@@ -409,11 +409,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/qwen-code.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/requesty.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3

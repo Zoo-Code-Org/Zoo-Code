@@ -255,6 +255,79 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("settles with the abort contract when the signal aborts while the credential load is pending", async () => {
+			// The cached credential load never settles, so without the race the
+			// generator would wait for fs.readFile forever after a Stop.
+			vi.mocked(fs.readFile).mockImplementation(() => new Promise<string>(() => {}))
+			const external = new AbortController()
+
+			const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+			const pending = stream.next()
+			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending load
+			external.abort()
+
+			let caught: unknown
+			try {
+				await pending
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("settles with the abort contract when the signal aborts while the token refresh is pending, and the shared refresh still completes", async () => {
+			// Expired cached credentials force a refresh; its fetch stays
+			// pending until the Stop lands, then settles in the background —
+			// the request-local abort must cut only the wait, not the shared
+			// refresh that other requests dedupe against.
+			const expiredCredentials = {
+				access_token: "expired-access-token",
+				refresh_token: "test-refresh-token",
+				token_type: "Bearer",
+				expiry_date: Date.now() - 1000, // expired
+				resource_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(expiredCredentials))
+			let resolveFetch!: (response: { ok: boolean; json: () => Promise<Record<string, unknown>> }) => void
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockImplementation(
+					() =>
+						new Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>((resolve) => {
+							resolveFetch = resolve
+						}),
+				),
+			)
+			const external = new AbortController()
+
+			const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+			const pending = stream.next()
+			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending refresh
+			external.abort()
+
+			let caught: unknown
+			try {
+				await pending
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// The shared refresh keeps running: once its fetch settles, the new
+			// credentials are persisted even though this request gave up.
+			resolveFetch(tokenResponse())
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(fs.writeFile).toHaveBeenCalled()
+		})
+
 		it("streams content, strips repeated prefixes and splits think tags", async () => {
 			mockCreate.mockResolvedValueOnce(
 				asyncStreamFrom([
@@ -504,6 +577,77 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect((caught as Error).message).toBe("This operation was aborted")
 			expect(mockCreate).not.toHaveBeenCalled()
 			expect(fs.readFile).not.toHaveBeenCalled() // no work starts after a pre-aborted signal
+		})
+
+		it("settles with the abort contract when the signal aborts while the credential load is pending", async () => {
+			// The cached credential load never settles, so without the race the
+			// call would wait for fs.readFile forever after a Stop.
+			vi.mocked(fs.readFile).mockImplementation(() => new Promise<string>(() => {}))
+			const external = new AbortController()
+
+			const pending = handler.completePrompt("hi", { abortSignal: external.signal })
+			await new Promise((resolve) => setTimeout(resolve, 10)) // let the call reach the pending load
+			external.abort()
+
+			let caught: unknown
+			try {
+				await pending
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("settles with the abort contract when the signal aborts while the token refresh is pending, and the shared refresh still completes", async () => {
+			// Expired cached credentials force a refresh; its fetch stays
+			// pending until the Stop lands, then settles in the background —
+			// the abort must cut only the wait, not the shared refresh that
+			// other requests dedupe against.
+			const expiredCredentials = {
+				access_token: "expired-access-token",
+				refresh_token: "test-refresh-token",
+				token_type: "Bearer",
+				expiry_date: Date.now() - 1000, // expired
+				resource_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(expiredCredentials))
+			let resolveFetch!: (response: { ok: boolean; json: () => Promise<Record<string, unknown>> }) => void
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockImplementation(
+					() =>
+						new Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>((resolve) => {
+							resolveFetch = resolve
+						}),
+				),
+			)
+			const external = new AbortController()
+
+			const pending = handler.completePrompt("hi", { abortSignal: external.signal })
+			await new Promise((resolve) => setTimeout(resolve, 10)) // let the call reach the pending refresh
+			external.abort()
+
+			let caught: unknown
+			try {
+				await pending
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// The shared refresh keeps running: once its fetch settles, the new
+			// credentials are persisted even though this request gave up.
+			resolveFetch(tokenResponse())
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(fs.writeFile).toHaveBeenCalled()
 		})
 	})
 })

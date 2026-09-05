@@ -21,6 +21,7 @@ import {
 	throwIfAborted,
 	createAbortError,
 	isRequestAborted,
+	settleOnAbort,
 	type OpenAiRequestOptions,
 } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -205,14 +206,18 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 	private async callApiWithRetry<T>(apiCall: () => Promise<T>, externalSignal?: AbortSignal): Promise<T> {
 		try {
 			return await apiCall()
-		} catch (error: any) {
+		} catch (error) {
 			// An aborted request must never be retried: normalize it to the
 			// Task.ts abort contract (name "AbortError", message ending in
 			// "aborted") instead of rethrowing the raw SDK abort error.
 			if (isRequestAborted(error, externalSignal)) {
 				throw createAbortError("Qwen Code")
 			}
-			if (error.status === 401) {
+			// The catch binding is unknown, so read the OpenAI SDK's APIError
+			// `status` through a narrow shape; a non-object throw yields
+			// undefined and falls through to the rethrow below.
+			const status = (error as { status?: number } | null)?.status
+			if (status === 401) {
 				// Token expired, refresh and retry. The retry reuses apiCall’s
 				// captured request options, so it carries the same abort signal.
 				// (An already-aborted request is normalized above and never
@@ -264,7 +269,12 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		}
 
 		try {
-			await this.ensureAuthenticated()
+			// A stop can land while the credential load or the token refresh
+			// below is still in flight; race the auth wait against the
+			// request-local signal so the caller settles promptly instead of
+			// waiting for credential I/O. The shared refresh keeps running —
+			// only this wait is cut.
+			await settleOnAbort(this.ensureAuthenticated(), requestController.signal, "Qwen Code")
 			const client = this.ensureClient()
 			const model = this.getModel()
 
@@ -417,7 +427,12 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			.setOption("signal", requestSignal)
 			.build()
 
-		await this.ensureAuthenticated()
+		// A stop or timeout can land while the credential load or the token
+		// refresh below is still in flight; race the auth wait against the
+		// merged signal so the caller settles promptly instead of waiting for
+		// credential I/O. The shared refresh keeps running — only this wait
+		// is cut.
+		await settleOnAbort(this.ensureAuthenticated(), requestSignal, "Qwen Code")
 		const client = this.ensureClient()
 		const model = this.getModel()
 

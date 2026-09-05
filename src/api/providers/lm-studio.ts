@@ -26,6 +26,7 @@ import {
 	throwIfAborted,
 	createAbortError,
 	isRequestAborted,
+	settleOnAbort,
 	type OpenAiRequestOptions,
 } from "./utils/abort-signal"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -88,19 +89,11 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			return result
 		}
 
-		let inputTokens = 0
-		try {
-			inputTokens = await this.countTokens([{ type: "text", text: systemPrompt }, ...toContentBlocks(messages)])
-		} catch (err) {
-			console.error("[LmStudio] Failed to count input tokens:", err)
-			inputTokens = 0
-		}
-
-		let assistantText = ""
-		let reasoningOutput = ""
-
 		// Request-local abort controller — a class field would outlive this
-		// request and let concurrent requests abort each other.
+		// request and let concurrent requests abort each other. It is created
+		// before the token counts so an abort landing while either count is
+		// pending settles this generator promptly instead of waiting for the
+		// count to finish.
 		const requestController = new AbortController()
 		const onExternalAbort = () => {
 			requestController.abort()
@@ -108,16 +101,37 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		const externalSignal = metadata?.abortSignal
 		if (externalSignal) {
 			externalSignal.addEventListener("abort", onExternalAbort)
-			// An abort can land while the input token count above is still
-			// pending: a listener registered after the signal already aborted
-			// never fires, so bridge the aborted state into the request-local
-			// controller.
+			// A listener registered after the signal already aborted never
+			// fires, so bridge the aborted state into the request-local
+			// controller (this also covers an abort landing while a token
+			// count below is still pending).
 			if (externalSignal.aborted) {
 				requestController.abort()
 			}
 		}
 
 		try {
+			let inputTokens = 0
+			try {
+				inputTokens = await settleOnAbort(
+					this.countTokens([{ type: "text", text: systemPrompt }, ...toContentBlocks(messages)]),
+					requestController.signal,
+					this.providerName,
+				)
+			} catch (err) {
+				if (isRequestAborted(err, requestController.signal)) {
+					// An abort is not a count failure: let it propagate to the
+					// outer catch for normalization instead of falling back to
+					// zero tokens.
+					throw err
+				}
+				console.error("[LmStudio] Failed to count input tokens:", err)
+				inputTokens = 0
+			}
+
+			let assistantText = ""
+			let reasoningOutput = ""
+
 			const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
 				model: this.getModel().id,
 				messages: openAiMessages,
@@ -213,10 +227,27 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			try {
 				// Reasoning tokens are billed as output, so count them alongside the
 				// visible text — otherwise thinking models under-report usage entirely.
-				outputTokens = await this.countTokens([{ type: "text", text: reasoningOutput + assistantText }])
+				outputTokens = await settleOnAbort(
+					this.countTokens([{ type: "text", text: reasoningOutput + assistantText }]),
+					requestController.signal,
+					this.providerName,
+				)
 			} catch (err) {
+				if (isRequestAborted(err, requestController.signal)) {
+					// Same as the input count above: an abort is not a count
+					// failure — propagate it instead of reporting zero output
+					// tokens.
+					throw err
+				}
 				console.error("[LmStudio] Failed to count output tokens:", err)
 				outputTokens = 0
+			}
+
+			// A stop can land in the microtask gap between the output count
+			// settling and this generator resuming; do not report usage for an
+			// aborted response.
+			if (requestController.signal.aborted) {
+				throw createAbortError(this.providerName)
 			}
 
 			yield {
