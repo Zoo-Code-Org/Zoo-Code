@@ -51,6 +51,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 1,
 				description: "Claude Fable 5",
 			},
+			"anthropic/claude-fable-5.1": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 0.25,
+				description: "Claude Fable 5.1",
+			},
 			"anthropic/claude-sonnet-5": {
 				maxTokens: 128000,
 				contextWindow: 1000000,
@@ -96,6 +108,16 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheWritesPrice: 3.125,
 				cacheReadsPrice: 0.25,
 				description: "GPT-4o",
+			},
+			"openai/gpt-6-astra": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
 			},
 		})
 	}),
@@ -328,6 +350,24 @@ describe("VercelAiGatewayHandler", () => {
 			)
 		})
 
+		it("omits temperature for Claude Fable 5.1", async () => {
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-fable-5.1",
+				}),
+			)
+
+			await collectStream(handler.createMessage("system prompt", [{ role: "user", content: "test" }]))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5.1",
+					temperature: undefined,
+				}),
+			)
+		})
+
 		it("omits temperature for Claude Sonnet 5", async () => {
 			const handler = new VercelAiGatewayHandler(
 				makeApiHandlerOptions({
@@ -366,6 +406,30 @@ describe("VercelAiGatewayHandler", () => {
 			expect(call.model).toBe("anthropic/claude-opus-5")
 			expect(call.temperature).toBeUndefined()
 			expect(call.max_completion_tokens).toBe(128000)
+		})
+
+		it.each([
+			["max", "max"],
+			["none", "medium"],
+		] as const)("uses safe Astra request parameters for %s reasoning", async (reasoningEffort, expectedEffort) => {
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "openai/gpt-6-astra",
+					modelTemperature: 0.7,
+					reasoningEffort,
+				}),
+			)
+
+			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
+
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(call).toMatchObject({
+				model: "openai/gpt-6-astra",
+				max_completion_tokens: 128000,
+				reasoning_effort: expectedEffort,
+			})
+			expect(call.temperature).toBeUndefined()
 		})
 
 		it("adds cache breakpoints for supported models", async () => {
