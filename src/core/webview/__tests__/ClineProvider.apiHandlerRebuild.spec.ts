@@ -3,7 +3,7 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type HistoryItem } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -879,6 +879,125 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			// And task.apiConfiguration synced
 			expect((mockTask as any).apiConfiguration.apiProvider).toBe("openrouter")
 			expect((mockTask as any).apiConfiguration.openRouterModelId).toBe("anthropic/claude-3-5-sonnet-20241022")
+		})
+	})
+
+	describe("delegateParentAndOpenChild - nested root handoff", () => {
+		test("real mode-switch handoff publishes no state and leaves the exposed root task untouched", async () => {
+			// Nested registry topology: root at the bottom, parent focused on top.
+			const rootTask = new Task(defaultTaskOptions)
+			Object.defineProperty(rootTask, "taskId", { value: "root-task-id" })
+			rootTask["_taskMode"] = "code" as Mode
+			rootTask["_taskApiConfigName"] = "test-config"
+
+			const parentTask = new Task(defaultTaskOptions)
+			Object.defineProperty(parentTask, "taskId", { value: "parent-task-id" })
+			parentTask["_taskMode"] = "code" as Mode
+			Object.defineProperty(parentTask, "flushPendingToolResultsToHistory", {
+				value: vi.fn().mockResolvedValue(true),
+			})
+
+			await provider.addClineToStack(rootTask)
+			await provider.addClineToStack(parentTask)
+			expect(provider.getCurrentTask()).toBe(parentTask)
+
+			// External system only: the store executes the delegation updater and
+			// returns the parent and root histories.
+			const parentHistory: HistoryItem = {
+				id: "parent-task-id",
+				number: 2,
+				ts: 2,
+				task: "Parent",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "active",
+				mode: "code",
+				childIds: [],
+			}
+			const rootHistory: HistoryItem = {
+				id: "root-task-id",
+				number: 1,
+				ts: 1,
+				task: "Root",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "active",
+				mode: "code",
+				childIds: ["parent-task-id"],
+			}
+			const atomicUpdateSpy = vi
+				.spyOn(provider.taskHistoryStore, "atomicReadAndUpdate")
+				.mockImplementation(async (_taskId: string, updater: (current: HistoryItem) => HistoryItem) => [
+					updater(parentHistory),
+					rootHistory,
+				])
+
+			// createTask double: an inert child whose insertion reproduces the real
+			// stack transition through the real addClineToStack.
+			const child = new Task({ ...defaultTaskOptions })
+			Object.defineProperty(child, "taskId", { value: "child-task-id" })
+			child["_taskMode"] = "code" as Mode
+			Object.defineProperty(child, "run", { value: vi.fn().mockResolvedValue(undefined) })
+			const createTaskSpy = vi.spyOn(provider, "createTask").mockImplementation(async () => {
+				await provider.addClineToStack(child)
+				return child
+			})
+
+			// Snapshot the newly exposed root task before delegation.
+			const rootTaskModeBefore = rootTask["_taskMode"]
+			const rootApiConfigurationBefore = rootTask.apiConfiguration
+			const rootStickyProfileBefore = rootTask["_taskApiConfigName"]
+			const rootClineMessagesBefore = rootTask.clineMessages
+			const rootApiHistoryBefore = rootTask.apiConversationHistory
+
+			// Spy without replacing the implementation: the pending handoff must not
+			// publish any state.
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview")
+
+			// Exercise the real handleModeSwitch/handleModeSwitchUnlocked path with
+			// profile activation for the child's mode.
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("test-id")
+
+			const childResult = await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			// Drain the fire-and-forget scheduler so the inert child start settles.
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			expect(childResult).toBe(child)
+			expect(createTaskSpy).toHaveBeenCalledWith("Do child work", undefined, parentTask, {
+				initialTodos: [],
+				initialStatus: "active",
+				startTask: false,
+			})
+			expect(atomicUpdateSpy).toHaveBeenCalledTimes(1)
+
+			// The real mode switch applied the child's mode globally without a single
+			// state publication during the entire delegation.
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			// The stack transitioned parent -> child through the real addClineToStack,
+			// exposing the root beneath.
+			expect(provider.getCurrentTaskStack()).toEqual(["root-task-id", "child-task-id"])
+			expect(provider.getCurrentTask()).toBe(child)
+
+			// The exposed root task kept its identity and values: no mode, profile,
+			// API configuration, or history mutation.
+			expect(rootTask["_taskMode"]).toBe(rootTaskModeBefore)
+			expect(rootTask.apiConfiguration).toBe(rootApiConfigurationBefore)
+			expect(rootTask.apiConfiguration).toEqual(rootApiConfigurationBefore)
+			expect(rootTask["_taskApiConfigName"]).toBe(rootStickyProfileBefore)
+			expect(rootTask.clineMessages).toBe(rootClineMessagesBefore)
+			expect(rootTask.apiConversationHistory).toBe(rootApiHistoryBefore)
+			expect(rootTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(rootTask.setTaskApiConfigName).not.toHaveBeenCalled()
 		})
 	})
 

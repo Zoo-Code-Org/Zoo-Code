@@ -130,6 +130,48 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(current).toMatchObject({ status: "delegated", awaitingChildId: "child-1" })
 	})
 
+	it("fails closed when handleModeSwitch rejects: parent stays current and no child is created", async () => {
+		const parentTask = makeParentTask()
+		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn()
+		const handleModeSwitch = vi.fn().mockRejectedValue(new Error("mode switch failed"))
+		const providerEmit = vi.fn()
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: providerEmit,
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack,
+			createTask,
+			handleModeSwitch,
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow("mode switch failed")
+
+		// Fail closed before the stack changes: the parent was never removed, so it
+		// remains the current task.
+		expect(removeClineFromStack).not.toHaveBeenCalled()
+		expect(provider.getCurrentTask()).toBe(parentTask)
+
+		// No child was created (so none was scheduled) and no parent delegation
+		// metadata was committed.
+		expect(createTask).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
+		expect(providerEmit).not.toHaveBeenCalledWith(RooCodeEventName.TaskDelegated, "parent-1", expect.anything())
+	})
+
 	it("rolls back when pending-action ownership changes before the atomic parent update", async () => {
 		const pendingAction = {
 			kind: "create_subtask" as const,
@@ -334,7 +376,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			callOrder.push("createTask")
 			return { taskId: "child-1", start: vi.fn(), run: childRun }
 		})
-		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+		const handleModeSwitch = vi.fn(async () => {
+			callOrder.push("handleModeSwitch")
+		})
 		const taskHistoryStore = makeStoreStub({
 			atomicReadAndUpdate: vi.fn(async (_taskId: string, _updater: (h: HistoryItem) => HistoryItem) => {
 				callOrder.push("atomicReadAndUpdate")
@@ -363,8 +407,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		await Promise.resolve() // drain scheduler microtask so child.run() is invoked
 
-		// createTask → atomicReadAndUpdate → child.run: scheduler admits child only after metadata is persisted
-		expect(callOrder).toEqual(["createTask", "atomicReadAndUpdate", "child.run"])
+		// handleModeSwitch → createTask → atomicReadAndUpdate → child.run: the mode
+		// handoff completes before the parent leaves the stack, and the scheduler
+		// admits the child only after metadata is persisted
+		expect(callOrder).toEqual(["handleModeSwitch", "createTask", "atomicReadAndUpdate", "child.run"])
 	})
 
 	it("implicitly severs interrupted awaited child and re-delegates when parent is already delegated", async () => {

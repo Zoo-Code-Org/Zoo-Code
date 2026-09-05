@@ -3846,6 +3846,9 @@ export class ClineProvider
 	 * - Persist parent delegation metadata
 	 * - Emit TaskDelegated (task-level; API forwards to provider/bridge)
 	 * - Create child as sole active and switch mode to child's mode
+	 * - Fail closed if the mode-switch handoff rejects: the parent is never
+	 *   removed from the stack, so it stays the current, active task and no
+	 *   child is created or scheduled
 	 */
 	public async delegateParentAndOpenChild(params: {
 		parentTaskId: string
@@ -3910,7 +3913,23 @@ export class ClineProvider
 			)
 		}
 
-		// 3) Enforce single-open invariant by closing/disposing the parent first
+		// 3) Switch provider mode to child's requested mode BEFORE disposing the parent.
+		//    This is a null-target, non-publishing handoff (see
+		//    PRODUCTION_PROVIDER_HANDOFF_POLICY): it applies only global mode/profile
+		//    state and never mutates or publishes the current task, so running it while
+		//    the parent is still focused is safe. Performing it first makes delegation
+		//    fail closed: if the mode switch rejects, we abort before the parent is
+		//    removed from the stack, so the parent remains the current, active task and
+		//    no child is created or scheduled.
+		//    The mode switch must also happen before createTask() because the Task
+		//    constructor initializes its mode from provider.getState() during
+		//    initializeTaskMode().
+		const handoff = createProviderHandoffPlan(mode)
+		await this.handleModeSwitch(handoff.requestedMode, handoff.policy.targetTask, {
+			pendingHandoff: handoff.policy,
+		})
+
+		// 4) Enforce single-open invariant by closing/disposing the parent first
 		//    This ensures we never have >1 tasks open at any time during delegation.
 		//    Await abort completion to ensure clean disposal and prevent unhandled rejections.
 		try {
@@ -3924,24 +3943,7 @@ export class ClineProvider
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
 		}
 
-		// 3) Switch provider mode to child's requested mode BEFORE creating the child task
-		//    This ensures the child's system prompt and configuration are based on the correct mode.
-		//    The mode switch must happen before createTask() because the Task constructor
-		//    initializes its mode from provider.getState() during initializeTaskMode().
-		try {
-			const handoff = createProviderHandoffPlan(mode)
-			await this.handleModeSwitch(handoff.requestedMode, handoff.policy.targetTask, {
-				pendingHandoff: handoff.policy,
-			})
-		} catch (e) {
-			this.log(
-				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
-					(e as Error)?.message ?? String(e)
-				}`,
-			)
-		}
-
-		// 4) Create child as sole active (parent reference preserved for lineage)
+		// 5) Create child as sole active (parent reference preserved for lineage)
 		// Pass initialStatus: "active" to ensure the child task's historyItem is created
 		// with status from the start, avoiding race conditions where the task might
 		// call attempt_completion before status is persisted separately.
@@ -3958,7 +3960,7 @@ export class ClineProvider
 			startTask: false,
 		})
 
-		// 5) Persist parent delegation metadata BEFORE the child starts writing.
+		// 6) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a
 		//    single lock acquisition — no concurrent writer can slip between the read and
 		//    write, and the pure updater cannot re-enter the lock (no deadlock).
@@ -4036,10 +4038,10 @@ export class ClineProvider
 			throw err
 		}
 
-		// 6) Start the child task now that parent metadata is safely persisted.
+		// 7) Start the child task now that parent metadata is safely persisted.
 		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
 
-		// 7) Emit TaskDelegated (provider-level)
+		// 8) Emit TaskDelegated (provider-level)
 		try {
 			this.emit(RooCodeEventName.TaskDelegated, parentTaskId, child.taskId)
 		} catch {
