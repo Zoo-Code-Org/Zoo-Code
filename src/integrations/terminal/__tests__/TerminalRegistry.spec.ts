@@ -11,6 +11,13 @@ import { TerminalRegistry } from "../TerminalRegistry"
 
 const PAGER = process.platform === "win32" ? "" : "cat"
 
+function settleWithin<T>(promise: PromiseLike<T>): Promise<T> {
+	return Promise.race([
+		Promise.resolve(promise),
+		new Promise<T>((_, reject) => setTimeout(() => reject(new Error("terminal lifecycle did not settle")), 250)),
+	])
+}
+
 vi.mock("execa", () => ({
 	execa: vi.fn(),
 }))
@@ -209,6 +216,8 @@ describe("TerminalRegistry", () => {
 	})
 
 	describe("onDidEndTerminalShellExecution race condition (#489, #622)", () => {
+		let closeHandler: (terminal: vscode.Terminal) => void
+		let shellIntegrationHandler: (event: vscode.TerminalShellIntegrationChangeEvent) => void
 		let startHandler: (e: any) => Promise<void>
 		let endHandler: (e: any) => Promise<void>
 
@@ -220,6 +229,15 @@ describe("TerminalRegistry", () => {
 			// methods, so add them before spying.
 			;(vscode.window as any).onDidStartTerminalShellExecution ??= () => ({ dispose: () => {} })
 			;(vscode.window as any).onDidEndTerminalShellExecution ??= () => ({ dispose: () => {} })
+
+			vi.spyOn(vscode.window, "onDidCloseTerminal").mockImplementation((handler) => {
+				closeHandler = handler
+				return { dispose: vi.fn() }
+			})
+			vi.spyOn(vscode.window, "onDidChangeTerminalShellIntegration").mockImplementation((handler) => {
+				shellIntegrationHandler = handler
+				return { dispose: vi.fn() }
+			})
 
 			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution" as any).mockImplementation((handler: any) => {
 				startHandler = handler
@@ -289,6 +307,405 @@ describe("TerminalRegistry", () => {
 
 			expect(terminal.busy).toBe(false)
 			expect(completeSpy).not.toHaveBeenCalled()
+		})
+
+		it("finalizes an active process when its terminal closes (#1362)", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const process = new TerminalProcess(terminal)
+			process.ownExecution = { commandLine: { value: "git status" } } as vscode.TerminalShellExecution
+			terminal.process = process
+			terminal.busy = true
+			terminal.running = true
+			const completionSpy = vi.fn()
+			process.on("shell_execution_complete", completionSpy)
+			Object.defineProperty(terminal.terminal, "exitStatus", {
+				value: { code: undefined, reason: 3 },
+				configurable: true,
+			})
+
+			closeHandler(terminal.terminal)
+
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined })
+			expect(Object.hasOwn(completionSpy.mock.calls[0][0], "exitCode")).toBe(true)
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
+		})
+
+		it("removes only the closed registered terminal when no process is attached", () => {
+			const closed = TerminalRegistry.createTerminal("/closed", "vscode") as Terminal
+			const open = TerminalRegistry.createTerminal("/open", "vscode") as Terminal
+			closed.busy = true
+			closed.running = true
+			const completionSpy = vi.spyOn(closed, "shellExecutionComplete")
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			closeHandler(closed.terminal)
+
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined })
+			expect(Object.hasOwn(completionSpy.mock.calls[0][0], "exitCode")).toBe(true)
+			expect(closed.isClosed()).toBe(true)
+			expect(closed.busy).toBe(false)
+			expect(closed.running).toBe(false)
+			expect(cleanupSpy).toHaveBeenCalledWith(closed.id)
+			expect(TerminalRegistry["terminals"]).toEqual([open])
+		})
+
+		it("ignores close events from unregistered terminals", () => {
+			const registered = TerminalRegistry.createTerminal("/registered", "vscode") as Terminal
+			const foreign = { name: "foreign" } as vscode.Terminal
+			const closeSpy = vi.spyOn(registered, "handleClose")
+
+			closeHandler(foreign)
+
+			expect(closeSpy).not.toHaveBeenCalled()
+			expect(TerminalRegistry["terminals"]).toEqual([registered])
+		})
+
+		it("delivers buffered output and releases the stream iterator when an active terminal closes", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			let nextCall = 0
+			let signalWaitingForNext: () => void = () => {}
+			const waitingForNext = new Promise<void>((resolve) => {
+				signalWaitingForNext = resolve
+			})
+			const returnSpy = vi.fn().mockResolvedValue({ done: true, value: undefined })
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]() {
+					return {
+						next: vi.fn(() => {
+							nextCall++
+							if (nextCall === 1) {
+								return Promise.resolve({ done: false, value: "\x1b]633;C\x07hello\n" })
+							}
+
+							signalWaitingForNext()
+							return new Promise<IteratorResult<string>>(() => {})
+						}),
+						return: returnSpy,
+					}
+				},
+			}
+			const execution = {
+				commandLine: { value: "printf hello" },
+				read: vi.fn().mockReturnValue(stream),
+			} as unknown as vscode.TerminalShellExecution
+			const executeCommand = vi.fn().mockReturnValue(execution)
+			Object.defineProperty(terminal.terminal, "shellIntegration", {
+				value: { executeCommand },
+				configurable: true,
+			})
+			const completedSpy = vi.fn()
+			const result = terminal.runCommand("printf hello", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+
+			await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledOnce())
+			await startHandler({ terminal: terminal.terminal, execution })
+			await waitingForNext
+			closeHandler(terminal.terminal)
+			await settleWithin(result)
+
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("hello\n", process)
+			expect(returnSpy).toHaveBeenCalledOnce()
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
+		})
+
+		it("unblocks a process when its terminal closes while shell integration is initializing (#1362)", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+			const noShellIntegrationSpy = vi.fn()
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const result = terminal.runCommand("git status", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+				onNoShellIntegration: noShellIntegrationSpy,
+			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+			Object.defineProperty(terminal.terminal, "exitStatus", {
+				value: { code: undefined, reason: 3 },
+				configurable: true,
+			})
+
+			closeHandler(terminal.terminal)
+			await settleWithin(result)
+
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
+			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+		})
+
+		it("does not submit a command when shell integration resolves immediately before terminal closure", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const executeCommand = vi.fn(() => {
+				throw new Error("command should not execute after terminal closure")
+			})
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+			const noShellIntegrationSpy = vi.fn()
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const result = terminal.runCommand("git status", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+				onNoShellIntegration: noShellIntegrationSpy,
+			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+			Object.defineProperty(terminal.terminal, "shellIntegration", {
+				value: { executeCommand },
+				configurable: true,
+			})
+
+			shellIntegrationHandler({
+				terminal: terminal.terminal,
+				shellIntegration: terminal.terminal.shellIntegration!,
+			})
+			Object.defineProperty(terminal.terminal, "exitStatus", {
+				value: { code: undefined, reason: 3 },
+				configurable: true,
+			})
+			closeHandler(terminal.terminal)
+			await settleWithin(result)
+
+			expect(executeCommand).not.toHaveBeenCalled()
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
+			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
+		})
+
+		it("marks closure explicitly and completes only once when exitStatus remains undefined", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const result = terminal.runCommand("git status", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+
+			expect(terminal.terminal.exitStatus).toBeUndefined()
+			const shellCompleteSpy = vi.spyOn(terminal, "shellExecutionComplete")
+			terminal.handleClose()
+			terminal.handleClose()
+			await settleWithin(result)
+
+			expect(terminal.isClosed()).toBe(true)
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
+			expect(shellCompleteSpy).toHaveBeenCalledOnce()
+		})
+
+		it("does not start a command invoked after the terminal has already closed", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const executeCommand = vi.fn()
+			Object.defineProperty(terminal.terminal, "shellIntegration", {
+				value: { executeCommand },
+				configurable: true,
+			})
+			terminal.handleClose()
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+
+			const result = terminal.runCommand("git status", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+			await settleWithin(result)
+			const completedProcess = completedSpy.mock.calls[0][1]
+
+			expect(executeCommand).not.toHaveBeenCalled()
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, completedProcess)
+			expect(completedSpy).toHaveBeenCalledWith("", completedProcess)
+			expect(completedProcess).toBeInstanceOf(TerminalProcess)
+			expect(terminal.busy).toBe(false)
+		})
+
+		it("settles a shell-integration wait once and ignores unrelated terminal events", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpy = vi.fn()
+			let waitHandler: (event: vscode.TerminalShellIntegrationChangeEvent) => void = () => {}
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce((handler) => {
+				waitHandler = handler
+				return { dispose: disposeSpy }
+			})
+			const wait = terminal["waitForShellIntegration"](100)
+			const settledSpy = vi.fn()
+			void wait.then(settledSpy)
+
+			waitHandler({ terminal: { name: "foreign" } as vscode.Terminal, shellIntegration: {} as never })
+			await Promise.resolve()
+			expect(settledSpy).not.toHaveBeenCalled()
+
+			const event = { terminal: terminal.terminal, shellIntegration: {} as never }
+			waitHandler(event)
+			waitHandler(event)
+			await settleWithin(wait)
+
+			expect(settledSpy).toHaveBeenCalledOnce()
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			expect(terminal["cancelShellIntegrationWait"]).toBeUndefined()
+		})
+
+		it("does not let an older shell-integration wait clear a newer cancellation", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const handlers: Array<(event: vscode.TerminalShellIntegrationChangeEvent) => void> = []
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementation((handler) => {
+				handlers.push(handler)
+				return { dispose: vi.fn() }
+			})
+			const first = terminal["waitForShellIntegration"](100)
+			const firstCancel = terminal["cancelShellIntegrationWait"]
+			const second = terminal["waitForShellIntegration"](100)
+			const secondCancel = terminal["cancelShellIntegrationWait"]
+
+			expect(firstCancel).not.toBe(secondCancel)
+			handlers[0]({ terminal: terminal.terminal, shellIntegration: {} as never })
+			await settleWithin(first)
+			expect(terminal["cancelShellIntegrationWait"]).toBe(secondCancel)
+
+			handlers[1]({ terminal: terminal.terminal, shellIntegration: {} as never })
+			await settleWithin(second)
+			expect(terminal["cancelShellIntegrationWait"]).toBeUndefined()
+		})
+
+		it("rejects a direct shell-integration wait when the terminal is already closed", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.handleClose()
+
+			await expect(terminal["waitForShellIntegration"](100)).rejects.toThrow(
+				"Terminal closed before shell integration became available",
+			)
+		})
+
+		it("clears the timeout and disposes the listener when shell integration activates", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpy = vi.fn()
+			let waitHandler: (event: vscode.TerminalShellIntegrationChangeEvent) => void = () => {}
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce((handler) => {
+				waitHandler = handler
+				return { dispose: disposeSpy }
+			})
+			const wait = terminal["waitForShellIntegration"](1_000)
+
+			waitHandler({ terminal: terminal.terminal, shellIntegration: {} as never })
+			await wait
+
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+			vi.useRealTimers()
+		})
+
+		it("reports the configured timeout and releases wait resources", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpy = vi.fn()
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce(() => ({
+				dispose: disposeSpy,
+			}))
+			const rejectedSpy = vi.fn()
+			void terminal["waitForShellIntegration"](1_500).catch(rejectedSpy)
+
+			await vi.advanceTimersByTimeAsync(1_500)
+
+			expect(rejectedSpy).toHaveBeenCalledOnce()
+			expect(rejectedSpy.mock.calls[0][0]).toEqual(new Error("Shell integration did not activate within 1.5s"))
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+			vi.useRealTimers()
+		})
+
+		it("cancels a pending shell-integration wait with the terminal-close reason", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpy = vi.fn()
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce(() => ({
+				dispose: disposeSpy,
+			}))
+			const rejectedSpy = vi.fn()
+			void terminal["waitForShellIntegration"](1_000).catch(rejectedSpy)
+
+			terminal["cancelShellIntegrationWait"]?.()
+			await Promise.resolve()
+
+			expect(rejectedSpy).toHaveBeenCalledOnce()
+			expect(rejectedSpy.mock.calls[0][0]).toEqual(
+				new Error("Terminal closed before shell integration became available"),
+			)
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+			vi.useRealTimers()
+		})
+
+		it("uses the native exit status to recognize closure before the close event is handled", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			expect(terminal.isClosed()).toBe(false)
+
+			Object.defineProperty(terminal.terminal, "exitStatus", {
+				value: { code: 0, reason: 2 },
+				configurable: true,
+			})
+
+			expect(terminal.isClosed()).toBe(true)
+		})
+
+		it("does not finalize a process twice when its terminal closes after the end event", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const execution = { commandLine: { value: "git status" } } as vscode.TerminalShellExecution
+			const process = new TerminalProcess(terminal)
+			process.ownExecution = execution
+			terminal.process = process
+			terminal.busy = true
+			terminal.running = true
+			const completionSpy = vi.fn()
+			process.on("shell_execution_complete", completionSpy)
+
+			await endHandler({ terminal: terminal.terminal, execution, exitCode: 0 })
+			Object.defineProperty(terminal.terminal, "exitStatus", {
+				value: { code: 0, reason: 2 },
+				configurable: true,
+			})
+			closeHandler(terminal.terminal)
+
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith(expect.objectContaining({ exitCode: 0 }))
 		})
 
 		it(

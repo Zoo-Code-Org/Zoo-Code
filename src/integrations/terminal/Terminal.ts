@@ -11,6 +11,8 @@ import { mergePromise } from "./mergePromise"
 
 export class Terminal extends BaseTerminal {
 	public terminal: vscode.Terminal
+	private closed = false
+	private cancelShellIntegrationWait?: () => void
 
 	public cmdCounter: number = 0
 
@@ -74,7 +76,24 @@ export class Terminal extends BaseTerminal {
 	 * active. (This value is set when onDidCloseTerminal is fired.)
 	 */
 	public override isClosed(): boolean {
-		return this.terminal.exitStatus !== undefined
+		return this.closed || this.terminal.exitStatus !== undefined
+	}
+
+	/** Finalizes any attached command when VS Code disposes this terminal. */
+	public handleClose(): void {
+		if (this.closed) {
+			return
+		}
+
+		this.closed = true
+		this.cancelShellIntegrationWait?.()
+		this.cancelShellIntegrationWait = undefined
+
+		if (this.process instanceof TerminalProcess) {
+			this.process.handleTerminalClosed()
+		} else {
+			this.shellExecutionComplete({ exitCode: undefined })
+		}
 	}
 
 	public override runCommand(command: string, callbacks: RooTerminalCallbacks): RooTerminalProcessResultPromise {
@@ -104,6 +123,11 @@ export class Terminal extends BaseTerminal {
 				reject(error)
 			})
 
+			if (this.isClosed()) {
+				process.handleTerminalClosed()
+				return
+			}
+
 			if (Terminal.isActiveShellCmdExe()) {
 				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
 				// directly instead of routing through executeCommandInTerminal().
@@ -123,6 +147,10 @@ export class Terminal extends BaseTerminal {
 				// customised startup that suppresses the OSC 633;A marker).
 				this.waitForShellIntegration(Terminal.getShellIntegrationTimeout())
 					.then(() => {
+						if (this.isClosed()) {
+							return
+						}
+
 						// Clean up temporary directory if shell integration is available, zsh did its job:
 						ShellIntegrationManager.zshCleanupTmpDir(this.id)
 
@@ -130,6 +158,10 @@ export class Terminal extends BaseTerminal {
 						void process.run(command).catch((error) => process.emit("error", error))
 					})
 					.catch(() => {
+						if (this.isClosed()) {
+							return
+						}
+
 						console.log(`[Terminal ${this.id}] Shell integration not available. Command execution aborted.`)
 
 						// Clean up temporary directory if shell integration is not available
@@ -153,22 +185,43 @@ export class Terminal extends BaseTerminal {
 	 * than polling — important for slow-starting shells (heavy .zshrc, nvm, etc.).
 	 */
 	private waitForShellIntegration(timeoutMs: number): Promise<void> {
+		if (this.isClosed()) {
+			return Promise.reject(new Error("Terminal closed before shell integration became available"))
+		}
+
 		if (this.terminal.shellIntegration) {
 			return Promise.resolve()
 		}
 
 		return new Promise<void>((resolve, reject) => {
 			const ref = { disposable: null as vscode.Disposable | null }
-			const timer = setTimeout(() => {
+			let settled = false
+			let cancel = () => {}
+			const finish = (callback: () => void) => {
+				if (settled) {
+					return
+				}
+
+				settled = true
+				clearTimeout(timer)
 				ref.disposable?.dispose()
-				reject(new Error(`Shell integration did not activate within ${timeoutMs / 1000}s`))
+
+				if (this.cancelShellIntegrationWait === cancel) {
+					this.cancelShellIntegrationWait = undefined
+				}
+
+				callback()
+			}
+			const timer = setTimeout(() => {
+				finish(() => reject(new Error(`Shell integration did not activate within ${timeoutMs / 1000}s`)))
 			}, timeoutMs)
+
+			cancel = () => finish(() => reject(new Error("Terminal closed before shell integration became available")))
+			this.cancelShellIntegrationWait = cancel
 
 			ref.disposable = vscode.window.onDidChangeTerminalShellIntegration((e) => {
 				if (e.terminal === this.terminal) {
-					clearTimeout(timer)
-					ref.disposable?.dispose()
-					resolve()
+					finish(resolve)
 				}
 			})
 		})
