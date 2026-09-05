@@ -3,8 +3,104 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	mergeAbortSignals,
+	rejectOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
+
+/**
+ * Stryker guard: fails fast if `promise` does not settle within `ms`.
+ *
+ * Stryker's per-mutant cutoff (timeoutMS 5s x timeoutFactor 1.5 ~= 7.5s) is shorter
+ * than vitest's testTimeout (20s). A mutant that removes a settle call (or an abort
+ * listener) leaves an awaited promise pending forever; without this guard the test
+ * would outlive the cutoff and the mutant would be reported as Timeout (inconclusive).
+ * Settling the guard at 500ms turns those mutants into fast failures (KILLED).
+ */
+function withSettleGuard<T>(promise: Promise<T>, ms = 500): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			reject(new Error(`settle guard timed out after ${ms}ms`))
+		}, ms)
+		void promise.then(
+			(value) => {
+				clearTimeout(timer)
+				resolve(value)
+			},
+			(error) => {
+				clearTimeout(timer)
+				reject(error)
+			},
+		)
+	})
+}
+
+describe("rejectOnAbort", () => {
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")),
+		).resolves.toBe("done")
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	it("rejects with the provider abort error when the signal aborts first", async () => {
+		const controller = new AbortController()
+		// Never settles: the race must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const race = rejectOnAbort(pending, controller.signal, "TestProvider")
+		controller.abort()
+
+		await expect(withSettleGuard(race)).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const pending = new Promise<never>(() => {})
+
+		await expect(withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider"))).rejects.toMatchObject({
+			name: "AbortError",
+		})
+	})
+
+	it("propagates the pending rejection when the signal stays active", async () => {
+		const controller = new AbortController()
+		const boom = new Error("lookup failed")
+
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.reject(boom), controller.signal, "TestProvider")),
+		).rejects.toBe(boom)
+	})
+
+	it("detaches the abort listener once the pending settles", async () => {
+		const controller = new AbortController()
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")),
+		).resolves.toBe("done")
+
+		expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		removeSpy.mockRestore()
+	})
+
+	it("detaches the abort listener when the pending rejects", async () => {
+		const controller = new AbortController()
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const lookupError = new Error("lookup failed")
+
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.reject(lookupError), controller.signal, "TestProvider")),
+		).rejects.toBe(lookupError)
+
+		expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		removeSpy.mockRestore()
+	})
+})
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {
