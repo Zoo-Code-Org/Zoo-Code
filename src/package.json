@@ -541,15 +541,15 @@
 		"@types/ps-tree": "1.1.6",
 		"@types/semver-compare": "1.0.3",
 		"@types/vscode": "1.100.0",
-		"@vitest/coverage-v8": "4.1.9",
+		"@vitest/coverage-v8": "4.1.11",
 		"@vscode/vsce": "3.9.2",
 		"ai": "6.0.218",
 		"esbuild-wasm": "0.28.1",
 		"execa": "9.6.1",
 		"mkdirp": "3.0.1",
-		"nock": "14.0.15",
+		"nock": "14.0.17",
 		"ovsx": "0.10.12",
 		"rimraf": "6.0.1",
-		"vitest": "4.1.9"
+		"vitest": "4.1.11"
 	}
 }
