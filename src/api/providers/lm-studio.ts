@@ -123,13 +123,6 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				const delta = chunk.choices[0]?.delta
 				const finishReason = chunk.choices[0]?.finish_reason
 
-				if (delta?.content) {
-					assistantText += delta.content
-					for (const processedChunk of matcher.update(delta.content)) {
-						yield processedChunk
-					}
-				}
-
 				// Reasoning models served by LM Studio (Qwen3, DeepSeek-R1, QwQ, ...) stream
 				// their thinking in a dedicated `reasoning_content`/`reasoning` delta field
 				// rather than as <think> tags inside `content`, so TagMatcher never sees it.
@@ -137,6 +130,13 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				if (reasoningText) {
 					reasoningOutput += reasoningText
 					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					assistantText += delta.content
+					for (const processedChunk of matcher.update(delta.content)) {
+						yield processedChunk
+					}
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
