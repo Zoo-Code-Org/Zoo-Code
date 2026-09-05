@@ -693,6 +693,7 @@ describe("ReadFileTool", () => {
 			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
 			Object.assign(task, createMockTask())
 			task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked", text: undefined, images: undefined })
+			const parseSpy = vi.spyOn(JSON, "parse")
 			const fileResults = [
 				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
 				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
@@ -700,8 +701,10 @@ describe("ReadFileTool", () => {
 
 			await readFileTool["requestApproval"](task, fileResults, () => {})
 
+			expect(parseSpy).not.toHaveBeenCalled()
 			expect(task.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
 			expect(task.didRejectTool).toBe(true)
+			parseSpy.mockRestore()
 		})
 
 		it("applies individual decisions for a batch read", async () => {
