@@ -1601,3 +1601,290 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		).rejects.toThrow("Invalid task status transition: delegated → completed")
 	})
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// startPeriodicReconciliation — delegation repair on each tick (review item #2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TaskHistoryStore periodic delegation reconciliation", () => {
+	let tmpDir: string
+	let store: TaskHistoryStore | undefined
+	let mtimeSpy: { mockRestore(): void } | undefined
+
+	// Private static interval used to advance the fake clock by exactly one tick.
+	// There is no typed accessor; this casts through `unknown` (not `as any`)
+	// following the same private-member access pattern used for
+	// LIVE_CHILD_MTIME_THRESHOLD_MS at the top of this spec.
+	const RECONCILE_INTERVAL_MS = (TaskHistoryStore as unknown as { RECONCILE_INTERVAL_MS: number })
+		.RECONCILE_INTERVAL_MS
+
+	const CHILD_ID = "child-tick"
+	const PARENT_ID = "parent-tick"
+
+	/**
+	 * Fake only what the tick scheduling needs: the 5-minute `setTimeout` clock
+	 * and `Date` (consumed by the liveness guard). Everything else (fs I/O,
+	 * microtasks) stays real so `flushAsyncWork()` below can pump the event
+	 * loop while the timer clock advances only 1 ms per yield.
+	 */
+	function useTickClock(): void {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+	}
+
+	/**
+	 * Drain pending real fs I/O. The tick's reconcile/repair chain completes on
+	 * libuv callbacks that fake timers alone never advance, and each
+	 * `advanceTimersByTimeAsync(1)` yields one REAL macrotask turn (processing
+	 * the poll phase) while advancing the fake clock only 1 ms. The total fake
+	 * time here stays far below RECONCILE_INTERVAL_MS, so no extra tick fires
+	 * during the pump — this only lets in-flight fs callbacks settle. The count
+	 * is generous to absorb Windows antivirus/OneDrive fs latency.
+	 */
+	async function flushAsyncWork(yields = 2000): Promise<void> {
+		for (let i = 0; i < yields; i++) {
+			await vi.advanceTimersByTimeAsync(1)
+		}
+	}
+
+	async function seedItems(items: HistoryItem[]): Promise<void> {
+		const tasksDir = path.join(tmpDir, "tasks")
+		await fs.mkdir(tasksDir, { recursive: true })
+		for (const item of items) {
+			const taskDir = path.join(tasksDir, item.id)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
+		}
+	}
+
+	/**
+	 * Stateful mtime injection for the liveness guard. The guard computes
+	 * `Date.now() - mtimeMs` against the (fake) clock, and this injector returns
+	 * `Date.now() - childAgeMs` at call time, so flipping `childAgeMs` between
+	 * the startup pass and a periodic tick deterministically models "live in
+	 * another window at startup, then crashed before the next tick". Exact
+	 * regardless of filesystem mtime precision, same convention as
+	 * `setChildMtimeAge` above. Other child ids delegate to the real
+	 * implementation so unrelated probe paths keep exercising the FS.
+	 */
+	let childAgeMs = 0
+	function installChildAgeInjector(): void {
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const original = probe.getChildFileMtimeMs
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((childId: string) =>
+				childId === CHILD_ID ? Promise.resolve(Date.now() - childAgeMs) : original.call(store!, childId),
+			)
+	}
+
+	function makeDelegatedPair(): HistoryItem[] {
+		const child = makeItem({
+			id: CHILD_ID,
+			status: "active",
+			parentTaskId: PARENT_ID,
+			rootTaskId: PARENT_ID,
+		})
+		const parent = makeItem({
+			id: PARENT_ID,
+			status: "delegated",
+			awaitingChildId: CHILD_ID,
+			delegatedToId: CHILD_ID,
+			childIds: [CHILD_ID],
+		})
+		return [parent, child]
+	}
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "periodic-deleg-test-"))
+		childAgeMs = 60_000
+	})
+
+	afterEach(async () => {
+		mtimeSpy?.mockRestore()
+		mtimeSpy = undefined
+		store?.dispose()
+		store = undefined
+		vi.useRealTimers()
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	})
+
+	it("repairs an active child whose mtime goes stale between startup and the next tick (the reported bug)", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const [parent, child] = makeDelegatedPair()
+		await seedItems([parent, child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		installChildAgeInjector()
+		useTickClock()
+		// Child looks live at startup (written 60s ago by another window) → startup skips repair.
+		childAgeMs = 60_000
+		await s.initialize()
+		expect(errorSpy).not.toHaveBeenCalled()
+
+		expect(s.get(CHILD_ID)?.status).toBe("active")
+		expect(s.get(PARENT_ID)?.status).toBe("delegated")
+		expect(s.get(PARENT_ID)?.awaitingChildId).toBe(CHILD_ID)
+
+		// The owning window crashes: nobody rewrites the child file, so by the
+		// next periodic tick its mtime is past the liveness threshold.
+		childAgeMs = 10 * 60 * 1000
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+
+		// Within ONE interval, the parent window must repair: child → interrupted,
+		// parent → active with delegation links cleared.
+		expect(s.get(CHILD_ID)).toMatchObject({ id: CHILD_ID, status: "interrupted", parentTaskId: PARENT_ID })
+		expect(s.get(PARENT_ID)).toMatchObject({ id: PARENT_ID, status: "active" })
+		expect(s.get(PARENT_ID)?.awaitingChildId).toBeUndefined()
+		expect(s.get(PARENT_ID)?.delegatedToId).toBeUndefined()
+
+		// Repaired on disk, not just in the cache.
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", CHILD_ID, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", PARENT_ID, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("interrupted")
+		expect(persistedParent.status).toBe("active")
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+
+		// The warn message proves the DELEGATION pass (not the plain cache
+		// reconcile) ran inside the tick, and the tick raised no errors.
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+		expect(errorSpy).not.toHaveBeenCalled()
+
+		// Re-arm must survive the successful tick so the loop keeps running.
+		const internals = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+		expect(internals.reconcileTimer).not.toBeNull()
+
+		warnSpy.mockRestore()
+		errorSpy.mockRestore()
+	})
+
+	it("never repairs a child this window itself persisted as active, even with a stale mtime (in-window delegation)", async () => {
+		// Startup has no local sessions, so an active child on disk implies a
+		// crashed host and is a valid repair target. Mid-session that inference
+		// breaks: a child running IN THIS WINDOW (e.g. an in-window delegation)
+		// can go minutes without rewriting its history file while it streams a
+		// long turn or waits on a user prompt. The tick must not tear it away
+		// from its own runner — only children this store never wrote active
+		// (i.e. loaded from disk, owned elsewhere) are orphan candidates.
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const child = makeItem({
+			id: CHILD_ID,
+			status: "active",
+			parentTaskId: PARENT_ID,
+			rootTaskId: PARENT_ID,
+		})
+		const parent = makeItem({ id: PARENT_ID, status: "active" })
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+		await s.initialize()
+
+		// This window creates the parent and the child, then delegates.
+		await s.upsert(parent)
+		await s.upsert(child)
+		await s.atomicReadAndUpdate(PARENT_ID, (current) => ({
+			...current,
+			status: "delegated" as const,
+			awaitingChildId: CHILD_ID,
+			delegatedToId: CHILD_ID,
+		}))
+		expect(s.get(PARENT_ID)?.status).toBe("delegated")
+
+		// Even though the child's mtime looks stale, it is owned HERE.
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const realProbe = probe.getChildFileMtimeMs
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((childId: string) =>
+				childId === CHILD_ID ? Promise.resolve(Date.now() - 10 * 60 * 1000) : realProbe.call(s, childId),
+			)
+
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+
+		expect(s.get(CHILD_ID)?.status).toBe("active")
+		expect(s.get(PARENT_ID)?.status).toBe("delegated")
+		expect(s.get(PARENT_ID)?.awaitingChildId).toBe(CHILD_ID)
+		expect(errorSpy).not.toHaveBeenCalled()
+
+		errorSpy.mockRestore()
+	})
+
+	it("does not repair a child that stays live across the periodic tick (no cross-window clobbering)", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const [parent, child] = makeDelegatedPair()
+		await seedItems([parent, child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		installChildAgeInjector()
+		useTickClock()
+		childAgeMs = 60_000
+		await s.initialize()
+		// Startup also logs the skip; clear so remaining calls come from the tick.
+		logSpy.mockClear()
+
+		// The other window keeps writing: the child stays live at tick time.
+		childAgeMs = 60_000
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+
+		// Nothing may be repaired: child stays active, parent keeps its delegation links.
+		expect(s.get(CHILD_ID)?.status).toBe("active")
+		expect(s.get(PARENT_ID)?.status).toBe("delegated")
+		expect(s.get(PARENT_ID)?.awaitingChildId).toBe(CHILD_ID)
+		expect(s.get(PARENT_ID)?.delegatedToId).toBe(CHILD_ID)
+
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", CHILD_ID, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("active")
+
+		// The skip log proves the tick ran delegation reconciliation and the
+		// liveness guard protected the other window's child.
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`Skipping repair for live child ${CHILD_ID}`))
+
+		logSpy.mockRestore()
+	})
+
+	it("logs and keeps re-arming when the periodic delegation step throws", async () => {
+		const [parent, child] = makeDelegatedPair()
+		await seedItems([parent, child])
+
+		const internals = TaskHistoryStore.prototype as unknown as {
+			runPeriodicDelegationReconciliation: () => Promise<void>
+		}
+		const throwingSpy = vi
+			.spyOn(internals, "runPeriodicDelegationReconciliation")
+			.mockRejectedValue(new Error("tick delegation boom"))
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+		await s.initialize()
+
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Periodic delegation reconciliation failed"),
+			expect.objectContaining({ message: "tick delegation boom" }),
+		)
+
+		// One more interval still fires the delegation step: the recursive
+		// re-arm is preserved even though the step threw.
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+		expect(throwingSpy).toHaveBeenCalledTimes(2)
+
+		errorSpy.mockRestore()
+		throwingSpy.mockRestore()
+	})
+})

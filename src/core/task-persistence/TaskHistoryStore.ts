@@ -85,6 +85,21 @@ export class TaskHistoryStore {
 	private writeLock: Promise<void> = Promise.resolve()
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
+	/**
+	 * Serializes the periodic delegation-reconciliation step across ticks. The
+	 * store lock already prevents interleaved mutations, but overlapping ticks
+	 * would queue stale passes behind each other; skipping a tick instead lets
+	 * the next interval retry with fresher data.
+	 */
+	private delegationTickRunning = false
+	/**
+	 * Task ids this store instance itself persisted with an `active` status.
+	 * Their task sessions live in this window, so periodic delegation
+	 * reconciliation must exclude them from orphan-repair candidates. The set
+	 * is per-instance by design: after a host restart the new store has no
+	 * entries, so startup reconciliation keeps repairing genuine crash orphans.
+	 */
+	private readonly locallyActiveTaskIds = new Set<string>()
 	private disposed = false
 
 	/**
@@ -257,6 +272,12 @@ export class TaskHistoryStore {
 
 		// Update in-memory cache with what was actually persisted
 		this.cache.set(written.id, written)
+		// Only runtime writes (not `skipTransitionCheck` administrative repairs)
+		// prove a live task session runs in THIS window; repairs go through the
+		// same core but must not suppress future orphan reconciliation.
+		if (!options.skipTransitionCheck) {
+			this.trackLocalSessionOwnership(written)
+		}
 
 		const all = this.getAll()
 
@@ -275,6 +296,7 @@ export class TaskHistoryStore {
 		return this.withLock(async () => {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
+			this.locallyActiveTaskIds.delete(taskId)
 
 			// Remove per-task file (best-effort)
 			try {
@@ -299,6 +321,7 @@ export class TaskHistoryStore {
 			for (const taskId of taskIds) {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
+				this.locallyActiveTaskIds.delete(taskId)
 
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
@@ -393,8 +416,9 @@ export class TaskHistoryStore {
 	/**
 	 * Repair delegation inconsistencies left by a crash mid-transition.
 	 *
-	 * Called once from `initialize()` after `reconcile()`. Runs inside `withLock` to
-	 * prevent interleaving with watcher-triggered reconcile() calls. Iterates until
+	 * Called from `initialize()` and from each periodic reconciliation tick,
+	 * always after `reconcile()`. Runs inside `withLock` to prevent interleaving
+	 * with watcher-triggered reconcile() calls. Iterates until
 	 * convergence so that one-level chained delegations visible at startup are resolved.
 	 *
 	 * Must NOT be called from within `withLock` — `withLock` is non-reentrant (promise
@@ -528,6 +552,22 @@ export class TaskHistoryStore {
 				.filter((item) => (item.status ?? "active") === "active")
 				.map((item) => item.id),
 		)
+	}
+
+	/**
+	 * Maintain the set of task ids whose live session runs in THIS window.
+	 * A record this store persisted as active belongs to a task running here,
+	 * so the periodic delegation pass must never treat it as a crash orphan —
+	 * its history-file mtime can legitimately go quiet for minutes while the
+	 * task streams a long model turn or waits on a user prompt. Any non-active
+	 * status write ends that ownership.
+	 */
+	private trackLocalSessionOwnership(written: HistoryItem): void {
+		if ((written.status ?? "active") === "active") {
+			this.locallyActiveTaskIds.add(written.id)
+		} else {
+			this.locallyActiveTaskIds.delete(written.id)
+		}
 	}
 
 	/**
@@ -978,6 +1018,13 @@ export class TaskHistoryStore {
 	/**
 	 * Start periodic reconciliation as a defensive fallback for platforms
 	 * where fs.watch is unreliable.
+	 *
+	 * Each tick refreshes disk→cache via `reconcile()` and then re-runs the same
+	 * delegation repair `initialize()` performs, so a child that skipped repair
+	 * at startup (recent mtime = live in another window) but crashes afterwards
+	 * is caught within one interval instead of waiting for the next extension
+	 * host restart. Intent replay is intentionally NOT part of the tick: the
+	 * durable repair journal is replayed at startup by design.
 	 */
 	private startPeriodicReconciliation(): void {
 		if (this.disposed) {
@@ -993,8 +1040,52 @@ export class TaskHistoryStore {
 			} catch (err) {
 				console.error("[TaskHistoryStore] Periodic reconciliation failed:", err)
 			}
+			try {
+				await this.runPeriodicDelegationReconciliation()
+			} catch (err) {
+				console.error("[TaskHistoryStore] Periodic delegation reconciliation failed:", err)
+			}
 			this.startPeriodicReconciliation()
 		}, TaskHistoryStore.RECONCILE_INTERVAL_MS)
+	}
+
+	/**
+	 * One delegation-reconciliation pass for a periodic tick.
+	 *
+	 * Mirrors the `initialize()` sequence: capture which active task ids exist
+	 * in persisted state (the cache was just refreshed from disk by
+	 * `reconcile()` and no repair has mutated statuses yet), then run the
+	 * reconciliation against that snapshot. The child-mtime liveness guard
+	 * inside `reconcileDelegationStateCore` protects children actively written
+	 * by another window, so ticking is safe for multi-window workspaces.
+	 *
+	 * One mid-session-only refinement over the startup snapshot: ids this
+	 * window itself persisted as active are excluded. At startup no local
+	 * sessions exist, so an active child on disk implies a previous host
+	 * crashed; mid-session, an active child that THIS store wrote belongs to a
+	 * live task here, and a quiet-but-live mtime (long model turn, user
+	 * deliberating over an ask) must not cause it to be repaired away from
+	 * under its own runner. Genuine crashes of this window take the tick with
+	 * them and are handled by the next startup pass instead.
+	 *
+	 * `reconcileDelegationState` acquires the non-reentrant `withLock` chain
+	 * itself (same entry point `initialize()` uses); this method never holds
+	 * the lock. The running flag only guards snapshot→pass adjacency and skips
+	 * (rather than queues) a tick whose previous pass is still in flight.
+	 */
+	private async runPeriodicDelegationReconciliation(): Promise<void> {
+		if (this.disposed || this.delegationTickRunning) {
+			return
+		}
+		this.delegationTickRunning = true
+		try {
+			const persistedActiveIds = new Set(
+				Array.from(this.getPersistedActiveIds()).filter((id) => !this.locallyActiveTaskIds.has(id)),
+			)
+			await this.reconcileDelegationState(persistedActiveIds)
+		} finally {
+			this.delegationTickRunning = false
+		}
 	}
 
 	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
@@ -1087,12 +1178,15 @@ export class TaskHistoryStore {
 				// First record is committed on disk. Update cache so it
 				// reflects disk state before propagating the error.
 				this.cache.set(firstId, writtenFirst)
+				this.trackLocalSessionOwnership(writtenFirst)
 				throw error
 			}
 
 			// Both disk writes succeeded — now update the cache.
 			this.cache.set(firstId, writtenFirst)
 			this.cache.set(secondId, writtenSecond)
+			this.trackLocalSessionOwnership(writtenFirst)
+			this.trackLocalSessionOwnership(writtenSecond)
 
 			const all = this.getAll()
 			if (this.onWrite) {
