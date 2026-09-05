@@ -1212,6 +1212,24 @@ describe("VertexHandler", () => {
 			expect(model.info.supportsTemperature).toBe(false)
 		})
 
+		it("should return Claude Fable 5.1 model info", () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-fable-5-1",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-fable-5-1")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.cacheReadsPrice).toBe(0.25)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+		})
+
 		it("should return Claude Sonnet 5 model info", () => {
 			const handler = new AnthropicVertexHandler({
 				apiModelId: "claude-sonnet-5",
@@ -1481,6 +1499,37 @@ describe("VertexHandler", () => {
 		it("should use adaptive thinking for Claude Fable 5", async () => {
 			const fableHandler = new AnthropicVertexHandler({
 				apiModelId: "claude-fable-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
+			fableHandler["client"].messages.create = mockCreate
+
+			await fableHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should use adaptive thinking for Claude Fable 5.1", async () => {
+			const fableHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-fable-5-1",
 				vertexProjectId: "test-project",
 				vertexRegion: "us-central1",
 				enableReasoningEffort: true,

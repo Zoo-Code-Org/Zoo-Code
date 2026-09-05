@@ -14,7 +14,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.80.1",
+		version: "3.82.0",
 	},
 }))
 
@@ -37,9 +37,10 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 		t: (key: string, options?: { version?: string }) => {
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What's New:",
-				"chat:announcement.release.highlight2": "New model — GLM-5.3-Flash is now available through Z AI.",
+				"chat:announcement.release.highlight2":
+					"🎁 For a limited time, get free access to MiniMax-M3 through Zoo Gateway.",
 				"chat:announcement.release.highlight3":
-					"Reliability fixes — restored subtask approvals, Vertex Gemini 3.7 empty tool output, terminal startup failures, background service errors, and theme legibility.",
+					"✨ Now available: the brand-new GPT-6 Astra and Claude Fable 5.1 models.",
 			}
 
 			if (key === "chat:announcement.title") {
@@ -55,12 +56,12 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.80.1 Released")).toBeInTheDocument()
-		expect(screen.getByText("New model — GLM-5.3-Flash is now available through Z AI.")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.82.0 Released")).toBeInTheDocument()
 		expect(
-			screen.getByText(
-				"Reliability fixes — restored subtask approvals, Vertex Gemini 3.7 empty tool output, terminal startup failures, background service errors, and theme legibility.",
-			),
+			screen.getByText("🎁 For a limited time, get free access to MiniMax-M3 through Zoo Gateway."),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText("✨ Now available: the brand-new GPT-6 Astra and Claude Fable 5.1 models."),
 		).toBeInTheDocument()
 	})
 
