@@ -1020,8 +1020,11 @@ describe("RequestyHandler", () => {
 
 			// The cleanup path must remove the exact listener that was registered, not just any
 			// function: removing a different reference would leave the original abort listener
-			// attached to the signal.
+			// attached to the signal. First require the registration to have happened at all,
+			// so a missing registration cannot silently degrade to an undefined comparison.
+			expect(addSpy).toHaveBeenCalledTimes(1)
 			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(typeof registeredListener).toBe("function")
 			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
 			addSpy.mockRestore()
 			removeSpy.mockRestore()

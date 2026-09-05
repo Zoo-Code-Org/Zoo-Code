@@ -186,9 +186,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			]
 
 			// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
-			const allowedEffort = (["low", "medium", "high"] as const).includes(reasoning_effort as any)
-				? (reasoning_effort as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming["reasoning_effort"])
-				: undefined
+			const allowedEffort = (["low", "medium", "high"] as const).find((effort) => effort === reasoning_effort)
 
 			const completionParams: RequestyChatCompletionParamsStreaming = {
 				messages: openAiMessages,
@@ -217,7 +215,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				throw handleOpenAIError(error, this.providerName)
 			}
 			try {
-				let lastUsage: any = undefined
+				let lastUsage: RequestyUsage | undefined = undefined
 
 				for await (const chunk of stream) {
 					// The iterator can keep delivering buffered chunks after the abort has already
