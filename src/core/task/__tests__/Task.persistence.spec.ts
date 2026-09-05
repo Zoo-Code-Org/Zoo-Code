@@ -894,9 +894,40 @@ describe("Task persistence", () => {
 			}
 		})
 
+		it("does not wait or flush dependent tool results after abort", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.abort = true
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+			const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(waitForPersistence).not.toHaveBeenCalled()
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+		})
+
+		it("does not flush dependent tool results when the persistence barrier is cancelled", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+			vi.spyOn(task, "waitForCurrentAssistantMessagePersistence").mockResolvedValue(false)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+		})
+
 		it("does not flush dependent tool results when assistant persistence retries are exhausted", async () => {
 			vi.useFakeTimers()
 			mockSaveApiMessages.mockRejectedValue(new Error("assistant write failed"))
+			const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -918,7 +949,12 @@ describe("Task persistence", () => {
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(4)
 				expect(task.assistantMessageSavedToHistory).toBe(false)
 				expect(task.userMessageContent).toHaveLength(1)
+				expect(consoleWarn).toHaveBeenCalledWith(
+					expect.stringContaining("failed to persist assistant message"),
+					expect.any(Error),
+				)
 			} finally {
+				consoleWarn.mockRestore()
 				mockSaveApiMessages.mockResolvedValue(undefined)
 				vi.useRealTimers()
 			}
