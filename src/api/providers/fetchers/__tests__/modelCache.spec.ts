@@ -76,6 +76,7 @@ import {
 	flushModels,
 	clearAuthSessionModelsForProvider,
 	resetModelCacheTransientStateForTests,
+	authScopedClearGenerationSizeForTests,
 } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
@@ -1629,9 +1630,11 @@ describe("auth session cache", () => {
 		const refreshed = await refreshModels(options)
 
 		expect(refreshed).toEqual({})
+		// Must be the auth-scoped catch (original provider error), not fallthrough into
+		// fetchModelsFromProvider which throws a different "must not be called" error.
 		expect(consoleSpy).toHaveBeenCalledWith(
 			expect.stringContaining("[refreshModels] Failed to refresh"),
-			expect.any(Error),
+			expect.objectContaining({ message: "network down" }),
 		)
 		consoleSpy.mockRestore()
 	})
@@ -1753,17 +1756,23 @@ describe("auth session cache", () => {
 		try {
 			mockGetZooGatewayModels
 				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+				.mockResolvedValueOnce(zooGatewayOk({}))
 				.mockResolvedValueOnce({ kind: "not_modified" })
 				.mockResolvedValueOnce(zooGatewayOk({}))
 
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
-			await getModels(options)
+			await getModels(options) // seed session + etag
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
-			await getModels(options) // 304 path deletes throttle via reportedEmptyModelResponse.delete
-			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
-			await getModels(options) // empty response must report again
+			await getModels(options) // empty → arm throttle (telemetry #1)
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 
-			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+			await getModels(options) // 304 touch must delete throttle via reportedEmptyModelResponse.delete
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+			await getModels(options) // empty again must report (telemetry #2)
+
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+			expect(TelemetryService.instance.captureEvent).toHaveBeenLastCalledWith(
 				"Model Cache Empty Response",
 				expect.objectContaining({
 					provider: providerIdentifiers.zooGateway,
@@ -2099,5 +2108,56 @@ describe("auth session cache", () => {
 		expect(finalResult).toEqual(models3)
 
 		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+	})
+
+	it("clearAuthSessionModelsForProvider clears bare provider cache keys (no apiKey)", async () => {
+		// Kills: ConditionalExpression mutant that replaces `key === provider` with false.
+		// Without apiKey/baseUrl, getCacheKey returns the bare provider name.
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		const options = { provider: providerIdentifiers.zooGateway }
+
+		await getModels(options)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		await getModels(options)
+
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+	})
+
+	it("clearAuthSessionModelsForProvider does not drop in-flight fetches for other auth providers", async () => {
+		// Kills: ConditionalExpression mutant that always-true matches in-flight keys on clear.
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		type KimiResult = Awaited<ReturnType<typeof getKimiCodeModels>>
+		const kimiModels: ModelRecord = {
+			"kimi-for-coding": { maxTokens: 8192, contextWindow: 128000, supportsPromptCache: false },
+		}
+
+		let resolveZoo!: (v: ZooGatewayResult) => void
+		let resolveKimi!: (v: KimiResult) => void
+		mockGetZooGatewayModels.mockReturnValueOnce(new Promise((r) => (resolveZoo = r)))
+		mockGetKimiCodeModels.mockReturnValueOnce(new Promise((r) => (resolveKimi = r)))
+
+		const zooPending = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "zoo-session" })
+		const kimiPending = getModels({ provider: providerIdentifiers.kimiCode, apiKey: "kimi-session" })
+
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+
+		// Kimi in-flight must remain; a second kimi getModels should dedupe (still 1 call).
+		const kimiDeduped = getModels({ provider: providerIdentifiers.kimiCode, apiKey: "kimi-session" })
+		expect(mockGetKimiCodeModels).toHaveBeenCalledTimes(1)
+
+		resolveZoo(zooGatewayOk(zooModels))
+		resolveKimi(kimiModels)
+		await zooPending
+		expect(await kimiPending).toEqual(kimiModels)
+		expect(await kimiDeduped).toEqual(kimiModels)
+	})
+
+	it("clearAuthSessionModelsForProvider does not bump generation for non-auth providers", () => {
+		// Kills: ConditionalExpression mutant that always enters the isAuthScopedProvider branch.
+		expect(authScopedClearGenerationSizeForTests()).toBe(0)
+		clearAuthSessionModelsForProvider(providerIdentifiers.openrouter)
+		expect(authScopedClearGenerationSizeForTests()).toBe(0)
 	})
 })

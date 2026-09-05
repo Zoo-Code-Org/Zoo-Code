@@ -132,6 +132,8 @@ function authSessionHasModels(models: ModelRecord): boolean {
 }
 
 function authSessionKeyMatchesProvider(key: string, provider: RouterName): boolean {
+	// Bare equality covers missing apiKey/baseUrl (cache key === provider name).
+	// Compound keys always use `provider:...` via getCacheKey.
 	return key === provider || key.startsWith(`${provider}:`)
 }
 
@@ -152,7 +154,7 @@ function isAuthScopedProvider(provider: RouterName): provider is AuthScopedProvi
 function assertAuthScopedGetModelsOptions(options: GetModelsOptions): AuthScopedGetModelsOptions {
 	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
 	if (!isAuthScopedProvider(options.provider)) {
-		// Stryker disable next-line StringLiteral: defensive error message; unreachable for typed callers
+		// Stryker disable next-line CallExpression,StringLiteral: defensive throw; unreachable for typed callers that already passed isAuthScopedProvider
 		throw new Error(`Expected auth-scoped provider, got ${options.provider}`)
 	}
 	// Runtime guard above; TS cannot narrow the GetModelsOptions discriminated union here.
@@ -233,6 +235,7 @@ export function clearAuthSessionModelsForProvider(provider: RouterName): void {
 	// know they should not write back stale data. Keyed by provider (not cache key)
 	// because the cache entry may not exist yet when sign-out occurs.
 	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line ArithmeticOperator: write-back only checks inequality vs generationAtStart; +1 and -1 are equivalent
 		authScopedClearGeneration.set(provider, (authScopedClearGeneration.get(provider) ?? 0) + 1)
 	}
 }
@@ -467,8 +470,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 
 	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
 	if (isAuthScopedProvider(provider)) {
-		// Stryker disable next-line StringLiteral: defensive error message; auth-scoped callers never reach this helper
+		// Stryker disable next-line CallExpression,StringLiteral: defensive throw; auth-scoped callers never reach this helper
 		throw new Error(
+			// Stryker disable next-line StringLiteral: defensive error message; auth-scoped callers never reach this helper
 			`fetchModelsFromProvider must not be called for auth-scoped provider "${provider}" — use resolveAuthScopedModels instead`,
 		)
 	}
@@ -640,6 +644,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		// Stryker disable next-line BlockStatement: emptying this try falls through into the non-auth provider fetch path
 		try {
 			return await resolveAuthScopedModels(options, { forceRefresh: true })
+			// Stryker disable next-line BlockStatement: emptying catch falls through into non-auth refresh; covered by error-message assertion in tests
 		} catch (error) {
 			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
 			const existing = getAuthSessionEntry(cacheKey)
@@ -838,6 +843,11 @@ export function resetModelCacheTransientStateForTests(): void {
 	reportedEmptyModelResponse.clear()
 	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
 	inFlightRefresh.clear()
+}
+
+/** Test-only: observe clear-generation map size (non-auth clears must not insert entries). */
+export function authScopedClearGenerationSizeForTests(): number {
+	return authScopedClearGeneration.size
 }
 
 /**
