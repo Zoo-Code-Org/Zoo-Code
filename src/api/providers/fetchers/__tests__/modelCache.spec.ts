@@ -66,9 +66,17 @@ import type { Mock, Mocked } from "vitest"
 import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
+import * as fsPromises from "fs/promises"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModels, getModelsFromCache } from "../modelCache"
+import {
+	getModels,
+	getModelsFromCache,
+	refreshModels,
+	flushModels,
+	clearAuthSessionModelsForProvider,
+	resetModelCacheTransientStateForTests,
+} from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
@@ -117,6 +125,60 @@ describe("getModels with new GetModelsOptions", () => {
 
 		expect(mockGetLiteLLMModels).toHaveBeenCalledWith("test-api-key", "http://localhost:4000")
 		expect(result).toEqual(mockModels)
+	})
+
+	it("logs disk-cache write failures without rejecting getModels", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(fsPromises.writeFile).mockRejectedValueOnce(new Error("disk full"))
+		mockGetOpenRouterModels.mockResolvedValue({
+			"openrouter/model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		})
+
+		const result = await getModels({ provider: providerIdentifiers.openrouter })
+
+		expect(result).toEqual({
+			"openrouter/model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		})
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[MODEL_CACHE] Error writing"),
+			expect.any(Error),
+		)
+		consoleErrorSpy.mockRestore()
+	})
+
+	it("logs disk-cache write failures without rejecting refreshModels", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(fsPromises.writeFile).mockRejectedValueOnce(new Error("disk full"))
+		mockGetOpenRouterModels.mockResolvedValue({
+			"openrouter/model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		})
+
+		const result = await refreshModels({ provider: providerIdentifiers.openrouter })
+
+		expect(result).toEqual({
+			"openrouter/model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		})
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[refreshModels] Error writing"),
+			expect.any(Error),
+		)
+		consoleErrorSpy.mockRestore()
 	})
 
 	it("calls getOpenRouterModels for openrouter provider", async () => {
@@ -799,61 +861,37 @@ describe("empty cache protection", () => {
 })
 
 describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
-	type ModelCacheModule = typeof import("../modelCache")
-
-	let freshGetModels: ModelCacheModule["getModels"]
-	let freshRefreshModels: ModelCacheModule["refreshModels"]
-	let freshMockGetOpenRouterModels: Mock<typeof getOpenRouterModels>
-	let freshMockGetLiteLLMModels: Mock<typeof getLiteLLMModels>
-	let freshMockGetZooGatewayModels: Mock<typeof getZooGatewayModels>
-
-	beforeEach(async () => {
-		// The empty-response throttle is deliberately module-level, persistent state (once per
-		// cache key per session). Reset modules per test so each test starts with a clean gate.
-		vi.resetModules()
+	beforeEach(() => {
+		// Module-level throttle state; reset without vi.resetModules so Stryker sees mutants.
+		resetModelCacheTransientStateForTests()
 		vi.clearAllMocks()
 
-		const modelCacheModule: ModelCacheModule = await import("../modelCache")
-		const openRouterModule = await import("../openrouter")
-		const liteLLMModule = await import("../litellm")
-		const zooGatewayModule = await import("../zoo-gateway")
-
-		freshGetModels = modelCacheModule.getModels
-		freshRefreshModels = modelCacheModule.refreshModels
-		freshMockGetOpenRouterModels = openRouterModule.getOpenRouterModels as Mock<typeof getOpenRouterModels>
-		freshMockGetLiteLLMModels = liteLLMModule.getLiteLLMModels as Mock<typeof getLiteLLMModels>
-		freshMockGetZooGatewayModels = zooGatewayModule.getZooGatewayModels as Mock<typeof getZooGatewayModels>
-
-		const NodeCacheModule = await import("node-cache")
-		const MockedNodeCache = vi.mocked(NodeCacheModule.default)
+		const MockedNodeCache = vi.mocked(NodeCache)
 		const mockCache = vi.mocked(new MockedNodeCache())
 		mockCache.get.mockReturnValue(undefined)
 	})
 
 	it("fires MODEL_CACHE_EMPTY_RESPONSE only once for repeated empty getModels responses from the same provider", async () => {
-		freshMockGetOpenRouterModels.mockResolvedValue({})
+		mockGetOpenRouterModels.mockResolvedValue({})
 
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await getModels({ provider: providerIdentifiers.openrouter })
+		await getModels({ provider: providerIdentifiers.openrouter })
+		await getModels({ provider: providerIdentifiers.openrouter })
 
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
 			"Model Cache Empty Response",
 			expect.objectContaining({ provider: providerIdentifiers.openrouter, context: "getModels" }),
 		)
 	})
 
 	it("fires again after a non-empty response resets the throttle", async () => {
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		mockGetOpenRouterModels.mockResolvedValue({})
+		await getModels({ provider: providerIdentifiers.openrouter })
+		await getModels({ provider: providerIdentifiers.openrouter })
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
-
-		freshMockGetOpenRouterModels.mockResolvedValue({
+		mockGetOpenRouterModels.mockResolvedValue({
 			"openrouter/model": {
 				maxTokens: 8192,
 				contextWindow: 128000,
@@ -861,36 +899,32 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 				description: "OpenRouter model",
 			},
 		})
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await getModels({ provider: providerIdentifiers.openrouter })
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		mockGetOpenRouterModels.mockResolvedValue({})
+		await getModels({ provider: providerIdentifiers.openrouter })
 
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("throttles independently per provider", async () => {
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		mockGetOpenRouterModels.mockResolvedValue({})
+		mockGetLiteLLMModels.mockResolvedValue({})
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
-		freshMockGetLiteLLMModels.mockResolvedValue({})
+		await getModels({ provider: providerIdentifiers.openrouter })
+		await getModels({ provider: providerIdentifiers.litellm, apiKey: "key", baseUrl: "http://localhost:4000" })
 
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.litellm, apiKey: "key", baseUrl: "http://localhost:4000" })
-
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("throttles empty responses from refreshModels using the same per-key gate", async () => {
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		mockGetOpenRouterModels.mockResolvedValue({})
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
+		await refreshModels({ provider: providerIdentifiers.openrouter })
+		await refreshModels({ provider: providerIdentifiers.openrouter })
 
-		await freshRefreshModels({ provider: providerIdentifiers.openrouter })
-		await freshRefreshModels({ provider: providerIdentifiers.openrouter })
-
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
 			"Model Cache Empty Response",
 			expect.objectContaining({
 				provider: providerIdentifiers.openrouter,
@@ -905,27 +939,25 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		// Two different LiteLLM servers share the "litellm" provider name but are a different
 		// cache identity (see getCacheKey) -- an empty response from one must not suppress the
 		// signal for the other.
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		mockGetLiteLLMModels.mockResolvedValue({})
 
-		freshMockGetLiteLLMModels.mockResolvedValue({})
-
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.litellm,
 			apiKey: "key-a",
 			baseUrl: "http://server-a:4000",
 		})
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.litellm,
 			apiKey: "key-a",
 			baseUrl: "http://server-a:4000",
 		})
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.litellm,
 			apiKey: "key-b",
 			baseUrl: "http://server-b:4000",
 		})
 
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("throttles zoo-gateway independently per session token, even though caching itself is skipped", async () => {
@@ -934,37 +966,33 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		// identity: a sign-out/sign-in cycle to a different account carries a different
 		// session token (apiKey) on the same gateway URL, and must not have its empty-response
 		// signal suppressed by the previous account's throttle entry.
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
 
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
+		await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
-
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+		await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("throttles zoo-gateway independently per gateway baseUrl", async () => {
 		// Same session token, different gateway endpoint (e.g. staging vs. production) --
 		// must also be treated as a distinct identity for throttle purposes.
-		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
 
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
-
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.zooGateway,
 			apiKey: "token",
 			baseUrl: "https://gateway-a.example.com",
 		})
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.zooGateway,
 			apiKey: "token",
 			baseUrl: "https://gateway-b.example.com",
 		})
 
-		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("never shares results across different zoo-gateway credentials (auth isolation)", async () => {
@@ -992,7 +1020,7 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 
 		let resolveA: (value: Awaited<ReturnType<typeof getZooGatewayModels>>) => void
 		let resolveB: (value: Awaited<ReturnType<typeof getZooGatewayModels>>) => void
-		freshMockGetZooGatewayModels
+		mockGetZooGatewayModels
 			.mockImplementationOnce(
 				() =>
 					new Promise((resolve) => {
@@ -1006,10 +1034,10 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 					}),
 			)
 
-		const promiseA = freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
-		const promiseB = freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
+		const promiseA = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		const promiseB = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 
 		resolveB!(zooGatewayOk(accountBModels))
 		resolveA!(zooGatewayOk(accountAModels))
@@ -1022,14 +1050,14 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 	it("deduplicates concurrent zoo-gateway fetches for the same session token", async () => {
 		// Auth-scoped providers use inFlightAuthScopedFetch to coalesce concurrent calls
 		// for the same cache key so two panels opening simultaneously share one fetch.
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
 
 		await Promise.all([
-			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
-			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+			getModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+			getModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
 		])
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -1211,14 +1239,6 @@ describe("compound cache key derivation across scoping dimensions", () => {
 })
 
 describe("auth session cache", () => {
-	type ModelCacheModule = typeof import("../modelCache")
-
-	let freshGetModels: ModelCacheModule["getModels"]
-	let freshRefreshModels: ModelCacheModule["refreshModels"]
-	let freshFlushModels: ModelCacheModule["flushModels"]
-	let freshClearAuthSessionModelsForProvider: ModelCacheModule["clearAuthSessionModelsForProvider"]
-	let freshMockGetZooGatewayModels: Mock<typeof getZooGatewayModels>
-	let freshMockGetKimiCodeModels: Mock<typeof getKimiCodeModels>
 	let mockSet: Mocked<NodeCache>["set"]
 
 	const zooModels: ModelRecord = {
@@ -1229,64 +1249,52 @@ describe("auth session cache", () => {
 		},
 	}
 
-	beforeEach(async () => {
-		vi.resetModules()
+	beforeEach(() => {
+		resetModelCacheTransientStateForTests()
 		vi.clearAllMocks()
 
-		const modelCacheModule: ModelCacheModule = await import("../modelCache")
-		const zooGatewayModule = await import("../zoo-gateway")
-		const kimiCodeModule = await import("../kimi-code")
 		const MockedNodeCache = vi.mocked(NodeCache)
 		const mockCache = vi.mocked(new MockedNodeCache())
 		mockCache.get.mockReturnValue(undefined)
 		mockSet = mockCache.set
-
-		freshGetModels = modelCacheModule.getModels
-		freshRefreshModels = modelCacheModule.refreshModels
-		freshFlushModels = modelCacheModule.flushModels
-		freshClearAuthSessionModelsForProvider = modelCacheModule.clearAuthSessionModelsForProvider
-		freshMockGetZooGatewayModels = zooGatewayModule.getZooGatewayModels as Mock<typeof getZooGatewayModels>
-		freshMockGetKimiCodeModels = kimiCodeModule.getKimiCodeModels as Mock<typeof getKimiCodeModels>
 	})
 
 	it("reuses in-memory session cache within TTL without refetching", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		await freshGetModels(options)
+		await getModels(options)
+		await getModels(options)
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 	})
 
 	it("keeps prior catalog when a refresh returns empty", async () => {
-		freshMockGetZooGatewayModels
-			.mockResolvedValueOnce(zooGatewayOk(zooModels))
-			.mockResolvedValueOnce(zooGatewayOk({}))
+		mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels)).mockResolvedValueOnce(zooGatewayOk({}))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		const refreshed = await freshRefreshModels(options)
+		await getModels(options)
+		const refreshed = await refreshModels(options)
 
 		expect(refreshed).toEqual(zooModels)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("clears session cache on sign-out helper so the same identity refetches", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
-		await freshGetModels(options)
+		await getModels(options)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		await getModels(options)
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("never writes auth-scoped catalogs to the shared memory cache", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-token" })
+		await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-token" })
 
 		expect(mockSet).not.toHaveBeenCalled()
 	})
@@ -1294,18 +1302,18 @@ describe("auth session cache", () => {
 	it("clearAuthSessionModelsForProvider prevents a resolved in-flight fetch from repopulating the cache", async () => {
 		// Regression guard: an in-flight fetch that resolves after clearAuthSessionModelsForProvider
 		// must not repopulate the session cache (which would leak a prior session's catalog).
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 		// Fetch and populate cache
-		await freshGetModels(options)
+		await getModels(options)
 
 		// Sign out — clears cache and in-flight map
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 
 		// A new getModels call after sign-out must refetch (cache was cleared)
-		await freshGetModels(options)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		await getModels(options)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("in-flight fetch started before sign-out does not repopulate cache when a new fetch starts after sign-out", async () => {
@@ -1332,18 +1340,18 @@ describe("auth session cache", () => {
 
 		// First call returns fetchAPromise (hangs until we resolve)
 		// Second call returns fetchBPromise (hangs until we resolve)
-		freshMockGetZooGatewayModels.mockReturnValueOnce(fetchAPromise).mockReturnValueOnce(fetchBPromise)
+		mockGetZooGatewayModels.mockReturnValueOnce(fetchAPromise).mockReturnValueOnce(fetchBPromise)
 
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 		// 1. Start fetch A (pre-sign-out)
-		const fetchAResult = freshGetModels(options)
+		const fetchAResult = getModels(options)
 
 		// 2. Sign out — clears cache and bumps generation
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 
 		// 3. Start fetch B (post-sign-out) — this registers a NEW in-flight promise
-		const fetchBResult = freshGetModels(options)
+		const fetchBResult = getModels(options)
 
 		// 4. Resolve fetch A with stale data — it should NOT write to cache
 		resolveFetchA(zooGatewayOk(staleModels))
@@ -1358,30 +1366,30 @@ describe("auth session cache", () => {
 
 		// Verify a subsequent getModels call returns the fresh data (proving fetch A didn't overwrite)
 		// Don't set a new mock — the call should be served from cache
-		const subsequent = await freshGetModels(options)
+		const subsequent = await getModels(options)
 		expect(subsequent).toEqual(freshModelsAfterSignOut)
 		// Should be served from cache, not trigger a new fetch (only 2 fetches: A and B)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 
 		// Clean up — clear cache so subsequent tests don't see stale entries
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 	})
 
 	it("returns cached entry within TTL without hitting the provider", async () => {
 		// Kills: AUTH_SESSION_TTL_MS arithmetic mutant (5*60/1000 would expire in <1ms)
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-			await freshGetModels(options)
+			await getModels(options)
 			// Advance by 1 second — well within the 5-minute TTL
 			vi.advanceTimersByTime(1000)
-			const second = await freshGetModels(options)
+			const second = await getModels(options)
 
 			expect(second).toEqual(zooModels)
 			// Only one fetch — the second call was served from cache
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1391,16 +1399,16 @@ describe("auth session cache", () => {
 		// Kills: < vs <= equality-operator mutant on isAuthSessionFresh
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-			await freshGetModels(options)
+			await getModels(options)
 			// Advance to exactly TTL — entry is now stale (< not <=)
 			vi.advanceTimersByTime(5 * 60 * 1000)
-			await freshGetModels(options)
+			await getModels(options)
 
 			// Must have refetched — entry was stale at exact TTL
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1414,30 +1422,30 @@ describe("auth session cache", () => {
 		// "prunes session entries older than twice the TTL" test covers the >=2x case.
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 			const optionsA = { provider: providerIdentifiers.zooGateway, apiKey: "session-a" }
 			const optionsB = { provider: providerIdentifiers.zooGateway, apiKey: "session-b" }
 
 			// First fetch returns an etag so we can detect it on the revalidation call
-			freshMockGetZooGatewayModels.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
-			await freshGetModels(optionsA)
+			mockGetZooGatewayModels.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+			await getModels(optionsA)
 
 			// Advance to 1x TTL + 1ms — stale but below 2x cutoff
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
 			// Adding a second entry triggers enforceAuthSessionCacheBound → pruneExpiredAuthSessionEntries
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
-			await freshGetModels(optionsB)
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			await getModels(optionsB)
 
 			// session-a is below 2x TTL so it is NOT pruned.
 			// It IS stale (1x TTL elapsed), so the next getModels call will issue a revalidation
 			// request WITH the etag — confirming the entry is still in the cache.
-			freshMockGetZooGatewayModels.mockClear()
-			freshMockGetZooGatewayModels.mockResolvedValue({ kind: "ok", models: zooModels, etag: '"v2"' })
-			await freshGetModels(optionsA)
+			mockGetZooGatewayModels.mockClear()
+			mockGetZooGatewayModels.mockResolvedValue({ kind: "ok", models: zooModels, etag: '"v2"' })
+			await getModels(optionsA)
 
 			// The etag from the prior fetch must have been sent (entry was not pruned)
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledWith(expect.objectContaining({ ifNoneMatch: '"v1"' }))
+			expect(mockGetZooGatewayModels).toHaveBeenCalledWith(expect.objectContaining({ ifNoneMatch: '"v1"' }))
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1447,15 +1455,15 @@ describe("auth session cache", () => {
 		// Kills: ConditionalExpression mutant (false) on `if (current && Object.keys(current.models).length > 0)`
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels
+			mockGetZooGatewayModels
 				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
 				.mockResolvedValueOnce({ kind: "not_modified" })
 
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
-			await freshGetModels(options)
+			await getModels(options)
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
-			const result = await freshGetModels(options)
+			const result = await getModels(options)
 
 			// If the condition were false, touchAuthSessionEntry wouldn't fire and result might differ
 			expect(result).toEqual(zooModels)
@@ -1468,15 +1476,15 @@ describe("auth session cache", () => {
 		// Kills: ConditionalExpression mutant (false) on `if (existing && Object.keys(existing.models).length > 0)` fallback
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels
+			mockGetZooGatewayModels
 				.mockResolvedValueOnce(zooGatewayOk(zooModels))
 				.mockResolvedValueOnce(zooGatewayOk({}))
 
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
-			await freshGetModels(options)
+			await getModels(options)
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
-			const result = await freshGetModels(options)
+			const result = await getModels(options)
 
 			// If condition were false, {} would be returned — but existing catalog should survive
 			expect(result).toEqual(zooModels)
@@ -1487,81 +1495,79 @@ describe("auth session cache", () => {
 
 	it("forceRefresh bypasses the fresh-cache short-circuit", async () => {
 		// Kills: ConditionalExpression mutant (true) on `!forceRefresh` in cache-hit guard
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
+		await getModels(options)
 		// Entry is fresh — without forceRefresh the second call would be served from cache
-		await freshRefreshModels(options)
+		await refreshModels(options)
 
 		// forceRefresh must bypass the cache and issue a second fetch
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("concurrent getModels calls for the same session key share one fetch", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		const [first, second] = await Promise.all([freshGetModels(options), freshGetModels(options)])
+		const [first, second] = await Promise.all([getModels(options), getModels(options)])
 
 		expect(first).toEqual(zooModels)
 		expect(second).toEqual(zooModels)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 	})
 
 	it("revalidates with ETag after TTL expires and keeps the prior catalog on 304", async () => {
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels
+			mockGetZooGatewayModels
 				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
 				.mockResolvedValueOnce({ kind: "not_modified" })
 
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
-			await freshGetModels(options)
+			await getModels(options)
 
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
-			const second = await freshGetModels(options)
+			const second = await getModels(options)
 
 			expect(second).toEqual(zooModels)
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
-			expect(freshMockGetZooGatewayModels).toHaveBeenLastCalledWith(
-				expect.objectContaining({ ifNoneMatch: '"v1"' }),
-			)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+			expect(mockGetZooGatewayModels).toHaveBeenLastCalledWith(expect.objectContaining({ ifNoneMatch: '"v1"' }))
 
 			// A third call within the refreshed TTL window must not trigger another fetch,
 			// proving touchAuthSessionEntry actually updated fetchedAt.
-			const third = await freshGetModels(options)
+			const third = await getModels(options)
 			expect(third).toEqual(zooModels)
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 		} finally {
 			vi.useRealTimers()
 		}
 	})
 
 	it("flushModels clears session cache and can force a refetch", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		await getModels(options)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 
-		await freshFlushModels(options, true)
+		await flushModels(options, true)
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("returns the prior session catalog when a fetch throws", async () => {
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels
+			mockGetZooGatewayModels
 				.mockResolvedValueOnce(zooGatewayOk(zooModels))
 				.mockRejectedValueOnce(new Error("network down"))
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-			await freshGetModels(options)
+			await getModels(options)
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
-			const second = await freshGetModels(options)
+			const second = await getModels(options)
 
 			expect(second).toEqual(zooModels)
 		} finally {
@@ -1570,29 +1576,35 @@ describe("auth session cache", () => {
 	})
 
 	it("getModels throws on the first call when the provider fetch fails and there is no prior cache", async () => {
-		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
+		mockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await expect(freshGetModels(options)).rejects.toThrow("network down")
+		await expect(getModels(options)).rejects.toThrow("network down")
 	})
 
 	it("refreshModels returns an empty catalog when refresh throws and no session cache exists", async () => {
-		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		const refreshed = await freshRefreshModels(options)
+		const refreshed = await refreshModels(options)
 
 		expect(refreshed).toEqual({})
+		expect(consoleSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[refreshModels] Failed to refresh"),
+			expect.any(Error),
+		)
+		consoleSpy.mockRestore()
 	})
 
 	it("refreshModels keeps the prior session catalog when refresh throws", async () => {
-		freshMockGetZooGatewayModels
+		mockGetZooGatewayModels
 			.mockResolvedValueOnce(zooGatewayOk(zooModels))
 			.mockRejectedValueOnce(new Error("network down"))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		const refreshed = await freshRefreshModels(options)
+		await getModels(options)
+		const refreshed = await refreshModels(options)
 
 		expect(refreshed).toEqual(zooModels)
 	})
@@ -1605,41 +1617,41 @@ describe("auth session cache", () => {
 				supportsPromptCache: false,
 			},
 		}
-		freshMockGetKimiCodeModels.mockResolvedValue(kimiModels)
+		mockGetKimiCodeModels.mockResolvedValue(kimiModels)
 		const options = { provider: providerIdentifiers.kimiCode, apiKey: "kimi-session" }
 
-		await freshGetModels(options)
-		await freshGetModels(options)
+		await getModels(options)
+		await getModels(options)
 
-		expect(freshMockGetKimiCodeModels).toHaveBeenCalledTimes(1)
+		expect(mockGetKimiCodeModels).toHaveBeenCalledTimes(1)
 		expect(mockSet).not.toHaveBeenCalled()
 	})
 
 	it("flushModels without refresh evicts the session cache until the next fetch", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		await freshFlushModels(options)
-		await freshGetModels(options)
+		await getModels(options)
+		await flushModels(options)
+		await getModels(options)
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("returns an empty catalog when revalidation is 304 and no session cache exists", async () => {
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels
+			mockGetZooGatewayModels
 				.mockResolvedValueOnce(zooGatewayOk(zooModels))
 				.mockResolvedValueOnce({ kind: "not_modified" })
 
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
-			await freshGetModels(options)
-			await freshFlushModels(options)
+			await getModels(options)
+			await flushModels(options)
 
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
-			const result = await freshGetModels(options)
+			const result = await getModels(options)
 
 			expect(result).toEqual({})
 		} finally {
@@ -1648,97 +1660,98 @@ describe("auth session cache", () => {
 	})
 
 	it("returns an empty catalog on the first empty zoo-gateway response", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		const result = await freshGetModels(options)
+		const result = await getModels(options)
 
 		expect(result).toEqual({})
 	})
 
 	it("clearAuthSessionModelsForProvider removes compound cache keys", async () => {
-		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.zooGateway,
 			apiKey: "account-a",
 			baseUrl: "https://gateway-a.test/v1",
 		})
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.zooGateway,
 			apiKey: "account-b",
 			baseUrl: "https://gateway-b.test/v1",
 		})
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.zooGateway,
 			apiKey: "account-a",
 			baseUrl: "https://gateway-a.test/v1",
 		})
-		await freshGetModels({
+		await getModels({
 			provider: providerIdentifiers.zooGateway,
 			apiKey: "account-b",
 			baseUrl: "https://gateway-b.test/v1",
 		})
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(4)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(4)
 	})
 
 	it("flushModels with refresh keeps the prior catalog when the provider fetch fails", async () => {
-		freshMockGetZooGatewayModels
+		mockGetZooGatewayModels
 			.mockResolvedValueOnce(zooGatewayOk(zooModels))
 			.mockRejectedValueOnce(new Error("network down"))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		await expect(freshFlushModels(options, true)).resolves.toBeUndefined()
+		await getModels(options)
+		await expect(flushModels(options, true)).resolves.toBeUndefined()
 
-		const afterFailedRefresh = await freshGetModels(options)
+		const afterFailedRefresh = await getModels(options)
 		expect(afterFailedRefresh).toEqual(zooModels)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("flushModels with refresh logs and does not throw when refresh fails with no session cache", async () => {
 		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
+		mockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await expect(freshFlushModels(options, true)).resolves.toBeUndefined()
-		expect(consoleSpy).toHaveBeenCalled()
+		await expect(flushModels(options, true)).resolves.toBeUndefined()
+		expect(consoleSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[flushModels] Failed to refresh auth-scoped"),
+			expect.any(Error),
+		)
 		consoleSpy.mockRestore()
 	})
 
 	it("flushModels with refresh keeps the prior catalog when refresh returns empty", async () => {
-		freshMockGetZooGatewayModels
-			.mockResolvedValueOnce(zooGatewayOk(zooModels))
-			.mockResolvedValueOnce(zooGatewayOk({}))
+		mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels)).mockResolvedValueOnce(zooGatewayOk({}))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels(options)
-		await freshFlushModels(options, true)
+		await getModels(options)
+		await flushModels(options, true)
 
-		const afterEmptyRefresh = await freshGetModels(options)
+		const afterEmptyRefresh = await getModels(options)
 		expect(afterEmptyRefresh).toEqual(zooModels)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("prunes session entries older than twice the TTL when maintaining the cache", async () => {
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 			const first = { provider: providerIdentifiers.zooGateway, apiKey: "session-a" }
 			const second = { provider: providerIdentifiers.zooGateway, apiKey: "session-b" }
 
-			await freshGetModels(first)
+			await getModels(first)
 			vi.advanceTimersByTime(5 * 60 * 1000 * 2 + 1)
-			await freshGetModels(second)
+			await getModels(second)
 
-			freshMockGetZooGatewayModels.mockClear()
-			freshMockGetZooGatewayModels.mockResolvedValueOnce({ kind: "not_modified" })
-			const result = await freshGetModels(first)
+			mockGetZooGatewayModels.mockClear()
+			mockGetZooGatewayModels.mockResolvedValueOnce({ kind: "not_modified" })
+			const result = await getModels(first)
 
 			expect(result).toEqual({})
 		} finally {
@@ -1750,19 +1763,19 @@ describe("auth session cache", () => {
 		// Kills: EqualityOperator mutant L159 (>= staleCutoffMs → > staleCutoffMs)
 		vi.useFakeTimers()
 		try {
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
 			const first = { provider: providerIdentifiers.zooGateway, apiKey: "session-a" }
 			const second = { provider: providerIdentifiers.zooGateway, apiKey: "session-b" }
 
-			await freshGetModels(first)
+			await getModels(first)
 			// Advance to EXACTLY 2x TTL — must be pruned (>= not just >)
 			vi.advanceTimersByTime(5 * 60 * 1000 * 2)
-			await freshGetModels(second)
+			await getModels(second)
 
-			freshMockGetZooGatewayModels.mockClear()
+			mockGetZooGatewayModels.mockClear()
 			// First entry was pruned — a new fetch must fire (not_modified without etag yields {})
-			freshMockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk({}))
-			const result = await freshGetModels(first)
+			mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk({}))
+			const result = await getModels(first)
 
 			// No cache entry → provider returned empty → fallback to {}
 			expect(result).toEqual({})
@@ -1777,16 +1790,57 @@ describe("auth session cache", () => {
 		try {
 			// Fill 65 unique sessions (1 over AUTH_SESSION_MAX_ENTRIES=64)
 			for (let i = 0; i < 65; i++) {
-				freshMockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels))
 				vi.advanceTimersByTime(1) // ensure fetchedAt differs so oldest is well-defined
-				await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: `session-${i}` })
+				await getModels({ provider: providerIdentifiers.zooGateway, apiKey: `session-${i}` })
 			}
 			// session-0 is the oldest — it must have been evicted. Verify by clearing mock
 			// and calling with session-0: if it was evicted, a fresh fetch fires.
-			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
-			freshMockGetZooGatewayModels.mockClear()
-			await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-0" })
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockClear()
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-0" })
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("does not evict when the session cache is exactly at MAX_ENTRIES", async () => {
+		// Kills: EqualityOperator mutant `size > MAX` → `size >= MAX` (would evict at exactly 64)
+		vi.useFakeTimers()
+		try {
+			for (let i = 0; i < 64; i++) {
+				mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				vi.advanceTimersByTime(1)
+				await getModels({ provider: providerIdentifiers.zooGateway, apiKey: `session-${i}` })
+			}
+
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockClear()
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-0" })
+			expect(mockGetZooGatewayModels).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("evicts the earliest-inserted entry when fetchedAt timestamps are equal", async () => {
+		// Kills: EqualityOperator mutant `fetchedAt < oldest` → `<=` (would prefer the newest key)
+		vi.useFakeTimers()
+		try {
+			for (let i = 0; i < 65; i++) {
+				mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				await getModels({ provider: providerIdentifiers.zooGateway, apiKey: `session-${i}` })
+			}
+
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			mockGetZooGatewayModels.mockClear()
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-0" })
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+
+			mockGetZooGatewayModels.mockClear()
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-64" })
+			expect(mockGetZooGatewayModels).not.toHaveBeenCalled()
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1794,19 +1848,19 @@ describe("auth session cache", () => {
 
 	it("setAuthSessionEntry does not store an empty model record", async () => {
 		// Kills: ConditionalExpression mutant L188 (false) — empty models must be rejected
-		freshMockGetZooGatewayModels
+		mockGetZooGatewayModels
 			.mockResolvedValueOnce(zooGatewayOk({})) // first call: empty
 			.mockResolvedValueOnce(zooGatewayOk(zooModels)) // second call: populated
 
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 		// First call returns empty — nothing stored
-		await freshGetModels(options)
+		await getModels(options)
 		// Second call must fetch again (nothing was cached from first call)
-		const second = await freshGetModels(options)
+		const second = await getModels(options)
 
 		expect(second).toEqual(zooModels)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("stale in-flight fetch must not write to cache even when a new fetch registered the key", async () => {
@@ -1828,18 +1882,18 @@ describe("auth session cache", () => {
 		const fetchADeferred = new Promise<ZooGatewayResult>((r) => (resolveFetchA = r))
 		const fetchBDeferred = new Promise<ZooGatewayResult>((r) => (resolveFetchB = r))
 
-		freshMockGetZooGatewayModels.mockReturnValueOnce(fetchADeferred).mockReturnValueOnce(fetchBDeferred)
+		mockGetZooGatewayModels.mockReturnValueOnce(fetchADeferred).mockReturnValueOnce(fetchBDeferred)
 
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 		// 1. Start fetch A (pre-sign-out)
-		const fetchAResult = freshGetModels(options)
+		const fetchAResult = getModels(options)
 
 		// 2. Sign-out
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 
 		// 3. Start fetch B (post-sign-out) — registers new in-flight under the same key
-		const fetchBResult = freshGetModels(options)
+		const fetchBResult = getModels(options)
 
 		// 4. Resolve fetch A with stale data
 		resolveFetchA(zooGatewayOk(staleModels))
@@ -1848,7 +1902,7 @@ describe("auth session cache", () => {
 		// 5. Third call immediately after A resolves (B still pending).
 		//    If stale data was written (|| bug), it gets served from cache → returns stale.
 		//    If stale data was NOT written (correct &&), it deduplicates to fetch B → blocks.
-		const thirdCallResult = freshGetModels(options)
+		const thirdCallResult = getModels(options)
 
 		// 6. Resolve fetch B with fresh data
 		resolveFetchB(zooGatewayOk(freshModelsAfterSignOut2))
@@ -1857,7 +1911,7 @@ describe("auth session cache", () => {
 		// The third call must have gotten fresh data (deduped to B), not stale data from A
 		expect(thirdResult).toEqual(freshModelsAfterSignOut2)
 
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 	})
 
 	it("clearAuthSessionModelsForProvider also invalidates in-flight fetches not yet in cache", async () => {
@@ -1871,18 +1925,18 @@ describe("auth session cache", () => {
 		let resolveFetchA!: (v: ZooGatewayResult) => void
 		const fetchADeferred = new Promise<ZooGatewayResult>((r) => (resolveFetchA = r))
 
-		freshMockGetZooGatewayModels.mockReturnValueOnce(fetchADeferred).mockResolvedValueOnce(zooGatewayOk(freshModels2))
+		mockGetZooGatewayModels.mockReturnValueOnce(fetchADeferred).mockResolvedValueOnce(zooGatewayOk(freshModels2))
 
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 		// 1. Start fetch A — it's in-flight, cache is EMPTY (hasn't resolved yet)
-		const fetchAResult = freshGetModels(options)
+		const fetchAResult = getModels(options)
 
 		// 2. Sign out before fetch A resolves — must also clear the in-flight entry
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 
 		// 3. Start fetch B — if in-flight was cleared, a NEW fetch fires (not deduped to A)
-		const fetchBResult = freshGetModels(options)
+		const fetchBResult = getModels(options)
 
 		// 4. Resolve A (stale) and B (fresh)
 		resolveFetchA(zooGatewayOk(zooModels)) // stale pre-sign-out data
@@ -1891,9 +1945,9 @@ describe("auth session cache", () => {
 		const bResult = await fetchBResult
 		expect(bResult).toEqual(freshModels2)
 		// Two fetches fired: A and B (if in-flight was cleared correctly)
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 	})
 
 	it("generation counter increments by +1 on each sign-out, not by -1", async () => {
@@ -1909,7 +1963,7 @@ describe("auth session cache", () => {
 		let resolveA!: (v: ZooGatewayResult) => void
 		let resolveB!: (v: ZooGatewayResult) => void
 		let resolveC!: (v: ZooGatewayResult) => void
-		freshMockGetZooGatewayModels
+		mockGetZooGatewayModels
 			.mockReturnValueOnce(new Promise((r) => (resolveA = r)))
 			.mockReturnValueOnce(new Promise((r) => (resolveB = r)))
 			.mockReturnValueOnce(new Promise((r) => (resolveC = r)))
@@ -1917,13 +1971,13 @@ describe("auth session cache", () => {
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 		// fetch A (gen=0 at start)
-		const resA = freshGetModels(options)
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway) // gen → 1
+		const resA = getModels(options)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway) // gen → 1
 		// fetch B (gen=1 at start)
-		const resB = freshGetModels(options)
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway) // gen → 2
+		const resB = getModels(options)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway) // gen → 2
 		// fetch C (gen=2 at start)
-		const resC = freshGetModels(options)
+		const resC = getModels(options)
 
 		// Resolve all with distinct data; only C's data should land in cache
 		resolveA(zooGatewayOk(models1))
@@ -1936,6 +1990,6 @@ describe("auth session cache", () => {
 		// C was the last fetch with matching generation — result must be models3
 		expect(finalResult).toEqual(models3)
 
-		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 	})
 })

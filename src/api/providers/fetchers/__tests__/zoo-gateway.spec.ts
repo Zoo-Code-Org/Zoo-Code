@@ -165,11 +165,21 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(validateStatus?.(500)).toBe(false)
 		})
 
+		it("omits If-None-Match when no etag is provided", async () => {
+			mockAxiosGet.mockResolvedValueOnce(mockResponse)
+
+			await getZooGatewayModels(gatewayOptions())
+
+			const headers = mockAxiosGet.mock.calls[0]?.[1]?.headers as Record<string, string>
+			expect(headers).toEqual({ Authorization: `Bearer ${token}` })
+			expect(headers).not.toHaveProperty("If-None-Match")
+		})
+
 		it("skips the request and returns {} when no token is available", async () => {
 			const result = await getZooGatewayModels(gatewayOptions({ zooSessionToken: undefined }))
 
 			expect(mockAxiosGet).not.toHaveBeenCalled()
-			expect(modelsFromResult(result)).toEqual({})
+			expect(result).toEqual({ kind: "ok", models: {} })
 		})
 
 		it("returns {} and never leaks the error object when the request fails", async () => {
@@ -183,7 +193,7 @@ describe("Zoo Gateway Fetchers", () => {
 
 			const result = await getZooGatewayModels(gatewayOptions())
 
-			expect(modelsFromResult(result)).toEqual({})
+			expect(result).toEqual({ kind: "ok", models: {} })
 			const logged = consoleErrorSpy.mock.calls.map((args) => String(args[0])).join("\n")
 			expect(logged).toContain("status=502")
 			expect(logged).toContain("code=ECONNRESET")
@@ -228,7 +238,7 @@ describe("Zoo Gateway Fetchers", () => {
 
 			const result = await getZooGatewayModels(gatewayOptions())
 
-			expect(modelsFromResult(result)).toEqual({})
+			expect(result).toEqual({ kind: "ok", models: {} })
 			expect(consoleErrorSpy).toHaveBeenCalled()
 			consoleErrorSpy.mockRestore()
 		})

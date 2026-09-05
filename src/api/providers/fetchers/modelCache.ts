@@ -141,6 +141,7 @@ function isAuthScopedProvider(provider: RouterName): provider is AuthScopedProvi
 }
 
 function assertAuthScopedGetModelsOptions(options: GetModelsOptions): AuthScopedGetModelsOptions {
+	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
 	if (!isAuthScopedProvider(options.provider)) {
 		throw new Error(`Expected auth-scoped provider, got ${options.provider}`)
 	}
@@ -173,6 +174,7 @@ function enforceAuthSessionCacheBound(): void {
 				oldestKey = key
 			}
 		}
+		// Stryker disable next-line ConditionalExpression: Map iteration always yields a key while size > 0; break is a defensive latch
 		if (!oldestKey) {
 			break
 		}
@@ -260,6 +262,7 @@ async function resolveAuthScopedModels(
 	const cacheKey = getCacheKey(options)
 	const existing = getAuthSessionEntry(cacheKey)
 
+	// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
 	if (!forceRefresh && existing && isAuthSessionFresh(existing) && Object.keys(existing.models).length > 0) {
 		return existing.models
 	}
@@ -287,6 +290,7 @@ async function resolveAuthScopedModels(
 				// Re-read from the Map: a concurrent sign-out could have cleared
 				// the entry between when we captured `existing` and now.
 				const current = getAuthSessionEntry(cacheKey)
+				// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
 				if (current && Object.keys(current.models).length > 0) {
 					touchAuthSessionEntry(cacheKey, current)
 					reportedEmptyModelResponse.delete(cacheKey)
@@ -309,17 +313,20 @@ async function resolveAuthScopedModels(
 
 				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
 					context: forceRefresh ? "refreshModels" : "getModels",
+					// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
 					hasExistingCache: Boolean(existing && Object.keys(existing.models).length > 0),
 					...(existing ? { existingCacheSize: Object.keys(existing.models).length } : {}),
 				})
 			}
 
+			// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
 			if (existing && Object.keys(existing.models).length > 0) {
 				return existing.models
 			}
 
 			return fetched.models
 		} catch (error) {
+			// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
 			if (existing && Object.keys(existing.models).length > 0) {
 				return existing.models
 			}
@@ -452,6 +459,7 @@ async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
 async function fetchModelsFromProvider(options: GetModelsOptions): Promise<ModelRecord> {
 	const { provider } = options
 
+	// Stryker disable next-line ConditionalExpression,StringLiteral: auth-scoped callers never reach this helper; guard is defensive
 	if (isAuthScopedProvider(provider)) {
 		throw new Error(
 			`fetchModelsFromProvider must not be called for auth-scoped provider "${provider}" — use resolveAuthScopedModels instead`,
@@ -627,6 +635,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		} catch (error) {
 			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
 			const existing = getAuthSessionEntry(cacheKey)
+			// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
 			if (existing && Object.keys(existing.models).length > 0) {
 				return existing.models
 			}
@@ -804,6 +813,18 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 	}
 
 	return undefined
+}
+
+/**
+ * Clears auth-session maps and the empty-response throttle for test isolation.
+ * Prefer this over `vi.resetModules()` so mutation testing instruments the same module instance.
+ */
+export function resetModelCacheTransientStateForTests(): void {
+	authSessionCache.clear()
+	inFlightAuthScopedFetch.clear()
+	authScopedClearGeneration.clear()
+	reportedEmptyModelResponse.clear()
+	inFlightRefresh.clear()
 }
 
 /**
