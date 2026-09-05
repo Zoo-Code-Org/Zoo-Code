@@ -688,11 +688,11 @@ describe("ReadFileTool", () => {
 			parseSpy.mockRestore()
 		})
 
-		it("denies batch reads for a queued message response without text", async () => {
+		it("denies batch reads without feedback text", async () => {
 			const task = Object.create(Task.prototype) as Task
 			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
 			Object.assign(task, createMockTask())
-			task.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: undefined, images: undefined })
+			task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked", text: undefined, images: undefined })
 			const fileResults = [
 				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
 				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
@@ -701,6 +701,33 @@ describe("ReadFileTool", () => {
 			await readFileTool["requestApproval"](task, fileResults, () => {})
 
 			expect(task.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+			expect(task.didRejectTool).toBe(true)
+		})
+
+		it("applies individual decisions for a batch read", async () => {
+			const task = Object.create(Task.prototype) as Task
+			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
+			Object.assign(task, createMockTask())
+			task.ask = vi.fn().mockImplementation(async (_type, text) => {
+				const { batchFiles } = JSON.parse(text ?? "{}") as { batchFiles: Array<{ key: string }> }
+				return {
+					response: "objectResponse",
+					text: JSON.stringify({ [batchFiles[0].key]: true, [batchFiles[1].key]: false }),
+					images: undefined,
+				}
+			})
+			const fileResults = [
+				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
+				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
+			]
+			const updates = new Map<string, Record<string, unknown>>()
+
+			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
+				updates.set(filePath, update)
+			})
+
+			expect(updates.get("one.ts")).toMatchObject({ status: "approved" })
+			expect(updates.get("two.ts")).toMatchObject({ status: "denied" })
 			expect(task.didRejectTool).toBe(true)
 		})
 	})

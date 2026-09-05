@@ -52,6 +52,7 @@ describe("Task.ask queued message drain", () => {
 		const task = await createTask()
 
 		const askPromise = task.ask("command_output", "command is still running...", false)
+		task.messageQueueService.addMessage("1+1=?")
 
 		setTimeout(() => {
 			task.approveAsk()
