@@ -203,6 +203,13 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Fail fast when the task is already cancelled before any model-catalog
+		// work starts: the standardized AbortError must win over any failure the
+		// fallible resolution could raise.
+		if (metadata?.abortSignal?.aborted) {
+			throw createAbortError("Opencode Go")
+		}
+
 		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
 
 		// Per-request controller so an external abort signal (e.g. task
@@ -243,16 +250,20 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		}
 
 		if (format === "responses") {
-			yield* this.streamResponsesMessage(
-				modelId,
-				info,
-				temperature,
-				maxTokens,
-				reasoningEffort,
-				systemPrompt,
-				messages,
-				metadata,
-			)
+			try {
+				yield* this.streamResponsesMessage(
+					modelId,
+					info,
+					temperature,
+					maxTokens,
+					reasoningEffort,
+					systemPrompt,
+					messages,
+					metadata,
+				)
+			} finally {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
+			}
 			return
 		}
 

@@ -487,10 +487,9 @@ describe("OpencodeGoHandler", () => {
 
 	describe("createMessage abort signal bridging", () => {
 		it("rejects with an AbortError when the external signal is already aborted", async () => {
-			// Capture the INTERNAL controller signal the SDK call receives: an
-			// already-aborted external signal must abort the controller before
-			// the request starts so the catch path can normalize the rejection
-			// to the DOM-standard AbortError.
+			// A pre-aborted request must fail fast before any model-catalog or
+			// SDK work starts: the standardized AbortError wins over any
+			// resolution failure, and the request itself never begins.
 			let capturedSignal: AbortSignal | undefined
 			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
@@ -511,7 +510,9 @@ describe("OpencodeGoHandler", () => {
 				() => undefined,
 				(e: unknown) => e,
 			)
-			expect(capturedSignal?.aborted).toBe(true)
+			// The fast-fail guard throws before the request starts.
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(capturedSignal).toBeUndefined()
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
 		})
@@ -591,11 +592,15 @@ describe("OpencodeGoHandler", () => {
 
 			const chunks = await collectStream(stream)
 			expect(chunks).toContainEqual({ type: "text", text: "ok" })
-			expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// Assert the exact listener reference so a bridge that removes a
+			// different callback than the one it registered cannot pass.
+			const addedListener = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")?.[1]
+			expect(typeof addedListener).toBe("function")
 			// The listener is registered with { once: true } — assert the exact
 			// options so a bridge that drops them (and relies on the finally
 			// block alone for single-shot semantics) is caught.
-			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
 			expect(controller.signal.aborted).toBe(false)
 		})
 
@@ -619,6 +624,7 @@ describe("OpencodeGoHandler", () => {
 			})
 			const controller = new AbortController()
 			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
 
 			const stream = handler.createMessage(
 				"sys",
@@ -628,7 +634,10 @@ describe("OpencodeGoHandler", () => {
 
 			const chunks = await collectStream(stream)
 			expect(chunks).toContainEqual({ type: "text", text: "ok" })
-			expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			const addedListener = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
 			expect(controller.signal.aborted).toBe(false)
 		})
 	})
@@ -1474,6 +1483,27 @@ describe("OpencodeGoHandler", () => {
 				signal: controller.signal,
 				headers: { "x-opencode-session": "test-task" },
 			})
+		})
+
+		it("detaches the bridged abort listener from the Responses-format path", async () => {
+			// The Responses branch must detach the bridged listener on the way
+			// out like the other formats: a task-scoped signal must not
+			// accumulate one listener per request.
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(
+				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
+			)
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
+			const addedListener = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			expect(controller.signal.aborted).toBe(false)
 		})
 
 		it("closes the Responses iterator when the consumer stops early", async () => {

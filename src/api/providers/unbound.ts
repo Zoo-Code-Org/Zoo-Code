@@ -197,38 +197,52 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			}
 			let lastUsage: any = undefined
 
-			for await (const chunk of stream) {
-				const delta = chunk.choices[0]?.delta
+			try {
+				for await (const chunk of stream) {
+					const delta = chunk.choices[0]?.delta
 
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
-				}
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
 
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
+					if (delta?.content) {
+						yield { type: "text", text: delta.content }
+					}
 
-				// Handle native tool calls
-				if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-					for (const toolCall of delta.tool_calls) {
-						yield {
-							type: "tool_call_partial",
-							index: toolCall.index,
-							id: toolCall.id,
-							name: toolCall.function?.name,
-							arguments: toolCall.function?.arguments,
+					// Handle native tool calls
+					if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+						for (const toolCall of delta.tool_calls) {
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
 						}
+					}
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
 
-				if (chunk.usage) {
-					lastUsage = chunk.usage
+				if (lastUsage) {
+					yield this.processUsageMetrics(lastUsage, info)
 				}
-			}
-
-			if (lastUsage) {
-				yield this.processUsageMetrics(lastUsage, info)
+			} catch (error) {
+				// Preserve abort identity (series standard): a cancellation that
+				// surfaces after the stream has started must also normalize to
+				// the standardized AbortError, not the raw SDK rejection.
+				if (
+					controller.signal.aborted ||
+					error instanceof APIUserAbortError ||
+					(error instanceof Error && error.name === "AbortError")
+				) {
+					throw createAbortError("Unbound")
+				}
+				throw error
 			}
 		} finally {
 			externalAbortSignal?.removeEventListener("abort", abortListener)

@@ -632,14 +632,107 @@ describe("UnboundHandler", () => {
 			await new Promise((resolve) => setTimeout(resolve, 25))
 			controller.abort()
 
-			// createMessage's stream loop has no catch: the raw SDK rejection
-			// propagates once the bridge aborts the in-flight request.
+			// The stream loop normalizes failures that surface after the stream
+			// has started (series standard): the cancellation must surface as
+			// the standardized AbortError, not the raw rejection.
 			const error = await consumed.then(
 				() => undefined,
 				(e: unknown) => e,
 			)
 			expect(capturedSignal?.aborted).toBe(true)
-			expect((error as Error).message).toBe("boom")
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Unbound request was aborted")
+		})
+
+		it("normalizes a mid-stream APIUserAbortError to the standardized AbortError", async () => {
+			// The SDK can raise its own user-abort error even when the per-request
+			// controller was not aborted (e.g. the SDK watched a different signal):
+			// the instanceof branch of the loop catch must normalize it.
+			sharedMockCreate.mockImplementation(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+
+			const handler = new UnboundHandler({
+				unboundApiKey: "test-key",
+				unboundModelId: "openai/gpt-4o",
+			})
+
+			await expect(
+				collectStream(
+					handler.createMessage(
+						"system",
+						[{ role: "user", content: "hi" }],
+						makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+					),
+				),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Unbound request was aborted",
+			})
+		})
+
+		it("normalizes a name-based AbortError thrown from the stream to the standardized AbortError", async () => {
+			// The DOM-style name check must catch errors that are not SDK abort
+			// classes: a plain Error named AbortError is normalized too.
+			const abortError = new Error("The operation was aborted.")
+			abortError.name = "AbortError"
+			sharedMockCreate.mockImplementation(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw abortError
+				})(),
+			)
+
+			const handler = new UnboundHandler({
+				unboundApiKey: "test-key",
+				unboundModelId: "openai/gpt-4o",
+			})
+
+			await expect(
+				collectStream(
+					handler.createMessage(
+						"system",
+						[{ role: "user", content: "hi" }],
+						makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+					),
+				),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Unbound request was aborted",
+			})
+		})
+
+		it("rethrows a non-Error mid-stream failure that merely looks like an abort", async () => {
+			// The instanceof guard is load-bearing: a plain object carrying an
+			// AbortError name is not an Error, so it must not be normalized and
+			// must propagate unchanged.
+			const fake = { name: "AbortError", message: "suspicious" }
+			sharedMockCreate.mockImplementation(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw fake
+				})(),
+			)
+
+			const handler = new UnboundHandler({
+				unboundApiKey: "test-key",
+				unboundModelId: "openai/gpt-4o",
+			})
+
+			const error = await collectStream(
+				handler.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				),
+			).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toBe(fake)
 		})
 
 		it("detaches the bridged abort listener when the request completes normally", async () => {
