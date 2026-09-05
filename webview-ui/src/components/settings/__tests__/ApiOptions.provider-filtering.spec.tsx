@@ -1,4 +1,3 @@
-import { providerIdentifiers } from "@roo-code/types"
 import { screen } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -117,7 +116,7 @@ describe("ApiOptions Provider Filtering", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.mocked(useSelectedModel).mockReturnValue({
-			provider: "anthropic",
+			provider: providerIdentifiers.anthropic,
 			id: "claude-3-5-sonnet-20241022",
 			info: undefined,
 			isLoading: false,
@@ -133,7 +132,7 @@ describe("ApiOptions Provider Filtering", () => {
 
 	it("requests router models only for the selected dynamic provider", () => {
 		vi.mocked(useSelectedModel).mockReturnValue({
-			provider: "kenari",
+			provider: providerIdentifiers.kenari,
 			id: "glm-5-2",
 			info: undefined,
 			isLoading: false,
@@ -142,10 +141,10 @@ describe("ApiOptions Provider Filtering", () => {
 
 		renderWithProviders({
 			...defaultProps,
-			apiConfiguration: { apiProvider: "kenari" } as ProviderSettings,
+			apiConfiguration: { apiProvider: providerIdentifiers.kenari } as ProviderSettings,
 		})
 
-		expect(useRouterModels).toHaveBeenCalledWith({ enabled: true, provider: "kenari" })
+		expect(useRouterModels).toHaveBeenCalledWith({ enabled: true, provider: providerIdentifiers.kenari })
 	})
 
 	it.each([providerIdentifiers.ollama, providerIdentifiers.lmstudio])(
