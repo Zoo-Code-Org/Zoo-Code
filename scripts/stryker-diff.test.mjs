@@ -22,7 +22,6 @@ import {
 	parseChangedLines,
 	parseNameStatus,
 	parseVitestTestFiles,
-	preferDirectTestFiles,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
 	packageForPath,
