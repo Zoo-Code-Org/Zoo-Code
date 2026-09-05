@@ -735,6 +735,38 @@ describe("UnboundHandler", () => {
 			expect(error).toBe(fake)
 		})
 
+		it("rethrows a plain non-abort Error instance from the stream unchanged", async () => {
+			// The name check must not over-normalize: a genuine Error whose
+			// name is not "AbortError" must propagate unchanged — only real
+			// aborts surface as the standardized AbortError.
+			const boom = new Error("stream exploded")
+			sharedMockCreate.mockImplementation(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw boom
+				})(),
+			)
+
+			const handler = new UnboundHandler({
+				unboundApiKey: "test-key",
+				unboundModelId: "openai/gpt-4o",
+			})
+
+			const error = await collectStream(
+				handler.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				),
+			).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// Identity, not shape: the rethrown error must be the very Error
+			// instance the stream raised, not a normalized abort error.
+			expect(error).toBe(boom)
+		})
+
 		it("detaches the bridged abort listener when the request completes normally", async () => {
 			// The listener is added with { once: true }, so it only detaches on
 			// abort. A task-scoped signal spanning many requests must not

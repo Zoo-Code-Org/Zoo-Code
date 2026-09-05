@@ -517,6 +517,53 @@ describe("OpencodeGoHandler", () => {
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
 		})
 
+		it("aborts the internal controller when the external signal aborts during model resolution", async () => {
+			// A signal that passes the entry guard un-aborted but aborts while
+			// resolveModel() is still awaiting the model catalog must take the
+			// bridge's pre-abort branch: a once-listener on a signal that is
+			// already aborted can never fire, so the internal controller has to
+			// be aborted directly before the request starts.
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				if (options?.signal?.aborted) {
+					throw new DOMException("The operation was aborted.", "AbortError")
+				}
+				return (async function* () {
+					yield { choices: [{ delta: { content: "late" }, index: 0 }], index: 0 }
+				})()
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Abort the external signal inside the catalog await, after the
+			// entry guard has already observed an un-aborted signal.
+			vitest.mocked(getModels).mockImplementationOnce(async () => {
+				controller.abort()
+				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+			})
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"sys",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The bridge must have aborted the internal controller before the
+			// request started; a listener-only bridge would leave it
+			// un-aborted and the mock would stream "late" instead of rejecting.
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
 		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
 			// The mock polls the INTERNAL controller signal instead of waiting
 			// for an "abort" event: bounded polling means the test can never
