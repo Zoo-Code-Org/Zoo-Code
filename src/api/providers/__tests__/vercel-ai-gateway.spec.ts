@@ -417,6 +417,7 @@ describe("VercelAiGatewayHandler", () => {
 					model: "anthropic/claude-fable-5.1",
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
