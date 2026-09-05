@@ -6,20 +6,23 @@ Zoo Code checks task lifecycle protocols through one compositional verification 
 pnpm lifecycle:model-check
 ```
 
-The command runs six independent bounded submodels in sequence:
+The command runs seven independent bounded submodels in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed provider handoff and scheduler ordering;
 4. the task cleanup protocol;
-5. request-stream parser scoping; and
-6. completion persistence.
+5. request-stream parser scoping;
+6. completion persistence; and
+7. the terminal command lifecycle.
 
 This umbrella command is the single model-check entry point in the `compile` CI job after type checking. Command-level composition does not merge the submodels' state spaces: each checker retains its own bounds, transitions, invariant ownership, reachability requirements, and counterexample format. In particular, parser state is not part of the persisted lifecycle graph. The focused parser checker remains directly runnable with `pnpm parser-scope:model-check` for debugging.
 
 An individual checker fails if it finds an invariant violation, a modeled action becomes unreachable, a named semantic landmark disappears, or exploration exceeds its declared state budget. A lifecycle violation includes the shortest breadth-first event trace, every intermediate state, and the active bounds so the sequence can be replayed as a focused regression test.
 
 Executable cross-model composition should be added only when a correctness claim genuinely spans two or more submodels and there is an explicit, production-grounded boundary mapping between their events or state. That composition must state a bounded joint exploration strategy and own cross-model invariants that cannot be proved within either child model alone. Shared command orchestration or conceptual adjacency is not sufficient reason to multiply independent state spaces.
+
+`pnpm lifecycle:model` runs the same seven checks directly; `lifecycle:model-check` is the CI-facing alias.
 
 ## Why an executable TypeScript model
 
@@ -49,6 +52,12 @@ TLA+/PlusCal or Quint with TLC becomes a better fit when the lifecycle needs tem
 The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain. It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion. Named semantic landmarks require the graph to retain interrupted-child re-delegation and nested delegation even when the raw state total changes.
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
+
+## Terminal command lifecycle model
+
+The same command runs a bounded terminal lifecycle explorer for issue #1362. It models command startup, shell activation, streamed output, normal completion, and terminal closure. Its invariants require completion to remain at-most-once, closure to detach the process, buffered output to be delivered, and an active stream iterator to be released. Named landmarks retain the important interleavings: closure before command submission, closure after output, closure after a normal end event, and duplicate closure.
+
+This terminal model is intentionally separate from persisted task delegation state because VS Code terminal events are an extension-host adapter protocol rather than `HistoryItem` transitions. Focused `TerminalRegistry` tests bind the abstract properties to production behavior, including omitted `onDidEndTerminalShellExecution` events and an undefined `exitStatus` during the close callback.
 
 ## Shared-store concurrency model
 
