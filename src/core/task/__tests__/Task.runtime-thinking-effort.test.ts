@@ -122,10 +122,10 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 		})
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
 		vi.useRealTimers()
 		if (task && !task.abort) {
-			task.dispose()
+			await task.dispose().catch(() => {})
 		}
 	})
 

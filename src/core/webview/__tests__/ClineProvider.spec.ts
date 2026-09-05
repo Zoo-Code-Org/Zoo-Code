@@ -266,6 +266,7 @@ vi.mock("../../task/Task", () => ({
 		return {
 			api: undefined,
 			abortTask: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
 			handleWebviewAskResponse: vi.fn(),
 			clineMessages: [],
 			apiConversationHistory: [],
@@ -413,6 +414,7 @@ describe("ClineProvider", () => {
 			const task: any = {
 				api: undefined,
 				abortTask: vi.fn(),
+				dispose: vi.fn().mockResolvedValue(undefined),
 				handleWebviewAskResponse: vi.fn(),
 				clineMessages: [],
 				apiConversationHistory: [],
@@ -1136,6 +1138,131 @@ describe("ClineProvider", () => {
 			([msg]) => typeof msg === "string" && msg.includes("Disposing ClineProvider..."),
 		)
 		expect(disposeCalls).toHaveLength(1)
+	})
+
+	test("dispose drains every task in abort-then-cleanup order", async () => {
+		let resolveCurrentAbort!: () => void
+		let resolveCurrentCleanup!: () => void
+		let resolveRemainingAbort!: () => void
+		let resolveRemainingCleanup!: () => void
+		const currentTask = {
+			taskId: "current-task",
+			instanceId: "current-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockReturnValue(
+				new Promise<void>((resolve) => {
+					resolveCurrentAbort = resolve
+				}),
+			),
+			dispose: vi.fn().mockReturnValue(
+				new Promise<void>((resolve) => {
+					resolveCurrentCleanup = resolve
+				}),
+			),
+		}
+		const remainingTask = {
+			taskId: "remaining-task",
+			instanceId: "remaining-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockReturnValue(
+				new Promise<void>((resolve) => {
+					resolveRemainingAbort = resolve
+				}),
+			),
+			dispose: vi.fn().mockReturnValue(
+				new Promise<void>((resolve) => {
+					resolveRemainingCleanup = resolve
+				}),
+			),
+		}
+		Object.assign(provider, { taskRegistry: new TaskRegistry() })
+		provider["taskRegistry"].push(remainingTask as unknown as Task)
+		provider["taskRegistry"].push(currentTask as unknown as Task)
+		let shutdownComplete = false
+
+		const shutdown = provider.dispose()
+		void shutdown
+			.then(() => {
+				shutdownComplete = true
+			})
+			.catch(() => {})
+		await vi.waitFor(() => expect(currentTask.abortTask).toHaveBeenCalledOnce())
+		expect(currentTask.dispose).not.toHaveBeenCalled()
+		expect(remainingTask.abortTask).not.toHaveBeenCalled()
+
+		resolveCurrentAbort()
+		await vi.waitFor(() => expect(currentTask.dispose).toHaveBeenCalledOnce())
+		expect(remainingTask.abortTask).not.toHaveBeenCalled()
+
+		resolveCurrentCleanup()
+		await vi.waitFor(() => expect(remainingTask.abortTask).toHaveBeenCalledOnce())
+		expect(remainingTask.dispose).not.toHaveBeenCalled()
+
+		resolveRemainingAbort()
+		await vi.waitFor(() => expect(remainingTask.dispose).toHaveBeenCalledOnce())
+
+		expect(shutdownComplete).toBe(false)
+		resolveRemainingCleanup()
+		await shutdown
+		expect(shutdownComplete).toBe(true)
+	})
+
+	test("dispose continues draining tasks after cleanup rejects", async () => {
+		const cleanupError = new Error("cleanup failed")
+		const logSpy = vi.spyOn(provider, "log")
+		const remainingTask = {
+			taskId: "remaining-task",
+			instanceId: "remaining-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const currentTask = {
+			taskId: "current-task",
+			instanceId: "current-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockRejectedValue(cleanupError),
+		}
+		Object.assign(provider, { taskRegistry: new TaskRegistry() })
+		provider["taskRegistry"].push(remainingTask as unknown as Task)
+		provider["taskRegistry"].push(currentTask as unknown as Task)
+
+		await expect(provider.dispose()).resolves.toBeUndefined()
+
+		expect(currentTask.dispose).toHaveBeenCalledOnce()
+		expect(remainingTask.dispose).toHaveBeenCalledOnce()
+		expect(logSpy).toHaveBeenCalledWith(
+			"[ClineProvider#dispose] Task cleanup failed for current-task.current-instance: cleanup failed",
+		)
+	})
+
+	test("dispose continues draining tasks after abort rejects", async () => {
+		const abortError = new Error("abort failed")
+		const remainingTask = {
+			taskId: "remaining-task",
+			instanceId: "remaining-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const currentTask = {
+			taskId: "current-task",
+			instanceId: "current-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockRejectedValue(abortError),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		Object.assign(provider, { taskRegistry: new TaskRegistry() })
+		provider["taskRegistry"].push(remainingTask as unknown as Task)
+		provider["taskRegistry"].push(currentTask as unknown as Task)
+
+		await expect(provider.dispose()).resolves.toBeUndefined()
+
+		expect(currentTask.abortTask).toHaveBeenCalledOnce()
+		expect(currentTask.dispose).toHaveBeenCalledOnce()
+		expect(remainingTask.abortTask).toHaveBeenCalledOnce()
+		expect(remainingTask.dispose).toHaveBeenCalledOnce()
 	})
 
 	test("handles webviewDidLaunch message", async () => {

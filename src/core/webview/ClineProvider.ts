@@ -307,7 +307,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.80.1-gateway-promo-models-fixes" // v3.80.1 Zoo Gateway promo, GLM-5.3-Flash, and reliability fixes
+	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -810,6 +810,17 @@ export class ClineProvider
 		}
 	}
 
+	/** Drain one task's memoized cleanup without preventing the remaining provider shutdown work. */
+	private async drainTaskDisposal(task: Task): Promise<void> {
+		try {
+			await task.dispose()
+		} catch (error) {
+			this.log(
+				`[ClineProvider#dispose] Task cleanup failed for ${task.taskId}.${task.instanceId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
 	async dispose() {
 		if (this._disposed) {
 			return
@@ -827,10 +838,14 @@ export class ClineProvider
 		// so an active delegated child is marked interrupted before the extension shuts down,
 		// rather than being left persisted as "active" across the reload.
 		if (this.taskRegistry.length > 0) {
+			const task = this.taskRegistry.current!
 			await this.evictCurrentTask()
+			await this.drainTaskDisposal(task)
 		}
 		while (this.taskRegistry.length > 0) {
+			const task = this.taskRegistry.current!
 			await this.removeClineFromStack()
+			await this.drainTaskDisposal(task)
 		}
 
 		this.log("Cleared all tasks")
