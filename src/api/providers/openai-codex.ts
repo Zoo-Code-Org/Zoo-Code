@@ -42,6 +42,7 @@ type OpenAiCodexRequestServiceTier = typeof OpenAiCodexServiceTier.Priority
 const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
+const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([LUNA_MODEL_ID, "gpt-6-astra"])
 
 /**
  * A refusal is streamed as text so the chat still shows why the model declined, but it is not part
@@ -71,15 +72,15 @@ function stripInputImageDetail(value: any): any {
 	)
 }
 
-export function transformLunaResponsesLiteBody(requestBody: any, effectiveSessionId: string): any {
+export function transformResponsesLiteBody(requestBody: any, effectiveSessionId: string): any {
 	if (!Array.isArray(requestBody.input)) {
-		throw new Error("Invalid gpt-5.6-luna Responses Lite request: input must be an array.")
+		throw new Error("Invalid Responses Lite request: input must be an array.")
 	}
 	if (requestBody.tools !== undefined && !Array.isArray(requestBody.tools)) {
-		throw new Error("Invalid gpt-5.6-luna Responses Lite request: tools must be an array when provided.")
+		throw new Error("Invalid Responses Lite request: tools must be an array when provided.")
 	}
 	if (requestBody.instructions !== undefined && typeof requestBody.instructions !== "string") {
-		throw new Error("Invalid gpt-5.6-luna Responses Lite request: instructions must be a string when provided.")
+		throw new Error("Invalid Responses Lite request: instructions must be a string when provided.")
 	}
 
 	const { tools, instructions, ...rest } = requestBody
@@ -104,12 +105,12 @@ export function transformLunaResponsesLiteBody(requestBody: any, effectiveSessio
 				: []),
 			...transformedInput,
 		],
-		// Luna Responses Lite requires these exact values, so they intentionally
+		// Responses Lite requires these exact values, so they intentionally
 		// override any caller-supplied tool_choice or parallel_tool_calls.
 		tool_choice: "auto",
 		parallel_tool_calls: false,
 		prompt_cache_key: effectiveSessionId,
-		// Luna Responses Lite requires reasoning context "all_turns"; this intentionally
+		// Responses Lite requires reasoning context "all_turns"; this intentionally
 		// overwrites any context value already present in the incoming reasoning config.
 		reasoning: { ...reasoning, context: "all_turns" },
 	}
@@ -273,10 +274,9 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		const baseRequestBody = this.buildRequestBody(model, formattedInput, systemPrompt, reasoningEffort, metadata)
 		let requestBody: any
 		try {
-			requestBody =
-				model.id === LUNA_MODEL_ID
-					? this.buildLunaRequestBody(baseRequestBody, effectiveSessionId)
-					: baseRequestBody
+			requestBody = RESPONSES_LITE_MODEL_IDS.has(model.id)
+				? this.buildResponsesLiteRequestBody(baseRequestBody, effectiveSessionId)
+				: baseRequestBody
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			TelemetryService.instance.captureException(
@@ -316,8 +316,8 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private buildLunaRequestBody(baseRequestBody: any, effectiveSessionId: string): any {
-		return transformLunaResponsesLiteBody(baseRequestBody, effectiveSessionId)
+	private buildResponsesLiteRequestBody(baseRequestBody: any, effectiveSessionId: string): any {
+		return transformResponsesLiteBody(baseRequestBody, effectiveSessionId)
 	}
 
 	private buildRequestBody(
@@ -1240,8 +1240,21 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	}
 
 	private getReasoningEffort(model: OpenAiCodexModel): ReasoningEffortExtended | undefined {
-		const selected = (this.options.reasoningEffort as any) ?? (model.info.reasoningEffort as any)
-		return selected && selected !== "disable" && selected !== "none" ? (selected as any) : undefined
+		const supported = model.info.supportsReasoningEffort
+		const configured = this.options.reasoningEffort
+		const fallback = model.info.reasoningEffort
+		const reasoningDisabled =
+			configured === "disable" || configured === "none" || this.options.enableReasoningEffort === false
+
+		if (reasoningDisabled && !model.info.requiredReasoningEffort) return undefined
+
+		if (Array.isArray(supported)) {
+			if (!reasoningDisabled && configured && supported.includes(configured)) return configured
+			return fallback && fallback !== "none" && supported.includes(fallback) ? fallback : undefined
+		}
+
+		const selected = configured === "disable" ? fallback : (configured ?? fallback)
+		return selected && selected !== "none" ? selected : undefined
 	}
 
 	private buildCodexHeaders(
@@ -1249,17 +1262,22 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		effectiveSessionId: string,
 		accountId?: string | null,
 	): Record<string, string> {
+		const usesResponsesLite = RESPONSES_LITE_MODEL_IDS.has(model.id)
 		return {
 			originator: "zoo-code",
 			session_id: effectiveSessionId,
 			"User-Agent": `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
 			...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
-			...(model.id === LUNA_MODEL_ID
+			...(usesResponsesLite
 				? {
 						"session-id": effectiveSessionId,
+						"x-openai-internal-codex-responses-lite": "true",
+					}
+				: {}),
+			...(model.id === LUNA_MODEL_ID
+				? {
 						"x-session-affinity": effectiveSessionId,
 						version: LUNA_CODEX_VERSION,
-						"x-openai-internal-codex-responses-lite": "true",
 					}
 				: {}),
 		}
