@@ -722,6 +722,8 @@ describe("ClineProvider", () => {
 			soundEnabled: false,
 			ttsEnabled: false,
 			enableCheckpoints: false,
+			perWriteCheckpoints: false,
+			changeCardDetail: "summary",
 			writeDelayMs: 1000,
 			mcpEnabled: true,
 			mode: defaultModeSlug,
@@ -1566,6 +1568,81 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
 	})
 
+	test("getState returns the saved per-write checkpoints setting", async () => {
+		await provider.contextProxy.setValue("perWriteCheckpoints", false)
+
+		const state = await provider.getState()
+
+		expect(state.perWriteCheckpoints).toBe(false)
+	})
+
+	test("getState defaults per-write checkpoints to true when unset", async () => {
+		const state = await provider.getState()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
+	test("getStateToPostToWebview returns the saved per-write checkpoints setting", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("perWriteCheckpoints", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
+	test("getStateToPostToWebview returns false when per-write checkpoints is saved as false", async () => {
+		// The default is also true, so only an explicit false proves that the
+		// stored value (rather than the default) reaches the webview state.
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("perWriteCheckpoints", false)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.perWriteCheckpoints).toBe(false)
+	})
+
+	test("getStateToPostToWebview defaults per-write checkpoints to true when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
+	test("getState returns the saved changeCardDetail setting", async () => {
+		await provider.contextProxy.setValue("changeCardDetail", "full")
+
+		const state = await provider.getState()
+
+		expect(state.changeCardDetail).toBe("full")
+	})
+
+	test("getState defaults changeCardDetail to summary when unset", async () => {
+		const state = await provider.getState()
+
+		expect(state.changeCardDetail).toBe("summary")
+	})
+
+	test("getStateToPostToWebview returns the saved changeCardDetail setting", async () => {
+		// The default is "summary", so only an explicit "full" proves that the
+		// stored value (rather than the default) reaches the webview state.
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("changeCardDetail", "full")
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.changeCardDetail).toBe("full")
+	})
+
+	test("getStateToPostToWebview defaults changeCardDetail to summary when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.changeCardDetail).toBe("summary")
+	})
+
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"
@@ -1574,14 +1651,36 @@ describe("ClineProvider", () => {
 		expect(state.language).toBe("pt-BR")
 	})
 
-	test("writeDelayMs defaults to 1000ms", async () => {
+	test("writeDelayMs defaults to DEFAULT_WRITE_DELAY_MS", async () => {
 		// Mock globalState.get to return undefined for writeDelayMs
 		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
 			return key === "writeDelayMs" ? undefined : null
 		})
 
 		const state = await provider.getState()
-		expect(state.writeDelayMs).toBe(1000)
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
+	test("getStateToPostToWebview returns the persisted writeDelayMs value", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Simulate the updateSettings handler storing the value.
+		await provider.contextProxy.setValue("writeDelayMs", 500)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(500)
+	})
+
+	test("getStateToPostToWebview defaults writeDelayMs to DEFAULT_WRITE_DELAY_MS when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Ensure the setting is not persisted.
+		await provider.contextProxy.setValue("writeDelayMs", undefined)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {

@@ -16,6 +16,7 @@ import type { ReadFileParams, ReadFileMode, ReadFileToolParams, FileEntry, LineR
 import { isLegacyReadFileParams, type ClineSayTool } from "@roo-code/types"
 
 import { Task } from "../task/Task"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
@@ -214,11 +215,28 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read text file content with lossy UTF-8 conversion
 					// Reading as Buffer first allows graceful handling of non-UTF8 bytes
 					// (they become U+FFFD replacement characters instead of throwing)
+					// A2 (epic #1375): capture the on-disk token before the read so a mutation
+					// landing mid-read is detected by the post-read stat below.
+					const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
 					const buffer = await fs.readFile(fullPath)
 					const fileContent = buffer.toString("utf-8")
 					const result = this.processTextFile(fileContent, entry)
 
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
+
+					// A2 (plan #33 / epic #1375): record the observed on-disk version for the future write guard.
+					// The token is captured before AND after the read; the target is observed only
+					// when both match — a mutation between the two stats means the content the model
+					// received is not the on-disk state, and observing it would let a later write
+					// match a token the model never saw. A stat failure leaves the target
+					// unobserved and never fails the read.
+					const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+					if (preReadStats && postReadStats) {
+						const preReadToken = versionTokenOfStat(preReadStats)
+						if (preReadToken === versionTokenOfStat(postReadStats)) {
+							task.observationRegistry.observe(fullPath, preReadToken)
+						}
+					}
 
 					updateFileResult(relPath, {
 						nativeContent: `File: ${relPath}\n${result}`,
@@ -768,6 +786,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				}
 
 				// Read text file
+				// A2 (epic #1375): capture the on-disk token before the read so a mutation
+				// landing mid-read is detected by the post-read stat below.
+				const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
 				const rawContent = await fs.readFile(fullPath, "utf8")
 
 				// Handle line ranges if specified
@@ -799,6 +820,19 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 				// Track file in context
 				await task.fileContextTracker.trackFileContext(relPath, "read_tool")
+
+				// A2 (plan #33 / epic #1375): mirror the native path — record the observed
+				// on-disk version so legacy-format reads also feed the future write guard.
+				// Observe only when the pre-read and post-read tokens match (a mutation between
+				// them means the returned content is not the on-disk state). A stat failure
+				// leaves the target unobserved and never fails the read.
+				const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+				if (preReadStats && postReadStats) {
+					const preReadToken = versionTokenOfStat(preReadStats)
+					if (preReadToken === versionTokenOfStat(postReadStats)) {
+						task.observationRegistry.observe(fullPath, preReadToken)
+					}
+				}
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)

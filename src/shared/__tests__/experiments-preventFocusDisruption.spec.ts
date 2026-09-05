@@ -5,13 +5,13 @@ describe("PREVENT_FOCUS_DISRUPTION experiment", () => {
 		expect(EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION).toBe("preventFocusDisruption")
 	})
 
-	it("should have PREVENT_FOCUS_DISRUPTION in experimentConfigsMap", () => {
+	it("should have PREVENT_FOCUS_DISRUPTION enabled by default (chat-diff is the default approval path)", () => {
 		expect(experimentConfigsMap.PREVENT_FOCUS_DISRUPTION).toBeDefined()
-		expect(experimentConfigsMap.PREVENT_FOCUS_DISRUPTION.enabled).toBe(false)
+		expect(experimentConfigsMap.PREVENT_FOCUS_DISRUPTION.enabled).toBe(true)
 	})
 
-	it("should have PREVENT_FOCUS_DISRUPTION in experimentDefault", () => {
-		expect(experimentDefault.preventFocusDisruption).toBe(false)
+	it("should have PREVENT_FOCUS_DISRUPTION enabled in experimentDefault", () => {
+		expect(experimentDefault.preventFocusDisruption).toBe(true)
 	})
 
 	it("should correctly check if PREVENT_FOCUS_DISRUPTION is enabled", () => {
@@ -23,8 +23,8 @@ describe("PREVENT_FOCUS_DISRUPTION experiment", () => {
 		const enabledConfig = { preventFocusDisruption: true }
 		expect(experiments.isEnabled(enabledConfig, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(true)
 
-		// Test when experiment is not in config (should use default)
+		// Test when experiment is not in config (should use default — now enabled)
 		const emptyConfig = {}
-		expect(experiments.isEnabled(emptyConfig, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)
+		expect(experiments.isEnabled(emptyConfig, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(true)
 	})
 })

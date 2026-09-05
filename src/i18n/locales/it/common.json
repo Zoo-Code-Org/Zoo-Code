@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Nessuna attività attiva da cui eliminare messaggi",
+			"no_active_task_to_roll_back": "Nessun task attivo da cui annullare le modifiche",
+			"no_active_task_to_restore": "Nessun task attivo da cui ripristinare le modifiche",
 			"invalid_timestamp_for_deletion": "Timestamp del messaggio non valido per l'eliminazione",
 			"cannot_delete_missing_timestamp": "Impossibile eliminare il messaggio: timestamp mancante",
 			"cannot_delete_invalid_timestamp": "Impossibile eliminare il messaggio: timestamp non valido",

@@ -13,6 +13,7 @@ import {
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
+	type HistoryItem,
 	type TaskLike,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -27,6 +28,9 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import * as taskMetadataModule from "../../task-persistence/taskMetadata"
+import * as taskMessagesModule from "../../task-persistence/taskMessages"
+import { getApiMetrics } from "../../../shared/getApiMetrics"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -3355,6 +3359,98 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("task-start baseline (B1 perWriteCheckpoints)", () => {
+		it("records one suppressed baseline checkpoint per Task instance at loop start", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
+		})
+
+		it("records the baseline checkpoint when the setting is unset (default-on)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline unset task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			// Unset: the property is absent from the state, so default-on applies.
+			const unsetState = { ...state }
+			Reflect.deleteProperty(unsetState, "perWriteCheckpoints")
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(unsetState as typeof state)
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
+		})
+
+		it("does not record a baseline checkpoint when perWriteCheckpoints is disabled", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline disabled task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...state, perWriteCheckpoints: false })
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("awaits the baseline checkpoint before entering the request loop", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline await task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			type SaveResult = Awaited<ReturnType<typeof task.checkpointSave>>
+			let resolveSave: (value: SaveResult | PromiseLike<SaveResult>) => void = () => {}
+			const saveSpy = vi
+				.spyOn(task, "checkpointSave")
+				.mockImplementation(() => new Promise<SaveResult>((resolve) => (resolveSave = resolve)))
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...(await mockProvider.getState()) })
+			const loopPromise = taskAccess.initiateTaskLoop([])
+
+			// The loop must not enter while the baseline checkpoint is still in flight.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(requestSpy).not.toHaveBeenCalled()
+
+			resolveSave()
+			await loopPromise
+			expect(requestSpy).toHaveBeenCalled()
+		})
+	})
+
 	describe("start()", () => {
 		it("should be a no-op if the task was already started in the constructor", () => {
 			const task = new Task({
@@ -4361,5 +4457,78 @@ describe("pushToolResultToUserContent", () => {
 		expect(task.userMessageContent[0].type).toBe("text")
 		expect(task.userMessageContent[1].type).toBe("image")
 		expect(task.userMessageContent[2]).toEqual(toolResult)
+	})
+})
+
+describe("saveClineMessages abandoned guard (#1021)", () => {
+	beforeEach(() => {
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+	})
+
+	it("persists messages but does not update task history when the task was abandoned", async () => {
+		// The history item carries the stale link: a fire-and-forget save that
+		// reaches updateTaskHistory() after abandonSubtask's atomicUpdatePair()
+		// cleared parentTaskId/rootTaskId would silently reattach the severed
+		// parent-child link.
+		const staleHistoryItem: HistoryItem = {
+			id: "orphan-subtask",
+			number: 7,
+			ts: Date.now(),
+			task: "orphan subtask",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			rootTaskId: "stale-root",
+			parentTaskId: "stale-parent",
+		}
+		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue(undefined)
+		const metaSpy = vi
+			.spyOn(taskMetadataModule, "taskMetadata")
+			.mockResolvedValue({ historyItem: staleHistoryItem, tokenUsage: getApiMetrics([]) })
+
+		try {
+			const mockProvider = {
+				context: {
+					globalStorageUri: { fsPath: "/test/storage" },
+					globalState: {
+						get: vi.fn().mockImplementation(() => undefined),
+						update: vi.fn().mockResolvedValue(undefined),
+						keys: vi.fn().mockReturnValue([]),
+					},
+				},
+				getState: vi.fn().mockResolvedValue({
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
+					mcpEnabled: false,
+				}),
+				getMcpHub: vi.fn().mockReturnValue(undefined),
+				postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+				updateTaskHistory: vi.fn().mockResolvedValue(undefined),
+				// Task receives a full ClineProvider at runtime; this focused unit test only
+				// exercises these methods, so the partial double is cast (same pattern as the
+				// "Subtask Rate Limiting" block above).
+			} as unknown as MockedClineProvider
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
+				task: "orphan subtask",
+				startTask: false,
+			})
+
+			// abandonSubtask severs the link, then aborts the subtask with
+			// isAbandoned=true; an in-flight fire-and-forget save lands here.
+			task.abandoned = true
+
+			const saved = await getTaskTestAccess(task).saveClineMessages()
+
+			expect(saved).toBe(false)
+			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled() // history link is not reattached
+		} finally {
+			saveSpy.mockRestore()
+			metaSpy.mockRestore()
+		}
 	})
 })

@@ -104,6 +104,7 @@ import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
@@ -210,6 +211,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly parentTask: Task | undefined = undefined
 	readonly taskNumber: number
 	readonly workspacePath: string
+	readonly observationRegistry = new ObservationRegistry()
 
 	/**
 	 * The mode associated with this task. Persisted across sessions
@@ -342,6 +344,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponseImages?: string[]
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
+
+	// B1: task-start baseline, recorded at most once (initiateTaskLoop also runs on resume).
+	private taskStartBaselineDone = false
 
 	// Tool Use
 	consecutiveMistakeCount: number = 0
@@ -1246,6 +1251,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// - At most one emit per interval during rapid updates (maxWait)
 			// - Final state is emitted when updates stop (trailing: true)
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
+
+			// Guard: don't update the history item for abandoned tasks. Fire-and-forget
+			// saveClineMessages() calls can reach updateTaskHistory() after
+			// abandonSubtask's atomicUpdatePair() has already cleared
+			// parentTaskId/rootTaskId; writing this live Task's stale values would
+			// silently reattach the severed parent-child link.
+			if (this.abandoned) {
+				return false
+			}
 
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
@@ -2723,6 +2737,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// returned promise cannot reject. `void` is sufficient — no `.catch`
 		// arm needed.
 		void getCheckpointService(this)
+
+		// B1 task-start baseline: a suppressed pre-task root commit (default-on).
+		if (!this.taskStartBaselineDone) {
+			this.taskStartBaselineDone = true
+			const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
+			if (baselineEnabled !== false) {
+				// allowEmpty=true so a clean workspace still produces the baseline
+				// commit; awaited so the first per-write checkpoint cannot interleave.
+				await this.checkpointSave(true, true)
+			}
+		}
 
 		let nextUserContent = userContent
 		let includeFileDetails = true

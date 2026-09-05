@@ -18,6 +18,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1136,6 +1137,10 @@ export class DiffViewProvider {
 	 * @param relPath - Relative path to the file
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
+	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
+	 *   Defaults to "create" because this method always publishes a complete file
+	 *   content: an unobserved target may only be created when absent, and an
+	 *   observed target must still carry the version token recorded at read time.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1144,6 +1149,7 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		writeKind: GuardedWriteKind = "create",
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1151,12 +1157,25 @@ export class DiffViewProvider {
 	}> {
 		const absolutePath = path.resolve(this.cwd, relPath)
 
-		// Get diagnostics before editing the file
-		this.preDiagnostics = vscode.languages.getDiagnostics()
+		// Get diagnostics before editing the file. Capture the snapshot locally:
+		// overlapping saveDirectly calls (multi-file edits) must not let a later
+		// call overwrite this one's baseline before its diagnostics tail runs.
+		const preDiagnostics = vscode.languages.getDiagnostics()
+		this.preDiagnostics = preDiagnostics
 
-		// Write the content directly to the file
+		// Publish through the S4 guarded-write API (epic #1375): an unobserved
+		// write to an existing file and a stale observed version are rejected
+		// with a re-read-then-retry remediation instead of overwriting the file.
+		// Concurrent in-process writes to the same path are already ordered by
+		// the guard's per-path FIFO chain, so no additional locking is added here.
+		const task = this.taskRef.deref()
+		if (!task) {
+			// Fail closed: without the owning task the observation registry is
+			// unreachable and the write cannot be guarded.
+			throw new Error("Cannot guard the write: the owning task is no longer available")
+		}
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await guardedWrite(task, relPath, content, writeKind)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
@@ -1175,23 +1194,64 @@ export class DiffViewProvider {
 				await doc.save()
 			}
 
-			// Force a small delay to ensure diagnostics are triggered
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			// The 100 ms diagnostics-settle wait is carried by the
+			// emitPostSaveDiagnostics tail (inMemoryDocument) instead of here:
+			// blocking the save path delayed every openFile=false save even when
+			// diagnostics were disabled or the write delay was 0.
 		}
 
-		let newProblemsMessage = ""
-
+		// L1 (A2): resolve without awaiting the LSP diagnostics settle. The
+		// diagnostics check becomes a fire-and-forget tail that emits any new
+		// problems via the existing "error" ClineSay type; the returned
+		// newProblemsMessage is therefore always undefined.
 		if (diagnosticsEnabled) {
-			// Add configurable delay to allow linters time to process
-			const safeDelayMs = Math.max(0, writeDelayMs)
+			// The method's outer try/catch guarantees it never rejects, so the
+			// fire-and-forget call needs no .catch wrapper.
+			void this.emitPostSaveDiagnostics(relPath, writeDelayMs, preDiagnostics, !openFile)
+		}
 
-			try {
-				await delay(safeDelayMs)
-			} catch (error) {
-				console.warn(`Failed to apply write delay: ${error}`)
-			}
+		// Store the results for formatFileWriteResponse
+		this.newProblemsMessage = undefined
+		this.userEdits = undefined
+		this.relPath = relPath
+		this.newContent = content
 
-			const postDiagnostics = vscode.languages.getDiagnostics()
+		return {
+			newProblemsMessage: undefined,
+			userEdits: undefined,
+			finalContent: content,
+		}
+	}
+
+	// L1 (A2): fire-and-forget post-save diagnostics. After the write delay,
+	// collects new Error-severity problems and emits them via the existing
+	// "error" ClineSay type (only Error-severity diagnostics reach this branch;
+	// "error" carries no task-failure semantics in core). Abort-safe: say()
+	// rejects when the task is aborted, so the whole body sits inside a
+	// try/catch that degrades to a console.warn — the tail can never reject.
+	private async emitPostSaveDiagnostics(
+		relPath: string,
+		writeDelayMs: number,
+		preDiagnostics: [vscode.Uri, vscode.Diagnostic[]][],
+		inMemoryDocument = false,
+	): Promise<void> {
+		try {
+			// Add configurable delay to allow linters time to process. When the
+			// document was opened in memory (openFile=false), the tail also
+			// carries the 100 ms diagnostics-settle wait that used to block
+			// saveDirectly. delay() never rejects, so no catch is required here.
+			const safeDelayMs = Math.max(0, writeDelayMs) + (inMemoryDocument ? 100 : 0)
+			await delay(safeDelayMs)
+
+			// Filter to the saved file: saveDirectly resolves before this tail
+			// completes, so in a multi-file write sequence (e.g. apply_patch)
+			// a later file's problems must not be attributed to this relPath.
+			const savedFilePath = path.resolve(this.cwd, relPath)
+			// arePathsEqual: case-insensitive on Windows, where a relPath whose
+			// casing differs from the diagnostic URI is still the same file.
+			const postDiagnostics = vscode.languages
+				.getDiagnostics()
+				.filter(([uri]) => arePathsEqual(uri.fsPath, savedFilePath))
 
 			// Get diagnostic settings from state
 			const task = this.taskRef.deref()
@@ -1200,27 +1260,20 @@ export class DiffViewProvider {
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 
 			const newProblems = await diagnosticsToProblemsString(
-				getNewDiagnostics(this.preDiagnostics, postDiagnostics),
+				getNewDiagnostics(preDiagnostics, postDiagnostics),
 				[vscode.DiagnosticSeverity.Error],
 				this.cwd,
 				includeDiagnosticMessages,
 				maxDiagnosticMessages,
 			)
 
-			newProblemsMessage =
-				newProblems.length > 0 ? `\n\nNew problems detected after saving the file:\n${newProblems}` : ""
-		}
-
-		// Store the results for formatFileWriteResponse
-		this.newProblemsMessage = newProblemsMessage
-		this.userEdits = undefined
-		this.relPath = relPath
-		this.newContent = content
-
-		return {
-			newProblemsMessage,
-			userEdits: undefined,
-			finalContent: content,
+			if (newProblems.length > 0) {
+				await task?.say("error", `New problems detected after saving file: ${relPath}\n\n${newProblems}`)
+			}
+		} catch (error) {
+			// Abort-safe: never let a post-save diagnostic emit become an
+			// unhandled rejection (say() rejects when the task is aborted).
+			console.warn(`Post-save diagnostics emit failed: ${error}`)
 		}
 	}
 }

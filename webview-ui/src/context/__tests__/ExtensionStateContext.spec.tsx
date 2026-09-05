@@ -12,9 +12,15 @@ import {
 	type RouterModels,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
-import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import {
+	ExtensionStateContextProvider,
+	useExtensionState,
+	mergeExtensionState,
+	createInitialExtensionState,
+} from "../ExtensionStateContext"
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -215,6 +221,18 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
 	})
 
+	it("initializes the checkpoint keys and write delay to the pre-hydration defaults", () => {
+		// The initializer itself (not a merge fixture) must carry the series
+		// defaults: a regression that dropped them from createInitialExtensionState
+		// would otherwise stay hidden because the merge tests supply the keys
+		// manually.
+		const state = createInitialExtensionState()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+		expect(state.changeCardDetail).toBe("summary")
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
 	it("initializes shadowed context fields from initialState", () => {
 		const routerModels = {} as RouterModels
 		const marketplaceItems: MarketplaceItem[] = [
@@ -336,6 +354,17 @@ describe("ExtensionStateContext", () => {
 		}
 	})
 
+	it("initializes the change-card defaults before hydration", () => {
+		// The initializer itself (not a merge fixture) must carry the change-card
+		// defaults: a regression that dropped either key from
+		// createInitialExtensionState would otherwise stay hidden because the
+		// merge tests supply the keys manually.
+		const state = createInitialExtensionState()
+
+		expect(state.changeCardDetail).toBe("summary")
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
 	it("updates apiConfiguration through setApiConfiguration", () => {
 		render(
 			<ExtensionStateContextProvider>
@@ -410,7 +439,11 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
-			writeDelayMs: 1000,
+			perWriteCheckpoints: true,
+			changeCardDetail: "summary",
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],
@@ -440,12 +473,16 @@ describe("mergeExtensionState", () => {
 
 		const prevState: ExtensionState = {
 			...baseState,
+			// Non-default checkpoint keys so a merge regression that drops or
+			// resets them cannot hide behind the initial defaults.
+			perWriteCheckpoints: false,
+			changeCardDetail: "full",
 			apiConfiguration: { modelMaxTokens: 1234, modelMaxThinkingTokens: 123 },
 			experiments: {} as Record<ExperimentId, boolean>,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS - 5,
 		}
 
-		const newState: ExtensionState = {
+		const newState: Partial<ExtensionState> = {
 			...baseState,
 			apiConfiguration: { modelMaxThinkingTokens: 456, modelTemperature: 0.3 },
 			experiments: {
@@ -456,6 +493,11 @@ describe("mergeExtensionState", () => {
 			} as Record<ExperimentId, boolean>,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS + 5,
 		}
+
+		// A partial state push may omit the checkpoint keys entirely; the
+		// merge must preserve the previous non-default values.
+		delete newState.perWriteCheckpoints
+		delete newState.changeCardDetail
 
 		const result = mergeExtensionState(prevState, newState)
 
@@ -470,6 +512,11 @@ describe("mergeExtensionState", () => {
 			runSlashCommand: false,
 			customTools: false,
 		})
+
+		// A partial push that omits the checkpoint keys must keep the previous
+		// non-default values.
+		expect(result.perWriteCheckpoints).toBe(false)
+		expect(result.changeCardDetail).toBe("full")
 	})
 
 	describe("clineMessagesSeq protection", () => {
@@ -480,7 +527,11 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
-			writeDelayMs: 1000,
+			perWriteCheckpoints: true,
+			changeCardDetail: "summary",
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],
