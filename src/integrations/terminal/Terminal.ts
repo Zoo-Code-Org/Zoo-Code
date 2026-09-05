@@ -79,6 +79,7 @@ export class Terminal extends BaseTerminal {
 		return this.closed || this.terminal.exitStatus !== undefined
 	}
 
+	/** Finalizes any attached command when VS Code disposes this terminal. */
 	public handleClose(): void {
 		if (this.closed) {
 			return
