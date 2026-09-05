@@ -308,6 +308,8 @@ async function resolveAuthScopedModels(
 					reportedEmptyModelResponse.delete(cacheKey)
 					return current.models
 				}
+				// Sign-out cleared the entry while the 304 was in-flight.
+				return {}
 			} else {
 				const modelCount = Object.keys(fetched.models).length
 				if (modelCount > 0) {
