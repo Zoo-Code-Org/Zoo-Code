@@ -9,6 +9,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 import { Anthropic } from "@anthropic-ai/sdk"
+import { TelemetryService } from "@roo-code/telemetry"
 import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
 import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
@@ -589,6 +590,72 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
 		expect(signalDuringRequest!.aborted).toBe(true)
 		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// The cancellation wins over the auth retry: force-refreshing a token for a request that is
+	// already gone would spend a network round trip on a dead request and surface the
+	// cancellation as an authentication failure.
+	it("fails fast with the abort contract instead of force-refreshing the token after cancellation", async () => {
+		const handler = createHandler()
+		const refresh = vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+		const controller = new AbortController()
+		// The SDK keeps the request open until the signal it was handed aborts, then rejects the way
+		// it rejects aborted requests.
+		const create = vitest.fn().mockImplementation(
+			(_body: unknown, options: { signal: AbortSignal }) =>
+				new Promise((_resolve, reject) => {
+					options.signal.addEventListener("abort", () => reject(new Error("Request was aborted")), {
+						once: true,
+					})
+				}),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const completion = handler.completePrompt("Hello", { abortSignal: controller.signal })
+		await vitest.waitFor(() => expect(create).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(refresh).not.toHaveBeenCalled()
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// The abort lands while the fallback fetch is in flight, so the cancellation must come out as
+	// the shared abort contract - not a telemetry event and not a wrapped connection error.
+	it("keeps the abort contract and skips telemetry when the fallback fetch is cancelled", async () => {
+		const handler = createHandler()
+		// The module mock keeps the spy across tests, so clear it before asserting on this request
+		const captureException = vitest.mocked(TelemetryService.instance.captureException)
+		captureException.mockClear()
+		// The SDK path is unusable, so the request falls back to the SSE transport.
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const controller = new AbortController()
+		// Reject the way fetch rejects once the signal it was handed aborts.
+		const mockFetch = vitest.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+			const signal = init?.signal
+			if (!signal || signal.aborted) {
+				return Promise.reject(new DOMException("The operation was aborted", "AbortError"))
+			}
+			return new Promise((_resolve, reject) => {
+				signal.addEventListener(
+					"abort",
+					() => reject(new DOMException("The operation was aborted", "AbortError")),
+					{ once: true },
+				)
+			})
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const completion = handler.completePrompt("Hello", { abortSignal: controller.signal })
+		await vitest.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(captureException).not.toHaveBeenCalled()
 	})
 
 	it("wraps failures from both transports as a completion error", async () => {

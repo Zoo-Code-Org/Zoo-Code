@@ -577,7 +577,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			controller.abort()
 
 			const chunks = await collected
-			expect(chunks.length).toBeGreaterThan(0)
+			// Exactly the pre-abort delta: the completed event only arrives once the abort resolves
+			// the transport's pause, so the loop must break before processing it.
+			expect(chunks).toEqual([{ type: "text", text: "test" }])
 
 			expect(mockCreate).toHaveBeenCalled()
 			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
@@ -619,8 +621,10 @@ describe("OpenAiCodexHandler native tool calls", () => {
 				abortSignal: controller.signal,
 			})
 
-			// Consume the stream to trigger the request
-			await collectStream(stream)
+			// Consume the stream to trigger the request; the request-local controller is already
+			// aborted, so the loop must break before the first event is processed.
+			const chunks = await collectStream(stream)
+			expect(chunks).toEqual([])
 
 			expect(mockCreate).toHaveBeenCalled()
 			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
