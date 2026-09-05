@@ -263,14 +263,14 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			// Aborted requests are user-initiated: surface them as AbortError (this also covers
 			// timeouts, which abort the same signal) instead of a completion error.
 			if (requestAbortSignal?.aborted) {
-				throw createAbortError("Requesty")
+				throw createAbortError(this.providerName)
 			}
 			throw handleOpenAIError(error, this.providerName)
 		}
 
 		if (requestAbortSignal?.aborted) {
 			// The response resolved after the request was aborted: do not return the late result.
-			throw createAbortError("Requesty")
+			throw createAbortError(this.providerName)
 		}
 		return response.choices[0]?.message.content || ""
 	}

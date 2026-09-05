@@ -17,33 +17,7 @@ import { ApiHandlerCreateMessageMetadata } from "../../index"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
-
-/**
- * Stryker guard: fails fast if `promise` does not settle within `ms`.
- *
- * Stryker's per-mutant cutoff (timeoutMS 5s x timeoutFactor 1.5 ~= 7.5s) is shorter
- * than vitest's testTimeout (20s). A mutant that removes a settle call (or an abort
- * listener) leaves an awaited promise pending forever; without this guard the test
- * would outlive the cutoff and the mutant would be reported as Timeout (inconclusive).
- * Settling the guard at 500ms turns those mutants into fast failures (KILLED).
- */
-function withSettleGuard<T>(promise: Promise<T>, ms = 500): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			reject(new Error(`settle guard timed out after ${ms}ms`))
-		}, ms)
-		void promise.then(
-			(value) => {
-				clearTimeout(timer)
-				resolve(value)
-			},
-			(error) => {
-				clearTimeout(timer)
-				reject(error)
-			},
-		)
-	})
-}
+import { withSettleGuard } from "../../../test-utils/settle-guard"
 
 const mockCreate = vitest.fn()
 
@@ -765,13 +739,31 @@ describe("RequestyHandler", () => {
 			const handler = new RequestyHandler(mockOptions)
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
-			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: expect.any(String) }),
-				expect.objectContaining({
-					timeout: 5000,
-				}),
-			)
+			// Capture the exact timeout signal instance the provider creates so the
+			// test can assert identity, not just type, for the signal it forwards.
+			const timeoutSignalSpy = vitest.spyOn(AbortSignal, "timeout")
+			try {
+				await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+				// Assert the factory argument and call count too: the identity check
+				// below would also pass for a signal created with the wrong duration.
+				expect(timeoutSignalSpy).toHaveBeenCalledTimes(1)
+				expect(timeoutSignalSpy).toHaveBeenCalledWith(5000)
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String) }),
+					expect.objectContaining({ timeout: 5000 }),
+				)
+				// Without a caller signal the merged signal is exactly the
+				// AbortSignal.timeout instance; the SDK relies on it to reject with a
+				// DOM-standard AbortError when the timeout fires.
+				const clientOptions = mockCreate.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+				const expectedSignal = timeoutSignalSpy.mock.results[0]?.value
+				expect(expectedSignal).toBeInstanceOf(AbortSignal)
+				expect(clientOptions?.signal).toBe(expectedSignal)
+			} finally {
+				// Restore on every exit path: a failed assertion above must not leave
+				// the static spy installed for the remaining tests in this file.
+				timeoutSignalSpy.mockRestore()
+			}
 		})
 
 		it("should work without options (backward compatible)", async () => {
@@ -795,6 +787,7 @@ describe("RequestyHandler", () => {
 				name: "AbortError",
 				message: "This operation was aborted",
 			})
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("rejects with AbortError when the signal aborts during model lookup", async () => {

@@ -6,33 +6,7 @@ import {
 	rejectOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
-
-/**
- * Stryker guard: fails fast if `promise` does not settle within `ms`.
- *
- * Stryker's per-mutant cutoff (timeoutMS 5s x timeoutFactor 1.5 ~= 7.5s) is shorter
- * than vitest's testTimeout (20s). A mutant that removes a settle call (or an abort
- * listener) leaves an awaited promise pending forever; without this guard the test
- * would outlive the cutoff and the mutant would be reported as Timeout (inconclusive).
- * Settling the guard at 500ms turns those mutants into fast failures (KILLED).
- */
-function withSettleGuard<T>(promise: Promise<T>, ms = 500): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			reject(new Error(`settle guard timed out after ${ms}ms`))
-		}, ms)
-		void promise.then(
-			(value) => {
-				clearTimeout(timer)
-				resolve(value)
-			},
-			(error) => {
-				clearTimeout(timer)
-				reject(error)
-			},
-		)
-	})
-}
+import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
 describe("rejectOnAbort", () => {
 	it("resolves with the pending value when it settles before the signal aborts", async () => {
@@ -64,6 +38,7 @@ describe("rejectOnAbort", () => {
 
 		await expect(withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider"))).rejects.toMatchObject({
 			name: "AbortError",
+			message: "The TestProvider request was aborted",
 		})
 	})
 
@@ -78,18 +53,28 @@ describe("rejectOnAbort", () => {
 
 	it("detaches the abort listener once the pending settles", async () => {
 		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
 		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 
 		await expect(
 			withSettleGuard(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")),
 		).resolves.toBe("done")
 
-		expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		// The settle path must remove the exact listener that was registered, not just any
+		// function: removing a different reference would leave the original abort listener
+		// attached to the signal. First require the registration to have happened at all,
+		// so a missing registration cannot silently degrade to an undefined comparison.
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
 		removeSpy.mockRestore()
 	})
 
 	it("detaches the abort listener when the pending rejects", async () => {
 		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
 		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 		const lookupError = new Error("lookup failed")
 
@@ -97,7 +82,15 @@ describe("rejectOnAbort", () => {
 			withSettleGuard(rejectOnAbort(Promise.reject(lookupError), controller.signal, "TestProvider")),
 		).rejects.toBe(lookupError)
 
-		expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		// The settle path must remove the exact listener that was registered, not just any
+		// function: removing a different reference would leave the original abort listener
+		// attached to the signal. First require the registration to have happened at all,
+		// so a missing registration cannot silently degrade to an undefined comparison.
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
 		removeSpy.mockRestore()
 	})
 })
