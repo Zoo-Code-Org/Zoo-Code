@@ -9,7 +9,12 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
+import {
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	OpenAiCodexServiceTier,
+	SERVICE_TIER_KEY,
+	type ModelInfo,
+} from "@roo-code/types"
 import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -83,6 +88,80 @@ describe("OpenAiCodexHandler.getModel", () => {
 				supportsTemperature: false,
 			},
 		})
+	})
+
+	it.each([
+		["disable", undefined],
+		["none", undefined],
+	] as const)("omits optional Codex reasoning for %s", (reasoningEffort, expected) => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol", reasoningEffort })
+		expect(handler["getReasoningEffort"](handler.getModel())).toBe(expected)
+	})
+
+	it("omits optional Codex reasoning when the reasoning toggle is disabled", () => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-5.6-sol",
+			reasoningEffort: "high",
+			enableReasoningEffort: false,
+		})
+		expect(handler["getReasoningEffort"](handler.getModel())).toBeUndefined()
+	})
+
+	it.each([
+		["high", "high"],
+		["minimal", "low"],
+		["disable", "low"],
+	] as const)("normalizes required Astra reasoning from %s", (reasoningEffort, expected) => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6-astra", reasoningEffort })
+		expect(handler["getReasoningEffort"](handler.getModel())).toBe(expected)
+	})
+
+	it("omits an unsupported Codex fallback", () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6-astra", reasoningEffort: "high" })
+		const model = handler.getModel()
+		const unsupportedModel = {
+			...model,
+			info: {
+				...model.info,
+				supportsReasoningEffort: ["low"] as ModelInfo["supportsReasoningEffort"],
+				reasoningEffort: "medium" as const,
+			},
+		}
+		expect(handler["getReasoningEffort"](unsupportedModel)).toBeUndefined()
+	})
+
+	it("omits a required Codex fallback when it is the none sentinel", () => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-6-astra",
+			reasoningEffort: "high",
+			enableReasoningEffort: false,
+		})
+		const model = handler.getModel()
+		const invalidModel = {
+			...model,
+			info: {
+				...model.info,
+				supportsReasoningEffort: ["none", "high"] as ModelInfo["supportsReasoningEffort"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "none" as const,
+			},
+		}
+		expect(handler["getReasoningEffort"](invalidModel)).toBeUndefined()
+	})
+
+	it.each([
+		["high", "medium", "high"],
+		[undefined, "medium", "medium"],
+		["disable", "medium", "medium"],
+		["none", "medium", undefined],
+	] as const)("handles scalar Codex reasoning support with %s configured", (reasoningEffort, fallback, expected) => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6-astra", reasoningEffort })
+		const model = handler.getModel()
+		const scalarModel = {
+			...model,
+			info: { ...model.info, supportsReasoningEffort: true, reasoningEffort: fallback },
+		}
+		expect(handler["getReasoningEffort"](scalarModel)).toBe(expected)
 	})
 })
 

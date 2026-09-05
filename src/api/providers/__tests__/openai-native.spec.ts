@@ -13,7 +13,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } from "@roo-code/types"
+import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers, type ModelInfo } from "@roo-code/types"
 
 import { OpenAiNativeHandler } from "../openai-native"
 import { ApiHandlerOptions } from "../../../shared/api"
@@ -190,6 +190,81 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			expect(astraHandler["getReasoningEffort"](astraHandler.getModel())).toBe("medium")
+		})
+
+		it.each([
+			["the configured effort is disabled", { reasoningEffort: "disable" as const }],
+			["the reasoning toggle is disabled", { enableReasoningEffort: false }],
+		])("omits optional reasoning when %s", (_description, options) => {
+			const optionalHandler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-5.6-sol",
+				...options,
+			})
+
+			expect(optionalHandler["getReasoningEffort"](optionalHandler.getModel())).toBeUndefined()
+		})
+
+		it("omits an unsupported fallback", () => {
+			const currentHandler = new OpenAiNativeHandler({ ...mockOptions, reasoningEffort: "high" })
+			const model = currentHandler.getModel()
+			const unsupportedModel = {
+				...model,
+				info: {
+					...model.info,
+					supportsReasoningEffort: ["low"] as ModelInfo["supportsReasoningEffort"],
+					reasoningEffort: "medium" as const,
+				},
+			}
+
+			expect(currentHandler["getReasoningEffort"](unsupportedModel)).toBeUndefined()
+		})
+
+		it("does not send the disable sentinel even if required model metadata lists it", () => {
+			const currentHandler = new OpenAiNativeHandler({ ...mockOptions, reasoningEffort: "disable" })
+			const model = currentHandler.getModel()
+			const requiredModel = {
+				...model,
+				info: {
+					...model.info,
+					supportsReasoningEffort: ["disable", "medium"] as ModelInfo["supportsReasoningEffort"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium" as const,
+				},
+			}
+
+			expect(currentHandler["getReasoningEffort"](requiredModel)).toBe("medium")
+		})
+
+		it("uses a scalar fallback when required reasoning cannot be disabled", () => {
+			const currentHandler = new OpenAiNativeHandler({ ...mockOptions, reasoningEffort: "disable" })
+			const model = currentHandler.getModel()
+			const requiredModel = {
+				...model,
+				info: {
+					...model.info,
+					supportsReasoningEffort: true,
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium" as const,
+				},
+			}
+
+			expect(currentHandler["getReasoningEffort"](requiredModel)).toBe("medium")
+		})
+
+		it.each([
+			["high", "medium", "high"],
+			[undefined, "medium", "medium"],
+			["disable", "medium", undefined],
+		] as const)("handles scalar reasoning support with %s configured", (reasoningEffort, fallback, expected) => {
+			const currentHandler = new OpenAiNativeHandler({ ...mockOptions, reasoningEffort })
+			const model = currentHandler.getModel()
+			const scalarModel = {
+				...model,
+				info: { ...model.info, supportsReasoningEffort: true, reasoningEffort: fallback },
+			}
+
+			expect(currentHandler["getReasoningEffort"](scalarModel)).toBe(expected)
 		})
 
 		it.each(serviceTiers)("should include the selected %s service tier", async (serviceTier) => {

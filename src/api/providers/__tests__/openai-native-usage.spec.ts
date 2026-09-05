@@ -146,6 +146,18 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 			expect(result).toMatchObject({ inputTokens: 100, cacheReadTokens: 20, cacheWriteTokens: 30 })
 		})
 
+		it.each([
+			[{ cached_tokens: 0, cache_miss_tokens: 7, cache_write_tokens: 0 }, 7],
+			[{ cached_tokens: 0, cache_miss_tokens: 0, cache_write_tokens: 7 }, 7],
+		])("derives input totals when one nested detail is positive", (inputDetails, expected) => {
+			const result = handler["normalizeUsage"](
+				{ output_tokens: 0, input_tokens_details: inputDetails },
+				getGpt6AstraModel(),
+			)
+
+			expect(result?.inputTokens).toBe(expected)
+		})
+
 		it("should handle reasoning tokens in output details", () => {
 			const usage = {
 				input_tokens: 100,

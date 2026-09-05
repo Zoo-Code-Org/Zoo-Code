@@ -5,12 +5,13 @@ vi.mock("vscode", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
+import { nanoGptDefaultModelId, providerIdentifiers, type ModelInfo } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { NanoGptHandler } from "../nanogpt"
 import { getModels } from "../fetchers/modelCache"
+import type { ApiHandlerOptions } from "../../../shared/api"
 
 vi.mock("openai")
 vi.mock("../fetchers/modelCache", () => ({
@@ -204,6 +205,103 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
+	it("uses safe parallel-tool handling for the Astra Pro route", async () => {
+		const modelId = "openai/gpt-6-astra-pro"
+		vi.mocked(getModels).mockResolvedValue({
+			[modelId]: {
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: modelId }).createMessage("sys", messages, {
+				taskId: "task",
+				parallelToolCalls: true,
+			}),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: modelId, parallel_tool_calls: false })
+	})
+
+	it.each([
+		["boolean support", { reasoningEffort: "high" }, { supportsReasoningEffort: true }, "high"],
+		["array support", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low", "high"] }, "high"],
+		["unsupported effort", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low"] }, undefined],
+		["disabled effort", { reasoningEffort: "disable" }, { supportsReasoningEffort: ["low"] }, undefined],
+		[
+			"listed disable sentinel",
+			{ reasoningEffort: "disable" },
+			{ supportsReasoningEffort: ["disable", "low"] },
+			undefined,
+		],
+		["none effort", { reasoningEffort: "none" }, { supportsReasoningEffort: ["low"] }, undefined],
+		["listed none sentinel", { reasoningEffort: "none" }, { supportsReasoningEffort: ["none", "low"] }, undefined],
+		[
+			"disabled toggle",
+			{ reasoningEffort: "high", enableReasoningEffort: false },
+			{ supportsReasoningEffort: ["low", "high"] },
+			undefined,
+		],
+		["minimal effort", { reasoningEffort: "minimal" }, { supportsReasoningEffort: ["minimal"] }, undefined],
+		[
+			"required fallback",
+			{ reasoningEffort: "high" },
+			{ supportsReasoningEffort: ["low", "medium"], requiredReasoningEffort: true, reasoningEffort: "medium" },
+			"medium",
+		],
+		[
+			"required default",
+			{},
+			{ supportsReasoningEffort: ["low", "medium"], requiredReasoningEffort: true, reasoningEffort: "medium" },
+			"medium",
+		],
+		[
+			"invalid required fallback",
+			{},
+			{ supportsReasoningEffort: ["low"], requiredReasoningEffort: true, reasoningEffort: "none" },
+			undefined,
+		],
+		["optional fallback", {}, { supportsReasoningEffort: ["low", "medium"], reasoningEffort: "medium" }, undefined],
+	] satisfies ReadonlyArray<readonly [string, Partial<ApiHandlerOptions>, Partial<ModelInfo>, string | undefined]>)(
+		"normalizes %s",
+		async (_case, options, modelOverrides, expectedEffort) => {
+			const modelId = "reasoning-model"
+			vi.mocked(getModels).mockResolvedValue({
+				[modelId]: {
+					maxTokens: 8_192,
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					...modelOverrides,
+				},
+			})
+
+			await collectStream(
+				new NanoGptHandler({ nanoGptModelId: modelId, ...options }).createMessage("sys", messages),
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			if (expectedEffort) expect(request.reasoning_effort).toBe(expectedEffort)
+			else expect(request).not.toHaveProperty("reasoning_effort")
+		},
+	)
+
+	it.each([
+		[undefined, true],
+		[false, false],
+	] as const)("uses %s parallel-tool preference as %s for ordinary models", async (parallelToolCalls, expected) => {
+		const metadata = parallelToolCalls === undefined ? undefined : { taskId: "task", parallelToolCalls }
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages, metadata),
+		)
+		expect(mockCreate.mock.calls[0][0].parallel_tool_calls).toBe(expected)
+	})
+
 	it("keeps Muse Spark tool-result history contiguous across turns", async () => {
 		const modelId = "meta/muse-spark-1.2-contributor"
 		vi.mocked(getModels).mockResolvedValue({
@@ -370,6 +468,35 @@ describe("NanoGptHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("omits temperature when it is not configured", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt")
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+		})
+
+		it.each([
+			["supported model", "temperature-model", undefined, 0.7],
+			["metadata-disabled model", "temperature-model", false, undefined],
+			["name-disabled model", "openai/o3-mini-test", undefined, undefined],
+		] as const)(
+			"handles configured temperature for a %s",
+			async (_case, modelId, supportsTemperature, expected) => {
+				vi.mocked(getModels).mockResolvedValue({
+					[modelId]: {
+						maxTokens: 8_192,
+						contextWindow: 128_000,
+						supportsPromptCache: false,
+						supportsTemperature,
+					},
+				})
+				mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+				await new NanoGptHandler({ nanoGptModelId: modelId, modelTemperature: 0.7 }).completePrompt("prompt")
+				const request = mockCreate.mock.calls[0][0]
+				if (expected === undefined) expect(request).not.toHaveProperty("temperature")
+				else expect(request.temperature).toBe(expected)
+			},
+		)
+
 		it("requests cache-capable routing without changing the completion model ID", async () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const handler = new NanoGptHandler({
