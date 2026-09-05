@@ -38,6 +38,7 @@ Detail the steps to test your changes. This helps reviewers verify your work.
 - [ ] **Scope**: My changes are focused on the linked issue (one major feature/fix per PR).
 - [ ] **Self-Review**: I have performed a thorough self-review of my code.
 - [ ] **Testing**: New and/or updated tests have been added to cover my changes (if applicable).
+- [ ] **Test Helpers** (test changes only): Shared test helpers (`src/test-utils/`, `@/utils/test-utils`) are used only for mechanical duplication; test intent and scenario-specific mocks remain visible.
 - [ ] **Visual Snapshot** (UI changes only): If a user would notice this change at a glance (layout, theme tokens, brand elements, empty/error states), I've added or updated a `*.visual.tsx` snapshot in `webview-ui/`. See `webview-ui/AGENTS.md` → "When a UI change needs a snapshot".
 - [ ] **Documentation Impact**: I have considered if my changes require documentation updates (see "Documentation Updates" section below).
 - [ ] **Contribution Guidelines**: I have read and agree to the [Contributor Guidelines](/CONTRIBUTING.md).

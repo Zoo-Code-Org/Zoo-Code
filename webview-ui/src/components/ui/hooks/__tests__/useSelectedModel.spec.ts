@@ -1,7 +1,9 @@
 // npx vitest src/components/ui/hooks/__tests__/useSelectedModel.spec.ts
 
 import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
+
+import { createTestQueryClient } from "@/utils/test-utils"
 import { renderHook } from "@testing-library/react"
 import type { Mock } from "vitest"
 
@@ -81,13 +83,7 @@ const createLocalModelsResult = (
 ): ReturnType<typeof useLmStudioModels> => createQueryResult(data, options) as ReturnType<typeof useLmStudioModels>
 
 const createWrapper = () => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				retry: false,
-			},
-		},
-	})
+	const queryClient = createTestQueryClient()
 	return ({ children }: { children: React.ReactNode }) =>
 		React.createElement(QueryClientProvider, { client: queryClient }, children)
 }
