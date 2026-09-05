@@ -472,6 +472,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Detach the bridging listener so a late abort from this request cannot
 			// cancel a later request's controller.
 			if (abortListener) {
+				// Stryker disable next-line OptionalChaining: abortListener is only assigned inside the if (externalAbortSignal) block, so whenever the finally guard is true the signal is non-nullish; dropping the optional chain is behaviorally identical on every reachable path (covered by the abort-signal bridging specs)
 				externalAbortSignal?.removeEventListener("abort", abortListener)
 			}
 			// Only clear the field if this request still owns it (the fallback path may
@@ -716,6 +717,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Detach the bridging listener so a late abort from this request cannot
 			// cancel a later request's controller.
 			if (abortListener) {
+				// Stryker disable next-line OptionalChaining: abortListener is only assigned inside the if (externalAbortSignal) block, so whenever the finally guard is true the signal is non-nullish; dropping the optional chain is behaviorally identical on every reachable path (covered by the abort-signal bridging specs)
 				externalAbortSignal?.removeEventListener("abort", abortListener)
 			}
 			if (this.abortController === requestController) {
