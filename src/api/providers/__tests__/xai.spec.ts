@@ -298,6 +298,107 @@ describe("XAIHandler", () => {
 		)
 	})
 
+	it("createMessage should map a custom tool_choice to the Responses API shape", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: { type: "custom", custom: { name: "custom_tool" } },
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: { type: "custom", name: "custom_tool" },
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should pass through unmappable allowed_tools entries unchanged", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		// Entries that fail the function-name guard must pass through unchanged: a
+		// non-function type carrying a function ref, a null ref, a function value
+		// (typeof "function", not "object", whose .name is still a string), and an
+		// object whose name is not a string.
+		const probeFunction = () => 1
+		const entries = [
+			{ type: "mcp", function: { name: "leaky" } },
+			{ type: "function", function: null },
+			{ type: "function", function: probeFunction },
+			{ type: "function", function: { name: 123 } },
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: { type: "allowed_tools", allowed_tools: { mode: "auto", tools: entries } },
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: {
+					type: "allowed_tools",
+					mode: "auto",
+					tools: entries,
+				},
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should send max_output_tokens and temperature for the default model", async () => {
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [])
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				max_output_tokens: 65_536,
+				temperature: 0,
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should omit tool parameters when no tools are provided", async () => {
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [])
+		await stream.next()
+
+		const callArgs = mockResponsesCreate.mock.calls[mockResponsesCreate.mock.calls.length - 1][0]
+		expect(callArgs).not.toHaveProperty("tools")
+		expect(callArgs).not.toHaveProperty("tool_choice")
+		expect(callArgs).not.toHaveProperty("parallel_tool_calls")
+	})
+
 	it("completePrompt should return text from Responses API", async () => {
 		const expectedResponse = "This is a test response"
 		mockResponsesCreate.mockResolvedValueOnce({
@@ -327,6 +428,17 @@ describe("XAIHandler", () => {
 		)
 	})
 
+	it("completePrompt should surface a native AbortError unmodified on abort", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const abortError = new Error("This operation was aborted")
+		abortError.name = "AbortError"
+		mockResponsesCreate.mockRejectedValueOnce(abortError)
+
+		// The error must surface as the same instance, not wrapped by handleOpenAIError
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toBe(abortError)
+	})
+
 	it("completePrompt should pass abort signal through to client", async () => {
 		const controller = new AbortController()
 		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
@@ -344,6 +456,21 @@ describe("XAIHandler", () => {
 		expect(result).toBe("response")
 		expect(mockResponsesCreate).toHaveBeenCalledWith(
 			expect.objectContaining({ model: expect.any(String) }),
+			undefined,
+		)
+	})
+
+	it("completePrompt should send the full Responses API request body", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt")
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			{
+				model: xaiDefaultModelId,
+				input: [{ role: "user", content: [{ type: "input_text", text: "test prompt" }] }],
+				store: false,
+			},
 			undefined,
 		)
 	})
@@ -465,6 +592,22 @@ describe("XAIHandler", () => {
 		await expect(stream.next()).rejects.toThrow(`xAI completion error: ${errorMessage}`)
 	})
 
+	it("should capture createMessage failures in telemetry with operation context", async () => {
+		mockResponsesCreate.mockRejectedValueOnce(new Error("Stream error"))
+
+		const stream = handler.createMessage("test prompt", [])
+		await expect(stream.next()).rejects.toThrow("xAI completion error: Stream error")
+
+		expect(mockCaptureException).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: "ApiProviderError",
+				provider: "xAI",
+				modelId: xaiDefaultModelId,
+				operation: "createMessage",
+			}),
+		)
+	})
+
 	it("createMessage should surface the SDK APIUserAbortError unmodified on abort", async () => {
 		const abortedController = new AbortController()
 		abortedController.abort()
@@ -570,6 +713,8 @@ describe("XAIHandler", () => {
 		expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
 		const [event, listener] = addEventListenerSpy.mock.calls[0]
 		expect(event).toBe("abort")
+		// The listener is registered once so it detaches itself when the signal aborts.
+		expect(addEventListenerSpy.mock.calls[0][2]).toEqual({ once: true })
 		// The same retained callback must be detached once the stream is done.
 		expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
 		expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)

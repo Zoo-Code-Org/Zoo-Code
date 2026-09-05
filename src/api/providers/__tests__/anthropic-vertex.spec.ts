@@ -837,6 +837,39 @@ describe("VertexHandler", () => {
 			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
 		})
+
+		it("should default message_start outputTokens to zero when output_tokens is omitted", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+							},
+						},
+					},
+				]),
+			)
+			handler["client"].messages.create = mockCreate
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks = await collectStream(stream)
+
+			expect(chunks[0]).toEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 0,
+				cacheWriteTokens: undefined,
+				cacheReadTokens: undefined,
+			})
+		})
 	})
 
 	describe("completePrompt", () => {

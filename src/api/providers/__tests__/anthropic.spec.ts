@@ -537,6 +537,55 @@ describe("AnthropicHandler", () => {
 			controller.abort()
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
+
+		it("should not pre-abort the bridged signal for a pending external signal", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.signal?.aborted).toBe(false)
+		})
+
+		it("should register the external abort listener with the once option", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			// The listener is registered once so it detaches itself when the signal aborts.
+			expect(addEventListenerSpy.mock.calls[0][2]).toEqual({ once: true })
+		})
+
+		it("should join beta headers with a comma for the default model", async () => {
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await collectStream(stream)
+
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.headers?.["anthropic-beta"]).toBe(
+				"fine-grained-tool-streaming-2025-05-14,prompt-caching-2024-07-31",
+			)
+		})
 	})
 
 	describe("completePrompt", () => {

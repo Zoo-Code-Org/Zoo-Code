@@ -297,6 +297,29 @@ describe("MiniMaxHandler", () => {
 			)
 		})
 
+		it("completePrompt should send the configured temperature, user message and stream flag", async () => {
+			const temperatureHandler = new MiniMaxHandler({
+				minimaxApiKey: "test-minimax-api-key",
+				modelTemperature: 0.5,
+			})
+			mockCreate.mockResolvedValueOnce({
+				content: [{ type: "text", text: "response" }],
+			})
+
+			await temperatureHandler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: minimaxDefaultModelId,
+					max_tokens: 16_384,
+					temperature: 0.5,
+					messages: [{ role: "user", content: "test prompt" }],
+					stream: false,
+				},
+				undefined,
+			)
+		})
+
 		it("createMessage should yield text content from stream", async () => {
 			const testContent = "This is test content from MiniMax stream"
 
@@ -494,6 +517,45 @@ describe("MiniMaxHandler", () => {
 			const promise = stream.next()
 			controller.abort()
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should not pre-abort the bridged signal for a pending external signal", async () => {
+			const controller = new AbortController()
+			let observedSignal: AbortSignal | undefined
+
+			mockCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				observedSignal = options?.signal
+				return asyncStreamFrom([])
+			})
+
+			const stream = handler.createMessage(
+				"system prompt",
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).resolves.toEqual([])
+
+			expect(observedSignal?.aborted).toBe(false)
+		})
+
+		it("should register the external abort listener with the once option", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				"system prompt",
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).resolves.toEqual([])
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			// The listener is registered once so it detaches itself when the signal aborts.
+			expect(addEventListenerSpy.mock.calls[0][2]).toEqual({ once: true })
 		})
 	})
 
