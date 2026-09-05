@@ -327,6 +327,8 @@ describe("MarkdownBlock", () => {
 			// clickable span (which would also make the text vanish from CodeBlock).
 			expect(container.querySelector("code")?.textContent).toBe("echo hello @problems\n")
 			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			// No placeholder control characters leak out of the masked code region.
+			expect(container.textContent).not.toContain("\u0001")
 		})
 
 		it("keeps mention patterns literal inside inline code", async () => {
@@ -337,6 +339,8 @@ describe("MarkdownBlock", () => {
 
 			expect(container.querySelector("code")?.textContent).toBe("@problems")
 			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			// No placeholder control characters leak out of the masked code region.
+			expect(container.textContent).not.toContain("\u0001")
 		})
 
 		it("keeps mention patterns literal inside link text even when enabled", async () => {
@@ -354,7 +358,11 @@ describe("MarkdownBlock", () => {
 
 			// The anchor's own handler still fires (nothing swallows the click).
 			fireEvent.click(anchor)
-			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "/src/main.ts" })
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openFile",
+				text: "/src/main.ts",
+				values: { fromMarkdown: true },
+			})
 			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openMention" }))
 		})
 
@@ -422,6 +430,50 @@ describe("MarkdownBlock", () => {
 			expect(container.textContent).not.toContain("\u0001")
 		})
 
+		it("keeps mention patterns inert inside image alt text", async () => {
+			// An image's alt renders as the img's alt attribute, not as body text. A
+			// mention inside it must stay literal: rewriting it to a mention placeholder
+			// would corrupt the alt with control characters.
+			const markdown = "See ![a @problems screenshot](https://example.com/problems.png) now."
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/now/, { exact: false })
+
+			const img = container.querySelector("img")!
+			expect(img).toHaveAttribute("src", "https://example.com/problems.png")
+			expect(img).toHaveAttribute("alt", "a @problems screenshot")
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			expect(container.textContent).not.toContain("\u0001")
+		})
+
+		it("keeps mention patterns inert inside inline and block math", async () => {
+			// Math regions render through KaTeX from the formula value, not as plain
+			// text. A mention rewritten to a placeholder would leak control characters
+			// into the rendered formula (MathML annotation included), so both inline
+			// and display math must stay masked.
+			const markdown = "Inline $x = @problems$ and block math:\n\n$$\n@problems + 1\n$$\n\ndone"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/done/, { exact: false })
+
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			expect(container.textContent).not.toContain("\u0001")
+		})
+
+		it("keeps mention patterns inert inside raw HTML blocks", async () => {
+			// Raw HTML blocks render as escaped literal text (this stack has no
+			// rehype-raw). A mention inside must stay verbatim: rewriting it to a
+			// mention placeholder would leak control characters into the output.
+			const markdown = "before\n\n<div>\n@problems\n</div>\n\nafter"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/after/, { exact: false })
+
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			expect(container.textContent).toContain("@problems")
+			expect(container.textContent).not.toContain("\u0001")
+		})
+
 		it("keeps the shared regex boundary rules when a mention directly follows a link or inline code", async () => {
 			// Matching must run on the raw string so the shared regex's start boundary
 			// sees the real characters: with no whitespace after a closing `)` or a
@@ -483,6 +535,8 @@ describe("MarkdownBlock", () => {
 			const mention = container.querySelector("span.mention-context-highlight")!
 			expect(mention.getAttribute("role")).toBe("button")
 			expect(mention.getAttribute("tabindex")).toBe("0")
+			expect(mention.classList.contains("text-[0.9em]")).toBe(true)
+			expect(mention.classList.contains("cursor-pointer")).toBe(true)
 
 			// Enter/Space must both post and be default-prevented: dispatching a
 			// cancelable event returns false once preventDefault has run, and Space's
@@ -622,6 +676,102 @@ describe("MarkdownBlock", () => {
 			// Two separate paragraphs (the blank line is a hard break, not a soft one).
 			expect(container.querySelectorAll("p")).toHaveLength(2)
 			expect(container.querySelector("p")?.querySelector("br")).toBeNull()
+		})
+	})
+
+	describe("file anchor validation", () => {
+		it("does not post openFile for traversal targets and still prevents navigation", async () => {
+			// Task markdown is untrusted: a `..` segment (e.g. `[x](../../.env)`) must
+			// never reach the extension's openFile handler, and the webview must not
+			// navigate to a bogus relative URL either.
+			const markdown = "open [the secret](../../.env) now"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/the secret/)
+
+			const anchor = container.querySelector("a")!
+			// The click is still swallowed (preventDefault ran) but nothing is posted.
+			expect(fireEvent.click(anchor)).toBe(false)
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openFile" }))
+		})
+
+		it("leaves non-file links to the browser without posting openFile", async () => {
+			// External schemes are not local files: the anchor keeps its default
+			// navigation behavior (no preventDefault) and posts nothing.
+			const markdown = "visit https://example.com/docs today"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/today/)
+
+			const anchor = container.querySelector("a")!
+			expect(fireEvent.click(anchor)).toBe(true)
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("posts openFile with a ./ prefix for plain relative paths", async () => {
+			const markdown = "see [main.ts](src/main.ts) for the entry point"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/entry point/)
+
+			const anchor = container.querySelector("a")!
+			fireEvent.click(anchor)
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openFile",
+				text: "./src/main.ts",
+				values: { fromMarkdown: true },
+			})
+		})
+
+		it("posts openFile with a line number for links with a line anchor", async () => {
+			// The line anchor must reach the extension: the posted values keep both
+			// the parsed line and the fromMarkdown tag (a `values && {}` mutation
+			// would drop the line field).
+			const markdown = "see [line 12](src/main.ts:12) for context"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/context/)
+
+			const anchor = container.querySelector("a")!
+			fireEvent.click(anchor)
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openFile",
+				text: "./src/main.ts",
+				values: { line: 12, fromMarkdown: true },
+			})
+		})
+	})
+
+	describe("empty markdown", () => {
+		it("renders nothing for empty markdown with mentions enabled", () => {
+			// The falsy-markdown fast path must produce the same empty output as
+			// parsing an empty string: no paragraph and no leaked placeholder.
+			const { container } = render(<MarkdownBlock markdown="" mentions />)
+
+			expect(container.querySelector("p")).toBeNull()
+			expect(container.textContent).toBe("")
+		})
+
+		it("renders nothing for empty markdown without mentions", () => {
+			const { container } = render(<MarkdownBlock markdown="" />)
+
+			expect(container.querySelector("p")).toBeNull()
+			expect(container.textContent).toBe("")
+		})
+
+		it("recomputes the prepared markdown when the markdown prop changes", async () => {
+			// The prepared-markdown memo must track its inputs: a stale cache would
+			// keep rendering the first prompt after the text changes.
+			const { container, rerender } = render(<MarkdownBlock markdown="first @problems" mentions />)
+
+			await screen.findByText(/first/)
+			expect(container.querySelectorAll("span.mention-context-highlight")).toHaveLength(1)
+
+			rerender(<MarkdownBlock markdown="second @terminal" mentions />)
+			await screen.findByText(/second/)
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions).toHaveLength(1)
+			expect(mentions[0].textContent).toBe("@terminal")
 		})
 	})
 })

@@ -497,6 +497,12 @@ describe("TaskHeader", () => {
 			// The empty prompt renders nothing but must not crash; the rest of the
 			// expanded header (cost row) is still present.
 			expect(screen.getByText("$0.05")).toBeInTheDocument()
+
+			// The expanded text area stays empty: a missing prompt must not render
+			// placeholder content into the markdown container.
+			const textArea = container.querySelector(".scrollable")
+			expect(textArea).not.toBeNull()
+			expect(textArea?.textContent).toBe("")
 		})
 	})
 })

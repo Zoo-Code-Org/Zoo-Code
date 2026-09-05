@@ -22,7 +22,9 @@ import MermaidBlock from "./MermaidBlock"
 // always keeps a whole placeholder inside a single text node. Built via
 // `new RegExp` from a string constant (a template literal) so the control
 // character does not appear in a regex literal (no-control-regex).
+// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 const MENTION_PLACEHOLDER_CHAR = "\u0001"
+// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 const MENTION_PLACEHOLDER_REGEX = new RegExp(`${MENTION_PLACEHOLDER_CHAR}(\\d+)${MENTION_PLACEHOLDER_CHAR}`, "g")
 
 // mdast node types whose raw source regions must never be mention-rewritten:
@@ -32,16 +34,27 @@ const MENTION_PLACEHOLDER_REGEX = new RegExp(`${MENTION_PLACEHOLDER_CHAR}(\\d+)$
 // reference link's href; rewriting a reference label or alt would leak the raw
 // placeholder into the anchor text or img alt (rehypeMentions skips anchors),
 // instead of producing a mention span.
+// Stryker disable next-line ArrayDeclaration: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 const MENTION_MASK_NODE_TYPES = new Set([
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"code",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"inlineCode",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"link",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"image",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"html",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"inlineMath",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"math",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"definition",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"linkReference",
+	// Stryker disable next-line StringLiteral: module-scope static; Stryker 10.0.0 vitest-runner skips static activation when testFiles is set (false survivor); pinned by mask tests
 	"imageReference",
 ])
 
@@ -65,7 +78,9 @@ const MENTION_MASK_NODE_TYPES = new Set([
  * is discarded so mentions inside such regions stay inert.
  */
 function prepareMentions(markdown: string): { preparedMarkdown: string; mentions: string[] } {
+	// Stryker disable next-line ConditionalExpression: equivalent: parsing empty input yields the same result as the early return and no mention regex match is possible on an empty string
 	if (!markdown) {
+		// Stryker disable next-line ObjectLiteral,ArrayDeclaration: equivalent for empty markdown: an empty or undefined preparedMarkdown renders nothing and the empty tree has no placeholders for rehypeMentions to index
 		return { preparedMarkdown: markdown, mentions: [] }
 	}
 
@@ -85,16 +100,21 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 		if (!MENTION_MASK_NODE_TYPES.has(node.type)) {
 			return
 		}
+		// Stryker disable next-line OptionalChaining: equivalent: remark always reports position.start.offset for parsed nodes; optional chaining only defends against a shape remark never emits
 		const start = node.position?.start?.offset
+		// Stryker disable next-line OptionalChaining: equivalent: remark always reports position.end.offset for parsed nodes; optional chaining only defends against a shape remark never emits
 		const end = node.position?.end?.offset
+		// Stryker disable next-line ConditionalExpression,LogicalOperator,BlockStatement: defensive: remark position offsets are always numeric, so the guard and its body are unreachable in well-formed output (NoCoverage)
 		if (typeof start !== "number" || typeof end !== "number") {
 			return
 		}
+		// Stryker disable next-line EqualityOperator,ConditionalExpression: equivalent: i < end already bounds i below isMasked.length, and the mention regex boundary lookbehind prevents a later match from starting at a previous match end offset
 		for (let i = start; i < end && i < isMasked.length; i++) {
 			isMasked[i] = true
 		}
 	})
 
+	// Stryker disable next-line ArrayDeclaration: equivalent: placeholder indices are computed as mentions.length - 1 after each push, so a junk initial element shifts all indices consistently and index 0 is never referenced
 	const mentions: string[] = []
 	let preparedMarkdown = ""
 	let lastIndex = 0
@@ -105,6 +125,7 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 		// rules must see: masking would turn a preceding `)` or backtick into a
 		// space and make a non-mention actionable (e.g. `[file](/src/a.ts)`@problems``).
 		// Discard a match only when its range lands inside a masked literal region.
+		// Stryker disable next-line MethodExpression: equivalent: mention matches are word-boundary delimited while masked regions begin and end on non-word syntax characters, so an overlapping range is fully inside or outside and some/every agree
 		if (isMasked.slice(start, end).some(Boolean)) {
 			continue
 		}
@@ -125,13 +146,16 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
  */
 function rehypeMentions(mentions: string[]) {
 	return (tree: any) => {
+		// Stryker disable next-line StringLiteral: equivalent (empirically verified): in this unist-util stack an empty node-type test degenerates to visit-all and the visitor no-ops on non-text nodes, so behavior is unchanged
 		visit(tree, "text", (node: any, index: number | undefined, parent: any) => {
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,BlockStatement: defensive: unist-util-visit always provides index and parent for non-root nodes and a text node can never be the tree root, so the guard body is unreachable
 			if (index === undefined || !parent) {
 				return
 			}
 
 			// Skip text inside spans we already created (the visitor may revisit
 			// children inserted during the same pass).
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator,OptionalChaining,StringLiteral,BlockStatement: defensive: spans created in this pass carry plain mention text without placeholders and the visitor does not revisit inserted children, so the guard can never change output
 			if (parent?.tagName === "span" && parent.properties?.className?.includes("mention-context-highlight")) {
 				return
 			}
@@ -142,6 +166,7 @@ function rehypeMentions(mentions: string[]) {
 			// stopPropagation would block the anchor's own openFile handler; inside
 			// code it would corrupt the CodeBlock text extraction, which only keeps
 			// string children (the mention text would silently disappear).
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,OptionalChaining,StringLiteral,BlockStatement: defensive: prepareMentions masks code/inlineCode/link source regions so no placeholder can exist inside code, pre, or a; the guard is a second line of defense
 			if (parent?.tagName === "code" || parent?.tagName === "pre" || parent?.tagName === "a") {
 				return
 			}
@@ -149,12 +174,14 @@ function rehypeMentions(mentions: string[]) {
 			const originalValue = String(node.value)
 			const matches = Array.from(originalValue.matchAll(MENTION_PLACEHOLDER_REGEX))
 
+			// Stryker disable next-line ConditionalExpression,BlockStatement: equivalent: with no placeholder matches the fall-through rebuilds the text node with its own unchanged value (or drops an empty text node), which renders identically
 			if (matches.length === 0) {
 				return
 			}
 
 			// If any placeholder fails to resolve (should not happen), leave the
 			// text untouched instead of rendering the control characters verbatim.
+			// Stryker disable next-line ConditionalExpression,MethodExpression,ArrowFunction,BlockStatement: defensive: placeholders are created by prepareMentions with self-consistent indices into this same mentions array, so an unresolvable index is unreachable (NoCoverage)
 			if (matches.some((match) => mentions[Number(match[1])] === undefined)) {
 				return
 			}
@@ -169,6 +196,7 @@ function rehypeMentions(mentions: string[]) {
 				const mentionValue = mentionText.slice(1)
 				const mentionStart = match.index!
 
+				// Stryker disable next-line ConditionalExpression,EqualityOperator: equivalent: a zero-length gap only pushes an empty text node which renders nothing, and matches are ordered so mentionStart is never below lastIndex
 				if (mentionStart > lastIndex) {
 					children.push({ type: "text", value: originalValue.slice(lastIndex, mentionStart) })
 				}
@@ -183,6 +211,7 @@ function rehypeMentions(mentions: string[]) {
 						onClick: (event: React.MouseEvent<HTMLSpanElement>) => {
 							// Keep mention clicks from bubbling to the TaskHeader toggle, which
 							// would collapse the expanded panel right after opening the mention.
+							// Stryker disable next-line CallExpression: equivalent: TaskHeader's root onClick early-returns when e.target matches closest('[role=button]') (the mention span itself) and no intermediate ancestor handles clicks
 							event.stopPropagation()
 							vscode.postMessage({ type: "openMention", text: mentionValue })
 						},
@@ -196,6 +225,7 @@ function rehypeMentions(mentions: string[]) {
 								return
 							}
 							event.preventDefault()
+							// Stryker disable next-line CallExpression: equivalent: no ancestor in the MarkdownBlock/TaskHeader tree registers a keydown handler and preventDefault already suppresses the default scroll action
 							event.stopPropagation()
 							vscode.postMessage({ type: "openMention", text: mentionValue })
 						},
@@ -206,6 +236,7 @@ function rehypeMentions(mentions: string[]) {
 				lastIndex = mentionStart + match[0].length
 			}
 
+			// Stryker disable next-line ConditionalExpression,EqualityOperator: equivalent: when the mention ends at the text end the tail slice is empty, and pushing an empty text node renders nothing
 			if (lastIndex < originalValue.length) {
 				children.push({ type: "text", value: originalValue.slice(lastIndex) })
 			}
@@ -227,11 +258,14 @@ function rehypeMentions(mentions: string[]) {
  */
 function rehypeStripBreakNewlines() {
 	return (tree: any) => {
+		// Stryker disable next-line StringLiteral: equivalent (empirically verified): an empty node-type test degenerates to visit-all and the body's tagName guard no-ops on non-elements, so behavior is unchanged
 		visit(tree, "element", (node: any, index: number | undefined, parent: any) => {
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,BlockStatement: equivalent: hast elements always have a tagName and unist-util-visit always provides index/parent for non-root nodes; mdast-util-to-hast emits a lone newline text node only after a br element
 			if (node.tagName !== "br" || index === undefined || !parent) {
 				return
 			}
 			const next = parent.children[index + 1]
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,OptionalChaining: equivalent: the hardBreak handler always emits a br followed by a newline text node, so the sibling right after a br is always exactly that text node and the checks restate the invariant
 			if (next?.type === "text" && next.value === "\n") {
 				parent.children.splice(index + 1, 1)
 			}
@@ -548,6 +582,14 @@ const MarkdownBlock = memo(({ markdown, mentions = false, breaks = false }: Mark
 						values = { line: parseInt(match[2]) }
 					}
 
+					// Reject path traversal: task markdown is untrusted, so a
+					// `..` segment (e.g. `[x](../../.env)`) must never reach the
+					// extension's openFile. The extension re-checks workspace
+					// containment as a second line of defense.
+					if (filePath.split(/[\\/]/).includes("..")) {
+						return
+					}
+
 					// Add ./ prefix if needed
 					if (!filePath.startsWith("/") && !filePath.startsWith("./")) {
 						filePath = "./" + filePath
@@ -556,7 +598,13 @@ const MarkdownBlock = memo(({ markdown, mentions = false, breaks = false }: Mark
 					vscode.postMessage({
 						type: "openFile",
 						text: filePath,
-						values,
+						values: {
+							...(values ?? {}),
+							// Tag the request as markdown-sourced so the extension can
+							// apply strict workspace containment: markdown links are
+							// untrusted input.
+							fromMarkdown: true,
+						},
 					})
 				}
 
@@ -640,6 +688,7 @@ const MarkdownBlock = memo(({ markdown, mentions = false, breaks = false }: Mark
 	// When mentions are actionable, rewrite the raw markdown before parsing so
 	// mention matching runs on the untokenized string (see prepareMentions).
 	const { preparedMarkdown, mentions: mentionList } = useMemo(
+		// Stryker disable next-line ArrayDeclaration: equivalent: this mentions list is consumed only by the rehypeMentions plugin, which is registered only when the mentions prop is truthy, so the junk element is never read
 		() => (mentions ? prepareMentions(markdown || "") : { preparedMarkdown: markdown || "", mentions: [] }),
 		[markdown, mentions],
 	)

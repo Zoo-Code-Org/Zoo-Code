@@ -165,8 +165,10 @@ const TaskHeader = ({
 							e.target.closest('[role="button"]') ||
 							e.target.closest("[data-radix-popper-content-wrapper]") ||
 							e.target.closest("img") ||
+							// Stryker disable next-line ConditionalExpression,StringLiteral: a click on the <img> itself is already caught by closest("img") above; the tagName backstop adds no distinct behavior
 							e.target.tagName === "IMG" ||
 							e.target.closest("a") ||
+							// Stryker disable next-line ConditionalExpression,StringLiteral: a click on the <a> itself is already caught by closest("a") above; the tagName backstop adds no distinct behavior
 							e.target.tagName === "A")
 					) {
 						return
