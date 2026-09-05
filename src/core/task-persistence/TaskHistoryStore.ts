@@ -505,7 +505,7 @@ export class TaskHistoryStore {
 							mtimeMs !== undefined &&
 							Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
 						if (isLiveElsewhere) {
-							console.log(
+							console.warn(
 								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
 									`(mtime ${Math.round((Date.now() - mtimeMs) / 1000)}s ago) — owned by another window`,
 							)

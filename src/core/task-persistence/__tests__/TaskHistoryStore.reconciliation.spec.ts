@@ -390,7 +390,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	})
 
 	it("skips repair for active child with recent mtime (live in another window)", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const child = makeItem({
 			id: "child-live",
 			status: "active",
@@ -532,7 +532,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		//   1000) renders "300", while `* 1000`, `+ 1000`, `- 1000` and
 		//   `% 1000` all render a different second count.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		try {
 			const child = makeItem({
 				id: "child-boundary-live",
@@ -582,7 +582,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// `getChildFileMtimeMs`, so no filesystem millisecond precision is
 		// assumed.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		try {
 			const child = makeItem({
 				id: "child-epoch-mtime",
@@ -621,7 +621,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// exact future mtime is injected by the mocked `getChildFileMtimeMs`,
 		// independent of filesystem millisecond precision.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		try {
 			const child = makeItem({
 				id: "child-future-mtime",
@@ -657,7 +657,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// this one covers the ceil mutant. It also re-asserts the live side of
 		// the strict `<` boundary and the line-105 threshold mutants.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		try {
 			const child = makeItem({
 				id: "child-boundary-ceil",
@@ -1820,7 +1820,7 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 	})
 
 	it("does not repair a child that stays live across the periodic tick (no cross-window clobbering)", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const [parent, child] = makeDelegatedPair()
 		await seedItems([parent, child])
 
