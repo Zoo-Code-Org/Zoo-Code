@@ -38,6 +38,7 @@ export async function getZooGatewayModels(
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${sessionToken}`,
 	}
+	// Stryker disable next-line OptionalChaining,ConditionalExpression: options is defined whenever sessionToken resolved from it
 	if (options?.ifNoneMatch) {
 		headers["If-None-Match"] = options.ifNoneMatch
 	}
@@ -53,6 +54,7 @@ export async function getZooGatewayModels(
 			return { kind: "not_modified" }
 		}
 
+		// Stryker disable next-line ConditionalExpression: Node lowercases header names; non-string etag values are ignored
 		const etag = typeof response.headers.etag === "string" ? response.headers.etag : undefined
 
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)

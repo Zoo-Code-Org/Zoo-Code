@@ -1269,6 +1269,45 @@ describe("auth session cache", () => {
 		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 	})
 
+	it("keeps the session catalog fresh one minute into the TTL window", async () => {
+		// Kills: AUTH_SESSION_TTL_MS arithmetic mutants (5*60/1000, 5/60) that shrink TTL below 1 minute
+		vi.useFakeTimers()
+		try {
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options)
+			vi.advanceTimersByTime(60_000)
+			await getModels(options)
+
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("clearAuthSessionModelsForProvider does not clear a different auth-scoped provider", async () => {
+		// Kills: matchesProvider mutants that always-match or invert equality across providers
+		const kimiModels: ModelRecord = {
+			"kimi-for-coding": { maxTokens: 8192, contextWindow: 128000, supportsPromptCache: false },
+		}
+		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		mockGetKimiCodeModels.mockResolvedValue(kimiModels)
+
+		await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "zoo-session" })
+		await getModels({ provider: providerIdentifiers.kimiCode, apiKey: "kimi-session" })
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		expect(mockGetKimiCodeModels).toHaveBeenCalledTimes(1)
+
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+
+		await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "zoo-session" })
+		await getModels({ provider: providerIdentifiers.kimiCode, apiKey: "kimi-session" })
+
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetKimiCodeModels).toHaveBeenCalledTimes(1)
+	})
+
 	it("keeps prior catalog when a refresh returns empty", async () => {
 		mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels)).mockResolvedValueOnce(zooGatewayOk({}))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
@@ -1638,6 +1677,21 @@ describe("auth session cache", () => {
 		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
+	it("flushModels for non-auth providers deletes the shared memory cache entry", async () => {
+		// Kills: ConditionalExpression mutant that always takes the auth-scoped flush branch
+		const MockedNodeCache = vi.mocked(NodeCache)
+		const mockCache = vi.mocked(new MockedNodeCache())
+		const mockDel = mockCache.del
+		mockGetOpenRouterModels.mockResolvedValue({
+			"openrouter/model": { maxTokens: 8192, contextWindow: 128000, supportsPromptCache: false },
+		})
+
+		await getModels({ provider: providerIdentifiers.openrouter })
+		await flushModels({ provider: providerIdentifiers.openrouter })
+
+		expect(mockDel).toHaveBeenCalledWith("openrouter")
+	})
+
 	it("returns an empty catalog when revalidation is 304 and no session cache exists", async () => {
 		vi.useFakeTimers()
 		try {
@@ -1666,6 +1720,60 @@ describe("auth session cache", () => {
 		const result = await getModels(options)
 
 		expect(result).toEqual({})
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+			"Model Cache Empty Response",
+			expect.objectContaining({
+				provider: providerIdentifiers.zooGateway,
+				context: "getModels",
+				hasExistingCache: false,
+			}),
+		)
+	})
+
+	it("reports empty refreshModels context and existingCacheSize when a prior catalog exists", async () => {
+		mockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels)).mockResolvedValueOnce(zooGatewayOk({}))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await getModels(options)
+		await refreshModels(options)
+
+		expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+			"Model Cache Empty Response",
+			expect.objectContaining({
+				provider: providerIdentifiers.zooGateway,
+				context: "refreshModels",
+				hasExistingCache: true,
+				existingCacheSize: 1,
+			}),
+		)
+	})
+
+	it("re-arms empty-response telemetry after a 304 touch clears the throttle", async () => {
+		vi.useFakeTimers()
+		try {
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+				.mockResolvedValueOnce({ kind: "not_modified" })
+				.mockResolvedValueOnce(zooGatewayOk({}))
+
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+			await getModels(options)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+			await getModels(options) // 304 path deletes throttle via reportedEmptyModelResponse.delete
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+			await getModels(options) // empty response must report again
+
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+				"Model Cache Empty Response",
+				expect.objectContaining({
+					provider: providerIdentifiers.zooGateway,
+					context: "getModels",
+					hasExistingCache: true,
+				}),
+			)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("clearAuthSessionModelsForProvider removes compound cache keys", async () => {

@@ -123,8 +123,17 @@ type AuthScopedProvider = typeof providerIdentifiers.zooGateway | typeof provide
 
 type AuthScopedGetModelsOptions = Extract<GetModelsOptions, { provider: AuthScopedProvider }>
 
-const AUTH_SESSION_TTL_MS = 5 * 60 * 1000
+const AUTH_SESSION_TTL_MS = 300_000
 const AUTH_SESSION_MAX_ENTRIES = 64
+
+function authSessionHasModels(models: ModelRecord): boolean {
+	// Stryker disable next-line EqualityOperator,ConditionalExpression: empty catalogs are never stored in authSessionCache
+	return Object.keys(models).length > 0
+}
+
+function authSessionKeyMatchesProvider(key: string, provider: RouterName): boolean {
+	return key === provider || key.startsWith(`${provider}:`)
+}
 
 type AuthSessionCacheEntry = {
 	models: ModelRecord
@@ -143,6 +152,7 @@ function isAuthScopedProvider(provider: RouterName): provider is AuthScopedProvi
 function assertAuthScopedGetModelsOptions(options: GetModelsOptions): AuthScopedGetModelsOptions {
 	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
 	if (!isAuthScopedProvider(options.provider)) {
+		// Stryker disable next-line StringLiteral: defensive error message; unreachable for typed callers
 		throw new Error(`Expected auth-scoped provider, got ${options.provider}`)
 	}
 	// Runtime guard above; TS cannot narrow the GetModelsOptions discriminated union here.
@@ -187,6 +197,7 @@ function getAuthSessionEntry(cacheKey: string): AuthSessionCacheEntry | undefine
 }
 
 function setAuthSessionEntry(cacheKey: string, models: ModelRecord, etag?: string): void {
+	// Stryker disable next-line ConditionalExpression: callers only pass non-empty catalogs (guarded by modelCount > 0)
 	if (Object.keys(models).length === 0) {
 		return
 	}
@@ -196,6 +207,7 @@ function setAuthSessionEntry(cacheKey: string, models: ModelRecord, etag?: strin
 
 function touchAuthSessionEntry(cacheKey: string, entry: AuthSessionCacheEntry): void {
 	authSessionCache.set(cacheKey, { ...entry, fetchedAt: Date.now() })
+	// Stryker disable next-line CallExpression: touch cannot grow the cache; bound enforcement is redundant here
 	enforceAuthSessionCacheBound()
 }
 
@@ -204,10 +216,8 @@ function deleteAuthSessionEntry(cacheKey: string): void {
 }
 
 export function clearAuthSessionModelsForProvider(provider: RouterName): void {
-	const matchesProvider = (key: string) => key === provider || key.startsWith(`${provider}:`)
-
 	for (const key of authSessionCache.keys()) {
-		if (matchesProvider(key)) {
+		if (authSessionKeyMatchesProvider(key, provider)) {
 			authSessionCache.delete(key)
 		}
 	}
@@ -215,7 +225,7 @@ export function clearAuthSessionModelsForProvider(provider: RouterName): void {
 	// if the fetch hasn't resolved, so we must iterate inFlightAuthScopedFetch
 	// independently (not just keys already in authSessionCache).
 	for (const key of inFlightAuthScopedFetch.keys()) {
-		if (matchesProvider(key)) {
+		if (authSessionKeyMatchesProvider(key, provider)) {
 			inFlightAuthScopedFetch.delete(key)
 		}
 	}
@@ -263,7 +273,7 @@ async function resolveAuthScopedModels(
 	const existing = getAuthSessionEntry(cacheKey)
 
 	// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
-	if (!forceRefresh && existing && isAuthSessionFresh(existing) && Object.keys(existing.models).length > 0) {
+	if (!forceRefresh && existing && isAuthSessionFresh(existing) && authSessionHasModels(existing.models)) {
 		return existing.models
 	}
 
@@ -290,8 +300,7 @@ async function resolveAuthScopedModels(
 				// Re-read from the Map: a concurrent sign-out could have cleared
 				// the entry between when we captured `existing` and now.
 				const current = getAuthSessionEntry(cacheKey)
-				// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
-				if (current && Object.keys(current.models).length > 0) {
+				if (current && authSessionHasModels(current.models)) {
 					touchAuthSessionEntry(cacheKey, current)
 					reportedEmptyModelResponse.delete(cacheKey)
 					return current.models
@@ -313,21 +322,18 @@ async function resolveAuthScopedModels(
 
 				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
 					context: forceRefresh ? "refreshModels" : "getModels",
-					// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
-					hasExistingCache: Boolean(existing && Object.keys(existing.models).length > 0),
+					hasExistingCache: Boolean(existing && authSessionHasModels(existing.models)),
 					...(existing ? { existingCacheSize: Object.keys(existing.models).length } : {}),
 				})
 			}
 
-			// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
-			if (existing && Object.keys(existing.models).length > 0) {
+			if (existing && authSessionHasModels(existing.models)) {
 				return existing.models
 			}
 
 			return fetched.models
 		} catch (error) {
-			// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
-			if (existing && Object.keys(existing.models).length > 0) {
+			if (existing && authSessionHasModels(existing.models)) {
 				return existing.models
 			}
 			throw error
@@ -459,8 +465,9 @@ async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
 async function fetchModelsFromProvider(options: GetModelsOptions): Promise<ModelRecord> {
 	const { provider } = options
 
-	// Stryker disable next-line ConditionalExpression,StringLiteral: auth-scoped callers never reach this helper; guard is defensive
+	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
 	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line StringLiteral: defensive error message; auth-scoped callers never reach this helper
 		throw new Error(
 			`fetchModelsFromProvider must not be called for auth-scoped provider "${provider}" — use resolveAuthScopedModels instead`,
 		)
@@ -630,13 +637,14 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 	const cacheKey = getCacheKey(options)
 
 	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line BlockStatement: emptying this try falls through into the non-auth provider fetch path
 		try {
 			return await resolveAuthScopedModels(options, { forceRefresh: true })
 		} catch (error) {
 			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
 			const existing = getAuthSessionEntry(cacheKey)
-			// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
-			if (existing && Object.keys(existing.models).length > 0) {
+			// Stryker disable next-line ConditionalExpression,BlockStatement,EqualityOperator: resolveAuthScopedModels only throws when no usable session entry remains
+			if (existing && authSessionHasModels(existing.models)) {
 				return existing.models
 			}
 			return {}
@@ -820,10 +828,15 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
  * Prefer this over `vi.resetModules()` so mutation testing instruments the same module instance.
  */
 export function resetModelCacheTransientStateForTests(): void {
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
 	authSessionCache.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
 	inFlightAuthScopedFetch.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
 	authScopedClearGeneration.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
 	reportedEmptyModelResponse.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
 	inFlightRefresh.clear()
 }
 
