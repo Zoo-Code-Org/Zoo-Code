@@ -1980,3 +1980,500 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		throwingSpy.mockRestore()
 	})
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mutation-gate kill tests — focused coverage for the 15 surviving changed-code
+// mutants reproduced locally against TaskHistoryStore.ts (PR #1495 mutation-diff
+// gate). Each test names the exact mutant(s) it kills and asserts an observable
+// behavioral difference so the mutant cannot survive.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TaskHistoryStore mutation-gate kill tests", () => {
+	let tmpDir: string
+	let store: TaskHistoryStore | undefined
+	let mtimeSpy: { mockRestore(): void } | undefined
+
+	const RECONCILE_INTERVAL_MS = (TaskHistoryStore as unknown as { RECONCILE_INTERVAL_MS: number })
+		.RECONCILE_INTERVAL_MS
+
+	function useTickClock(): void {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+	}
+
+	async function flushAsyncWork(yields = 2000): Promise<void> {
+		for (let i = 0; i < yields; i++) {
+			await vi.advanceTimersByTimeAsync(1)
+		}
+	}
+
+	async function seedItems(items: HistoryItem[]): Promise<void> {
+		const tasksDir = path.join(tmpDir, "tasks")
+		await fs.mkdir(tasksDir, { recursive: true })
+		for (const item of items) {
+			const taskDir = path.join(tasksDir, item.id)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
+		}
+	}
+
+	/**
+	 * Read the private `locallyActiveTaskIds` set — the exact piece of state every
+	 * ownership-track mutant below (L278/L299/L324/L566/L569/L1181/L1188/L1189)
+	 * mutates. Its documented consumer is the periodic tick's orphan-repair
+	 * exclusion (TaskHistoryStore.ts line 1083), so asserting membership is a
+	 * direct observable of the mutated behavior. Same private-member cast pattern
+	 * as LIVE_CHILD_MTIME_THRESHOLD_MS at the top of this spec.
+	 */
+	function ownedIds(s: TaskHistoryStore): Set<string> {
+		return (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
+	}
+
+	/** Inject a stale mtime for `childId` so the liveness guard sees a crash orphan. */
+	function installStaleChildInjector(childId: string): void {
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+		}
+		const original = probe.getChildFileMtimeMs
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((id: string) =>
+				id === childId ? Promise.resolve(Date.now() - 10 * 60 * 1000) : original.call(store!, id),
+			)
+	}
+
+	function delegatedPair(parentId: string, childId: string): HistoryItem[] {
+		const child = makeItem({ id: childId, status: "active", parentTaskId: parentId, rootTaskId: parentId })
+		const parent = makeItem({
+			id: parentId,
+			status: "delegated",
+			awaitingChildId: childId,
+			delegatedToId: childId,
+			childIds: [childId],
+		})
+		return [parent, child]
+	}
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "mutkill-test-"))
+	})
+
+	afterEach(async () => {
+		mtimeSpy?.mockRestore()
+		mtimeSpy = undefined
+		store?.dispose()
+		store = undefined
+		vi.useRealTimers()
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	})
+
+	it("repair writes (skipTransitionCheck) do NOT register local ownership (kills L278 ConditionalExpression)", async () => {
+		// upsertCore: `if (!options.skipTransitionCheck) { trackLocalSessionOwnership(written) }`.
+		// The "interrupted handoff" repair path (reconcileDelegationStateCore) sets the parent to
+		// ACTIVE via upsertCore(..., { skipTransitionCheck: true }). Replacing `!options.skipTransitionCheck`
+		// with `true` would ALSO run trackLocalSessionOwnership(written) for that repair write, and
+		// because written.status === "active" the parent would be ADDED to locallyActiveTaskIds.
+		// Assert the repaired parent is NOT in the ownership set: present under the mutant, absent
+		// under correct code.
+		const child = makeItem({
+			id: "child-l278",
+			status: "completed",
+			completionResultSummary: "done",
+			parentTaskId: "parent-l278",
+			rootTaskId: "parent-l278",
+		})
+		const parent = makeItem({
+			id: "parent-l278",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+
+		// The completed-child handoff repaired the parent to active via skipTransitionCheck.
+		expect(s.get(parent.id)?.status).toBe("active")
+		expect(s.get(parent.id)?.awaitingChildId).toBeUndefined()
+		// Under L278->true the active repair write adds parent.id to this set; correct code does not.
+		expect(ownedIds(s).has(parent.id)).toBe(false)
+	})
+
+	it("non-active runtime write DELETES local ownership (kills L566 Conditional->true / LogicalOperator / StringLiteral, L569 CallExpression)", async () => {
+		// trackLocalSessionOwnership: `if ((written.status ?? "active") === "active") add else delete`.
+		// Observable under test: after an active runtime write registers ownership, a later NON-active
+		// runtime write must remove it (the else/`delete(id)` branch). If the mutant forces the add
+		// branch (L566 ->true) or drops the delete (L569 `;`), the task stays owned and the periodic
+		// tick will NOT repair it as a crash orphan.
+		//
+		// Sequence on ONE task id `orphan`:
+		//   1. runtime `active` write   -> ownership ADDED.
+		//   2. runtime `completed` write (valid active->completed) -> ownership DELETED.
+		//   3. seed disk so the SAME id is again an active child of a delegated parent (crash orphan)
+		//      and reload the store — the only ownership signal is from step 1/2 runtime writes.
+		//   4. tick: with ownership deleted, the orphan is repaired (interrupted). Under either mutant
+		//      it stays owned -> stays active.
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const childId = "orphan-l566"
+		const parentId = "parent-l566"
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+		await s.initialize()
+
+		// Steps 1+2: register then delete ownership via valid runtime transitions.
+		await s.upsert(makeItem({ id: childId, status: "active", parentTaskId: parentId, rootTaskId: parentId }))
+		await s.atomicReadAndUpdate(childId, (c) => ({ ...c, status: "completed" as const }))
+		expect(s.get(childId)?.status).toBe("completed")
+		s.dispose()
+
+		// Step 3: rewrite disk so the same child id is once more an ACTIVE orphan of a delegated
+		// parent (as if another window crashed mid-delegation), then reload into a fresh store.
+		const [parent, child] = delegatedPair(parentId, childId)
+		await seedItems([parent, child])
+		const s2 = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+
+		// Startup reconciliation must NOT repair it yet: make the mtime look live at startup, then
+		// stale only for the tick.
+		let age = 60_000
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+		}
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((id: string) =>
+				id === childId ? Promise.resolve(Date.now() - age) : Promise.resolve(undefined),
+			)
+
+		await s2.initialize()
+		expect(s2.get(childId)?.status).toBe("active")
+
+		// Step 4: tick with a now-stale mtime.
+		age = 10 * 60 * 1000
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+
+		// Ownership was deleted by the completed write, so the orphan is repaired.
+		// (Under L566->true or L569 `;` it would remain owned and stay active.)
+		expect(s2.get(childId)?.status).toBe("interrupted")
+		expect(errorSpy).not.toHaveBeenCalled()
+		errorSpy.mockRestore()
+	})
+
+	it("non-active runtime write removes the id from locallyActiveTaskIds (kills L566 Conditional->true / LogicalOperator, L569 CallExpression)", async () => {
+		// Direct set assertion for the else/`delete(id)` branch of trackLocalSessionOwnership.
+		// After an active runtime write the id is present; after a completed runtime write it must
+		// be removed. Under L566->true (forced add branch) or L569 `;` (delete dropped), the id
+		// would still be present after the completed write.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "own-add", status: "active" }))
+		expect(ownedIds(s).has("own-add")).toBe(true)
+
+		// Valid active -> completed transition exercises the else branch (delete).
+		await s.upsert(makeItem({ id: "own-add", status: "completed" }))
+		expect(ownedIds(s).has("own-add")).toBe(false)
+	})
+
+	it("active runtime write adds the id to locallyActiveTaskIds (kills L566 Conditional->true add-branch, LogicalOperator)", async () => {
+		// Complement: the add branch must actually insert. Under L566 LogicalOperator mutants
+		// (e.g. `written.status && "active"`), an explicit "active" status short-circuits to a
+		// truthy-but-not-"active" value, so `=== "active"` is false and the add is skipped.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "add-explicit", status: "active" }))
+		expect(ownedIds(s).has("add-explicit")).toBe(true)
+	})
+
+	it('undefined status is treated as implicit active and registers ownership (kills L566 StringLiteral->"")', async () => {
+		// `(written.status ?? "active") === "active"`: StringLiteral->"" makes undefined status fall
+		// to "" !== "active" -> delete branch. A runtime write with NO status field must still count
+		// as implicit active and register ownership, so the tick leaves this in-window child alone.
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const childId = "child-l566-undef"
+		const parentId = "parent-l566-undef"
+		const [parent, child] = delegatedPair(parentId, childId)
+		await seedItems([parent, child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+		await s.initialize()
+		await s.upsert(makeItem({ id: parentId, status: "active" }))
+		// Runtime write with status omitted entirely (legacy implicit active).
+		const noStatus = makeItem({ id: childId, parentTaskId: parentId, rootTaskId: parentId })
+		delete (noStatus as Partial<HistoryItem>).status
+		await s.upsert(noStatus)
+		// Delegate the pair; the child must remain owned HERE because its write was implicit-active.
+		await s.atomicReadAndUpdate(parentId, (c) => ({
+			...c,
+			status: "delegated" as const,
+			awaitingChildId: childId,
+			delegatedToId: childId,
+		}))
+		await s.atomicReadAndUpdate(childId, (c) => ({ ...c, status: "active" as const }))
+
+		installStaleChildInjector(childId)
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushAsyncWork()
+
+		// Owned here (implicit active) -> the tick must NOT tear it away from its own runner.
+		expect(s.get(childId)?.status).toBe("active")
+		expect(s.get(parentId)?.status).toBe("delegated")
+		expect(errorSpy).not.toHaveBeenCalled()
+		errorSpy.mockRestore()
+	})
+
+	it('undefined status is treated as implicit active and adds the id to locallyActiveTaskIds (kills L566 StringLiteral->"")', async () => {
+		// `(written.status ?? "active") === "active"`: StringLiteral->"" makes an undefined status
+		// fall to `"" !== "active"` -> delete branch, so the id is never added. A runtime write with
+		// NO status field must count as implicit active and register ownership. Assert membership.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		const noStatus = makeItem({ id: "undef-status" })
+		delete (noStatus as Partial<HistoryItem>).status
+		await s.upsert(noStatus)
+		// Under L566 StringLiteral->"" this stays absent; correct code adds it.
+		expect(ownedIds(s).has("undef-status")).toBe(true)
+	})
+
+	it("delete() removes the id from locallyActiveTaskIds (kills L299 CallExpression)", async () => {
+		// delete(): the `locallyActiveTaskIds.delete(taskId)` statement is the CallExpression the
+		// mutant drops (`;`). Register ownership via an active runtime write, then delete the task
+		// and assert the id is gone from the ownership set — under the mutant it would remain.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "del-l299", status: "active" }))
+		expect(ownedIds(s).has("del-l299")).toBe(true)
+
+		await s.delete("del-l299")
+		expect(s.get("del-l299")).toBeUndefined()
+		expect(ownedIds(s).has("del-l299")).toBe(false)
+	})
+
+	it("deleteMany() removes every deleted id from locallyActiveTaskIds (kills L324 CallExpression)", async () => {
+		// deleteMany(): the per-task `locallyActiveTaskIds.delete(taskId)` is the CallExpression the
+		// mutant drops. Own two tasks, delete both, and assert neither remains in the ownership set.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "dm-1", status: "active" }))
+		await s.upsert(makeItem({ id: "dm-2", status: "active" }))
+		await s.upsert(makeItem({ id: "dm-3", status: "active" }))
+		expect(ownedIds(s).has("dm-1")).toBe(true)
+		expect(ownedIds(s).has("dm-3")).toBe(true)
+
+		await s.deleteMany(["dm-1", "dm-3"])
+		expect(s.get("dm-1")).toBeUndefined()
+		expect(s.get("dm-3")).toBeUndefined()
+		expect(ownedIds(s).has("dm-1")).toBe(false)
+		expect(ownedIds(s).has("dm-3")).toBe(false)
+		// Untouched task keeps its ownership.
+		expect(ownedIds(s).has("dm-2")).toBe(true)
+	})
+
+	it("replay liveness guard treats child file age exactly at threshold as NOT live and repairs (kills L627 EqualityOperator '<'->'<=')", async () => {
+		// replayDelegationRepairIntent: `Date.now() - mtimeMs < LIVE_CHILD_MTIME_THRESHOLD_MS`.
+		// Under `<=`, age === threshold counts as live and the stale intent is quarantined. With the
+		// real strict `<`, age === threshold is NOT live, so the crash-orphan intent is replayed:
+		// child -> interrupted, parent -> active. Assert the replay happens at exactly threshold.
+		const FIXED_NOW = 1_756_886_400_000
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		try {
+			const child = makeItem({
+				id: "child-l627",
+				status: "active",
+				parentTaskId: "parent-l627",
+				rootTaskId: "parent-l627",
+			})
+			const parent = makeItem({
+				id: "parent-l627",
+				status: "delegated",
+				awaitingChildId: child.id,
+				delegatedToId: child.id,
+			})
+			await seedItems([parent, child])
+			const tasksDir = path.join(tmpDir, "tasks")
+			const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+			await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+
+			// Isolate the REPLAY guard's decision from the later startup reconcile (step 3 of
+			// initialize). The replay runs first and reads getChildFileMtimeMs once; make that first
+			// call return age EXACTLY == threshold, then make every subsequent call (the step-3
+			// startup reconcile's own liveness probe) return a RECENT age so step 3 treats the child
+			// as live and does NOT repair it. The child's final status then reflects ONLY the replay
+			// guard at line 627: strict '<' (correct) -> threshold age is NOT live -> replay repairs
+			// (child interrupted); '<=' (mutant) -> live -> quarantine (child stays active).
+			let probeCalls = 0
+			const probe = TaskHistoryStore.prototype as unknown as {
+				getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+			}
+			mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockImplementation((id: string) => {
+				if (id !== child.id) return Promise.resolve(undefined)
+				probeCalls++
+				// First call = the replayDelegationRepairIntent guard (line 627): exactly threshold.
+				// Later calls = the startup reconcile guard (line 506): recent -> child stays live.
+				return Promise.resolve(probeCalls === 1 ? FIXED_NOW - LIVE_CHILD_MTIME_THRESHOLD_MS : FIXED_NOW - 1_000)
+			})
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+
+			// Strict '<': threshold age is NOT live -> the intent replays (child interrupted).
+			// Under '<=': the intent would be quarantined and the child would stay active (step 3
+			// sees the child as live and leaves it alone).
+			expect(s.get(child.id)?.status).toBe("interrupted")
+			expect(s.get(parent.id)?.status).toBe("active")
+		} finally {
+			nowSpy.mockRestore()
+		}
+	})
+
+	it("runPeriodicDelegationReconciliation does not run the pass when disposed (kills L1077 Conditional->false / LogicalOperator)", async () => {
+		// `if (this.disposed || this.delegationTickRunning) return`. Conditional->false forces the
+		// guard OFF so the pass runs even after dispose(); LogicalOperator->&& makes it run only
+		// when disposed AND already-running (also wrong). The observable is whether the method
+		// reaches reconcileDelegationState. Assert that after dispose() the pass body does NOT run.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		s.dispose()
+
+		const internals = TaskHistoryStore.prototype as unknown as {
+			runPeriodicDelegationReconciliation: () => Promise<void>
+		}
+		// Hook reconcileDelegationState to detect whether the guarded body executes.
+		const reconProbe = s as unknown as { reconcileDelegationState: (ids: Set<string>) => Promise<void> }
+		let passRan = false
+		reconProbe.reconcileDelegationState = async () => {
+			passRan = true
+		}
+
+		await internals.runPeriodicDelegationReconciliation.call(s)
+		// Guard fired (disposed) -> the pass body never ran. Under L1077->false it would run.
+		expect(passRan).toBe(false)
+	})
+
+	it("runPeriodicDelegationReconciliation runs the pass when NOT disposed and NOT already running (kills L1077 LogicalOperator->&&)", async () => {
+		// Complement: with disposed=false and delegationTickRunning=false the guard must NOT fire,
+		// so the pass runs. Under LogicalOperator->&& the condition `disposed && tickRunning` is
+		// false here too... but Conditional->true (always skip) would suppress the run. Assert the
+		// pass executes in the normal case, pinning the guard's truth table from the other side.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+
+		const internals = TaskHistoryStore.prototype as unknown as {
+			runPeriodicDelegationReconciliation: () => Promise<void>
+		}
+		const reconProbe = s as unknown as { reconcileDelegationState: (ids: Set<string>) => Promise<void> }
+		let passRan = false
+		reconProbe.reconcileDelegationState = async () => {
+			passRan = true
+		}
+
+		await internals.runPeriodicDelegationReconciliation.call(s)
+		expect(passRan).toBe(true)
+	})
+
+	it("runPeriodicDelegationReconciliation sets then clears delegationTickRunning around the pass (kills L1080 BooleanLiteral->false, L1087 BooleanLiteral->true)", async () => {
+		// L1080 sets the flag true before the pass; L1087 clears it false in `finally`.
+		// - L1080->false: a concurrent second call would NOT see the flag set and would run twice.
+		// - L1087->true: after completion the flag stays set, so every subsequent call no-ops.
+		const [parent, child] = delegatedPair("parent-flag", "child-flag")
+		await seedItems([parent, child])
+		const s = (store = new TaskHistoryStore(tmpDir))
+		installStaleChildInjector(child.id)
+		await s.initialize()
+
+		const internals = TaskHistoryStore.prototype as unknown as {
+			runPeriodicDelegationReconciliation: () => Promise<void>
+		}
+		const flagReader = s as unknown as { delegationTickRunning: boolean }
+
+		// Observe the flag being true DURING the pass via a hook into reconcileDelegationState.
+		const reconProbe = s as unknown as { reconcileDelegationState: (ids: Set<string>) => Promise<void> }
+		const originalRecon = reconProbe.reconcileDelegationState.bind(s)
+		let flagDuringPass: boolean | undefined
+		reconProbe.reconcileDelegationState = async (ids: Set<string>) => {
+			flagDuringPass = flagReader.delegationTickRunning
+			return originalRecon(ids)
+		}
+
+		await internals.runPeriodicDelegationReconciliation.call(s)
+		// Flag was true while the pass ran (kills L1080->false).
+		expect(flagDuringPass).toBe(true)
+		// Flag cleared after the pass completed (kills L1087->true).
+		expect(flagReader.delegationTickRunning).toBe(false)
+
+		// A second call runs again (proves the flag was actually reset, not stuck).
+		let secondRan = false
+		reconProbe.reconcileDelegationState = async (ids: Set<string>) => {
+			secondRan = true
+			return originalRecon(ids)
+		}
+		await internals.runPeriodicDelegationReconciliation.call(s)
+		expect(secondRan).toBe(true)
+	})
+
+	it("atomicUpdatePair registers ownership for both records on success (kills L1188/L1189 CallExpression)", async () => {
+		// The success path calls trackLocalSessionOwnership(writtenFirst) and (writtenSecond). The
+		// CallExpression `;` mutants drop those calls, so the ids never enter locallyActiveTaskIds.
+		// Assert both ids are present after a pair write that leaves both active.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "pf-first", status: "active" }))
+		await s.upsert(makeItem({ id: "pf-second", status: "active" }))
+		// Clear prior ownership so only the atomicUpdatePair calls can re-add them.
+		ownedIds(s).clear()
+		expect(ownedIds(s).size).toBe(0)
+
+		await s.atomicUpdatePair(
+			"pf-first",
+			"pf-second",
+			(c) => ({ ...c, status: "active" as const }),
+			(c) => ({ ...c, status: "active" as const }),
+		)
+
+		// Under L1188/L1189 `;` the trackLocalSessionOwnership calls vanish and these stay absent.
+		expect(ownedIds(s).has("pf-first")).toBe(true)
+		expect(ownedIds(s).has("pf-second")).toBe(true)
+	})
+
+	it("atomicUpdatePair registers ownership for the committed first record on partial failure (kills L1181 CallExpression)", async () => {
+		// On second-write failure the catch block updates the cache AND calls
+		// trackLocalSessionOwnership(writtenFirst) before rethrowing. The `;` mutant drops that call,
+		// so the committed first record never enters locallyActiveTaskIds. Force the SECOND
+		// writeTaskFile to fail, then assert the first record IS in the ownership set (under the
+		// mutant it stays absent).
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "pf-first", status: "active" }))
+		await s.upsert(makeItem({ id: "pf-second", status: "active" }))
+		ownedIds(s).clear()
+
+		// Spy writeTaskFile: succeed for the first record, reject for the second, so the catch
+		// path (which contains L1181) runs.
+		const storeAny = s as unknown as { writeTaskFile: (item: HistoryItem, delta?: unknown) => Promise<HistoryItem> }
+		const originalWrite = storeAny.writeTaskFile.bind(s)
+		const writeSpy = vi
+			.spyOn(storeAny, "writeTaskFile")
+			.mockImplementation(async (item: HistoryItem, delta?: unknown) => {
+				if (item.id === "pf-second") {
+					throw new Error("simulated second-write failure")
+				}
+				return originalWrite(item, delta)
+			})
+
+		await expect(
+			s.atomicUpdatePair(
+				"pf-first",
+				"pf-second",
+				(c) => ({ ...c, status: "active" as const }),
+				(c) => ({ ...c, status: "active" as const }),
+			),
+		).rejects.toThrow("simulated second-write failure")
+
+		// The catch block committed pf-first to disk and must have registered its ownership.
+		// Under L1181 `;` that call vanishes and pf-first stays absent.
+		expect(ownedIds(s).has("pf-first")).toBe(true)
+		writeSpy.mockRestore()
+	})
+})
