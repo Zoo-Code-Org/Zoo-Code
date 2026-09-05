@@ -203,9 +203,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					betas.push("prompt-caching-2024-07-31")
 					const requestOptions: Anthropic.RequestOptions = {
 						headers: { "anthropic-beta": betas.join(",") },
-					}
-					if (abortSignal) {
-						requestOptions.signal = abortSignal
+						...(abortSignal && { signal: abortSignal }),
 					}
 					stream = await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
