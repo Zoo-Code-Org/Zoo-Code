@@ -1,5 +1,6 @@
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import * as fsReal from "fs"
 import * as os from "os"
 import * as path from "path"
 
@@ -10,6 +11,7 @@ import type { Mock } from "vitest"
 import {
 	providerIdentifiers,
 	RooCodeEventName,
+	type ClineMessage,
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
@@ -3702,6 +3704,402 @@ describe("Cline", () => {
 
 			expect(updateSpy).toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#ask] updateClineMessage failed:", boom)
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk persists and updates a non-last partial tool ask", async () => {
+			let updateSnapshot: Record<string, unknown> | undefined
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockImplementation(async (message) => {
+					updateSnapshot = { ...message }
+				})
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+				progressStatus: { text: "Generating…", icon: "sync" },
+			}
+
+			task.clineMessages.push(partialToolAsk)
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "say",
+				say: "error",
+				text: "intervening async message",
+			})
+
+			await task.finalizePartialToolAsk("partial tool message")
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(partialToolAsk.progressStatus).toBeUndefined()
+			// The ask is resolved by the system, not the user: stamp isAnswered so ChatView
+			// does not keep Save/Reject armed for a write that already failed.
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			expect(updateSnapshot?.partial).toBe(false)
+			expect(updateSnapshot?.progressStatus).toBeUndefined()
+			expect(updateSnapshot?.isAnswered).toBe(true)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk ignores non-matching partial tool asks when text is provided", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "ask",
+				ask: "tool",
+				text: "other partial tool message",
+				partial: true,
+			})
+
+			await task.finalizePartialToolAsk("target partial tool message")
+			await flushMicrotasks()
+
+			expect(task.clineMessages[0].partial).toBe(true)
+			expect(task.clineMessages[0].isAnswered).toBeUndefined()
+			expect(saveSpy).not.toHaveBeenCalled()
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk updates the latest partial tool ask when no text is provided", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const olderPartialToolAsk = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "older partial tool message",
+				partial: true,
+			}
+			const latestPartialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "latest partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(olderPartialToolAsk)
+			task.clineMessages.push(latestPartialToolAsk)
+
+			await task.finalizePartialToolAsk()
+			await flushMicrotasks()
+
+			expect(olderPartialToolAsk.partial).toBe(true)
+			expect(task.clineMessages[0].isAnswered).toBeUndefined()
+			expect(latestPartialToolAsk.partial).toBe(false)
+			// Only the finalized ask is stamped answered; the untouched one is not.
+			expect(task.clineMessages[1].isAnswered).toBe(true)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(latestPartialToolAsk)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk logs (instead of rejecting) when updateClineMessage rejects", async () => {
+			// Pins the .catch arm on updateClineMessage in finalizePartialToolAsk: the
+			// partial flag must already be persisted (saveClineMessages ran first), the
+			// failure must only be logged, and finalize must still resolve so callers'
+			// error-path cleanup (diff-view reset, resetTaskPartialState) always completes.
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockImplementation(async () => {
+					throw boom
+				})
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] updateClineMessage failed:",
+				boom,
+			)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk logs and skips the webview update when persistence fails", async () => {
+			// Pins the saveClineMessages-failure guard in finalizePartialToolAsk: while the
+			// on-disk record still carries partial: true, a webview-only update would diverge
+			// the two views (a later state resync or restart reload would flip the spinner
+			// back on). finalize must log, skip updateClineMessage, and still resolve so
+			// callers' error-path cleanup completes.
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(false)
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			// The in-memory message is still finalized so the ask is resolved by the system...
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// ...and the persistence failure is observed instead of silently swallowed.
+			expect(saveSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+			)
+			// ...but the webview update is skipped so disk (still partial: true) and
+			// webview do not diverge until the next save repairs the record.
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk still updates the webview when a later save stage fails", async () => {
+			// saveClineMessages() reports the message write separately from the metadata /
+			// task-history stages: the message array persisted while a later stage failed
+			// must still count as a successful save, so the finalized ask reaches the
+			// webview. A stale metadata entry is recomputed and re-emitted by the next
+			// saveClineMessages() call.
+			// saveTaskMessages() persists through safeWriteJson, which only mocks the
+			// fs/promises write helpers: its real fs.access gate and lockfile need the
+			// task directory to exist (uuid v7 is mocked to the fixed id below).
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const metadataFailure = new Error("task history stage failed")
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockRejectedValueOnce(metadataFailure)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// The message array persisted, so the webview update must run even though a
+			// later save stage failed...
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			// ...and the later-stage failure is observed instead of silently swallowed.
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
+
+			updateSpy.mockRestore()
+			historySpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
+			// Complements the later-stage-failure test above by failing the first save
+			// stage: with the real task directory removed, safeWriteJson's fs.access
+			// throws before anything is persisted, saveClineMessages() reports the
+			// failed message write, and the skip guard keeps the webview update off.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.rmSync(taskDir, { recursive: true, force: true })
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			// The in-memory ask is still finalized... (the flags are set before saving)
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// ...but the failed message write skips the webview update and surfaces
+			// both failure logs instead of updating on an unpersisted save.
+			expect(updateSpy).not.toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save Roo messages:", expect.any(Error))
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+			)
+
+			// Restore the directory for sibling tests that persist through the real fs.
+			fsReal.mkdirSync(taskDir, { recursive: true })
+
+			updateSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk ignores partial asks that match only some predicate clauses", async () => {
+			// Each distractor below satisfies a strict subset of the findLast predicate
+			// clauses, so no single clause (or a wrong combination of clauses) may select
+			// it: partial, type, ask kind, and text must all hold together.
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk: ClineMessage = {
+				ts: Date.now() - 4,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+			// Completed (non-partial) tool ask with the same text.
+			const completedToolAsk: ClineMessage = {
+				ts: Date.now() - 3,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: false,
+			}
+			// Partial ask of a different kind.
+			const nonToolAsk: ClineMessage = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "completion_result" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+			// Deliberately malformed: a "say" message that still carries the tool ask
+			// fields. The ClineMessage schema allows both fields, and the predicate under
+			// test reads message.ask on any message, so this is exactly the distractor
+			// the type clause exists to filter out.
+			const sayWithToolAsk: ClineMessage = {
+				ts: Date.now() - 1,
+				type: "say" as const,
+				say: "error" as const,
+				text: "partial tool message",
+				partial: true,
+				ask: "tool" as const,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+			task.clineMessages.push(completedToolAsk)
+			task.clineMessages.push(nonToolAsk)
+			task.clineMessages.push(sayWithToolAsk)
+
+			await task.finalizePartialToolAsk("partial tool message")
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(partialToolAsk.isAnswered).toBe(true)
+			// Every distractor stays untouched: only the genuine partial tool ask is
+			// finalized.
+			expect(completedToolAsk.partial).toBe(false)
+			expect(completedToolAsk.isAnswered).toBeUndefined()
+			expect(nonToolAsk.partial).toBe(true)
+			expect(nonToolAsk.isAnswered).toBeUndefined()
+			expect(sayWithToolAsk.partial).toBe(true)
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()
 		})

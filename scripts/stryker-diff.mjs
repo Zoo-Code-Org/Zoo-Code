@@ -293,12 +293,14 @@ export function parseVitestTestFiles(report, runRoot) {
 }
 
 export function preferDirectTestFiles(testFiles, sourceFiles) {
+	// Spec files follow the lowerCamel source-name convention (e.g.
+	// writeToFileTool.spec.ts for WriteToFileTool.ts), so match case-insensitively.
 	const sourceNames = sourceFiles.map((sourceFile) => path.posix.basename(sourceFile, path.posix.extname(sourceFile)))
 	const direct = testFiles.filter((testFile) => {
-		const testName = path.posix.basename(testFile)
+		const testName = path.posix.basename(testFile).toLowerCase()
 		return sourceNames.some(
 			(sourceName) =>
-				testName.startsWith(`${sourceName}.`) && /\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
+				testName.startsWith(`${sourceName.toLowerCase()}.`) && /\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
 		)
 	})
 	return direct.length > 0 ? direct : testFiles
