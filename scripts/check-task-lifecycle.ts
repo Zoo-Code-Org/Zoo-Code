@@ -11,7 +11,24 @@ import {
 
 const taskIds = ["parent", "child-a", "child-b"] as const
 type TaskId = (typeof taskIds)[number]
-type ModelState = Record<TaskId, HistoryItem | undefined>
+type TaskMap = Record<TaskId, HistoryItem | undefined>
+
+/**
+ * Abstract cross-window liveness flag. Production decides whether an active
+ * child awaited by a delegated parent belongs to another live window by
+ * comparing the child's history-file mtime against a 5-minute threshold
+ * (`TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS`). The model never reads
+ * wall-clock time: `liveElsewhere[child]` is true exactly when the modeled
+ * mtime is "recent" (the child is owned by another window) and false when it
+ * is "stale" or unreadable (the child is a crash orphan, repaired
+ * conservatively).
+ */
+type LivenessMap = Record<TaskId, boolean>
+
+interface ModelState {
+	tasks: TaskMap
+	liveElsewhere: LivenessMap
+}
 
 interface Transition {
 	name: string
@@ -25,17 +42,55 @@ interface TraceStep {
 
 const MAX_DEPTH = 12
 const MAX_STATES = 10_000
-const expectedActions = ["delegate", "interrupt", "complete", "abandon"] as const
+const expectedActions = [
+	"delegate",
+	"interrupt",
+	"complete",
+	"abandon",
+	"markLiveElsewhere",
+	"expireLiveElsewhere",
+	"reconcileStartup",
+] as const
 const semanticLandmarks = {
 	"interrupted-child-redelegation": (state: ModelState) =>
-		state.parent?.status === "delegated" &&
-		state.parent.awaitingChildId === "child-b" &&
-		state["child-a"]?.status === "interrupted",
+		state.tasks.parent?.status === "delegated" &&
+		state.tasks.parent.awaitingChildId === "child-b" &&
+		state.tasks["child-a"]?.status === "interrupted",
 	"nested-delegation": (state: ModelState) =>
-		state.parent?.status === "delegated" &&
-		state.parent.awaitingChildId === "child-a" &&
-		state["child-a"]?.status === "delegated" &&
-		state["child-a"].awaitingChildId === "child-b",
+		state.tasks.parent?.status === "delegated" &&
+		state.tasks.parent.awaitingChildId === "child-a" &&
+		state.tasks["child-a"]?.status === "delegated" &&
+		state.tasks["child-a"].awaitingChildId === "child-b",
+	// Proves the fix for the cross-window misrepair bug (PR #1495): startup
+	// reconciliation must leave a delegated parent awaiting an active child
+	// owned by another window untouched. The reconciliation skip is an identity
+	// transition, so this landmark plus the universal transition invariant in
+	// `checkTransitionInvariants` (no reachable action may clear the link while
+	// the child is active and live-elsewhere) formalizes "not repaired".
+	"live-child-preserved-across-reconciliation": (state: ModelState) => {
+		const parent = state.tasks.parent
+		if (parent?.status !== "delegated" || !parent.awaitingChildId) {
+			return false
+		}
+		const childId = parent.awaitingChildId as TaskId
+		return state.tasks[childId]?.status === "active" && state.liveElsewhere[childId]
+	},
+	// Proves the repair half of the same reconciliation outcome still works: a
+	// non-live (crash-orphan) active child is repaired to interrupted while the
+	// parent resumes as active with both delegation pointers cleared. This
+	// state class is only reachable through `reconcileStartup`, never through
+	// `interrupt`/`abandon`/`complete`.
+	"crash-orphan-repaired-by-startup": (state: ModelState) => {
+		const parent = state.tasks.parent
+		const child = state.tasks["child-a"]
+		return (
+			parent?.status === "active" &&
+			!parent.awaitingChildId &&
+			child?.status === "interrupted" &&
+			child.parentTaskId === "parent" &&
+			!state.liveElsewhere["child-a"]
+		)
+	},
 } satisfies Record<string, (state: ModelState) => boolean>
 
 function task(id: TaskId, parentTaskId?: TaskId): HistoryItem {
@@ -55,24 +110,29 @@ function task(id: TaskId, parentTaskId?: TaskId): HistoryItem {
 }
 
 function initialState(): ModelState {
-	return { parent: task("parent"), "child-a": undefined, "child-b": undefined }
+	return {
+		tasks: { parent: task("parent"), "child-a": undefined, "child-b": undefined },
+		liveElsewhere: { parent: false, "child-a": false, "child-b": false },
+	}
 }
 
 function replace(state: ModelState, ...updates: HistoryItem[]): ModelState {
-	const next = { ...state }
-	for (const update of updates) next[update.id as TaskId] = update
-	return next
+	const tasks = { ...state.tasks }
+	for (const update of updates) tasks[update.id as TaskId] = update
+	return { tasks, liveElsewhere: state.liveElsewhere }
 }
 
 function transitions(state: ModelState): Transition[] {
 	const result: Transition[] = []
 	for (const parentId of taskIds) {
-		const parent = state[parentId]
+		const parent = state.tasks[parentId]
 		if (!parent) continue
 
 		for (const childId of taskIds) {
-			if (childId === parentId || state[childId]) continue
-			const awaitedStatus = parent.awaitingChildId ? state[parent.awaitingChildId as TaskId]?.status : undefined
+			if (childId === parentId || state.tasks[childId]) continue
+			const awaitedStatus = parent.awaitingChildId
+				? state.tasks[parent.awaitingChildId as TaskId]?.status
+				: undefined
 			if (parent.status !== "active" && !(parent.status === "delegated" && awaitedStatus === "interrupted")) {
 				continue
 			}
@@ -85,10 +145,17 @@ function transitions(state: ModelState): Transition[] {
 	}
 
 	for (const childId of taskIds) {
-		const child = state[childId]
+		const child = state.tasks[childId]
 		if (!child?.parentTaskId) continue
-		const parent = state[child.parentTaskId as TaskId]
+		const parent = state.tasks[child.parentTaskId as TaskId]
 		if (!parent) continue
+
+		// A child marked live-elsewhere is owned by another window's session, so
+		// window-local lifecycle operations cannot target it until the flag
+		// expires. `checkTransitionInvariants` re-proves universally that no
+		// reachable action clears the parent's link while the child is active
+		// and live-elsewhere.
+		if (state.liveElsewhere[childId]) continue
 
 		if (parent.status === "delegated" && parent.awaitingChildId === child.id && child.status === "active") {
 			const interrupted = interruptDelegatedChild(parent, child)
@@ -115,13 +182,77 @@ function transitions(state: ModelState): Transition[] {
 			})
 		}
 	}
+
+	// Cross-window startup reconciliation (`TaskHistoryStore.reconcileDelegationStateCore`,
+	// run at initialize() and on every periodic tick). For every delegated parent
+	// whose awaited child is active, the outcome is decided solely by the
+	// abstract liveness flag:
+	//  - stale/unreadable mtime (not live-elsewhere) → repair: child → interrupted
+	//    via the shared production reducer, parent → active with both delegation
+	//    pointers cleared. The parent-side rewrite is modeled directly here
+	//    because production performs it as administrative recovery through
+	//    `upsertCore(..., { skipTransitionCheck: true })`, outside the shared
+	//    `taskLifecycle.ts` reducers; the child side matches `interruptDelegatedChild`.
+	//  - recent mtime (live-elsewhere) → skip: the pre-fix bug repaired exactly
+	//    this child, breaking the delegation link so the subtask's completion
+	//    could no longer return to the parent. The fix `continue`s, so the
+	//    action stays observable (it still marks `reconcileStartup` as executed)
+	//    while intentionally not producing a new state.
+	for (const parentId of taskIds) {
+		const parent = state.tasks[parentId]
+		if (parent?.status !== "delegated" || !parent.awaitingChildId) continue
+		const childId = parent.awaitingChildId as TaskId
+		const child = state.tasks[childId]
+		if (child?.status !== "active") continue
+		if (state.liveElsewhere[childId]) {
+			result.push({ name: `reconcileStartup(${parentId})`, next: state })
+			continue
+		}
+		const repairedParent: HistoryItem = {
+			...parent,
+			status: "active",
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		}
+		const repairedChild = interruptDelegatedChild(parent, child)
+		result.push({
+			name: `reconcileStartup(${parentId})`,
+			next: replace(state, repairedParent, repairedChild),
+		})
+	}
+
+	// Model actions for the abstract mtime liveness flag: `markLiveElsewhere`
+	// represents another window actively persisting the child (recent mtime),
+	// and `expireLiveElsewhere` represents the owning window going quiet past
+	// the threshold (e.g. it crashed after startup skipped its repair), after
+	// which the next `reconcileStartup` repairs it as a crash orphan. Only
+	// active tasks that are themselves children can toggle the flag; the root
+	// slot has no owning window in this bug class, and restricting the flag to
+	// child sessions keeps the liveness dimension from multiplying the state
+	// space beyond the explicit budget.
+	for (const id of taskIds) {
+		const current = state.tasks[id]
+		if (current?.status !== "active" || !current.parentTaskId) continue
+		const id2 = id as TaskId
+		if (!state.liveElsewhere[id2]) {
+			result.push({
+				name: `markLiveElsewhere(${id2})`,
+				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: true } },
+			})
+		} else {
+			result.push({
+				name: `expireLiveElsewhere(${id2})`,
+				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: false } },
+			})
+		}
+	}
 	return result
 }
 
 function invariantViolations(state: ModelState): string[] {
 	const violations: string[] = []
 	for (const id of taskIds) {
-		const current = state[id]
+		const current = state.tasks[id]
 		if (!current) continue
 
 		if (current.status === "delegated") {
@@ -129,7 +260,7 @@ function invariantViolations(state: ModelState): string[] {
 				violations.push(`${id}: delegated task must point to exactly one awaited child`)
 				continue
 			}
-			const child = state[current.awaitingChildId as TaskId]
+			const child = state.tasks[current.awaitingChildId as TaskId]
 			if (!child || child.parentTaskId !== id || child.status === "completed") {
 				violations.push(`${id}: awaited child must exist, link back, and not be completed`)
 			}
@@ -141,7 +272,7 @@ function invariantViolations(state: ModelState): string[] {
 		}
 
 		if (current.parentTaskId && current.status !== "interrupted") {
-			const parent = state[current.parentTaskId as TaskId]
+			const parent = state.tasks[current.parentTaskId as TaskId]
 			if (current.status !== "completed" && parent?.awaitingChildId !== id) {
 				violations.push(`${id}: active or delegated linked child must be the child its parent awaits`)
 			}
@@ -155,14 +286,14 @@ function invariantViolations(state: ModelState): string[] {
 				break
 			}
 			ancestors.add(cursor)
-			cursor = state[cursor as TaskId]?.parentTaskId
+			cursor = state.tasks[cursor as TaskId]?.parentTaskId
 		}
 	}
 	return violations
 }
 
 function canonical(state: ModelState): string {
-	return JSON.stringify(taskIds.map((id) => state[id] ?? null))
+	return JSON.stringify([taskIds.map((id) => state.tasks[id] ?? null), taskIds.map((id) => state.liveElsewhere[id])])
 }
 
 function formatCounterexample(message: string, trace: TraceStep[]): string {
@@ -183,10 +314,29 @@ function formatCounterexample(message: string, trace: TraceStep[]): string {
 function checkTransitionInvariants(previous: ModelState, transition: Transition): string[] {
 	const violations: string[] = []
 	for (const id of taskIds) {
-		const before = previous[id]
-		const after = transition.next[id]
+		const before = previous.tasks[id]
+		const after = transition.next.tasks[id]
 		if (before?.status === "completed" && canonicalTask(before) !== canonicalTask(after)) {
 			violations.push(`${id}: completed task changed after ${transition.name}`)
+			continue
+		}
+		// Cross-window ownership guard (PR #1495 bug class): no transition may
+		// clear a delegated parent's link to a child that is active AND marked
+		// live-elsewhere. Pre-fix, startup reconciliation repaired exactly these
+		// children; the mtime guard skips them, so the only enabled successor for
+		// such a state is the identity reconciliation. Any future model edit
+		// that reintroduces a link-clearing transition on a live-elsewhere child
+		// fails here with the shortest causal trace.
+		if (before?.status === "delegated" && before.awaitingChildId) {
+			const childId = before.awaitingChildId as TaskId
+			const childBefore = previous.tasks[childId]
+			if (childBefore?.status === "active" && previous.liveElsewhere[childId]) {
+				if (after?.status !== "delegated" || after.awaitingChildId !== childId) {
+					violations.push(
+						`${id}: ${transition.name} cleared delegation to active live-elsewhere child ${childId}`,
+					)
+				}
+			}
 		}
 	}
 	return violations
