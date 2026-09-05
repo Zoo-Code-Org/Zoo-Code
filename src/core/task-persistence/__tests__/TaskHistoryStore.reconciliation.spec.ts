@@ -486,6 +486,98 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		warnSpy.mockRestore()
 	})
 
+	it("routes an undefined getChildFileMtimeMs through initialize() and still repairs the active child", async () => {
+		// End-to-end companion to the direct-helper probe test above ("returns
+		// the file mtime for an existing child and undefined for a missing
+		// one"): that test covers the helper in isolation; this one feeds the
+		// same `undefined` return through `reconcileDelegationStateCore` via
+		// `initialize()` and asserts the conservative-repair contract fires —
+		// an unreadable mtime must NOT be treated as "live in another window",
+		// the child is repaired to interrupted and the parent back to active.
+		// A mutant that flips the `mtimeMs !== undefined` short-circuit (e.g.
+		// treating missing mtimes as live) would skip the repair and break the
+		// status assertions and the negative skip-log assertion below.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		// Private-instance access follows the documented double-assertion
+		// pattern used by the probe test and the repair-intent replay tests.
+		const internals = store as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const originalGetChildFileMtimeMs = internals.getChildFileMtimeMs
+		const mtimeUndefinedSpy = vi
+			.spyOn(internals, "getChildFileMtimeMs")
+			.mockImplementation((childId: string) =>
+				childId === "child-undef-mtime"
+					? Promise.resolve(undefined)
+					: originalGetChildFileMtimeMs.call(store, childId),
+			)
+		try {
+			const child = makeItem({
+				id: "child-undef-mtime",
+				status: "active",
+				parentTaskId: "parent-undef-mtime",
+				rootTaskId: "parent-undef-mtime",
+				childIds: ["grandchild-undef-mtime"],
+			})
+			const parent = makeItem({
+				id: "parent-undef-mtime",
+				status: "delegated",
+				awaitingChildId: "child-undef-mtime",
+				delegatedToId: "child-undef-mtime",
+				childIds: ["child-undef-mtime"],
+			})
+			// The child file is seeded normally (fresh mtime, and present in
+			// persistedActiveIds); only the stat probe is forced to undefined,
+			// simulating a file that races away or is unreadable at the moment
+			// the liveness guard checks it.
+			await seedItems([parent, child])
+
+			await store.initialize()
+
+			// Spy must have been exercised through the real reconciliation path.
+			expect(mtimeUndefinedSpy).toHaveBeenCalledWith("child-undef-mtime")
+
+			const repairedChild = store.get("child-undef-mtime")
+			const repairedParent = store.get("parent-undef-mtime")
+			expect(repairedChild).toMatchObject({
+				id: "child-undef-mtime",
+				status: "interrupted",
+				parentTaskId: "parent-undef-mtime",
+				rootTaskId: "parent-undef-mtime",
+				childIds: ["grandchild-undef-mtime"],
+			})
+			expect(repairedParent).toMatchObject({ id: "parent-undef-mtime", status: "active" })
+			expect(repairedParent?.awaitingChildId).toBeUndefined()
+			expect(repairedParent?.delegatedToId).toBeUndefined()
+
+			// Persisted state must match the cache, same as the stale-mtime test.
+			const tasksDir = path.join(tmpDir, "tasks")
+			const persistedChild = JSON.parse(
+				await fs.readFile(path.join(tasksDir, "child-undef-mtime", "history_item.json"), "utf8"),
+			) as HistoryItem
+			const persistedParent = JSON.parse(
+				await fs.readFile(path.join(tasksDir, "parent-undef-mtime", "history_item.json"), "utf8"),
+			) as HistoryItem
+			expect(persistedChild).toMatchObject({
+				id: "child-undef-mtime",
+				status: "interrupted",
+				parentTaskId: "parent-undef-mtime",
+				rootTaskId: "parent-undef-mtime",
+			})
+			expect(persistedParent).toMatchObject({ id: "parent-undef-mtime", status: "active" })
+			expect(persistedParent.awaitingChildId).toBeUndefined()
+			expect(persistedParent.delegatedToId).toBeUndefined()
+
+			// Repair ran and the liveness-skip branch was NOT taken.
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("child-undef-mtime"))
+			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
+		} finally {
+			mtimeUndefinedSpy.mockRestore()
+			warnSpy.mockRestore()
+		}
+	})
+
 	it("repairs when child file age is exactly the liveness threshold (strict '<' boundary)", async () => {
 		// Kills the TaskHistoryStore.ts line-481 EqualityOperator mutant `<=`:
 		// under `<=`, age === threshold (300000 ms) would count as live and the
