@@ -1126,6 +1126,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (this.userMessageContent.length === 0) {
 			return true
 		}
+		if (this.abort) {
+			return false
+		}
 
 		// CRITICAL: Wait for the assistant message to be saved to API history first.
 		// Without this, tool_result blocks would appear BEFORE tool_use blocks in the
@@ -1139,17 +1142,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		//
 		// The assistantMessageSavedToHistory flag is:
 		// - Reset to false at the start of each API request
-		// - Set to true after the assistant message is saved in recursivelyMakeClineRequests
+		// - Set to true after the initial write or a bounded persistence retry succeeds
 		if (!this.assistantMessageSavedToHistory) {
-			await pWaitFor(() => this.assistantMessageSavedToHistory || this.abort, {
-				interval: 50,
-				timeout: 30_000, // 30 second timeout as safety net
-			}).catch(() => {
-				// If timeout or abort, log and proceed anyway to avoid hanging
+			try {
+				if (!(await this.waitForCurrentAssistantMessagePersistence())) {
+					return false
+				}
+			} catch (error) {
 				console.warn(
-					`[Task#${this.taskId}] flushPendingToolResultsToHistory: timed out waiting for assistant message to be saved`,
+					`[Task#${this.taskId}] flushPendingToolResultsToHistory: failed to persist assistant message`,
+					error,
 				)
-			})
+				return false
+			}
 		}
 
 		// If task was aborted while waiting, don't flush

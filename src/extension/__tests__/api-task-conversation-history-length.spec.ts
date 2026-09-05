@@ -21,6 +21,7 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 	let providerListeners: Map<string, (...args: unknown[]) => unknown>
 
 	beforeEach(() => {
+		// API logging only needs appendLine in this suite; a full OutputChannel fake would obscure the tested contract.
 		mockOutputChannel = {
 			appendLine: vi.fn(),
 		} as unknown as vscode.OutputChannel

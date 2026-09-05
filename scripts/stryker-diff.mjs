@@ -296,16 +296,18 @@ export function preferDirectTestFiles(testFiles, sourceFiles) {
 	const sourceNames = sourceFiles.map((sourceFile) =>
 		path.posix.basename(sourceFile, path.posix.extname(sourceFile)).toLowerCase(),
 	)
-	const direct = testFiles.filter((testFile) => {
+	const isDirectMatch = (testFile, sourceName) => {
 		const testName = path.posix.basename(testFile)
 		const normalizedTestName = testName.toLowerCase()
-		return sourceNames.some(
-			(sourceName) =>
-				(normalizedTestName.startsWith(`${sourceName}.`) || normalizedTestName.startsWith(`${sourceName}-`)) &&
-				/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
+		return (
+			(normalizedTestName.startsWith(`${sourceName}.`) || normalizedTestName.startsWith(`${sourceName}-`)) &&
+			/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName)
 		)
-	})
-	return direct.length > 0 ? direct : testFiles
+	}
+	if (sourceNames.some((sourceName) => !testFiles.some((testFile) => isDirectMatch(testFile, sourceName)))) {
+		return testFiles
+	}
+	return testFiles.filter((testFile) => sourceNames.some((sourceName) => isDirectMatch(testFile, sourceName)))
 }
 
 export function shouldUseVitestRelated(packageEntry) {

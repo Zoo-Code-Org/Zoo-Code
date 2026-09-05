@@ -3490,7 +3490,7 @@ describe("Cline", () => {
 
 			expect(result).toBe(true)
 			expect(safeSpy).toHaveBeenCalled()
-			expect(resetPersistenceSpy).toHaveBeenCalled()
+			expect(resetPersistenceSpy).toHaveBeenCalledTimes(1)
 			expect(ensureModelFetched).toHaveBeenCalled()
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})

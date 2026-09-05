@@ -862,6 +862,67 @@ describe("Task persistence", () => {
 				vi.useRealTimers()
 			}
 		})
+
+		it("retries failed assistant persistence before flushing dependent tool results", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages
+				.mockRejectedValueOnce(new Error("initial assistant write failed"))
+				.mockResolvedValue(undefined)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "tool_use", id: "tool-1", name: "read_file", input: {} }],
+				})
+				task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+
+				const flushing = task.flushPendingToolResultsToHistory()
+				await vi.runAllTimersAsync()
+
+				await expect(flushing).resolves.toBe(true)
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(3)
+				expect(task.assistantMessageSavedToHistory).toBe(true)
+				expect(task.userMessageContent).toEqual([])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not flush dependent tool results when assistant persistence retries are exhausted", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages.mockRejectedValue(new Error("assistant write failed"))
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "tool_use", id: "tool-1", name: "read_file", input: {} }],
+				})
+				task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+
+				const flushing = task.flushPendingToolResultsToHistory()
+				await vi.runAllTimersAsync()
+
+				await expect(flushing).resolves.toBe(false)
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(4)
+				expect(task.assistantMessageSavedToHistory).toBe(false)
+				expect(task.userMessageContent).toHaveLength(1)
+			} finally {
+				mockSaveApiMessages.mockResolvedValue(undefined)
+				vi.useRealTimers()
+			}
+		})
 	})
 
 	// ── saveClineMessages ────────────────────────────────────────────────

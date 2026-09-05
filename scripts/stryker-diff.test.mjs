@@ -231,6 +231,12 @@ describe("preferDirectTestFiles", () => {
 			related.slice(0, 3),
 		)
 	})
+
+	it("keeps all related tests when any changed source lacks a direct test", () => {
+		const related = ["src/__tests__/indirect-a.spec.ts", "src/__tests__/B.spec.ts"]
+
+		assert.deepEqual(preferDirectTestFiles(related, ["src/A.ts", "src/B.ts"]), related)
+	})
 })
 
 describe("shouldUseVitestRelated", () => {
