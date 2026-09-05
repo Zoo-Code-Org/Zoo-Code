@@ -129,6 +129,13 @@ describe("FireworksHandler", () => {
 			outputPrice: 3.96,
 			cacheReadsPrice: 0.044,
 		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-flash-vision-exp" as const,
+			contextWindow: 1_048_576,
+			inputPrice: 0.22,
+			outputPrice: 0.66,
+			cacheReadsPrice: 0.007,
+		},
 	])(
 		"should expose newly added model $modelId",
 		({ modelId, contextWindow, inputPrice, outputPrice, cacheReadsPrice }) => {
@@ -148,6 +155,16 @@ describe("FireworksHandler", () => {
 			expect(handlerWithModel.getModel().id).toBe(modelId)
 		},
 	)
+
+	it("should expose vision support for DeepSeek V4 Flash Vision Exp", () => {
+		const model = fireworksModels["accounts/fireworks/models/deepseek-v4-flash-vision-exp"]
+
+		expect(model).toMatchObject({
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsMaxTokens: true,
+		})
+	})
 
 	it("should return Kimi K2 Instruct model with correct configuration", () => {
 		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
