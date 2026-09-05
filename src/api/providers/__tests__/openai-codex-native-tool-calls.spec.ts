@@ -551,6 +551,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								usage: { input_tokens: 1, output_tokens: 1 },
 							},
 						}
+						// Arrives after the abort resolves the pause: the loop guard must break before
+						// processing the completed event and this delta.
+						yield { type: "response.text.delta", delta: "post-abort" }
 					},
 				}
 			})
@@ -577,8 +580,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			controller.abort()
 
 			const chunks = await collected
-			// Exactly the pre-abort delta: the completed event only arrives once the abort resolves
-			// the transport's pause, so the loop must break before processing it.
+			// Exactly the pre-abort delta: the completed event and the post-abort delta only arrive
+			// once the abort resolves the transport's pause, so the loop guard must break before
+			// processing either.
 			expect(chunks).toEqual([{ type: "text", text: "test" }])
 
 			expect(mockCreate).toHaveBeenCalled()

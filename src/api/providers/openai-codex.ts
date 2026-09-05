@@ -650,7 +650,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		effectiveSessionId: string,
-		abortSignal?: AbortSignal,
+		abortSignal: AbortSignal,
 	): ApiStream {
 		// Per the implementation guide: route to Codex backend with Bearer token
 		const url = `${CODEX_API_BASE_URL}/responses`
@@ -735,7 +735,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			// The caller cancelled, so this is not a transport fault: hand back the shared abort
 			// contract instead of reporting the caller's own cancellation to telemetry or wrapping it
 			// as a connection failure.
-			if (abortSignal?.aborted) {
+			if (abortSignal.aborted) {
 				throw createAbortError(this.providerName)
 			}
 
@@ -756,7 +756,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	private async *handleStreamResponse(
 		body: ReadableStream<Uint8Array>,
 		model: OpenAiCodexModel,
-		abortSignal?: AbortSignal,
+		abortSignal: AbortSignal,
 	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
@@ -765,7 +765,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 		try {
 			while (true) {
-				if (abortSignal?.aborted) {
+				if (abortSignal.aborted) {
 					break
 				}
 
@@ -1023,7 +1023,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			// The caller cancelled while the fallback stream was being read: that is not a
 			// stream-processing failure, so hand back the shared abort contract instead of reporting
 			// the caller's own cancellation to telemetry.
-			if (abortSignal?.aborted) {
+			if (abortSignal.aborted) {
 				throw createAbortError(this.providerName)
 			}
 
