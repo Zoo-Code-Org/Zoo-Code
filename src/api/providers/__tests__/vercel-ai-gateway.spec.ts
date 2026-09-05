@@ -439,7 +439,19 @@ describe("VercelAiGatewayHandler", () => {
 			["array support", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low", "high"] }, "high"],
 			["unsupported effort", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low"] }, undefined],
 			["disabled effort", { reasoningEffort: "disable" }, { supportsReasoningEffort: ["low"] }, undefined],
+			[
+				"listed disable sentinel",
+				{ reasoningEffort: "disable" },
+				{ supportsReasoningEffort: ["disable", "low"] },
+				undefined,
+			],
 			["none effort", { reasoningEffort: "none" }, { supportsReasoningEffort: ["low"] }, undefined],
+			[
+				"listed none sentinel",
+				{ reasoningEffort: "none" },
+				{ supportsReasoningEffort: ["none", "low"] },
+				undefined,
+			],
 			[
 				"disabled toggle",
 				{ reasoningEffort: "high", enableReasoningEffort: false },
@@ -790,6 +802,7 @@ describe("VercelAiGatewayHandler", () => {
 					max_completion_tokens: 64000,
 				}),
 			)
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
 		})
 
 		it("uses custom temperature for completion", async () => {

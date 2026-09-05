@@ -117,6 +117,12 @@ describe("LiteLLMHandler", () => {
 				"medium",
 			],
 			[
+				"listed disable sentinel",
+				"disable",
+				{ supportsReasoningEffort: ["disable", "medium"], reasoningEffort: "medium" },
+				"medium",
+			],
+			[
 				"unset configured effort",
 				undefined,
 				{ supportsReasoningEffort: ["low", "medium"], reasoningEffort: "medium" },
@@ -509,6 +515,26 @@ describe("LiteLLMHandler", () => {
 			])
 		})
 
+		it.each([
+			[false, true, false],
+			[true, false, false],
+			[true, true, true],
+		] as const)(
+			"omits manual cache controls for enabled=%s supported=%s Responses=%s",
+			async (litellmUsePromptCache, supportsPromptCache, requiresResponsesApi) => {
+				handler = new LiteLLMHandler({ ...mockOptions, litellmUsePromptCache })
+				vi.spyOn(handler, "fetchModel").mockResolvedValue({
+					id: "cache-model",
+					info: { ...litellmDefaultModelInfo, supportsPromptCache, requiresResponsesApi },
+				})
+				mockCreate.mockReturnValue({ withResponse: vi.fn().mockResolvedValue({ data: asyncStreamFrom([]) }) })
+
+				await collectStream(handler.createMessage("System", [{ role: "user", content: "Hello" }]))
+
+				expect(mockCreate.mock.calls[0][0].messages[0]).toEqual({ role: "system", content: "System" })
+			},
+		)
+
 		it.each(["streaming", "completion"] as const)("omits temperature for metadata-disabled %s", async (mode) => {
 			handler = new LiteLLMHandler({ ...mockOptions, modelTemperature: 0.7 })
 			vi.spyOn(handler, "fetchModel").mockResolvedValue({
@@ -526,6 +552,38 @@ describe("LiteLLMHandler", () => {
 
 			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
+
+		it.each(["streaming", "completion"] as const)(
+			"uses standard token, temperature, and reasoning fields for ordinary %s",
+			async (mode) => {
+				handler = new LiteLLMHandler({ ...mockOptions })
+				vi.spyOn(handler, "fetchModel").mockResolvedValue({
+					id: "custom-model",
+					info: {
+						...litellmDefaultModelInfo,
+						maxTokens: 4_096,
+						supportsTemperature: true,
+						supportsReasoningEffort: false,
+					},
+				})
+
+				if (mode === "streaming") {
+					mockCreate.mockReturnValue({
+						withResponse: vi.fn().mockResolvedValue({ data: asyncStreamFrom([]) }),
+					})
+					await collectStream(handler.createMessage("System", []))
+				} else {
+					mockCreate.mockResolvedValue({ choices: [{ message: { content: "Response" } }] })
+					await handler.completePrompt("Hello")
+				}
+
+				const request = mockCreate.mock.calls[0][0]
+				expect(request.max_tokens).toBe(4_096)
+				expect(request).not.toHaveProperty("max_completion_tokens")
+				expect(request.temperature).toBe(0)
+				expect(request).not.toHaveProperty("reasoning_effort")
+			},
+		)
 
 		it("uses safe Astra parameters for completePrompt", async () => {
 			handler = new LiteLLMHandler({

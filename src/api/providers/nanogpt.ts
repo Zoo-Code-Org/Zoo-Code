@@ -31,9 +31,6 @@ type NanoGptCachingRequest = { caching?: true }
 
 const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
-const isNanoGptAstra = (modelId: string): boolean =>
-	modelId === "openai/gpt-6-astra" || modelId === "openai/gpt-6-astra-pro"
-
 function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
 	const configured = options.reasoningEffort
 	const reasoningDisabled =
@@ -95,7 +92,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const { id: canonicalModelId, info } = await this.fetchModel()
-		const isAstra = isNanoGptAstra(canonicalModelId)
+		const isAstra = canonicalModelId === "openai/gpt-6-astra" || canonicalModelId === "openai/gpt-6-astra-pro"
 		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & NanoGptCachingRequest = {
 			model: this.getRequestModelId(canonicalModelId),
 			messages: [

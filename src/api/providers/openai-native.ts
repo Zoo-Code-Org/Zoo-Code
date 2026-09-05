@@ -127,11 +127,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 		// If total input tokens are missing but we have details, derive from them
 		let totalInputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
-		if (
-			totalInputTokens === 0 &&
-			inputDetails &&
-			(cachedFromDetails > 0 || missFromDetails > 0 || writesFromDetails > 0)
-		) {
+		if (totalInputTokens === 0 && inputDetails) {
 			totalInputTokens = cachedFromDetails + missFromDetails + writesFromDetails
 		}
 

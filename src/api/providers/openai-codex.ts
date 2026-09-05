@@ -42,9 +42,6 @@ const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
 
-const isResponsesLiteModel = (modelId: OpenAiCodexModelId): boolean =>
-	modelId === LUNA_MODEL_ID || modelId === "gpt-6-astra"
-
 /**
  * A refusal is streamed as text so the chat still shows why the model declined, but it is not part
  * of the answer: the Responses API keeps refusals out of `output_text`. `completePrompt` relies on
@@ -275,9 +272,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		const baseRequestBody = this.buildRequestBody(model, formattedInput, systemPrompt, reasoningEffort, metadata)
 		let requestBody: any
 		try {
-			requestBody = isResponsesLiteModel(model.id)
-				? this.buildResponsesLiteRequestBody(baseRequestBody, effectiveSessionId)
-				: baseRequestBody
+			requestBody =
+				model.id === LUNA_MODEL_ID || model.id === "gpt-6-astra"
+					? this.buildResponsesLiteRequestBody(baseRequestBody, effectiveSessionId)
+					: baseRequestBody
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			TelemetryService.instance.captureException(
@@ -1263,7 +1261,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		effectiveSessionId: string,
 		accountId?: string | null,
 	): Record<string, string> {
-		const usesResponsesLite = isResponsesLiteModel(model.id)
+		const usesResponsesLite = model.id === LUNA_MODEL_ID || model.id === "gpt-6-astra"
 		return {
 			originator: "zoo-code",
 			session_id: effectiveSessionId,

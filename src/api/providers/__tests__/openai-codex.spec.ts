@@ -130,6 +130,25 @@ describe("OpenAiCodexHandler.getModel", () => {
 		expect(handler["getReasoningEffort"](unsupportedModel)).toBeUndefined()
 	})
 
+	it("omits a required Codex fallback when it is the none sentinel", () => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-6-astra",
+			reasoningEffort: "high",
+			enableReasoningEffort: false,
+		})
+		const model = handler.getModel()
+		const invalidModel = {
+			...model,
+			info: {
+				...model.info,
+				supportsReasoningEffort: ["none", "high"] as ModelInfo["supportsReasoningEffort"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "none" as const,
+			},
+		}
+		expect(handler["getReasoningEffort"](invalidModel)).toBeUndefined()
+	})
+
 	it.each([
 		["high", "medium", "high"],
 		[undefined, "medium", "medium"],

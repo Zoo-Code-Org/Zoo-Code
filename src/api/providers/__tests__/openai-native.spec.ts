@@ -220,6 +220,38 @@ describe("OpenAiNativeHandler", () => {
 			expect(currentHandler["getReasoningEffort"](unsupportedModel)).toBeUndefined()
 		})
 
+		it("does not send the disable sentinel even if required model metadata lists it", () => {
+			const currentHandler = new OpenAiNativeHandler({ ...mockOptions, reasoningEffort: "disable" })
+			const model = currentHandler.getModel()
+			const requiredModel = {
+				...model,
+				info: {
+					...model.info,
+					supportsReasoningEffort: ["disable", "medium"] as ModelInfo["supportsReasoningEffort"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium" as const,
+				},
+			}
+
+			expect(currentHandler["getReasoningEffort"](requiredModel)).toBe("medium")
+		})
+
+		it("uses a scalar fallback when required reasoning cannot be disabled", () => {
+			const currentHandler = new OpenAiNativeHandler({ ...mockOptions, reasoningEffort: "disable" })
+			const model = currentHandler.getModel()
+			const requiredModel = {
+				...model,
+				info: {
+					...model.info,
+					supportsReasoningEffort: true,
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium" as const,
+				},
+			}
+
+			expect(currentHandler["getReasoningEffort"](requiredModel)).toBe("medium")
+		})
+
 		it.each([
 			["high", "medium", "high"],
 			[undefined, "medium", "medium"],

@@ -210,7 +210,14 @@ describe("NanoGptHandler", () => {
 		["array support", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low", "high"] }, "high"],
 		["unsupported effort", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low"] }, undefined],
 		["disabled effort", { reasoningEffort: "disable" }, { supportsReasoningEffort: ["low"] }, undefined],
+		[
+			"listed disable sentinel",
+			{ reasoningEffort: "disable" },
+			{ supportsReasoningEffort: ["disable", "low"] },
+			undefined,
+		],
 		["none effort", { reasoningEffort: "none" }, { supportsReasoningEffort: ["low"] }, undefined],
+		["listed none sentinel", { reasoningEffort: "none" }, { supportsReasoningEffort: ["none", "low"] }, undefined],
 		[
 			"disabled toggle",
 			{ reasoningEffort: "high", enableReasoningEffort: false },
@@ -437,6 +444,12 @@ describe("NanoGptHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("omits temperature when it is not configured", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt")
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+		})
+
 		it.each([
 			["supported model", "temperature-model", undefined, 0.7],
 			["metadata-disabled model", "temperature-model", false, undefined],
