@@ -325,6 +325,61 @@ describe("TerminalRegistry", () => {
 			expect(terminal.running).toBe(false)
 		})
 
+		it("delivers buffered output and releases the stream iterator when an active terminal closes", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			let nextCall = 0
+			let signalWaitingForNext: () => void = () => {}
+			const waitingForNext = new Promise<void>((resolve) => {
+				signalWaitingForNext = resolve
+			})
+			const returnSpy = vi.fn().mockResolvedValue({ done: true, value: undefined })
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]() {
+					return {
+						next: vi.fn(() => {
+							nextCall++
+							if (nextCall === 1) {
+								return Promise.resolve({ done: false, value: "\x1b]633;C\x07hello\n" })
+							}
+
+							signalWaitingForNext()
+							return new Promise<IteratorResult<string>>(() => {})
+						}),
+						return: returnSpy,
+					}
+				},
+			}
+			const execution = {
+				commandLine: { value: "printf hello" },
+				read: vi.fn().mockReturnValue(stream),
+			} as unknown as vscode.TerminalShellExecution
+			const executeCommand = vi.fn().mockReturnValue(execution)
+			Object.defineProperty(terminal.terminal, "shellIntegration", {
+				value: { executeCommand },
+				configurable: true,
+			})
+			const completedSpy = vi.fn()
+			const result = terminal.runCommand("printf hello", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			})
+
+			await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledOnce())
+			await startHandler({ terminal: terminal.terminal, execution })
+			await waitingForNext
+			closeHandler(terminal.terminal)
+			await result
+
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("hello\n", expect.any(TerminalProcess))
+			expect(returnSpy).toHaveBeenCalledOnce()
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
+		})
+
 		it("unblocks a process when its terminal closes while shell integration is initializing (#1362)", async () => {
 			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
 			const completedSpy = vi.fn()
@@ -348,6 +403,7 @@ describe("TerminalRegistry", () => {
 
 			expect(completionSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 			expect(terminal.process).toBeUndefined()
 			expect(terminal.busy).toBe(false)
@@ -388,7 +444,35 @@ describe("TerminalRegistry", () => {
 			expect(executeCommand).not.toHaveBeenCalled()
 			expect(completionSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
+		})
+
+		it("marks closure explicitly and completes only once when exitStatus remains undefined", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const result = terminal.runCommand("git status", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+
+			expect(terminal.terminal.exitStatus).toBeUndefined()
+			terminal.handleClose()
+			terminal.handleClose()
+			await result
+
+			expect(terminal.isClosed()).toBe(true)
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, expect.any(TerminalProcess))
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
 		})
 
 		it("does not finalize a process twice when its terminal closes after the end event", async () => {
