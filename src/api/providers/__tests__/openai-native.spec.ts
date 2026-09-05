@@ -137,6 +137,35 @@ describe("OpenAiNativeHandler", () => {
 	})
 
 	describe("createMessage", () => {
+		function makeOpenStreamFetchMock() {
+			type OpenStream = {
+				controller?: ReadableStreamDefaultController<Uint8Array>
+				fetchSignal: AbortSignal
+			}
+			const openStreams: OpenStream[] = []
+			const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+				const entry: OpenStream = { fetchSignal: options?.signal as AbortSignal }
+				const body = new ReadableStream<Uint8Array>({
+					start: (controller) => {
+						entry.controller = controller
+					},
+				})
+				openStreams.push(entry)
+				return Promise.resolve({
+					ok: true,
+					body,
+				})
+			})
+			const requireController = (index: number): ReadableStreamDefaultController<Uint8Array> => {
+				const entry = openStreams[index]
+				if (!entry?.controller) {
+					throw new Error("expected fallback fetch to have started")
+				}
+				return entry.controller
+			}
+			return { openStreams, mockFetch, requireController }
+		}
+
 		it("shapes GPT-6 Astra requests for Responses tool calling", () => {
 			const astraHandler = new OpenAiNativeHandler({
 				...mockOptions,
@@ -495,33 +524,8 @@ describe("OpenAiNativeHandler", () => {
 			// the SECOND request's controller.
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
-			type OpenStream = {
-				controller?: ReadableStreamDefaultController<Uint8Array>
-				fetchSignal: AbortSignal
-			}
-			const openStreams: OpenStream[] = []
-			const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
-				const entry: OpenStream = { fetchSignal: options?.signal as AbortSignal }
-				const body = new ReadableStream<Uint8Array>({
-					start: (controller) => {
-						entry.controller = controller
-					},
-				})
-				openStreams.push(entry)
-				return Promise.resolve({
-					ok: true,
-					body,
-				})
-			})
+			const { openStreams, mockFetch, requireController } = makeOpenStreamFetchMock()
 			global.fetch = mockFetch as typeof fetch
-
-			const requireController = (index: number): ReadableStreamDefaultController<Uint8Array> => {
-				const entry = openStreams[index]
-				if (!entry?.controller) {
-					throw new Error("expected fallback fetch to have started")
-				}
-				return entry.controller
-			}
 
 			const firstController = new AbortController()
 			const secondController = new AbortController()
@@ -605,35 +609,6 @@ describe("OpenAiNativeHandler", () => {
 
 			function textChunks(chunks: ApiStreamChunk[]): ApiStreamTextChunk[] {
 				return chunks.filter((chunk): chunk is ApiStreamTextChunk => chunk.type === "text")
-			}
-
-			function makeOpenStreamFetchMock() {
-				type OpenStream = {
-					controller?: ReadableStreamDefaultController<Uint8Array>
-					fetchSignal: AbortSignal
-				}
-				const openStreams: OpenStream[] = []
-				const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
-					const entry: OpenStream = { fetchSignal: options?.signal as AbortSignal }
-					const body = new ReadableStream<Uint8Array>({
-						start: (controller) => {
-							entry.controller = controller
-						},
-					})
-					openStreams.push(entry)
-					return Promise.resolve({
-						ok: true,
-						body,
-					})
-				})
-				const requireController = (index: number): ReadableStreamDefaultController<Uint8Array> => {
-					const entry = openStreams[index]
-					if (!entry?.controller) {
-						throw new Error("expected fallback fetch to have started")
-					}
-					return entry.controller
-				}
-				return { openStreams, mockFetch, requireController }
 			}
 
 			it("should register a once-only abort listener on the external signal and detach it when the SDK request completes", async () => {
@@ -1045,9 +1020,14 @@ describe("OpenAiNativeHandler", () => {
 						expect(call[0]).toBe("abort")
 						expect(call[2]).toEqual({ once: true })
 					}
-					for (const call of removeSpy.mock.calls) {
-						expect(call[0]).toBe("abort")
-					}
+					const registered = addSpy.mock.calls.map(([, listener]) => listener)
+					const removed = removeSpy.mock.calls.map(([type, listener]) => {
+						expect(type).toBe("abort")
+						return listener
+					})
+					// Each bridge must detach its own listener exactly once.
+					expect(new Set(removed).size).toBe(2)
+					expect(new Set(removed)).toEqual(new Set(registered))
 					expect(handler["abortController"]).toBeUndefined()
 				} finally {
 					addSpy.mockRestore()
