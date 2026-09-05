@@ -257,6 +257,13 @@ export const parseOpenRouterModel = ({
 		supportedParameters: supportedParameters ? supportedParameters.filter(isModelParameter) : undefined,
 	}
 
+	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-pro") {
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
+		modelInfo.requiredReasoningEffort = true
+		modelInfo.reasoningEffort = "medium"
+		modelInfo.supportsTemperature = false
+	}
+
 	if (OPEN_ROUTER_REASONING_BUDGET_MODELS.has(id)) {
 		modelInfo.supportsReasoningBudget = true
 	}
@@ -297,6 +304,15 @@ export const parseOpenRouterModel = ({
 	// Set claude-opus-4.6 model to use the correct configuration
 	if (id === "anthropic/claude-opus-4.6") {
 		modelInfo.maxTokens = anthropicModels["claude-opus-4-6"].maxTokens
+	}
+
+	// Set claude-fable-5.1 model to use the correct Anthropic configuration.
+	// OpenRouter uses a dotted version suffix, unlike Anthropic's direct API.
+	if (id === "anthropic/claude-fable-5.1") {
+		modelInfo.maxTokens = anthropicModels["claude-fable-5-1"].maxTokens
+		modelInfo.supportsReasoningBudget = true
+		modelInfo.supportsReasoningBinary = true
+		modelInfo.supportsTemperature = false
 	}
 
 	// Set claude-fable-5 model to use the correct Anthropic configuration
