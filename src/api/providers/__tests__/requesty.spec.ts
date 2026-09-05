@@ -14,7 +14,7 @@ import type { ModelRecord } from "@roo-code/types"
 import { RequestyHandler } from "../requesty"
 import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
-import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { withSettleGuard } from "../../../test-utils/settle-guard"
@@ -262,7 +262,156 @@ describe("RequestyHandler", () => {
 					stream_options: { include_usage: true },
 					temperature: 0,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
+		})
+
+		it("forwards the settings reasoningEffort to the Requesty request", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"coding/claude-4-sonnet": {
+					maxTokens: 8192,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsReasoningEffort: true,
+					inputPrice: 3,
+					outputPrice: 15,
+					description: "Claude 4 Sonnet",
+				},
+			}))
+			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "c1", choices: [{ delta: { content: "ok" } }] }]))
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "coding/claude-4-sonnet",
+					reasoningEffort: "high",
+				}),
+			)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }]),
+			)
+			expect(chunks).toHaveLength(1)
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "coding/claude-4-sonnet", reasoning_effort: "high" }),
+				expect.anything(),
+			)
+		})
+
+		it("omits reasoning_effort when the settings effort is outside the model's supported set", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"coding/claude-4-sonnet": {
+					maxTokens: 8192,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsReasoningEffort: ["low", "medium", "high"],
+					inputPrice: 3,
+					outputPrice: 15,
+					description: "Claude 4 Sonnet",
+				},
+			}))
+			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "c1", choices: [{ delta: { content: "ok" } }] }]))
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "coding/claude-4-sonnet",
+					reasoningEffort: "minimal",
+				}),
+			)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }]),
+			)
+			expect(chunks).toHaveLength(1)
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+			// "minimal" is outside ["low", "medium", "high"], so the key must be absent entirely.
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+		})
+
+		it("forwards the task metadata into the requesty-specific request block", async () => {
+			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "c1", choices: [{ delta: { content: "ok" } }] }]))
+			const handler = new RequestyHandler(mockOptions)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }], {
+					taskId: "task-123",
+					mode: "plan",
+				}),
+			)
+			expect(chunks).toHaveLength(1)
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					requesty: { trace_id: "task-123", extra: { mode: "plan" } },
+				}),
+				expect.anything(),
+			)
+		})
+
+		it("tolerates chunks with empty choices before the first delta", async () => {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "c1", choices: [] },
+					{ id: "c2", choices: [{ delta: { content: "after empty" } }] },
+				]),
+			)
+			const handler = new RequestyHandler(mockOptions)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }]),
+			)
+			expect(chunks).toEqual([{ type: "text", text: "after empty" }])
+		})
+
+		it("streams tool_call_partial chunks when the tool call has no function payload", async () => {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "c1",
+						choices: [{ delta: { tool_calls: [{ index: 0, id: "call_123" }] } }],
+					},
+				]),
+			)
+			const handler = new RequestyHandler(mockOptions)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }]),
+			)
+			expect(chunks).toEqual([{ type: "tool_call_partial", index: 0, id: "call_123" }])
+		})
+
+		it("emits the usage chunk once when a final chunk carries no usage", async () => {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "c1", choices: [{ delta: { content: "text" } }] },
+					{ id: "c2", choices: [{ delta: {} }], usage: { prompt_tokens: 3, completion_tokens: 4 } },
+					{ id: "c3", choices: [{ delta: {} }] },
+				]),
+			)
+			const handler = new RequestyHandler(mockOptions)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }]),
+			)
+			expect(chunks).toHaveLength(2)
+			expect(chunks[0]).toEqual({ type: "text", text: "text" })
+			expect(chunks[1]).toMatchObject({ type: "usage", inputTokens: 3, outputTokens: 4 })
+		})
+
+		it("does not emit a usage chunk when the stream reports no usage", async () => {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([{ id: "c1", choices: [{ delta: { content: "only text" } }] }]),
+			)
+			const handler = new RequestyHandler(mockOptions)
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test" }]),
+			)
+			expect(chunks).toEqual([{ type: "text", text: "only text" }])
 		})
 
 		it("uses adaptive thinking for Claude Fable 5 when reasoning is enabled", async () => {
@@ -295,6 +444,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -328,6 +478,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -361,6 +512,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -394,6 +546,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -532,6 +685,7 @@ describe("RequestyHandler", () => {
 						]),
 						tool_choice: "auto",
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 
@@ -612,6 +766,273 @@ describe("RequestyHandler", () => {
 					outputTokens: 20,
 				})
 			})
+		})
+		it("rejects with AbortError when the external signal is pre-aborted", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "response" } }] }]))
+
+			const controller = new AbortController()
+			controller.abort()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			await expect(
+				handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata).next(),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			// The fast-fail guard must reject before model discovery starts.
+			const { getModels } = await import("../fetchers/modelCache")
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
+		})
+
+		it("rejects with AbortError when the external signal aborts during deferred model discovery", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Model discovery is deferred: capture the resolver and settle it only at the end of
+			// the test, so the abort deterministically lands while the lookup is still pending.
+			// The barrier below (instead of a fixed sleep) synchronizes on the lookup starting.
+			let resolveModelLookup!: (models: ModelRecord) => void
+			const deferredModelLookup = new Promise<ModelRecord>((resolve) => {
+				resolveModelLookup = resolve
+			})
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void nextPromise.catch(() => {})
+			await withSettleGuard(lookupStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(nextPromise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// Settle the abandoned lookup so it cannot outlive the test.
+			resolveModelLookup({})
+		})
+
+		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
+				// Emulate the OpenAI SDK: the first chunk arrives, then the in-flight
+				// response body rejects once the request signal aborts.
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "first" } }] }
+					await new Promise<void>((resolve) => {
+						expect(requestSignal).toBeDefined()
+						if (requestSignal!.aborted) {
+							resolve()
+						} else {
+							requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})()
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of generator) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(withSettleGuard(iteration)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(chunks).toContainEqual({ type: "text", text: "first" })
+		})
+		it("rejects with AbortError when the stream ends normally after a mid-stream abort (swallowed AbortError)", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Simulate openai@5.23.2: the SDK stream iterator swallows the mid-stream
+			// AbortError and returns normally instead of throwing, so the catch in
+			// createMessage never runs. The per-request signal (second argument) is the
+			// one the SDK observes.
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+					// Wait for the abort instead of polling: the iterator ends gracefully
+					// (no throw) once the request signal aborts.
+					await new Promise<void>((resolve) => {
+						expect(requestSignal).toBeDefined()
+						if (requestSignal!.aborted) {
+							resolve()
+						} else {
+							requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+				})()
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value).toEqual({ type: "text", text: "partial" })
+			// Abort mid-stream, after the first chunk has been yielded.
+			controller.abort()
+
+			// The stream ended normally, but createMessage must still reject with AbortError.
+			await expect(withSettleGuard(generator.next())).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+		it("does not emit buffered chunks after a mid-stream abort (iterator keeps delivering)", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Simulate openai@5.23.2 delivering a buffered chunk after the abort has already
+			// fired, then ending the iterator normally (no throw).
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+					// Wait for the abort instead of polling: the buffered chunk is delivered
+					// once the request signal aborts.
+					await new Promise<void>((resolve) => {
+						expect(requestSignal).toBeDefined()
+						if (requestSignal!.aborted) {
+							resolve()
+						} else {
+							requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					yield { id: "2", choices: [{ delta: { content: "after-abort" } }] }
+				})()
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value).toEqual({ type: "text", text: "partial" })
+			// Abort mid-stream, after the first chunk has been yielded.
+			controller.abort()
+
+			// The buffered second chunk must not be emitted, and the generator must reject
+			// with the provider AbortError.
+			await expect(withSettleGuard(generator.next())).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+		it("rejects with AbortError when the external signal aborts during request creation", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Synchronize on request startup (instead of a fixed sleep) so the abort
+			// deterministically lands while the request is in flight.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
+				// Emulate the OpenAI SDK: the pending request rejects when the signal aborts.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void nextPromise.catch(() => {})
+			await withSettleGuard(createStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(nextPromise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+
+		it("rethrows non-abort creation errors from createMessage", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockImplementationOnce(async () => {
+				throw new Error("boom")
+			})
+
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+
+			await expect(collectStream(generator)).rejects.toThrow("boom")
+		})
+
+		it("removes the external abort listener when the stream completes", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+			mockCreate.mockImplementationOnce(async () => {
+				return asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "done" } }] }])
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			await collectStream(generator)
+
+			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			removeSpy.mockRestore()
+		})
+
+		it("rethrows non-abort stream errors from createMessage", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockImplementationOnce(async () => {
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "first" } }] }
+					throw new Error("stream broke")
+				})()
+			})
+
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+
+			await expect(collectStream(generator)).rejects.toThrow("stream broke")
 		})
 	})
 
