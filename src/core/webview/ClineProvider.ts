@@ -307,7 +307,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.80.1-gateway-promo-models-fixes" // v3.80.1 Zoo Gateway promo, GLM-5.3-Flash, and reliability fixes
+	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
