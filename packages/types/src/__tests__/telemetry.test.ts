@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "../provider-identifiers.js"
 // pnpm --filter @roo-code/types test src/__tests__/telemetry.test.ts
 
 import {
@@ -536,7 +537,7 @@ describe("telemetry error utilities", () => {
 				consecutiveMistakeCount: 5,
 				consecutiveMistakeLimit: 3,
 				reason: "no_tools_used",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				modelId: "claude-3-sonnet-20240229",
 			})
 		})

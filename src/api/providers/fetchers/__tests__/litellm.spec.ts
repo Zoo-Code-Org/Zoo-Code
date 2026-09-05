@@ -242,6 +242,82 @@ describe("getLiteLLMModels", () => {
 		})
 	})
 
+	it("marks GPT-6 Astra aliases for the documented Responses bridge", async () => {
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				data: [
+					{
+						model_name: "astra-for-zoo",
+						model_info: {
+							max_output_tokens: 128_000,
+							max_input_tokens: 922_000,
+							supports_vision: true,
+							supports_prompt_caching: true,
+							input_cost_per_token: 0.00001,
+							output_cost_per_token: 0.00005,
+							cache_creation_input_token_cost: 0.0000125,
+							cache_read_input_token_cost: 0.000001,
+						},
+						litellm_params: { model: "openai/responses/gpt-6-astra" },
+					},
+				],
+			},
+		})
+
+		const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+		expect(result["astra-for-zoo"]).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+			requiredReasoningEffort: true,
+			reasoningEffort: "medium",
+			supportsTemperature: false,
+			requiresResponsesApi: true,
+			inputPrice: 10,
+			outputPrice: 50,
+			cacheWritesPrice: 12.5,
+			cacheReadsPrice: 1,
+		})
+	})
+
+	it("does not mark a Chat Completions Astra route as Responses-backed", async () => {
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				data: [
+					{
+						model_name: "gpt-6-astra",
+						model_info: {
+							max_output_tokens: 128_000,
+							max_input_tokens: 922_000,
+							supports_vision: true,
+							supports_prompt_caching: true,
+						},
+						litellm_params: { model: "openai/gpt-6-astra" },
+					},
+					{
+						model_name: "astra-uppercase-route",
+						model_info: {
+							max_output_tokens: 128_000,
+							max_input_tokens: 922_000,
+							supports_vision: true,
+							supports_prompt_caching: true,
+						},
+						litellm_params: { model: "OpenAI/Responses/gpt-6-astra" },
+					},
+				],
+			},
+		})
+
+		const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+		expect(result["gpt-6-astra"]).not.toHaveProperty("requiresResponsesApi")
+		expect(result["gpt-6-astra"]).not.toHaveProperty("supportsReasoningEffort")
+		expect(result["astra-uppercase-route"]).not.toHaveProperty("requiresResponsesApi")
+	})
+
 	it("makes request without authorization header when no API key provided", async () => {
 		const mockResponse = {
 			data: {
@@ -765,7 +841,7 @@ describe("getLiteLLMModels", () => {
 				data: {
 					data: [
 						{
-							model_name: "glm-5.3",
+							model_name: "glm-5.3-flash",
 							model_info: {
 								max_tokens: 8192,
 								max_input_tokens: 128000,
@@ -782,7 +858,7 @@ describe("getLiteLLMModels", () => {
 
 			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
 
-			expect(result["glm-5.3"]).toMatchObject({ preserveReasoning: true })
+			expect(result["glm-5.3-flash"]).toMatchObject({ preserveReasoning: true })
 		})
 
 		it("does not match a model id that merely contains a known family as a substring", async () => {

@@ -362,9 +362,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Accès aux fichiers plus sûr — utilise des listes d'autorisation distinctes pour la lecture et l'écriture afin de contrôler les chemins auxquels Zoo Code peut accéder.",
-			"highlight2": "Plus de modèles au choix — GLM 5.3 est désormais disponible via Z.ai, et Gemini 3.5 Flash Lite ainsi que Gemini 3.1 Flash Lite ont été ajoutés au provider Gemini.",
-			"highlight3": "Des workflows quotidiens plus fiables — les améliorations renforcent la récupération et l'historique des tâches, le streaming et l'utilisation des outils par les providers, l'import des paramètres et la lisibilité dans les différents thèmes d'IDE."
+			"highlight1": "🔑 Utilise ta clé API Zoo Gateway partout : ajoute-la à n'importe quel client ou workflow compatible avec OpenAI : <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Pendant une durée limitée, accède gratuitement à MiniMax-M3 via Zoo Gateway.",
+			"highlight3": "✨ Désormais disponibles : les tout nouveaux modèles GPT-6 Astra et Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

@@ -363,9 +363,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Daha güvenli dosya erişimi — Zoo Code'un hangi yollara erişebileceğini kontrol etmek için ayrı Okuma ve Yazma izin listeleri kullan.",
-			"highlight2": "Daha fazla model seçeneği — GLM 5.3 artık Z.ai üzerinden kullanılabilir; Gemini 3.5 Flash Lite ve Gemini 3.1 Flash Lite da Gemini provider'ına eklendi.",
-			"highlight3": "Daha güvenilir günlük iş akışları — iyileştirmeler görev kurtarma ve geçmişini, provider streaming ve araç kullanımını, ayar içe aktarmayı ve IDE temalarındaki okunabilirliği güçlendiriyor."
+			"highlight1": "🔑 Zoo Gateway API anahtarını her yerde kullan—anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Sınırlı bir süre için Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.",
+			"highlight3": "✨ Şimdi kullanıma sunuldu: yepyeni GPT-6 Astra ve Claude Fable 5.1 modelleri."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

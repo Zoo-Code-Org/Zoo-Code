@@ -1,14 +1,12 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
 import { expectContrast } from "../../../../playwright/contrast"
+import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import { AccessibilityContrastGallery } from "./AccessibilityContrast.visual.fixture"
 
 for (const theme of visualThemes) {
 	test(`audits representative controls in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("accessibility-contrast"))
 		await applyVisualTheme(page, theme)
-		const component = await mount(<AccessibilityContrastGallery />)
 		const gallery = component
 
 		await expectContrast(component.getByRole("heading", { name: "New task" }), {
@@ -115,6 +113,66 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} outline button boundary`,
 		})
+		const layout = await gallery.evaluate((element) => {
+			const contentBox = (target: Element) => {
+				const rect = target.getBoundingClientRect()
+				const styles = getComputedStyle(target)
+				return {
+					left: rect.left + Number.parseFloat(styles.borderLeftWidth) + Number.parseFloat(styles.paddingLeft),
+					right:
+						rect.right -
+						Number.parseFloat(styles.borderRightWidth) -
+						Number.parseFloat(styles.paddingRight),
+				}
+			}
+			const rect = element.getBoundingClientRect()
+			const root = document.querySelector("#root") as HTMLElement
+			return {
+				viewportWidth: window.innerWidth,
+				rootContent: contentBox(root),
+				galleryRect: { left: rect.left, right: rect.right },
+				galleryContent: contentBox(element),
+				buttons: Array.from(element.querySelectorAll("button")).map((button) => {
+					const buttonRect = button.getBoundingClientRect()
+					const styles = getComputedStyle(button)
+					return {
+						left: buttonRect.left,
+						right: buttonRect.right,
+						clientWidth: button.clientWidth,
+						scrollWidth: button.scrollWidth,
+						leftPadding: Number.parseFloat(styles.paddingLeft),
+						rightPadding: Number.parseFloat(styles.paddingRight),
+					}
+				}),
+				actionRows: ["chat-actions", "settings-actions"].map((testId) => {
+					const row = element.querySelector(`[data-testid="${testId}"]`) as HTMLElement
+					const rowRect = row.getBoundingClientRect()
+					const buttons = row.querySelectorAll("button")
+					return {
+						left: rowRect.left,
+						right: rowRect.right,
+						clientWidth: row.clientWidth,
+						scrollWidth: row.scrollWidth,
+						firstButtonLeft: buttons[0].getBoundingClientRect().left,
+						lastButtonRight: buttons[buttons.length - 1].getBoundingClientRect().right,
+					}
+				}),
+			}
+		})
+		expect(layout.galleryRect.left).toBeGreaterThanOrEqual(layout.rootContent.left - 0.5)
+		expect(layout.galleryRect.right).toBeLessThanOrEqual(layout.rootContent.right + 0.5)
+		expect(layout.galleryRect.right).toBeLessThanOrEqual(layout.viewportWidth)
+		for (const button of layout.buttons) {
+			expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
+			expect(Math.abs(button.leftPadding - button.rightPadding)).toBeLessThanOrEqual(0.5)
+			expect(button.left).toBeGreaterThanOrEqual(layout.galleryContent.left - 0.5)
+			expect(button.right).toBeLessThanOrEqual(layout.galleryContent.right + 0.5)
+		}
+		for (const row of layout.actionRows) {
+			expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth)
+			expect(row.firstButtonLeft).toBeGreaterThanOrEqual(row.left - 0.5)
+			expect(row.lastButtonRight).toBeLessThanOrEqual(row.right + 0.5)
+		}
 		await expect(
 			expectContrast(component.getByTestId("unsupported-gradient"), {
 				label: `${theme.name} unsupported gradient`,

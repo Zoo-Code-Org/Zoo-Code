@@ -384,9 +384,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更安全的檔案存取 — 使用獨立的讀取與寫入允許清單，控制 Zoo Code 可以存取的路徑。",
-			"highlight2": "更多模型選擇 — GLM 5.3 現已透過 Z.ai 提供，Gemini provider 也新增了 Gemini 3.5 Flash Lite 和 Gemini 3.1 Flash Lite。",
-			"highlight3": "更可靠的日常工作流程 — 改善強化了任務復原與歷史記錄、provider 串流與工具使用、設定匯入，以及不同 IDE 主題下的可讀性。"
+			"highlight1": "🔑 隨處使用你的 Zoo Gateway API 金鑰——可將它用於任何與 OpenAI 相容的用戶端或工作流程：<modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 限時透過 Zoo Gateway 免費使用 MiniMax-M3。",
+			"highlight3": "✨ 全新推出：GPT-6 Astra 和 Claude Fable 5.1 模型。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

@@ -363,9 +363,9 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới:",
-			"highlight1": "Truy cập file an toàn hơn — sử dụng allowlist Đọc và Ghi riêng biệt để kiểm soát các path mà Zoo Code có thể truy cập.",
-			"highlight2": "Nhiều lựa chọn model hơn — GLM 5.3 hiện có qua Z.ai, đồng thời Gemini 3.5 Flash Lite và Gemini 3.1 Flash Lite đã được thêm vào provider Gemini.",
-			"highlight3": "Workflow hằng ngày đáng tin cậy hơn — các cải tiến tăng cường khôi phục và lịch sử task, streaming và sử dụng tool của provider, nhập cài đặt và khả năng đọc trên các theme IDE."
+			"highlight1": "🔑 Dùng khóa API Zoo Gateway ở bất cứ đâu—thêm khóa vào bất kỳ client hoặc workflow nào tương thích với OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Trong thời gian giới hạn, nhận quyền truy cập miễn phí vào MiniMax-M3 qua Zoo Gateway.",
+			"highlight3": "✨ Hiện đã có: các model GPT-6 Astra và Claude Fable 5.1 hoàn toàn mới."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",
