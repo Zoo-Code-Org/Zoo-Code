@@ -495,11 +495,8 @@ describe("VsCodeLmHandler", () => {
 			const controller = new AbortController()
 			controller.abort()
 
-			const stream = handler.createMessage(
-				systemPrompt,
-				messages,
-				makeCreateMessageMetadata({ abortSignal: controller.signal }),
-			)
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
 			await expect(stream.next()).rejects.toSatisfy(
 				(error) => error instanceof Error && error.name === "AbortError",
 			)
@@ -526,11 +523,8 @@ describe("VsCodeLmHandler", () => {
 
 			const controller = new AbortController()
 			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
-			const stream = handler.createMessage(
-				systemPrompt,
-				messages,
-				makeCreateMessageMetadata({ abortSignal: controller.signal }),
-			)
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
 			const firstChunk = stream.next()
 
 			// Release the client, then abort before the next microtask can reach
@@ -573,11 +567,8 @@ describe("VsCodeLmHandler", () => {
 			})
 
 			const controller = new AbortController()
-			const stream = handler.createMessage(
-				systemPrompt,
-				messages,
-				makeCreateMessageMetadata({ abortSignal: controller.signal }),
-			)
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
 			const firstChunk = stream.next()
 			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1))
 
@@ -609,11 +600,8 @@ describe("VsCodeLmHandler", () => {
 			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
 			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
 
-			const stream = handler.createMessage(
-				systemPrompt,
-				messages,
-				makeCreateMessageMetadata({ abortSignal: controller.signal }),
-			)
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
 			for await (const _chunk of stream) {
 				// drain
 			}
@@ -656,6 +644,254 @@ describe("VsCodeLmHandler", () => {
 			const tokenSource = tokenSourceInstance()
 			expect(tokenSource.cancel).toHaveBeenCalled()
 			expect(tokenSource.dispose).toHaveBeenCalled()
+		})
+
+		it("should report the canonical abort error and cancel the token twice when the external signal is already aborted", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const controller = new AbortController()
+			controller.abort()
+
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
+			await expect(stream.next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+			// The pre-check and the finally each cancel the request token; the
+			// already-aborted signal cannot fire the bridge listener a second time.
+			expect(tokenSourceInstance().cancel).toHaveBeenCalledTimes(2)
+		})
+
+		it("should fail fast before client initialization when the external signal is already aborted", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			handler["client"] = null
+			const selectCallsBefore = (vscode.lm.selectChatModels as Mock).mock.calls.length
+
+			const controller = new AbortController()
+			controller.abort()
+
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
+			await expect(stream.next()).rejects.toSatisfy(
+				(error) => error instanceof Error && error.name === "AbortError",
+			)
+
+			// The pre-abort short-circuit runs before getClient(): the host is never contacted.
+			expect((vscode.lm.selectChatModels as Mock).mock.calls.length).toBe(selectCallsBefore)
+		})
+
+		it("should cancel the request token synchronously when the external signal aborts during client initialization", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			let releaseClient: () => void = () => {}
+			const clientGate = new Promise<void>((resolve) => {
+				releaseClient = resolve
+			})
+			;(vscode.lm.selectChatModels as Mock).mockImplementation(() =>
+				clientGate.then(() => [{ ...mockLanguageModelChat }]),
+			)
+			handler["client"] = null
+			// Consume the beforeEach's queued selectChatModels value so the request's
+			// own client lookup is the one that parks on the gate above.
+			await (vscode.lm.selectChatModels as Mock)()
+			const selectCallsBefore = (vscode.lm.selectChatModels as Mock).mock.calls.length
+
+			const controller = new AbortController()
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
+			const firstChunk = stream.next()
+			await vi.waitFor(() =>
+				expect((vscode.lm.selectChatModels as Mock).mock.calls.length).toBe(selectCallsBefore + 1),
+			)
+
+			releaseClient()
+			controller.abort()
+			// The abort bridge must cancel the request token synchronously on
+			// controller.abort(): the generator is still suspended inside getClient(),
+			// so the post-init re-check and the finally have not run yet.
+			expect(tokenSourceInstance().token.isCancellationRequested).toBe(true)
+
+			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+
+			// Bridge + post-init re-check + finally each cancel the request token.
+			expect(tokenSourceInstance().cancel).toHaveBeenCalledTimes(3)
+		})
+
+		it("should report the canonical abort error when client initialization fails while the external signal aborts", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			let rejectClient: (reason: unknown) => void = () => {}
+			const clientGate: Promise<never> = new Promise((_resolve, reject) => {
+				rejectClient = reject
+			})
+			;(vscode.lm.selectChatModels as Mock).mockImplementation(() =>
+				clientGate.then(() => [{ ...mockLanguageModelChat }]),
+			)
+			handler["client"] = null
+			// Consume the beforeEach's queued selectChatModels value so the request's
+			// own client lookup is the one that parks on the gate above.
+			await (vscode.lm.selectChatModels as Mock)()
+			const selectCallsBefore = (vscode.lm.selectChatModels as Mock).mock.calls.length
+
+			const controller = new AbortController()
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
+			const firstChunk = stream.next()
+			await vi.waitFor(() =>
+				expect((vscode.lm.selectChatModels as Mock).mock.calls.length).toBe(selectCallsBefore + 1),
+			)
+
+			// The signal aborts while client initialization is failing: the canonical
+			// abort error must win over the original client-initialization error.
+			controller.abort()
+			rejectClient(new Error("network down"))
+
+			await expect(firstChunk).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+		})
+
+		it("should brand host cancellation errors with the AbortError name", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			mockLanguageModelChat.sendRequest.mockRejectedValueOnce(new vscode.CancellationError())
+
+			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request cancelled by user",
+			)
+		})
+
+		it("should preserve message content in the host request", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Hello!")
+					return
+				})(),
+				text: (async function* () {
+					yield "Hello!"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			// The host request must receive the system prompt followed by the
+			// converted conversation messages, with content preserved.
+			const requestMessages = (mockLanguageModelChat.sendRequest as Mock).mock
+				.calls[0][0] as vscode.LanguageModelChatMessage[]
+			expect(requestMessages).toHaveLength(2)
+			expect(requestMessages[0].role).toBe("assistant")
+			expect(requestMessages[1].role).toBe("user")
+			const textValues = (content: string | vscode.LanguageModelChatMessage["content"]) =>
+				typeof content === "string"
+					? [content]
+					: content.map((part) => (part as vscode.LanguageModelTextPart).value)
+			expect(textValues(requestMessages[0].content)).toEqual([systemPrompt])
+			expect(textValues(requestMessages[1].content)).toEqual(["Hello"])
+		})
+
+		it("should release the request cancellation slot when the request completes", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Hello!")
+					return
+				})(),
+				text: (async function* () {
+					yield "Hello!"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			// The finally must clear the slot once the request is done so the next
+			// request (or dispose) does not see a stale token source.
+			expect(handler["currentRequestCancellation"]).toBeNull()
+		})
+
+		it("should keep the new request's cancellation source when a previous request finishes", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const gateA = new Promise<void>(() => {})
+			const gateB = new Promise<void>(() => {})
+			// Each response yields one chunk before parking so a later .return() settles;
+			// a generator parked inside an inner await would defer the return indefinitely.
+			mockLanguageModelChat.sendRequest
+				.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("A1")
+						await gateA
+						yield new vscode.LanguageModelTextPart("A2")
+					})(),
+					text: (async function* () {
+						yield "A1"
+						await gateA
+						yield "A2"
+					})(),
+				})
+				.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("B1")
+						await gateB
+						yield new vscode.LanguageModelTextPart("B2")
+					})(),
+					text: (async function* () {
+						yield "B1"
+						await gateB
+						yield "B2"
+					})(),
+				})
+
+			const streamA = handler.createMessage(systemPrompt, messages)
+			const firstChunkA = await streamA.next()
+			expect(firstChunkA.value).toEqual({ type: "text", text: "A1" })
+
+			// A second overlapping request establishes its own cancellation source;
+			// its ensureCleanState() synchronously cancels the first request's token.
+			const streamB = handler.createMessage(systemPrompt, messages)
+			const firstChunkB = await streamB.next()
+			expect(firstChunkB.value).toEqual({ type: "text", text: "B1" })
+
+			const sourceB = tokenSourceInstance(1)
+			expect(handler["currentRequestCancellation"]).toBe(sourceB)
+
+			// Stopping the first request early must not clear the second request's
+			// source: only a request that still owns the slot may release it.
+			await streamA.return(undefined)
+			expect(handler["currentRequestCancellation"]).toBe(sourceB)
+
+			await streamB.return(undefined)
+			expect(handler["currentRequestCancellation"]).toBeNull()
 		})
 
 		it("should throw a Zoo Code branded error on stream error with error-like object", async () => {
@@ -1313,8 +1549,7 @@ describe("VsCodeLmHandler", () => {
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
 			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
 
-			// Fails fast before invoking the host: the pre-aborted signal cancels the
-			// request token and sendRequest is never called.
+			// Fails fast before invoking the host: the pre-aborted signal cancels the token.
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
 		})
@@ -1344,11 +1579,20 @@ describe("VsCodeLmHandler", () => {
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
 			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1))
 
-			// Abort while the stream is in flight, then let the mock stream finish.
+			// Abort while the stream is in flight. The bridge must cancel the request
+			// token synchronously on controller.abort(): the generator is still
+			// suspended inside the stream, so the finally cleanup has not run yet.
 			controller.abort()
+			expect(tokenSourceInstance().token.isCancellationRequested).toBe(true)
 			releaseStream()
 
-			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			// The late abort must surface as the canonical abort error.
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "VSCode LM completion aborted",
+			)
 		})
 
 		it("should cancel the token when timeoutMs elapses", async () => {
@@ -1450,6 +1694,90 @@ describe("VsCodeLmHandler", () => {
 
 			expect(result).toBe("Completed text")
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
+		})
+
+		it("should not treat a zero timeoutMs as an immediate timeout", async () => {
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					await streamGate
+					yield new vscode.LanguageModelTextPart("Completed text")
+				})(),
+				text: (async function* () {
+					await streamGate
+					yield "Completed text"
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			vi.useFakeTimers()
+			try {
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: 0 })
+				for (let i = 0; i < 20; i++) {
+					await Promise.resolve()
+				}
+				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
+
+				// timeoutMs: 0 must be treated as "no timeout": the condition
+				// timeoutMs > 0 must not schedule a zero-delay timer.
+				expect(vi.getTimerCount()).toBe(0)
+				await vi.advanceTimersByTimeAsync(10)
+
+				releaseStream()
+				const result = await promise
+				expect(result).toBe("Completed text")
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("should clear the timeout timer when the completion finishes before it elapses", async () => {
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Completed text")
+					return
+				})(),
+				text: (async function* () {
+					yield "Completed text"
+					return
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			vi.useFakeTimers()
+			try {
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: 10_000 })
+				const result = await promise
+				expect(result).toBe("Completed text")
+
+				// The finally must have cleared the timer: advancing the clock past
+				// the timeout must not cancel the (already finished) request.
+				await vi.advanceTimersByTimeAsync(10_000)
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("should reject before client initialization when the signal is already aborted", async () => {
+			handler["client"] = null
+			const selectCallsBefore = (vscode.lm.selectChatModels as Mock).mock.calls.length
+
+			const controller = new AbortController()
+			controller.abort()
+
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+
+			// The pre-abort short-circuit runs before getClient(): the host is never contacted.
+			expect((vscode.lm.selectChatModels as Mock).mock.calls.length).toBe(selectCallsBefore)
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 		})
 
 		it("should wrap non-abort completion errors without an AbortError name", async () => {
