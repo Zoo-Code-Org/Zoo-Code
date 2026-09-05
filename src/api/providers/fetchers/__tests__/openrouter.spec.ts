@@ -4,7 +4,14 @@ import * as path from "path"
 
 import { back as nockBack } from "nock"
 
-import { getOpenRouterModelEndpoints, getOpenRouterModels, parseOpenRouterModel } from "../openrouter"
+import type { ModelInfo } from "@roo-code/types"
+
+import {
+	applyOpenRouterMoonshotK3Profile,
+	getOpenRouterModelEndpoints,
+	getOpenRouterModels,
+	parseOpenRouterModel,
+} from "../openrouter"
 
 nockBack.fixtures = path.join(__dirname, "fixtures")
 nockBack.setMode("lockdown")
@@ -478,6 +485,63 @@ describe("OpenRouter API", () => {
 			expect(result.contextWindow).toBe(128000)
 		})
 
+		it("applies the Moonshot K3 profile for moonshotai/kimi-k3", () => {
+			const mockModel = {
+				name: "Kimi K3",
+				description: "Test model",
+				context_length: 1000000,
+				max_completion_tokens: null,
+				pricing: {
+					prompt: "0.0000006",
+					completion: "0.000003",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "moonshotai/kimi-k3",
+				model: mockModel,
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: null,
+				supportedParameters: ["reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(32768)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
+		})
+
+		it("applies the Moonshot K3 profile for moonshotai/kimi-latest", () => {
+			const mockModel = {
+				name: "Kimi Latest",
+				description: "Test model",
+				context_length: 1000000,
+				max_completion_tokens: null,
+				pricing: {
+					prompt: "0.0000006",
+					completion: "0.000003",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "moonshotai/kimi-latest",
+				model: mockModel,
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: null,
+				supportedParameters: ["reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(32768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
+		})
+
 		it("does not override max tokens for other models", () => {
 			const mockModel = {
 				name: "Other Model",
@@ -594,6 +658,61 @@ describe("OpenRouter API", () => {
 			})
 
 			expect(resultWithoutTools.supportedParameters).toContain("max_tokens")
+		})
+	})
+
+	describe("applyOpenRouterMoonshotK3Profile", () => {
+		it("overrides stale cached values for moonshotai/kimi-k3", () => {
+			const stale: ModelInfo = {
+				maxTokens: 209716,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 0.6,
+				outputPrice: 3,
+				supportsReasoningEffort: true,
+			}
+
+			const result = applyOpenRouterMoonshotK3Profile("moonshotai/kimi-k3", stale)
+
+			expect(result).toEqual({
+				...stale,
+				maxTokens: 32768,
+				supportsReasoningEffort: ["low", "high", "max"],
+				reasoningEffort: "high",
+				supportsTemperature: true,
+				defaultTemperature: 1,
+			})
+			// The original record (e.g. a shared cache entry) must not be mutated.
+			expect(stale.maxTokens).toBe(209716)
+			expect(stale.supportsReasoningEffort).toBe(true)
+		})
+
+		it("applies the profile to moonshotai/kimi-latest", () => {
+			const stale: ModelInfo = {
+				maxTokens: 209716,
+				contextWindow: 1000000,
+				supportsPromptCache: true,
+				supportsReasoningEffort: true,
+			}
+
+			const result = applyOpenRouterMoonshotK3Profile("moonshotai/kimi-latest", stale)
+
+			expect(result.maxTokens).toBe(32768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
+		})
+
+		it("returns other models unchanged", () => {
+			const info: ModelInfo = {
+				maxTokens: 8192,
+				contextWindow: 200000,
+				supportsPromptCache: true,
+			}
+
+			expect(applyOpenRouterMoonshotK3Profile("openai/gpt-4o", info)).toBe(info)
 		})
 	})
 })

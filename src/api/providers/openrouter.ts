@@ -33,6 +33,7 @@ import { getModelParams } from "../transform/model-params"
 
 import { getModels } from "./fetchers/modelCache"
 import { getModelEndpoints } from "./fetchers/modelEndpointCache"
+import { applyOpenRouterMoonshotK3Profile } from "./fetchers/openrouter"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
@@ -563,6 +564,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		if (this.options.openRouterSpecificProvider && this.endpoints[this.options.openRouterSpecificProvider]) {
 			info = this.endpoints[this.options.openRouterSpecificProvider]
 		}
+
+		// Re-apply the Moonshot K3 profile at consumption time: model records are
+		// persisted in the model cache, so records cached before the profile existed
+		// still carry the fabricated max_tokens value and a boolean
+		// supportsReasoningEffort with no default effort.
+		info = applyOpenRouterMoonshotK3Profile(id, info)
 
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)

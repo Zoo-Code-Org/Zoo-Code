@@ -42,6 +42,14 @@ vitest.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
+const { mockGetModelEndpoints } = vitest.hoisted(() => ({
+	mockGetModelEndpoints: vitest.fn(),
+}))
+
+vitest.mock("../fetchers/modelEndpointCache", () => ({
+	getModelEndpoints: mockGetModelEndpoints,
+}))
+
 vitest.mock("../fetchers/modelCache", () => ({
 	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
@@ -100,6 +108,19 @@ vitest.mock("../fetchers/modelCache", () => ({
 				excludedTools: ["existing_excluded"],
 				includedTools: ["existing_included"],
 			},
+			// Stale cache record simulating what users cached before the Moonshot K3
+			// profile existed: the fabricated 0.2 context-window max_tokens and a
+			// boolean supportsReasoningEffort with no default effort.
+			"moonshotai/kimi-k3": {
+				maxTokens: 209716,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 0.6,
+				outputPrice: 3,
+				description: "Kimi K3",
+				supportsReasoningEffort: true,
+			},
 		})
 	}),
 	refreshModels: vitest.fn(async (options) => {
@@ -114,7 +135,13 @@ describe("OpenRouterHandler", () => {
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	})
 
-	beforeEach(() => clearAllMocks())
+	beforeEach(() => {
+		clearAllMocks()
+		// Endpoint records default to "not fetched" (same as the real guard for
+		// missing options); tests that exercise the specific-provider branch
+		// override this per test.
+		mockGetModelEndpoints.mockResolvedValue({})
+	})
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)
@@ -235,6 +262,75 @@ describe("OpenRouterHandler", () => {
 			// Should NOT have the tool exclusions/inclusions
 			expect(result.info.excludedTools).toBeUndefined()
 			expect(result.info.includedTools).toBeUndefined()
+		})
+
+		it("applies the Moonshot K3 profile to stale cached model info", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+				}),
+			)
+
+			const result = await handler.fetchModel()
+
+			// The stale cache record carried a fabricated max_tokens (209716) and a
+			// boolean supportsReasoningEffort with no default effort; the profile must
+			// correct all of that before any request parameters are derived.
+			expect(result.id).toBe("moonshotai/kimi-k3")
+			expect(result.maxTokens).toBe(32768)
+			expect(result.temperature).toBe(1)
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.reasoning).toEqual({ effort: "high" })
+			expect(result.info.maxTokens).toBe(32768)
+			expect(result.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.info.reasoningEffort).toBe("high")
+			expect(result.info.supportsTemperature).toBe(true)
+			expect(result.info.defaultTemperature).toBe(1)
+		})
+
+		it("applies the Moonshot K3 profile to a stale specific-provider endpoint record", async () => {
+			// Endpoint records are cached separately from the parent model cache and
+			// are selected before the profile is applied. A stale endpoint record
+			// (fabricated max_tokens, boolean supportsReasoningEffort, no reasoning
+			// default, no temperature default) must be corrected for the selected
+			// endpoint.
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 209716,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 0.6,
+					outputPrice: 3,
+					description: "Kimi K3 (Moonshot endpoint)",
+					supportsReasoningEffort: true,
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			const result = await handler.fetchModel()
+
+			// The selected endpoint record (not the parent model cache entry) must be
+			// profiled: a regression that applied the profile before endpoint
+			// selection would send the stale endpoint values.
+			expect(result.id).toBe("moonshotai/kimi-k3")
+			expect(result.info.maxTokens).toBe(32768)
+			expect(result.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.info.reasoningEffort).toBe("high")
+			expect(result.info.supportsTemperature).toBe(true)
+			expect(result.info.defaultTemperature).toBe(1)
+			expect(result.maxTokens).toBe(32768)
+			expect(result.temperature).toBe(1)
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.reasoning).toEqual({ effort: "high" })
 		})
 	})
 
@@ -542,6 +638,44 @@ describe("OpenRouterHandler", () => {
 			expect(partialChunks).toHaveLength(1)
 			expect(endChunks).toHaveLength(1)
 			expect(endChunks[0].id).toBe("call_openrouter_test")
+		})
+
+		it("sends profiled max_tokens, explicit temperature 1.0, and reasoning effort for moonshotai/kimi-k3", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+				}),
+			)
+
+			const mockStream = asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "ok" } }] }])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			// The vitest-mocked OpenAI class is structurally incompatible with the narrow
+			// chat stub; the double assertion routes through unknown (instead of any) to
+			// keep this file's no-explicit-any budget flat.
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "test message" }]
+				await collectStream(handler.createMessage("test system prompt", messages))
+
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams).toMatchObject({
+					model: "moonshotai/kimi-k3",
+					max_tokens: 32768,
+					temperature: 1,
+					reasoning: { effort: "high" },
+				})
+				// K3 is fixed at temperature 1.0 upstream (issue #1316); the request
+				// must carry it explicitly.
+			} finally {
+				// Restore the original prototype property so this stub cannot leak
+				// into later tests; clearAllMocks does not undo prototype assignment.
+				openAiPrototype.prototype.chat = originalChat
+			}
 		})
 	})
 
