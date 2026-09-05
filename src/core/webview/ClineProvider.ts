@@ -2,6 +2,7 @@ import os from "os"
 import * as path from "path"
 import fs from "fs/promises"
 import EventEmitter from "events"
+import crypto from "crypto"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
@@ -4088,6 +4089,7 @@ export class ClineProvider
 			if (!Array.isArray(parentApiMessages)) parentApiMessages = []
 
 			const subtaskUiMessage: ClineMessage = {
+				messageId: crypto.randomUUID(),
 				type: "say",
 				say: "subtask_result",
 				text: completionResultSummary,
@@ -4145,6 +4147,7 @@ export class ClineProvider
 				// If no existing tool_result found, create a NEW user message with the tool_result
 				if (!alreadyHasToolResult) {
 					parentApiMessages.push({
+						messageId: crypto.randomUUID(),
 						role: "user",
 						content: [
 							{
@@ -4179,6 +4182,7 @@ export class ClineProvider
 					)
 				if (!alreadyHasFallback) {
 					parentApiMessages.push({
+						messageId: crypto.randomUUID(),
 						role: "user",
 						content: [
 							{

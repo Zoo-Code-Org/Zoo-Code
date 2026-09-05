@@ -349,6 +349,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			expect.objectContaining({
 				messages: expect.arrayContaining([
 					expect.objectContaining({
+						messageId: expect.any(String),
 						type: "say",
 						say: "subtask_result",
 						text: "Subtask completed successfully",
@@ -365,6 +366,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			expect.objectContaining({
 				messages: expect.arrayContaining([
 					expect.objectContaining({
+						messageId: expect.any(String),
 						role: "user",
 						content: expect.arrayContaining([
 							expect.objectContaining({
