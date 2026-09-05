@@ -79,6 +79,12 @@ describe("ThinkingBudget", () => {
 		vi.clearAllMocks()
 	})
 
+	it("should render nothing when model information is unavailable", () => {
+		const { container } = render(<ThinkingBudget {...defaultProps} modelInfo={undefined} />)
+
+		expect(container.firstChild).toBeNull()
+	})
+
 	it("should render nothing when model doesn't support thinking", () => {
 		const { container } = render(
 			<ThinkingBudget
@@ -373,6 +379,52 @@ describe("ThinkingBudget", () => {
 			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
 		})
 
+		it("should use medium when boolean reasoning support is required without an advertised default", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						requiredReasoningEffort: true,
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "medium")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "medium")
+		})
+
+		it("should synchronize a default when model reasoning metadata changes", () => {
+			const setApiConfigurationField = vi.fn()
+			const { rerender } = render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{ ...reasoningEffortModelInfo, supportsReasoningEffort: false }}
+				/>,
+			)
+
+			setApiConfigurationField.mockClear()
+			rerender(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["disable", "high"],
+						reasoningEffort: "high",
+					}}
+				/>,
+			)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high")
+		})
+
 		it.each<{
 			name: string
 			apiConfiguration: ProviderSettings
@@ -448,6 +500,21 @@ describe("ThinkingBudget", () => {
 
 			// With an empty options array, falls back to the stored value "medium"
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "medium")
+		})
+
+		it("should retain the disabled fallback when availableOptions is empty and settings are unset", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: [] as any,
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
 		})
 
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {

@@ -236,6 +236,63 @@ describe("NanoGptHandler", () => {
 	})
 
 	it.each([
+		["an unsupported configured effort", { reasoningEffort: "max" as const }, ["low", "high"] as const, undefined],
+		["a none model default", {}, ["none", "low"] as const, "none" as const],
+		["a minimal model default", {}, ["minimal", "low"] as const, "minimal" as const],
+	])("uses a canonical fallback for %s", async (_name, settings, supportsReasoningEffort, reasoningEffort) => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: [...supportsReasoningEffort],
+				reasoningEffort,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", ...settings }).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("uses a configured effort when reasoning support is boolean", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", reasoningEffort: "high" }).createMessage(
+				"sys",
+				messages,
+			),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
+	})
+
+	it("omits an unset optional effort when disable is supported and no default is advertised", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+			},
+		})
+
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+	})
+
+	it.each([
 		["a stale disable effort", { reasoningEffort: "disable" as const }],
 		["a stale disabled toggle", { enableReasoningEffort: false }],
 	])("uses a supported fallback for %s when the model cannot disable reasoning", async (_name, settings) => {
@@ -264,6 +321,7 @@ describe("NanoGptHandler", () => {
 					contextWindow: 1050000,
 					supportsPromptCache: false,
 					supportsReasoningEffort: ["disable", "low", "high"],
+					reasoningEffort: "high",
 				},
 			})
 			await collectStream(
@@ -297,6 +355,7 @@ describe("NanoGptHandler", () => {
 				contextWindow: 1050000,
 				supportsPromptCache: false,
 				supportsReasoningEffort: ["disable", "low", "high"],
+				reasoningEffort: "high",
 			},
 		})
 		await collectStream(
