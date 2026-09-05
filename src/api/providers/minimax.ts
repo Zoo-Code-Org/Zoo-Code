@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
+import { withFinallyCleanup } from "./stream-cleanup"
 import OpenAI from "openai"
 
 import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
@@ -92,12 +93,18 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		// cancellation mechanism, preserving the existing behavior.
 		const externalAbortSignal = metadata?.abortSignal
 		let abortSignal: AbortSignal | undefined
+		let removeExternalAbortListener: (() => void) | undefined
 		if (externalAbortSignal) {
 			const controller = new AbortController()
 			if (externalAbortSignal.aborted) {
 				controller.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				// Retain the callback so the listener can be detached once this request
+				// ends: an anonymous listener on a long-lived external signal would
+				// outlive the request and retain the per-request controller.
+				const onExternalAbort = () => controller.abort()
+				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
 			abortSignal = controller.signal
 		}
@@ -130,17 +137,22 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
 		}
 
-		const stream = await this.client.messages.create(
-			requestParams,
-			abortSignal ? { signal: abortSignal } : undefined,
-		)
+		let stream: AnthropicStream<Anthropic.Messages.RawMessageStreamEvent>
+		try {
+			stream = await this.client.messages.create(requestParams, abortSignal ? { signal: abortSignal } : undefined)
+		} catch (error) {
+			// Creation failed before streaming: detach the bridged listener so it
+			// cannot outlive this request.
+			removeExternalAbortListener?.()
+			throw error
+		}
 
 		let inputTokens = 0
 		let outputTokens = 0
 		let cacheWriteTokens = 0
 		let cacheReadTokens = 0
 
-		for await (const chunk of stream) {
+		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
 			switch (chunk.type) {
 				case "message_start": {
 					// Tells us cache reads/writes/input/output.
