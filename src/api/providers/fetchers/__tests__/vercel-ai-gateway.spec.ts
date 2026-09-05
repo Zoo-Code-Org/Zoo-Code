@@ -163,6 +163,31 @@ describe("Vercel AI Gateway Fetchers", () => {
 			},
 		}
 
+		it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-fast"])(
+			"applies required Astra request constraints to %s",
+			(id) => {
+				const result = parseVercelAiGatewayModel({
+					id,
+					model: {
+						...baseModel,
+						id,
+						name: "GPT-6 Astra",
+						owned_by: "openai",
+						context_window: 1_050_000,
+						max_tokens: 128_000,
+						tags: ["reasoning", "tool-use", "vision"],
+					},
+				})
+
+				expect(result).toMatchObject({
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+					supportsTemperature: false,
+				})
+			},
+		)
+
 		it("parses basic model info correctly", () => {
 			const result = parseVercelAiGatewayModel({
 				id: "test/model",
