@@ -7,6 +7,7 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { NativeToolCallParser } from "../../../core/assistant-message/NativeToolCallParser"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { Package } from "../../../shared/package"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 describe("OpenAiCodexHandler native tool calls", () => {
@@ -75,7 +76,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		})
 
 		const parserScope = NativeToolCallParser.createScope()
-		const chunks: any[] = []
+		const chunks: ApiStreamChunk[] = []
 		for await (const chunk of stream) {
 			chunks.push(chunk)
 			if (chunk.type === "tool_call_partial") {
