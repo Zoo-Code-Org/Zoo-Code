@@ -461,7 +461,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "assistant", content: "done" })
 
 			await expect(task.waitForCurrentAssistantMessagePersistence()).resolves.toBe(true)
-			task.dispose()
+			void task.dispose()
 			await expect(task.waitForCurrentAssistantMessagePersistence()).resolves.toBe(false)
 		})
 
@@ -747,7 +747,7 @@ describe("Task persistence", () => {
 			})
 
 			const waiting = task.waitForCurrentAssistantMessagePersistence()
-			task.dispose()
+			void task.dispose()
 
 			await expect(waiting).resolves.toBe(false)
 		})
@@ -770,7 +770,7 @@ describe("Task persistence", () => {
 				const waiting = task.waitForCurrentAssistantMessagePersistence()
 
 				await vi.advanceTimersByTimeAsync(50)
-				task.dispose()
+				void task.dispose()
 
 				await expect(waiting).resolves.toBe(false)
 				await Promise.resolve()
@@ -794,7 +794,7 @@ describe("Task persistence", () => {
 			getTaskPersistenceAccess(task).resetAssistantMessagePersistence()
 
 			await expect(waiting).resolves.toBe(false)
-			task.dispose()
+			void task.dispose()
 		})
 
 		it("does not retry when cancelled after the delay resolves but before persistence starts", async () => {
@@ -818,7 +818,7 @@ describe("Task persistence", () => {
 				// Resolve the delay without flushing its promise continuation, then cancel at the save boundary.
 				await Promise.resolve()
 				vi.advanceTimersByTime(100)
-				task.dispose()
+				void task.dispose()
 
 				await expect(waiting).resolves.toBe(false)
 				expect(task.assistantMessageSavedToHistory).toBe(false)
@@ -852,7 +852,7 @@ describe("Task persistence", () => {
 
 				await vi.advanceTimersByTimeAsync(100)
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
-				task.dispose()
+				void task.dispose()
 				retrySave.resolve(undefined)
 
 				await expect(waiting).resolves.toBe(false)
