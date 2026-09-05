@@ -224,6 +224,35 @@ describe("XAIHandler", () => {
 		)
 	})
 
+	it("createMessage should honor an explicit parallelToolCalls false", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test Tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			parallelToolCalls: false,
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				parallel_tool_calls: false,
+			}),
+			undefined,
+		)
+	})
+
 	it("createMessage should map a forced tool_choice to the Responses API shape", async () => {
 		const testTools = [
 			{

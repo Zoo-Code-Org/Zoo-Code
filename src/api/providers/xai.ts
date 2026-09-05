@@ -139,6 +139,8 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		// Convert directly from Anthropic format to Responses API input format
 		const input = convertToResponsesApiInput(messages)
 		const responseTools = this.mapResponseTools(metadata?.tools)
+		const toolChoice = metadata?.tool_choice
+		const parallelToolCalls = metadata?.parallelToolCalls
 
 		// Bridge the external abort signal from request metadata into a per-request
 		// controller so the SDK call is cancelled when the owning request is aborted
@@ -174,20 +176,16 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 				include: ["reasoning.encrypted_content"],
 			}
 
-			if (model.maxTokens) {
-				requestBody.max_output_tokens = model.maxTokens
-			}
-
-			if (model.temperature !== undefined) {
-				requestBody.temperature = model.temperature
-			}
+			// Model params are always resolved by getModel(); send them unconditionally.
+			requestBody.max_output_tokens = model.maxTokens
+			requestBody.temperature = model.temperature
 
 			if (responseTools) {
 				requestBody.tools = responseTools
 				// Metadata carries a Chat Completions tool choice; the Responses API
 				// uses its own shape, so map it explicitly instead of casting.
-				requestBody.tool_choice = this.mapToolChoice(metadata?.tool_choice ?? "auto")
-				requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
+				requestBody.tool_choice = this.mapToolChoice(toolChoice === undefined ? "auto" : toolChoice)
+				requestBody.parallel_tool_calls = parallelToolCalls ?? true
 			}
 
 			// Pass reasoning effort for models that support it (e.g., grok-4.5, grok-3-mini).
@@ -200,10 +198,7 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
 			try {
 				stream = await this.client.responses.create(
-					{
-						...requestBody,
-						stream: true,
-					},
+					requestBody,
 					abortSignal ? { signal: abortSignal } : undefined,
 				)
 			} catch (error) {
