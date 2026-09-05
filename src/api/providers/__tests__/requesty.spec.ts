@@ -68,6 +68,20 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 1,
 				description: "Claude Fable 5",
 			},
+			"anthropic/claude-fable-5.1": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 0.25,
+				description: "Claude Fable 5.1",
+			},
 			"anthropic/claude-sonnet-5": {
 				maxTokens: 128000,
 				contextWindow: 1000000,
@@ -277,6 +291,40 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "anthropic/claude-fable-5",
+					max_tokens: 32768,
+					thinking: { type: "adaptive" },
+					temperature: undefined,
+				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("uses adaptive thinking for Claude Fable 5.1 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5.1",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
+
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "test-id",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 20 },
+					},
+				]),
+			)
+
+			const generator = handler.createMessage("test system prompt", [{ role: "user" as const, content: "test" }])
+			await generator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5.1",
 					max_tokens: 32768,
 					thinking: { type: "adaptive" },
 					temperature: undefined,

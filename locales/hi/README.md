@@ -46,12 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.80.1 में नया क्या है
+## v3.82.0 में नया क्या है
 
-🤖 नए Zoo Gateway पर balance रखने वाले users के लिए GLM-5.3-Flash और Gemini 3.7 Flash को 2 हफ़्तों के लिए 50% छूट पर आज़माएं और MiniMax M3 बिल्कुल FREE पाएं। https://zoocode.dev/models
-
-- **नया model** — GLM-5.3-Flash अब Z AI के माध्यम से उपलब्ध है।
-- **Reliability fixes** — subtask approvals को बहाल किया गया, और Vertex Gemini 3.7 के खाली tool output, terminal startup विफलताओं, background service errors तथा theme legibility की समस्याएं ठीक की गईं।
+- 🔑 **अपनी Zoo Gateway API key कहीं भी इस्तेमाल करें** — इसे किसी भी OpenAI-compatible client या workflow में जोड़ें: https://zoocode.dev/models
+- 🎁 **सीमित समय के लिए FREE model access** — Zoo Gateway के ज़रिए MiniMax-M3 का FREE access पाएं।
+- ✨ **बिल्कुल नए models** — GPT-6 Astra और Claude Fable 5.1 अब उपलब्ध हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 
