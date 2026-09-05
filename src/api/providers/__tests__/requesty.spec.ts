@@ -871,6 +871,10 @@ describe("RequestyHandler", () => {
 				message: "The Requesty request was aborted",
 			})
 			expect(chunks).toContainEqual({ type: "text", text: "first" })
+			// The provider must forward its own per-request signal, not the caller's signal:
+			// the per-request controller isolates this request from the external signal.
+			expect(requestSignal).toBeInstanceOf(AbortSignal)
+			expect(requestSignal).not.toBe(controller.signal)
 		})
 		it("rejects with AbortError when the stream ends normally after a mid-stream abort (swallowed AbortError)", async () => {
 			const handler = new RequestyHandler(mockOptions)
@@ -1022,6 +1026,30 @@ describe("RequestyHandler", () => {
 			// function: removing a different reference would leave the original abort listener
 			// attached to the signal. First require the registration to have happened at all,
 			// so a missing registration cannot silently degrade to an undefined comparison.
+			expect(addSpy).toHaveBeenCalledTimes(1)
+			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(typeof registeredListener).toBe("function")
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		})
+
+		it("removes the external abort listener when the stream fails without an abort", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+			mockCreate.mockImplementationOnce(async () => {
+				throw new Error("boom")
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			await expect(collectStream(generator)).rejects.toThrow("boom")
+
+			// The failure path must clean up just like the success path: the exact registered
+			// listener is removed even when the request rejects without any abort firing.
 			expect(addSpy).toHaveBeenCalledTimes(1)
 			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
 			expect(typeof registeredListener).toBe("function")
