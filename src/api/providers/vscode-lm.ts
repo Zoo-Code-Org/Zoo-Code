@@ -443,6 +443,19 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Calculate input tokens before starting the stream
 			const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
 
+			// Re-check the request-local token after counting: the external signal may
+			// have aborted while counting was in flight (bridged into the token) or a
+			// newer request may have superseded this one and cancelled its token. Bail
+			// before invoking the host so no work happens for a cancelled request. The
+			// token is the superset here: the bridge makes every external abort cancel it.
+			if (cancellationTokenSource.token.isCancellationRequested) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
 				justification: `Zoo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
@@ -458,8 +471,10 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Consume the stream and handle both text and tool call chunks
 			for await (const chunk of response.stream) {
 				// A late abort while consuming must stop the stream instead of
-				// yielding stale chunks.
-				if (externalAbortSignal?.aborted) {
+				// yielding stale chunks. The request-local token also covers local
+				// supersession (a newer request cancels this one), which the external
+				// signal alone cannot see.
+				if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
 					// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 					const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
 					// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here

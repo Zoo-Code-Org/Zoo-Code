@@ -915,6 +915,93 @@ describe("VsCodeLmHandler", () => {
 			expect(handler["currentRequestCancellation"]).toBeNull()
 		})
 
+		it("should stop yielding stale chunks when a newer request supersedes it mid-stream", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			let releaseA: () => void = () => {}
+			const streamAGate = new Promise<void>((resolve) => {
+				releaseA = resolve
+			})
+			mockLanguageModelChat.sendRequest
+				.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("A1")
+						await streamAGate
+						yield new vscode.LanguageModelTextPart("A2")
+					})(),
+					text: (async function* () {
+						yield "A1"
+						await streamAGate
+						yield "A2"
+					})(),
+				})
+				.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("B1")
+					})(),
+					text: (async function* () {
+						yield "B1"
+					})(),
+				})
+
+			const streamA = handler.createMessage(systemPrompt, messages)
+			const firstChunkA = await streamA.next()
+			expect(firstChunkA.value).toEqual({ type: "text", text: "A1" })
+
+			// A second overlapping request supersedes the first one: its
+			// ensureCleanState() cancels A's token while A is parked between host chunks.
+			const streamB = handler.createMessage(systemPrompt, messages)
+			const firstChunkB = await streamB.next()
+			expect(firstChunkB.value).toEqual({ type: "text", text: "B1" })
+			expect(tokenSourceInstance(0).token.isCancellationRequested).toBe(true)
+
+			releaseA()
+
+			// The per-chunk re-check must abort A instead of yielding A2's stale chunk;
+			// the external signal was never involved, so only the token check can see it.
+			await expect(streamA.next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+
+			await streamB.return(undefined)
+			expect(handler["currentRequestCancellation"]).toBeNull()
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should abort before sendRequest when the external signal fires while counting input tokens", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const controller = new AbortController()
+			// Token counting takes long enough that the caller's abort lands while it
+			// is in flight; the bridge cancels the request token during the count.
+			// @ts-ignore – access private method to drive the counting window
+			vi.spyOn(handler, "calculateTotalInputTokens").mockImplementation(async () => {
+				controller.abort()
+				return 10
+			})
+
+			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const stream = handler.createMessage(systemPrompt, messages, meta)
+
+			await expect(stream.next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+
+			// The post-counting check must stop the request before the host is invoked.
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
+		})
+
 		it("should throw a Zoo Code branded error on stream error with error-like object", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [
@@ -1797,6 +1884,46 @@ describe("VsCodeLmHandler", () => {
 
 				// timeoutMs: 0 must be treated as "no timeout": the condition
 				// timeoutMs > 0 must not schedule a zero-delay timer.
+				expect(vi.getTimerCount()).toBe(0)
+				await vi.advanceTimersByTimeAsync(10)
+
+				releaseStream()
+				const result = await promise
+				expect(result).toBe("Completed text")
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("should not treat a negative timeoutMs as an immediate timeout", async () => {
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					await streamGate
+					yield new vscode.LanguageModelTextPart("Completed text")
+				})(),
+				text: (async function* () {
+					await streamGate
+					yield "Completed text"
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			vi.useFakeTimers()
+			try {
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: -1 })
+				for (let i = 0; i < 20; i++) {
+					await Promise.resolve()
+				}
+				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
+
+				// timeoutMs: -1 must be treated as "no timeout" like 0: the condition
+				// timeoutMs > 0 must not schedule a timer for a negative value.
 				expect(vi.getTimerCount()).toBe(0)
 				await vi.advanceTimersByTimeAsync(10)
 
