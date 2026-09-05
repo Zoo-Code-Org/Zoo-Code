@@ -184,4 +184,60 @@ describe("LiteLLM", () => {
 		expect(screen.queryByText("OpenRouter unavailable")).not.toBeInTheDocument()
 		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
 	})
+
+	it("hides manual cache controls for Responses-backed models", () => {
+		mockUseExtensionState.mockReturnValue({
+			routerModels: {
+				[providerIdentifiers.litellm]: {
+					"gpt-6-astra": {
+						contextWindow: 1_050_000,
+						supportsPromptCache: true,
+						requiresResponsesApi: true,
+					},
+				},
+			},
+		})
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<LiteLLM
+					apiConfiguration={{ apiProvider: providerIdentifiers.litellm, litellmModelId: "gpt-6-astra" }}
+					setApiConfigurationField={vi.fn()}
+					organizationAllowList={organizationAllowList}
+				/>
+			</QueryClientProvider>,
+		)
+
+		expect(screen.queryByText("settings:providers.enablePromptCaching")).not.toBeInTheDocument()
+	})
+
+	it("shows manual cache controls for cache-capable chat completion models", () => {
+		mockUseExtensionState.mockReturnValue({
+			routerModels: {
+				[providerIdentifiers.litellm]: {
+					"cache-capable-model": {
+						contextWindow: 128_000,
+						supportsPromptCache: true,
+					},
+				},
+			},
+		})
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<LiteLLM
+					apiConfiguration={{
+						apiProvider: providerIdentifiers.litellm,
+						litellmModelId: "cache-capable-model",
+					}}
+					setApiConfigurationField={vi.fn()}
+					organizationAllowList={organizationAllowList}
+				/>
+			</QueryClientProvider>,
+		)
+
+		expect(screen.getByText("settings:providers.enablePromptCaching")).toBeInTheDocument()
+	})
 })

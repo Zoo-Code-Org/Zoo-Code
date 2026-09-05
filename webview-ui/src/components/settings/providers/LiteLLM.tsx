@@ -190,7 +190,7 @@ export const LiteLLM = ({
 			{(() => {
 				const selectedModelId = apiConfiguration.litellmModelId || litellmDefaultModelId
 				const selectedModel = routerModels?.litellm?.[selectedModelId]
-				if (selectedModel?.supportsPromptCache) {
+				if (selectedModel?.supportsPromptCache && !selectedModel.requiresResponsesApi) {
 					return (
 						<div className="mt-4">
 							<VSCodeCheckbox
