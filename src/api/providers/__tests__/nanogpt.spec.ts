@@ -277,6 +277,27 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
 	})
 
+	it("honors disable when optional reasoning support is boolean", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+				reasoningEffort: "high",
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", reasoningEffort: "disable" }).createMessage(
+				"sys",
+				messages,
+			),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+	})
+
 	it("omits an unset optional effort when disable is supported and no default is advertised", async () => {
 		vi.mocked(getModels).mockResolvedValue({
 			"model:thinking": {
