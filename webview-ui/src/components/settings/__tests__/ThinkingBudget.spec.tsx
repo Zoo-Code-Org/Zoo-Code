@@ -290,7 +290,7 @@ describe("ThinkingBudget", () => {
 
 			// The select value should be "low" (first item), not "disable"
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
-			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
 		})
 
@@ -310,7 +310,7 @@ describe("ThinkingBudget", () => {
 			)
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "high")
-			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
 		})
 
@@ -350,7 +350,7 @@ describe("ThinkingBudget", () => {
 			)
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "max")
-			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max")
 		})
 
 		it("should use the first supported effort when required reasoning has no advertised default", () => {
@@ -369,7 +369,7 @@ describe("ThinkingBudget", () => {
 			)
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
-			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
 		})
 
@@ -422,9 +422,9 @@ describe("ThinkingBudget", () => {
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", expected)
 			if (expectedWrite) {
-				expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", expectedWrite, false)
+				expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", expectedWrite)
 			} else {
-				expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything(), false)
+				expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
 				expect(setApiConfigurationField).not.toHaveBeenCalledWith(
 					"enableReasoningEffort",
 					expect.anything(),

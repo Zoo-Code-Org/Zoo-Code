@@ -32,6 +32,7 @@ type NanoGptCachingRequest = { caching?: true }
 const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
 const NANO_GPT_ASTRA_MODEL_IDS = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
+const NANO_GPT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
 function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
 	const configured = options.reasoningEffort
@@ -45,13 +46,12 @@ function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): Reason
 
 	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
 	if (Array.isArray(supported) && !supported.includes("disable")) {
-		candidates.push(supported.find((effort) => effort !== "none" && effort !== "minimal"))
+		candidates.push(NANO_GPT_REASONING_EFFORTS.find((effort) => supported.includes(effort)))
 	}
 
 	for (const effort of candidates) {
 		if (
 			effort &&
-			effort !== "disable" &&
 			effort !== "none" &&
 			effort !== "minimal" &&
 			(supported === true || (Array.isArray(supported) && supported.includes(effort)))

@@ -114,14 +114,14 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		? rawReasoningEffort
 		: fallbackReasoningEffort
 
-	// Set default reasoning effort when model supports it and no value is set
+	// Keep normalized defaults pending so Save persists them to the provider profile.
 	useEffect(() => {
 		if (
 			isReasoningEffortSupported &&
 			storedReasoningEffort !== currentReasoningEffort &&
 			currentReasoningEffort !== "disable"
 		) {
-			setApiConfigurationField("reasoningEffort", currentReasoningEffort as ReasoningEffortExtended, false)
+			setApiConfigurationField("reasoningEffort", currentReasoningEffort as ReasoningEffortExtended)
 		}
 	}, [isReasoningEffortSupported, storedReasoningEffort, currentReasoningEffort, setApiConfigurationField])
 
