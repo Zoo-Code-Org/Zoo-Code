@@ -1007,6 +1007,7 @@ describe("RequestyHandler", () => {
 		it("removes the external abort listener when the stream completes", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
 			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 			mockCreate.mockImplementationOnce(async () => {
 				return asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "done" } }] }])
@@ -1017,7 +1018,12 @@ describe("RequestyHandler", () => {
 
 			await collectStream(generator)
 
-			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// The cleanup path must remove the exact listener that was registered, not just any
+			// function: removing a different reference would leave the original abort listener
+			// attached to the signal.
+			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
 			removeSpy.mockRestore()
 		})
 
