@@ -310,6 +310,121 @@ describe("PoeHandler", () => {
 			expect(chunks).toContainEqual({ type: "text", text: "Hello " })
 		})
 
+		it("stops yielding chunks once the external signal aborts mid-stream", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			// The upstream stream ignores the abort and keeps producing late chunks; the
+			// provider must stop yielding them once the signal is aborted.
+			const fullStream = (async function* () {
+				yield { type: "text-delta", text: "Hello " }
+				yield { type: "text-delta", text: "late" }
+			})()
+			mockStreamText.mockReturnValueOnce({
+				fullStream,
+				usage: Promise.resolve(undefined),
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of handler.createMessage(
+					"system",
+					[{ role: "user" as const, content: "hi" }],
+					metadata,
+				)) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			// No late chunk may reach the caller after the abort.
+			expect(chunks).toEqual([{ type: "text", text: "Hello " }])
+		})
+
+		it("rejects with AbortError when the external signal aborts after the stream ends", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+
+			// The stream completes normally; the signal aborts while the provider is about
+			// to await result.usage. The abort must reject the stream before the usage
+			// promise is even read.
+			let usageAccessed = false
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "done" }
+				})(),
+				get usage() {
+					usageAccessed = true
+					return Promise.resolve({ inputTokens: 1, outputTokens: 1 })
+				},
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const iteration = (async () => {
+				for await (const chunk of handler.createMessage(
+					"system",
+					[{ role: "user" as const, content: "hi" }],
+					metadata,
+				)) {
+					if (chunk.type === "text") {
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			expect(usageAccessed).toBe(false)
+		})
+
+		it("rejects with AbortError when the external signal aborts while the usage promise is pending", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+
+			// The stream completes without aborting, so the provider reaches
+			// await result.usage. The signal aborts in the microtask between reading
+			// the usage promise and the usage settling: only the post-usage checkpoint
+			// can turn that late usage into an AbortError.
+			let reachedUsageAwait: (() => void) | undefined
+			let resolveUsage: (usage: { inputTokens: number; outputTokens: number }) => void = () => {}
+			const usagePromise = new Promise<{ inputTokens: number; outputTokens: number }>((resolve) => {
+				resolveUsage = resolve
+			})
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "x" }
+				})(),
+				get usage() {
+					queueMicrotask(() => reachedUsageAwait?.())
+					return usagePromise
+				},
+			})
+			const reachedUsage = new Promise<void>((resolve) => {
+				reachedUsageAwait = resolve
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const promise = collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata),
+			)
+			await reachedUsage
+			controller.abort()
+			resolveUsage({ inputTokens: 2, outputTokens: 2 })
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+		})
+
 		it("bridges the external abort signal into the request controller synchronously", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 
@@ -353,6 +468,7 @@ describe("PoeHandler", () => {
 		it("removes the external abort listener when the request completes without aborting", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			const controller = new AbortController()
+			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
 			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
 
 			mockStreamText.mockReturnValueOnce({
@@ -368,7 +484,12 @@ describe("PoeHandler", () => {
 			)
 
 			expect(chunks).toContainEqual({ type: "text", text: "done" })
-			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// The finally block must remove the exact listener that was registered, not
+			// just any function: removing a different reference would leave the original
+			// abort listener attached to the signal.
+			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
 			removeSpy.mockRestore()
 		})
 		it("rejects with AbortError when the external signal aborts during request creation", async () => {
@@ -659,21 +780,32 @@ describe("PoeHandler", () => {
 			expect(callArgs.abortSignal).not.toBe(controller.signal)
 		})
 
-		it("completePrompt should use AbortSignal.timeout when only timeoutMs is provided", async () => {
+		it("completePrompt rejects with AbortError when the per-request timeout expires before the response", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
-			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+			// Emulate a slow response: the generation settles only once the merged abort
+			// signal (which embeds the per-request timeout) fires.
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				await new Promise<void>((resolve) => {
+					if (args.abortSignal?.aborted) {
+						resolve()
+					} else {
+						args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				return { text: "late response" }
+			})
 
-			await handler.completePrompt("test prompt", { timeoutMs: 3000 })
-			expect(mockGenerateText).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: mockLanguageModel,
-					prompt: "test prompt",
-					abortSignal: expect.any(AbortSignal),
-				}),
-			)
-			const callArgs = mockGenerateText.mock.calls[0][0]
-			expect(callArgs.abortSignal).toBeDefined()
+			const promise = handler.completePrompt("test prompt", { timeoutMs: 30 })
+			const callArgs = mockGenerateText.mock.calls[0][0] as { abortSignal?: AbortSignal }
+			// The per-request timeout is embedded in the abort signal passed to the SDK...
 			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+
+			// ...and when it fires before the response settles, the provider rejects with
+			// the canonical AbortError instead of returning the late result.
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
 		})
 
 		it("completePrompt rejects with AbortError when the external signal aborts mid-flight", async () => {

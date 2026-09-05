@@ -157,11 +157,26 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			try {
 				for await (const part of result.fullStream) {
 					for (const chunk of processAiSdkStreamPart(part)) {
+						// Stop yielding once cancelled: a late chunk must not reach the caller.
+						if (controller.signal.aborted) {
+							// Stryker disable next-line StringLiteral: this error is only thrown while the signal is already aborted, and the catch below rethrows the canonical abort error, so the message built here is never observable
+							throw createAbortError("Poe")
+						}
 						yield chunk
 					}
 				}
 
+				// Stop yielding once cancelled: do not await usage after the request was aborted.
+				if (controller.signal.aborted) {
+					// Stryker disable next-line StringLiteral: this error is only thrown while the signal is already aborted, and the catch below rethrows the canonical abort error, so the message built here is never observable
+					throw createAbortError("Poe")
+				}
 				const usage = await result.usage
+				// Usage may resolve while the request is already aborted: reject instead of yielding it.
+				if (controller.signal.aborted) {
+					// Stryker disable next-line StringLiteral: this error is only thrown while the signal is already aborted, and the catch below rethrows the canonical abort error, so the message built here is never observable
+					throw createAbortError("Poe")
+				}
 				if (usage) {
 					const metrics = extractUsageMetrics(usage as any)
 					yield {
