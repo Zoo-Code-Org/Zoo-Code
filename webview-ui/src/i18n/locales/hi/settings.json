@@ -460,6 +460,8 @@
 		"headerName": "हेडर नाम",
 		"headerValue": "हेडर मूल्य",
 		"noCustomHeaders": "कोई कस्टम हेडर परिभाषित नहीं है। एक जोड़ने के लिए + बटन पर क्लिक करें।",
+		"extraBody": "अतिरिक्त बॉडी",
+		"extraBodyDescription": "वैकल्पिक JSON ऑब्जेक्ट जिसे API अनुरोध बॉडी में मर्ज किया जाता है। Zoo Code द्वारा प्रबंधित फ़ील्ड, जैसे model, messages, tools और stream, ओवरराइड नहीं किए जा सकते। गोपनीय जानकारी शामिल न करें।",
 		"unboundApiKey": "Unbound API कुंजी",
 		"getUnboundApiKey": "Unbound API कुंजी प्राप्त करें",
 		"requestyApiKey": "Requesty API कुंजी",
@@ -1036,6 +1038,11 @@
 		"modelId": "आपको एक मान्य मॉडल ID प्रदान करनी होगी।",
 		"modelSelector": "आपको एक मान्य मॉडल चयनकर्ता प्रदान करना होगा।",
 		"openAi": "आपको एक मान्य बेस URL, API कुंजी और मॉडल ID प्रदान करनी होगी।",
+		"openAiExtraBody": {
+			"invalidJson": "अतिरिक्त बॉडी में मान्य JSON होना चाहिए।",
+			"objectRequired": "अतिरिक्त बॉडी एक JSON ऑब्जेक्ट होनी चाहिए।",
+			"reservedKeys": "अतिरिक्त बॉडी Zoo Code द्वारा प्रबंधित फ़ील्ड को ओवरराइड नहीं कर सकती: {{keys}}।"
+		},
 		"arn": {
 			"invalidFormat": "अमान्य ARN प्रारूप। कृपया प्रारूप आवश्यकताएं जांचें।",
 			"regionMismatch": "चेतावनी: आपके ARN में क्षेत्र ({{arnRegion}}) आपके चयनित क्षेत्र ({{region}}) से मेल नहीं खाता। इससे पहुंच संबंधी समस्याएं हो सकती हैं। प्रदाता ARN से क्षेत्र का उपयोग करेगा।"

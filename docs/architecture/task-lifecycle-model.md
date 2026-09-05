@@ -63,6 +63,10 @@ The known-unsafe witnesses currently compare exact shortest action sequences. Th
 
 `TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with one synchronized integration smoke check through the real `proper-lockfile` and filesystem rename path; broader VS Code E2E remains reserved for restart and extension-host behavior.
 
+## Task cleanup protocol model
+
+The umbrella command also runs a separate bounded child model for in-memory abort, disposal, and provider-shutdown ordering. It models cleanup settlement and rejection as environment transitions and makes no filesystem, editor Promise, fairness, or timing-liveness claim. See [Task cleanup protocol model check](./task-cleanup-protocol-model.md).
+
 ## Invariants
 
 The checker currently enforces:

@@ -164,6 +164,23 @@ export const anthropicModels = {
 		supportsTemperature: false,
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"claude-fable-5-1": {
+		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 10.0, // $10 per million input tokens
+		outputPrice: 50.0, // $50 per million output tokens
+		cacheWritesPrice: 12.5, // $12.50 per million tokens (5-minute cache)
+		cacheReadsPrice: 0.25, // $0.25 per million tokens (2.5% of base input price)
+		// Fable 5.1 only accepts adaptive thinking (or an omitted thinking field).
+		// Manual budget_tokens and non-default sampling parameters return a 400.
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Fable 5.1 extends Fable 5 with stronger long-running agentic coding, multistep research, and document work.",
+	},
 	"claude-fable-5": {
 		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
 		contextWindow: 1_000_000,

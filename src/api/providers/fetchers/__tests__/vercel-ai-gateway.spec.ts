@@ -163,6 +163,31 @@ describe("Vercel AI Gateway Fetchers", () => {
 			},
 		}
 
+		it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-fast"])(
+			"applies required Astra request constraints to %s",
+			(id) => {
+				const result = parseVercelAiGatewayModel({
+					id,
+					model: {
+						...baseModel,
+						id,
+						name: "GPT-6 Astra",
+						owned_by: "openai",
+						context_window: 1_050_000,
+						max_tokens: 128_000,
+						tags: ["reasoning", "tool-use", "vision"],
+					},
+				})
+
+				expect(result).toMatchObject({
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+					supportsTemperature: false,
+				})
+			},
+		)
+
 		it("parses basic model info correctly", () => {
 			const result = parseVercelAiGatewayModel({
 				id: "test/model",
@@ -218,6 +243,29 @@ describe("Vercel AI Gateway Fetchers", () => {
 
 			expect(result.maxTokens).toBe(128000)
 			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+		})
+
+		it("marks Claude Fable 5.1 as not supporting temperature and parses its cache pricing", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-fable-5.1",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-fable-5.1",
+					context_window: 1000000,
+					max_tokens: 128000,
+					pricing: {
+						input: "0.00001",
+						output: "0.00005",
+						input_cache_write: "0.0000125",
+						input_cache_read: "0.00000025",
+					},
+				},
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.cacheReadsPrice).toBe(0.25)
 			expect(result.supportsTemperature).toBe(false)
 		})
 
