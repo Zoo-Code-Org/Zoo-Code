@@ -131,6 +131,21 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(caught).toBe(apiError)
 		})
 
+		it("rethrows a non-object rejection unchanged", async () => {
+			// A null rejection is not an object: the optional status read must
+			// yield undefined (not throw) and fall through to the rethrow.
+			mockCreate.mockRejectedValueOnce(null)
+
+			let caught: unknown
+			try {
+				await handler.completePrompt("hi")
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeNull()
+		})
+
 		it("retries once after 401 and succeeds", async () => {
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tokenResponse()))
 			mockCreate

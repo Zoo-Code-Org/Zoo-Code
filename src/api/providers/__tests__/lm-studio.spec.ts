@@ -444,6 +444,178 @@ describe("LmStudioHandler abort wiring", () => {
 			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 		})
+
+		it("counts the input tokens for the system prompt plus every message content block", async () => {
+			const handler = new LmStudioHandler(options)
+			const countSpy = vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			const create = lastCreate()
+			create.mockResolvedValue(asyncStreamFrom([]))
+
+			const chunks = await collectStream(handler.createMessage("system", [{ role: "user", content: "hello" }]))
+
+			// The count must see the system prompt block plus each converted
+			// message block - a reduced payload would undercount the context.
+			expect(countSpy).toHaveBeenCalledTimes(2)
+			expect(countSpy.mock.calls[0][0]).toEqual([
+				{ type: "text", text: "system" },
+				{ type: "text", text: "hello" },
+			])
+			expect(chunks).toEqual([{ type: "usage", inputTokens: 1, outputTokens: 1 }])
+		})
+
+		it("counts the output tokens for the exact concatenation of reasoning and visible text", async () => {
+			const handler = new LmStudioHandler(options)
+			const countSpy = vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			const create = lastCreate()
+			// Reasoning models stream their thinking in the delta's
+			// `reasoning_content` field alongside the visible `content`.
+			create.mockResolvedValue(
+				asyncStreamFrom([{ choices: [{ delta: { reasoning_content: "thinking", content: "answer" } }] }]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system", []))
+
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "thinking" },
+				{ type: "text", text: "answer" },
+				{ type: "usage", inputTokens: 1, outputTokens: 1 },
+			])
+			// The output count must see exactly reasoning + visible text:
+			// reasoning tokens are billed as output.
+			expect(countSpy.mock.calls[1][0]).toEqual([{ type: "text", text: "thinkinganswer" }])
+		})
+
+		it("falls back to zero input tokens and logs when the input count fails without an abort", async () => {
+			const handler = new LmStudioHandler(options)
+			const countSpy = vitest
+				.spyOn(handler, "countTokens")
+				.mockRejectedValueOnce(new Error("count failed"))
+				.mockResolvedValue(1)
+			const errorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const create = lastCreate()
+			create.mockResolvedValue(asyncStreamFrom([{ choices: [{ delta: { content: "hi" } }] }]))
+
+			const chunks = await collectStream(handler.createMessage("system", []))
+
+			// A count failure is not a request failure: the response still
+			// streams, with the failed count falling back to zero tokens.
+			expect(errorSpy).toHaveBeenCalledWith("[LmStudio] Failed to count input tokens:", expect.any(Error))
+			expect(countSpy).toHaveBeenCalledTimes(2)
+			expect(chunks).toEqual([
+				{ type: "text", text: "hi" },
+				{ type: "usage", inputTokens: 0, outputTokens: 1 },
+			])
+			errorSpy.mockRestore()
+		})
+
+		it("lets an abort-shaped input count rejection propagate to the abort contract", async () => {
+			const handler = new LmStudioHandler(options)
+			// Only the input count rejects: a permanent rejection would also hit
+			// the output count below, whose intact abort check would surface the
+			// same contract error and mask a dead input-side check.
+			vitest.spyOn(handler, "countTokens").mockRejectedValueOnce(sdkAbortError()).mockResolvedValue(1)
+			const create = lastCreate()
+			create.mockResolvedValue(asyncStreamFrom([{ choices: [{ delta: { content: "hi" } }] }]))
+
+			let caught: unknown
+			try {
+				await collectStream(handler.createMessage("system", []))
+			} catch (error) {
+				caught = error
+			}
+
+			// An abort-shaped count failure is the caller's Stop, not a count
+			// failure: it must surface as the abort contract error instead of
+			// falling back to zero tokens and keeping the stream alive.
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The LM Studio request was aborted")
+			expect(create).not.toHaveBeenCalled() // no request goes out after the Stop
+		})
+
+		it("falls back to zero output tokens and logs when the output count fails without an abort", async () => {
+			const handler = new LmStudioHandler(options)
+			const countSpy = vitest
+				.spyOn(handler, "countTokens")
+				.mockResolvedValueOnce(1)
+				.mockRejectedValueOnce(new Error("count failed"))
+			const errorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const create = lastCreate()
+			create.mockResolvedValue(asyncStreamFrom([{ choices: [{ delta: { content: "hi" } }] }]))
+
+			const chunks = await collectStream(handler.createMessage("system", []))
+
+			// Same fallback as the input count above: an error is logged,
+			// zero tokens are reported, and the stream still completes.
+			expect(errorSpy).toHaveBeenCalledWith("[LmStudio] Failed to count output tokens:", expect.any(Error))
+			expect(chunks).toEqual([
+				{ type: "text", text: "hi" },
+				{ type: "usage", inputTokens: 1, outputTokens: 0 },
+			])
+			errorSpy.mockRestore()
+		})
+
+		it("lets an abort-shaped output count rejection propagate to the abort contract", async () => {
+			const handler = new LmStudioHandler(options)
+			vitest.spyOn(handler, "countTokens").mockResolvedValueOnce(1).mockRejectedValueOnce(sdkAbortError())
+			const create = lastCreate()
+			create.mockResolvedValue(asyncStreamFrom([{ choices: [{ delta: { content: "hi" } }] }]))
+
+			let caught: unknown
+			try {
+				await collectStream(handler.createMessage("system", []))
+			} catch (error) {
+				caught = error
+			}
+
+			// Same contract as the input count above: an abort is not a count
+			// failure, so the usage chunk must not be reported for an
+			// aborted response.
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The LM Studio request was aborted")
+		})
+
+		it("does not issue the SDK request once the signal aborts while the input count settles", async () => {
+			// The stop lands in the microtask gap: after the input count
+			// settles (and the race detaches its listener) but before the
+			// generator resumes, so only the post-count fast-fail guard keeps
+			// the request from going out once the request-local signal has
+			// aborted.
+			const handler = new LmStudioHandler(options)
+			let resolveInputCount!: (tokens: number) => void
+			vitest
+				.spyOn(handler, "countTokens")
+				.mockImplementationOnce(
+					() =>
+						new Promise<number>((resolve) => {
+							resolveInputCount = resolve
+						}),
+				)
+				.mockResolvedValue(1)
+			const create = lastCreate()
+			create.mockResolvedValue(asyncStreamFrom([{ choices: [{ delta: { content: "hi" } }] }]))
+
+			const external = new AbortController()
+			const stream = handler.createMessage("system", [], { taskId: "t1", abortSignal: external.signal })
+			const pending = stream.next()
+			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending count
+			resolveInputCount(1)
+			await Promise.resolve() // let the race settle and detach its listener
+			external.abort()
+
+			let caught: unknown
+			try {
+				await pending
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The LM Studio request was aborted")
+			expect(create).not.toHaveBeenCalled() // the request must not be issued after the Stop
+		})
 	})
 
 	describe("completePrompt", () => {

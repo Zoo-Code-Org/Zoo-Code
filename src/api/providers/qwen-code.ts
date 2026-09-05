@@ -274,6 +274,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			// request-local signal so the caller settles promptly instead of
 			// waiting for credential I/O. The shared refresh keeps running —
 			// only this wait is cut.
+			// Stryker disable next-line StringLiteral: the rejection from this wait is always re-normalized by the outer catch's createAbortError("Qwen Code") (name "AbortError" always matches isRequestAborted), so this provider-name literal is unobservable
 			await settleOnAbort(this.ensureAuthenticated(), requestController.signal, "Qwen Code")
 			const client = this.ensureClient()
 			const model = this.getModel()

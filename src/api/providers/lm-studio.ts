@@ -105,7 +105,9 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			// fires, so bridge the aborted state into the request-local
 			// controller (this also covers an abort landing while a token
 			// count below is still pending).
+			// Stryker disable next-line ConditionalExpression: externalSignal.aborted can never be true here - a pre-aborted signal is already rejected by the entry throwIfAborted fast-fail above, and no await sits between that check and this bridge, so the guard is unreachable
 			if (externalSignal.aborted) {
+				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry throwIfAborted fast-fail before this bridge registers
 				requestController.abort()
 			}
 		}

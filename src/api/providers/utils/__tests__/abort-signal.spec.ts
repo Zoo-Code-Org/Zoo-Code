@@ -288,8 +288,10 @@ describe("abort-signal utilities", () => {
 			expect(removeSpy).toHaveBeenCalledTimes(1)
 		})
 
-		it("propagates a pending promise rejection unchanged", async () => {
+		it("propagates a pending promise rejection unchanged and detaches the abort listener", async () => {
 			const controller = new AbortController()
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 			const failure = new Error("count failed")
 
 			let caught: unknown
@@ -300,6 +302,11 @@ describe("abort-signal utilities", () => {
 			}
 
 			expect(caught).toBe(failure)
+			// The rejection path must detach the listener too: a leaked listener
+			// would keep this helper's closure alive for the life of the signal.
+			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(removeSpy).toHaveBeenCalledTimes(1)
+			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 		})
 	})
 })
