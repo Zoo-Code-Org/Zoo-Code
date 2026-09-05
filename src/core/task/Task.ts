@@ -2706,6 +2706,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error reverting diff changes:", error)
 		}
 
+		// Clear DTE runtime-effort override state so a retained disposed task never serves a stale override.
+		this.runtimeThinkingEffort = undefined
+		this.runtimeThinkingEffortSource = undefined
+		this.preOverrideReasoningEffort = undefined
+
 		await pendingCleanup
 		await this.diffReversionPromise
 	}
