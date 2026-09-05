@@ -266,6 +266,33 @@ describe("OpenRouter API", () => {
 	})
 
 	describe("parseOpenRouterModel", () => {
+		it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])(
+			"applies required Astra request constraints to %s",
+			(id) => {
+				const result = parseOpenRouterModel({
+					id,
+					model: {
+						name: "GPT-6 Astra",
+						description: "Test model",
+						context_length: 1_050_000,
+						max_completion_tokens: 128_000,
+						pricing: { prompt: "0.00001", completion: "0.00005" },
+					},
+					inputModality: ["text", "image"],
+					outputModality: ["text"],
+					maxTokens: 128_000,
+					supportedParameters: ["reasoning", "reasoning_effort", "tools"],
+				})
+
+				expect(result).toMatchObject({
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+					supportsTemperature: false,
+				})
+			},
+		)
+
 		it("sets claude-sonnet-4.6 model to Anthropic max tokens", () => {
 			const mockModel = {
 				name: "Claude Sonnet 4.6",
