@@ -404,6 +404,8 @@ describe("TerminalRegistry", () => {
 				onShellExecutionStarted: vi.fn(),
 				onShellExecutionComplete: vi.fn(),
 			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
 
 			await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledOnce())
 			await startHandler({ terminal: terminal.terminal, execution })
@@ -412,7 +414,7 @@ describe("TerminalRegistry", () => {
 			await settleWithin(result)
 
 			expect(completedSpy).toHaveBeenCalledOnce()
-			expect(completedSpy).toHaveBeenCalledWith("hello\n", expect.any(TerminalProcess))
+			expect(completedSpy).toHaveBeenCalledWith("hello\n", process)
 			expect(returnSpy).toHaveBeenCalledOnce()
 			expect(terminal.process).toBeUndefined()
 			expect(terminal.busy).toBe(false)
@@ -432,6 +434,8 @@ describe("TerminalRegistry", () => {
 				onShellExecutionComplete: completionSpy,
 				onNoShellIntegration: noShellIntegrationSpy,
 			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
 			Object.defineProperty(terminal.terminal, "exitStatus", {
 				value: { code: undefined, reason: 3 },
 				configurable: true,
@@ -442,7 +446,7 @@ describe("TerminalRegistry", () => {
 
 			expect(completionSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledOnce()
-			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
+			expect(completedSpy).toHaveBeenCalledWith("", process)
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 			expect(terminal.process).toBeUndefined()
 			expect(terminal.busy).toBe(false)
@@ -464,6 +468,8 @@ describe("TerminalRegistry", () => {
 				onShellExecutionComplete: completionSpy,
 				onNoShellIntegration: noShellIntegrationSpy,
 			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
 			Object.defineProperty(terminal.terminal, "shellIntegration", {
 				value: { executeCommand },
 				configurable: true,
@@ -483,7 +489,7 @@ describe("TerminalRegistry", () => {
 			expect(executeCommand).not.toHaveBeenCalled()
 			expect(completionSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledOnce()
-			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
+			expect(completedSpy).toHaveBeenCalledWith("", process)
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
 
@@ -498,6 +504,8 @@ describe("TerminalRegistry", () => {
 				onShellExecutionStarted: vi.fn(),
 				onShellExecutionComplete: completionSpy,
 			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
 
 			expect(terminal.terminal.exitStatus).toBeUndefined()
 			const shellCompleteSpy = vi.spyOn(terminal, "shellExecutionComplete")
@@ -507,9 +515,9 @@ describe("TerminalRegistry", () => {
 
 			expect(terminal.isClosed()).toBe(true)
 			expect(completionSpy).toHaveBeenCalledOnce()
-			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, expect.any(TerminalProcess))
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
 			expect(completedSpy).toHaveBeenCalledOnce()
-			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
+			expect(completedSpy).toHaveBeenCalledWith("", process)
 			expect(terminal.process).toBeUndefined()
 			expect(terminal.busy).toBe(false)
 			expect(terminal.running).toBe(false)
@@ -534,10 +542,13 @@ describe("TerminalRegistry", () => {
 				onShellExecutionComplete: completionSpy,
 			})
 			await settleWithin(result)
+			const completedProcess = completedSpy.mock.calls[0][1]
 
 			expect(executeCommand).not.toHaveBeenCalled()
 			expect(completionSpy).toHaveBeenCalledOnce()
-			expect(completedSpy).toHaveBeenCalledWith("", expect.any(TerminalProcess))
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, completedProcess)
+			expect(completedSpy).toHaveBeenCalledWith("", completedProcess)
+			expect(completedProcess).toBeInstanceOf(TerminalProcess)
 			expect(terminal.busy).toBe(false)
 		})
 

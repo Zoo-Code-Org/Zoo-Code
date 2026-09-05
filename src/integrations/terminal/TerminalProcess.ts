@@ -58,6 +58,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 		return terminal
 	}
 
+	/** Completes this process when its terminal closes without an execution-end event. */
 	public handleTerminalClosed(): void {
 		const executionStarted = this.ownExecution !== undefined
 		this.terminal.shellExecutionComplete({ exitCode: undefined })
