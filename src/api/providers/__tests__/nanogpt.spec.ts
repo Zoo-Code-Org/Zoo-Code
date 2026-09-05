@@ -123,8 +123,8 @@ describe("NanoGptHandler", () => {
 			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages),
 		)
 		expect(chunks).toEqual([
-			{ type: "text", text: "answer" },
 			{ type: "reasoning", text: "modern" },
+			{ type: "text", text: "answer" },
 			{ type: "reasoning", text: "legacy" },
 			{ type: "tool_call_partial", index: 0, id: "call-1", name: "read_file", arguments: '{"path":' },
 			{ type: "tool_call_partial", index: 1, id: "call-2", name: "search_files", arguments: '{"query":' },
@@ -169,6 +169,39 @@ describe("NanoGptHandler", () => {
 			{ signal },
 		)
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("max_completion_tokens")
+	})
+
+	it.each([
+		["max", "max"],
+		["none", "medium"],
+	] as const)("uses safe Astra request parameters for %s reasoning", async (reasoningEffort, expectedEffort) => {
+		const modelId = "openai/gpt-6-astra"
+		vi.mocked(getModels).mockResolvedValue({
+			[modelId]: {
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: modelId, modelTemperature: 0.7, reasoningEffort }).createMessage(
+				"sys",
+				messages,
+				{ taskId: "task", parallelToolCalls: true },
+			),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({
+			model: modelId,
+			reasoning_effort: expectedEffort,
+			parallel_tool_calls: false,
+		})
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
 	it("keeps Muse Spark tool-result history contiguous across turns", async () => {

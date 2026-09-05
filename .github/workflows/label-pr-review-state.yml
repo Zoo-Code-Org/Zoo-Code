@@ -3,6 +3,8 @@ name: Label PR review state
 on:
   schedule:
     - cron: "0 * * * *" # hourly fallback
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       pull_request_number:
@@ -15,11 +17,18 @@ on:
     types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled, unlabeled]
   pull_request_review:
     types: [submitted, dismissed]
+  # Fork review events have a read-only token. CodeRabbit's status-comment update
+  # provides a trusted base-repository event that can reconcile those PRs promptly.
+  issue_comment:
+    types: [created, edited]
   workflow_run:
     workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
     types: [completed]
 
 permissions:
+  # This privileged workflow only reads PR/check metadata and writes issue labels,
+  # comments, and commit statuses. All unspecified permissions, including contents,
+  # are none; no fork code or configuration is checked out or executed.
   pull-requests: write
   issues: write
   checks: read
@@ -32,6 +41,9 @@ concurrency:
 jobs:
   reconcile:
     name: Zoo Code / reconcile PR review state
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')
     runs-on: ubuntu-latest
     steps:
       - name: Reconcile PR review state labels
@@ -52,17 +64,17 @@ jobs:
               {
                 name: 'awaiting-coderabbit',
                 color: '5319e7',
-                description: 'Waiting for CodeRabbit to approve the latest commit',
+                description: 'Waiting for automated review of the latest commit',
               },
               {
                 name: 'awaiting-ready',
                 color: '1d76db',
-                description: 'CodeRabbit approved; waiting for the draft to be marked ready',
+                description: 'Automated review complete; waiting for the draft to be marked ready',
               },
               {
                 name: 'awaiting-maintainer',
                 color: '0e8a16',
-                description: 'CodeRabbit approved; waiting for a human maintainer',
+                description: 'Waiting for fresh human maintainer or CODEOWNER approval',
               },
               {
                 name: 'coderabbit-review-active',
@@ -73,16 +85,26 @@ jobs:
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
             const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
             const codeRabbitLogin = 'coderabbitai[bot]';
+            const codeRabbitLogins = new Set([codeRabbitLogin, 'coderabbitai']);
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'Zoo Code / PR review gate';
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
 
+            if (context.eventName === 'issue_comment' &&
+                (!context.payload.issue?.pull_request ||
+                 context.payload.comment?.user?.login?.toLowerCase() !== codeRabbitLogin)) {
+              core.info('Ignoring untrusted issue comment event');
+              return;
+            }
+
             // When triggered by a single PR event, only reconcile that PR.
-            // The hourly schedule and workflow_dispatch reconcile all open PRs.
+            // Main-branch pushes, the hourly schedule, and workflow_dispatch reconcile all open PRs.
             let prs;
             let eventPrNumbers = [];
             if (context.payload.pull_request?.number) {
               eventPrNumbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'issue_comment') {
+              eventPrNumbers = [context.payload.issue.number];
             } else if (context.eventName === 'workflow_dispatch') {
               eventPrNumbers = [Number(context.payload.inputs.pull_request_number)];
             } else if (context.payload.workflow_run?.pull_requests) {
@@ -161,6 +183,19 @@ jobs:
               }
               const currentLabels = new Set(pr.labels.map(l => l.name));
               const labelErrors = [];
+              if (desiredLabel && !currentLabels.has(desiredLabel)) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
+                  });
+                  currentLabels.add(desiredLabel);
+                  pr.labels.push({ name: desiredLabel });
+                } catch (err) {
+                  const error = new Error(`Could not add desired label: ${err.message}`);
+                  error.preserveStateLabels = true;
+                  throw error;
+                }
+              }
               for (const label of stateLabels) {
                 if (label !== desiredLabel && currentLabels.has(label)) {
                   try {
@@ -177,17 +212,6 @@ jobs:
                       labelErrors.push(err);
                     }
                   }
-                }
-              }
-              if (desiredLabel && !currentLabels.has(desiredLabel)) {
-                try {
-                  await github.rest.issues.addLabels({
-                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
-                  });
-                  currentLabels.add(desiredLabel);
-                  pr.labels.push({ name: desiredLabel });
-                } catch (err) {
-                  labelErrors.push(err);
                 }
               }
               if (desiredLabel !== 'awaiting-author' && currentLabels.has('stale-awaiting-author')) {
@@ -305,16 +329,17 @@ jobs:
 
             function phaseMessage(phase) {
               const messages = {
-                draft: 'Mark the PR ready to start CodeRabbit after required CI passes.',
+                draft: 'Mark the PR ready. Required CI must pass before CodeRabbit starts.',
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
-                'ci-pending': 'Wait for the required CI checks to finish.',
-                'ci-failed': 'Fix the failing required CI checks and push an update.',
+                'ci-pending': 'Wait for required CI checks; awaiting-maintainer requires CI and automated review completion.',
+                'ci-failed': 'Fix the failing required CI checks; awaiting-maintainer requires CI and automated review completion.',
+                'mergeability-pending': 'Wait for GitHub to finish calculating mergeability.',
                 'configuration-error': 'Repository rules must not require this advisory workflow\'s own gate or reconciliation job.',
-                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
-                coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
-                'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
-                'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
-                maintainer: 'Ready for human maintainer review and approval.',
+                'coderabbit-changes': 'Address automated review findings and push fixes.',
+                coderabbit: 'Required CI passed. Waiting for automated review of the latest commit.',
+                'draft-approved': 'Automated review complete for the latest commit. Mark the draft ready.',
+                'maintainer-changes': 'Address maintainer or CODEOWNER feedback, then push an update.',
+                maintainer: 'Awaiting fresh human maintainer or CODEOWNER approval.',
                 approved: 'The required review sequence passed. Remaining merge requirements apply.',
               };
               return messages[phase];
@@ -373,12 +398,18 @@ jobs:
                 ? `\n${codeRabbitLabelMarkerPrefix}${pr.head.sha}${activationPending ? ':pending' : ''} -->`
                 : '';
 
-              return `${guideMarker}\n### Review process\n\n${authorNote}\n\n` +
-                '1. Required CI checks pass.\n' +
-                '2. The workflow starts CodeRabbit automatically.\n' +
-                '3. For eligible human-authored PRs, CodeRabbit reviews and approves the latest commit.\n' +
-                '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
-                `**Current step:** ${phaseMessage(phase)}${labelMarker}`;
+              const phaseHelp = phase === 'coderabbit-changes'
+                ? '\n\nAfter fixes are pushed and required CI passes, automated review restarts.'
+                : phase === 'coderabbit'
+                  ? '\n\nIf automated review does not start, a maintainer must restart it.'
+                  : phase === 'maintainer' && !automatedAuthor
+                    ? '\n\nAutomated review is complete for the latest commit but does not replace human approval.'
+                    : '';
+
+              return `${guideMarker}\n### Review status\n\n${authorNote}\n\n` +
+                `**Current step:** ${phaseMessage(phase)}${phaseHelp}\n\n` +
+                'Review-state labels are managed by this workflow; do not edit them manually.' +
+                labelMarker;
             }
 
             async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false) {
@@ -601,10 +632,11 @@ jobs:
                 const latest = new Map();
                 for (const r of reviews) {
                   const reviewer = r.user.login.toLowerCase();
+                  const reviewerKey = codeRabbitLogins.has(reviewer) ? codeRabbitLogin : reviewer;
                   if (r.state === 'DISMISSED') {
-                    latest.delete(reviewer);
+                    latest.delete(reviewerKey);
                   } else if (r.state !== 'COMMENTED') {
-                    latest.set(reviewer, r);
+                    latest.set(reviewerKey, r);
                   }
                 }
 
@@ -616,6 +648,7 @@ jobs:
                 for (const review of latest.values()) {
                   if (review.commit_id !== pr.head.sha ||
                       review.user?.type === 'Bot' ||
+                      codeRabbitLogins.has(review.user?.login.toLowerCase()) ||
                       review.user?.login.toLowerCase() === pr.user?.login.toLowerCase()) {
                     continue;
                   }
@@ -627,12 +660,12 @@ jobs:
                   review => review.state === 'CHANGES_REQUESTED'
                 );
                 const automatedAuthor = pr.user?.type === 'Bot';
-                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED';
+                const codeRabbitReviewComplete = freshCodeRabbitReview?.state === 'APPROVED';
                 const codeRabbitChangesRequested = freshCodeRabbitReview?.state === 'CHANGES_REQUESTED';
                 const maintainerApproval = freshMaintainerReviews
                   .filter(review => review.state === 'APPROVED')
                   .sort((a, b) => b.id - a.id)[0];
-                const maintainerApprovedAfterCodeRabbit = codeRabbitApproved &&
+                const maintainerApprovedAfterAutomatedReview = codeRabbitReviewComplete &&
                   maintainerApproval &&
                   maintainerApproval.id > freshCodeRabbitReview.id;
 
@@ -654,7 +687,7 @@ jobs:
                     desiredLabel = null;
                     phase = 'approved';
                   }
-                } else if (!codeRabbitApproved) {
+                } else if (!codeRabbitReviewComplete) {
                   if (pr.draft) {
                     desiredLabel = null;
                     phase = 'draft';
@@ -667,12 +700,30 @@ jobs:
                 } else if (pr.draft) {
                   desiredLabel = 'awaiting-ready';
                   phase = 'draft-approved';
-                } else if (!maintainerApprovedAfterCodeRabbit) {
+                } else if (!maintainerApprovedAfterAutomatedReview) {
                   desiredLabel = 'awaiting-maintainer';
                   phase = 'maintainer';
                 } else {
                   desiredLabel = null;
                   phase = 'approved';
+                }
+
+                if (desiredLabel === 'awaiting-maintainer') {
+                  const { data: latestPrDetail } = await github.rest.pulls.get({
+                    owner, repo, pull_number: pr.number,
+                  });
+                  if (latestPrDetail.mergeable === false && latestPrDetail.mergeable_state === 'dirty') {
+                    core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                    await updateReviewGate(pr, 'conflict', false);
+                    await setCodeRabbitReviewActive(pr, false);
+                    await reconcileLabels(pr, 'has-conflicts');
+                    await updateReviewGuide(pr, 'conflict', existingGuide);
+                    continue;
+                  }
+                  if (latestPrDetail.mergeable === null || latestPrDetail.mergeable_state === 'unknown') {
+                    desiredLabel = null;
+                    phase = 'mergeability-pending';
+                  }
                 }
 
                 core.info(
@@ -714,10 +765,12 @@ jobs:
                 } catch (cleanupError) {
                   metadataErrors.push(cleanupError);
                 }
-                try {
-                  await reconcileLabels(pr, null);
-                } catch (cleanupError) {
-                  metadataErrors.push(cleanupError);
+                if (!error.preserveStateLabels) {
+                  try {
+                    await reconcileLabels(pr, null);
+                  } catch (cleanupError) {
+                    metadataErrors.push(cleanupError);
+                  }
                 }
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
