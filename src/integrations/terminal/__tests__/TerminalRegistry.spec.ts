@@ -361,7 +361,7 @@ describe("TerminalRegistry", () => {
 			closeHandler(foreign)
 
 			expect(closeSpy).not.toHaveBeenCalled()
-			expect(TerminalRegistry.getAllTerminals()).toEqual([registered])
+			expect(TerminalRegistry["terminals"]).toEqual([registered])
 		})
 
 		it("delivers buffered output and releases the stream iterator when an active terminal closes", async () => {
