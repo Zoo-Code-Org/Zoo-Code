@@ -407,7 +407,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// initialize or invoke the host request for a cancelled request.
 			if (externalAbortSignal?.aborted) {
 				cancellationTokenSource.cancel()
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				abortError.name = "AbortError"
 				throw abortError
 			}
@@ -419,7 +421,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// tokens or invoking the host so no work happens for a cancelled request.
 			if (externalAbortSignal?.aborted) {
 				cancellationTokenSource.cancel()
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				abortError.name = "AbortError"
 				throw abortError
 			}
@@ -456,7 +460,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				// A late abort while consuming must stop the stream instead of
 				// yielding stale chunks.
 				if (externalAbortSignal?.aborted) {
+					// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 					const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+					// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 					abortError.name = "AbortError"
 					throw abortError
 				}
@@ -572,8 +578,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Detach the abort bridge listener on every path (success, error, and
 			// early consumer break); { once: true } alone would leak it when the
 			// request completes without the signal ever aborting.
-			if (onExternalAbort !== undefined) {
-				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
+			// Stryker disable next-line LogicalOperator: set only when the signal is truthy, so && and || are equivalent
+			if (externalAbortSignal && onExternalAbort) {
+				externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
 			// Cancel before disposing: VS Code's CancellationTokenSource.dispose()
 			// frees resources without cancelling the token, so a premature consumer
@@ -708,7 +715,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Fail fast if the caller already aborted before we even started: do not
 			// initialize or invoke the host request for a cancelled request.
 			if (isAborted()) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				const abortError = new Error("VSCode LM completion aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				abortError.name = "AbortError"
 				throw abortError
 			}
@@ -720,7 +729,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// so a timeout that fired during a slow client lookup can never lead to a
 			// sendRequest call.
 			if (isAborted()) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				const abortError = new Error("VSCode LM completion aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				abortError.name = "AbortError"
 				throw abortError
 			}
@@ -739,7 +750,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 			// Guard against a quiet completion after the request was aborted.
 			if (isAborted()) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				const abortError = new Error("VSCode LM completion aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				abortError.name = "AbortError"
 				throw abortError
 			}
@@ -762,13 +775,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			}
 			throw error
 		} finally {
-			if (timeoutId !== undefined) {
-				clearTimeout(timeoutId)
-			}
+			// clearTimeout(undefined) is a spec no-op, so clear unconditionally.
+			clearTimeout(timeoutId)
 			// { once: true } only detaches the listener when the signal actually
 			// aborts, so remove it explicitly on every path.
-			if (onAbort !== undefined) {
-				externalAbortSignal?.removeEventListener("abort", onAbort)
+			// Stryker disable next-line LogicalOperator: set only when the signal is truthy, so && and || are equivalent
+			if (externalAbortSignal && onAbort) {
+				externalAbortSignal.removeEventListener("abort", onAbort)
 			}
 			tokenSource.dispose()
 		}

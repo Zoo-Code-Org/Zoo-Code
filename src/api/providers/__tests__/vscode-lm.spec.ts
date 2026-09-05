@@ -498,7 +498,10 @@ describe("VsCodeLmHandler", () => {
 			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const stream = handler.createMessage(systemPrompt, messages, meta)
 			await expect(stream.next()).rejects.toSatisfy(
-				(error) => error instanceof Error && error.name === "AbortError",
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
 			)
 
 			// No host request is started for an already-aborted signal.
@@ -532,7 +535,12 @@ describe("VsCodeLmHandler", () => {
 			releaseClient()
 			controller.abort()
 
-			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			await expect(firstChunk).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
 
 			// The abort landed after client initialization, so no host request started
 			// and no input tokens were counted (the post-init re-check bails first).
@@ -577,7 +585,12 @@ describe("VsCodeLmHandler", () => {
 			// instead of yielding stale chunks.
 			controller.abort()
 			releaseStream()
-			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			await expect(firstChunk).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
 
 			// The bridge relayed the abort to the request cancellation token.
 			const tokenSource = tokenSourceInstance()
@@ -609,7 +622,7 @@ describe("VsCodeLmHandler", () => {
 			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
 			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
 			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addEventListenerSpy.mock.calls[0][1])
 		})
 
 		it("should cancel the request token when the consumer stops consuming early", async () => {
@@ -681,7 +694,10 @@ describe("VsCodeLmHandler", () => {
 			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const stream = handler.createMessage(systemPrompt, messages, meta)
 			await expect(stream.next()).rejects.toSatisfy(
-				(error) => error instanceof Error && error.name === "AbortError",
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
 			)
 
 			// The pre-abort short-circuit runs before getClient(): the host is never contacted.
@@ -720,7 +736,12 @@ describe("VsCodeLmHandler", () => {
 			// so the post-init re-check and the finally have not run yet.
 			expect(tokenSourceInstance().token.isCancellationRequested).toBe(true)
 
-			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			await expect(firstChunk).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
 
 			// Bridge + post-init re-check + finally each cancel the request token.
 			expect(tokenSourceInstance().cancel).toHaveBeenCalledTimes(3)
@@ -1537,7 +1558,7 @@ describe("VsCodeLmHandler", () => {
 			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
 			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
 			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addEventListenerSpy.mock.calls[0][1])
 		})
 
 		it("should reject with an AbortError when the signal is already aborted", async () => {
@@ -1547,7 +1568,12 @@ describe("VsCodeLmHandler", () => {
 			controller.abort()
 
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
-			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "VSCode LM completion aborted",
+			)
 
 			// Fails fast before invoking the host: the pre-aborted signal cancels the token.
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
@@ -1595,6 +1621,47 @@ describe("VsCodeLmHandler", () => {
 			)
 		})
 
+		it("should reject with the canonical AbortError when the external signal aborts even if the host token was not cancelled", async () => {
+			// Queue the host response but expect the original code never to consume it:
+			// the post-init re-check must abort before any sendRequest call.
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async () => ({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Completed text")
+					return
+				})(),
+				text: (async function* () {
+					yield "Completed text"
+					return
+				})(),
+			}))
+
+			handler["client"] = mockLanguageModelChat
+
+			const controller = new AbortController()
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			// Neutralise the bridge's token cancel before aborting the signal so the
+			// host token flag stays false: only the signal's own aborted state is
+			// true, the exact operand the right-hand side of isAborted() must see.
+			;(tokenSourceInstance().cancel as Mock).mockImplementation(() => {})
+			controller.abort()
+
+			// The token-agnostic mock stream completes, but the post-init re-check
+			// must still see the aborted external signal and surface the canonical
+			// abort error before any host request.
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "VSCode LM completion aborted",
+			)
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+
+			// The original path never made a host request, so the queued response
+			// was left unconsumed; reset the mock so it cannot leak into later tests.
+			mockLanguageModelChat.sendRequest.mockReset()
+		})
+
 		it("should cancel the token when timeoutMs elapses", async () => {
 			const mockModel = { ...mockLanguageModelChat }
 			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
@@ -1629,7 +1696,10 @@ describe("VsCodeLmHandler", () => {
 				// still makes the completion abort.
 				releaseStream()
 				await expect(promise).rejects.toSatisfy(
-					(error) => error instanceof Error && error.name === "AbortError",
+					(error) =>
+						error instanceof Error &&
+						error.name === "AbortError" &&
+						error.message === "VSCode LM completion aborted",
 				)
 			} finally {
 				vi.useRealTimers()
@@ -1661,7 +1731,10 @@ describe("VsCodeLmHandler", () => {
 				releaseClient()
 
 				await expect(promise).rejects.toSatisfy(
-					(error) => error instanceof Error && error.name === "AbortError",
+					(error) =>
+						error instanceof Error &&
+						error.name === "AbortError" &&
+						error.message === "VSCode LM completion aborted",
 				)
 				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 			} finally {
@@ -1773,7 +1846,12 @@ describe("VsCodeLmHandler", () => {
 			controller.abort()
 
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
-			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "VSCode LM completion aborted",
+			)
 
 			// The pre-abort short-circuit runs before getClient(): the host is never contacted.
 			expect((vscode.lm.selectChatModels as Mock).mock.calls.length).toBe(selectCallsBefore)
@@ -1807,7 +1885,12 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = mockLanguageModelChat
 
 			const promise = handler.completePrompt("Test prompt")
-			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "VSCode LM completion aborted",
+			)
 		})
 	})
 
