@@ -205,6 +205,30 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
+	it("uses safe parallel-tool handling for the Astra Pro route", async () => {
+		const modelId = "openai/gpt-6-astra-pro"
+		vi.mocked(getModels).mockResolvedValue({
+			[modelId]: {
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: modelId }).createMessage("sys", messages, {
+				taskId: "task",
+				parallelToolCalls: true,
+			}),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: modelId, parallel_tool_calls: false })
+	})
+
 	it.each([
 		["boolean support", { reasoningEffort: "high" }, { supportsReasoningEffort: true }, "high"],
 		["array support", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low", "high"] }, "high"],
