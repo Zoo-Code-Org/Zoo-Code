@@ -4101,7 +4101,7 @@ export class ClineProvider
 			) {
 				parentClineMessages.push(subtaskUiMessage)
 			}
-			await saveTaskMessages({
+			parentClineMessages = await saveTaskMessages({
 				messages: parentClineMessages,
 				taskId: parentTaskId,
 				globalStoragePath,
@@ -4191,7 +4191,7 @@ export class ClineProvider
 				}
 			}
 
-			await saveApiMessages({
+			parentApiMessages = await saveApiMessages({
 				messages: parentApiMessages as any,
 				taskId: parentTaskId,
 				globalStoragePath,
@@ -4264,12 +4264,12 @@ export class ClineProvider
 			// 8) Inject restored histories into the in-memory instance before resuming
 			if (parentInstance) {
 				try {
-					await parentInstance.overwriteClineMessages(parentClineMessages)
+					await parentInstance.overwriteClineMessages(parentClineMessages, false)
 				} catch {
 					// non-fatal
 				}
 				try {
-					await parentInstance.overwriteApiConversationHistory(parentApiMessages as any)
+					await parentInstance.overwriteApiConversationHistory(parentApiMessages as any, false)
 				} catch {
 					// non-fatal
 				}

@@ -2,7 +2,9 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { RooCodeEventName } from "@roo-code/types"
-import type { HistoryItem } from "@roo-code/types"
+import type { ClineMessage, HistoryItem } from "@roo-code/types"
+
+import type { ApiMessage } from "../core/task-persistence"
 
 /* vscode mock for Task/Provider imports */
 vi.mock("vscode", () => {
@@ -44,8 +46,8 @@ vi.mock("../core/task-persistence", async (importOriginal) => {
 	return {
 		...real,
 		readApiMessages: vi.fn().mockResolvedValue([]),
-		saveApiMessages: vi.fn().mockResolvedValue(undefined),
-		saveTaskMessages: vi.fn().mockResolvedValue(undefined),
+		saveApiMessages: vi.fn(async ({ messages }: { messages: unknown[] }) => messages),
+		saveTaskMessages: vi.fn(async ({ messages }: { messages: unknown[] }) => messages),
 	}
 })
 
@@ -237,7 +239,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			taskHistoryStore,
-		} as any)
+		} as unknown as ClineProvider)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -384,6 +386,68 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		const apiCall = vi.mocked(saveApiMessages).mock.calls[0][0]
 		expect(apiCall.messages).toHaveLength(2) // 1 original + 1 injected
+	})
+
+	it("hydrates the reopened parent from locked merge results without authoritative rewrites", async () => {
+		const parentItem = {
+			id: "parent-merge",
+			status: "delegated",
+			awaitingChildId: "child-merge",
+			childIds: ["child-merge"],
+			ts: 100,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const overwriteClineMessages = vi.fn()
+		const overwriteApiConversationHistory = vi.fn()
+		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-merge", status: "active" }, parentItem)
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-merge" })),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue({
+				overwriteClineMessages,
+				overwriteApiConversationHistory,
+				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+			}),
+			taskHistoryStore,
+		} as any)
+
+		vi.mocked(readTaskMessages).mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "initial UI" }])
+		vi.mocked(readApiMessages).mockResolvedValue([{ ts: 1, role: "user", content: "initial API" }])
+		vi.mocked(saveTaskMessages).mockResolvedValueOnce([
+			{ ts: 1, type: "say", say: "text", text: "initial UI" },
+			{ ts: 2, type: "say", say: "text", text: "concurrent UI" },
+		] satisfies ClineMessage[])
+		vi.mocked(saveApiMessages).mockResolvedValueOnce([
+			{ ts: 1, role: "user", content: "initial API" },
+			{ ts: 2, role: "assistant", content: "concurrent API" },
+		] satisfies ApiMessage[])
+
+		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "parent-merge",
+			childTaskId: "child-merge",
+			completionResultSummary: "Done",
+		})
+
+		expect(overwriteClineMessages).toHaveBeenCalledWith(
+			[
+				{ ts: 1, type: "say", say: "text", text: "initial UI" },
+				{ ts: 2, type: "say", say: "text", text: "concurrent UI" },
+			],
+			false,
+		)
+		expect(overwriteApiConversationHistory).toHaveBeenCalledWith(
+			[
+				{ ts: 1, role: "user", content: "initial API" },
+				{ ts: 2, role: "assistant", content: "concurrent API" },
+			],
+			false,
+		)
 	})
 
 	it("does not reopen or overwrite a parent when its UI history cannot be read", async () => {

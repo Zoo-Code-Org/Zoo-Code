@@ -1,15 +1,16 @@
-import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as fs from "fs/promises"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
-import { mergeApiMessageSnapshots } from "./mergeMessageSnapshots"
+import { ensureMessageIdentifiers, mergeApiMessageSnapshots } from "./mergeMessageSnapshots"
 import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 
 export type ApiMessage = Anthropic.MessageParam & {
+	messageId?: string
 	ts?: number
 	isSummary?: boolean
 	id?: string
@@ -138,8 +139,22 @@ export async function saveApiMessages({
 	taskId: string
 	globalStoragePath: string
 	merge?: boolean
-}) {
+}): Promise<ApiMessage[]> {
+	ensureMessageIdentifiers(messages)
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.apiConversationHistory)
-	await safeWriteJson(filePath, messages, merge ? { merge: mergeApiMessageSnapshots } : undefined)
+	let savedMessages = messages
+	await safeWriteJson(
+		filePath,
+		messages,
+		merge
+			? {
+					merge: (existing, incoming) => {
+						savedMessages = mergeApiMessageSnapshots(existing, incoming) as ApiMessage[]
+						return savedMessages
+					},
+				}
+			: undefined,
+	)
+	return savedMessages
 }

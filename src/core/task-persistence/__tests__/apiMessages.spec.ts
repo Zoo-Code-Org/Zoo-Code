@@ -133,7 +133,7 @@ describe("apiMessages.saveApiMessages", () => {
 			"utf8",
 		)
 
-		await saveApiMessages({
+		const savedMessages = await saveApiMessages({
 			taskId,
 			globalStoragePath: tmpBaseDir,
 			merge: true,
@@ -144,6 +144,11 @@ describe("apiMessages.saveApiMessages", () => {
 		})
 
 		expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual([
+			expect.objectContaining({ content: "updated prefix", ts: 1 }),
+			expect.objectContaining({ content: "incoming", ts: 2 }),
+			expect.objectContaining({ content: "disk suffix", ts: 3 }),
+		])
+		expect(savedMessages).toEqual([
 			expect.objectContaining({ content: "updated prefix", ts: 1 }),
 			expect.objectContaining({ content: "incoming", ts: 2 }),
 			expect.objectContaining({ content: "disk suffix", ts: 3 }),
@@ -171,6 +176,8 @@ describe("apiMessages.saveApiMessages", () => {
 			messages: [{ role: "user", content: "C", ts: 3 }],
 		})
 
-		expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual([{ role: "user", content: "C", ts: 3 }])
+		expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual([
+			expect.objectContaining({ role: "user", content: "C", ts: 3, messageId: expect.any(String) }),
+		])
 	})
 })

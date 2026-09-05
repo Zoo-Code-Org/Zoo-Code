@@ -112,6 +112,7 @@ import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
 	type ApiMessage,
+	ensureMessageIdentifiers,
 	readApiMessages,
 	saveApiMessages,
 	readTaskMessages,
@@ -979,7 +980,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// API Messages
 
 	private async getSavedApiConversationHistory(): Promise<ApiMessage[]> {
-		return readApiMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
+		const messages = await readApiMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
+		return ensureMessageIdentifiers(messages)
 	}
 
 	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string) {
@@ -1020,9 +1022,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// For API requests, consecutive same-role messages are merged via mergeConsecutiveApiMessages()
 	// so rewind/edit behavior can still reference original message boundaries.
 
-	async overwriteApiConversationHistory(newHistory: ApiMessage[]) {
-		this.apiConversationHistory = newHistory
-		await this.saveApiConversationHistory(false)
+	async overwriteApiConversationHistory(newHistory: ApiMessage[], persist = true) {
+		this.hydrateApiConversationHistory(newHistory)
+		if (persist) {
+			await this.saveApiConversationHistory(false)
+		}
 	}
 
 	/**
@@ -1087,7 +1091,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const lastEffective = effectiveHistoryForValidation[effectiveHistoryForValidation.length - 1]
 		const historyForValidation = lastEffective?.role === "assistant" ? effectiveHistoryForValidation : []
 		const validatedMessage = validateAndFixToolResultIds(userMessage, historyForValidation)
-		const userMessageWithTs = { ...validatedMessage, ts: Date.now() }
+		const userMessageWithTs = { ...validatedMessage, messageId: crypto.randomUUID(), ts: Date.now() }
 		this.apiConversationHistory.push(userMessageWithTs as ApiMessage)
 
 		const saved = await this.saveApiConversationHistory()
@@ -1150,6 +1154,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private async addToClineMessages(message: ClineMessage) {
+		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
 		// Unanswered asks must reach the webview before Message listeners can respond against its state.
@@ -1182,13 +1187,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	public async overwriteClineMessages(newMessages: ClineMessage[]) {
+	public async overwriteClineMessages(newMessages: ClineMessage[], persist = true) {
 		this.hydrateClineMessages(newMessages)
-		await this.saveClineMessages(false)
+		if (persist) {
+			await this.saveClineMessages(false)
+		}
 	}
 
 	private hydrateClineMessages(messages: ClineMessage[]) {
-		this.clineMessages = messages
+		this.clineMessages = ensureMessageIdentifiers(messages)
 		restoreTodoListForTask(this)
 
 		// When hydrating or overwriting messages, repopulate the cloud sync tracking Set
@@ -1199,6 +1206,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.cloudSyncedMessageTimestamps.add(msg.ts)
 			}
 		}
+	}
+
+	private hydrateApiConversationHistory(messages: ApiMessage[]) {
+		this.apiConversationHistory = ensureMessageIdentifiers(messages)
 	}
 
 	private async updateClineMessage(message: ClineMessage) {
@@ -2183,7 +2194,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// task, and it was because we were waiting for resume).
 			// This is important in case the user deletes messages without resuming
 			// the task first.
-			this.apiConversationHistory = await this.getSavedApiConversationHistory()
+			this.hydrateApiConversationHistory(await this.getSavedApiConversationHistory())
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(
@@ -2689,7 +2700,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Load conversation history if not already loaded
 		if (this.apiConversationHistory.length === 0) {
-			this.apiConversationHistory = await this.getSavedApiConversationHistory()
+			this.hydrateApiConversationHistory(await this.getSavedApiConversationHistory())
 		}
 
 		// Add environment details to the existing last user message (which contains the tool_result)

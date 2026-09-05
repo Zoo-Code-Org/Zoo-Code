@@ -12,6 +12,7 @@ export {
 	type TaskMessagesReadErrorKind,
 } from "./taskMessages"
 export { taskMetadata } from "./taskMetadata"
+export { ensureMessageIdentifiers } from "./mergeMessageSnapshots"
 export { TaskHistoryStore } from "./TaskHistoryStore"
 export {
 	abandonDelegatedChild,

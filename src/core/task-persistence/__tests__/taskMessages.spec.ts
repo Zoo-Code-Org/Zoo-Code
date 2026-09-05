@@ -83,16 +83,18 @@ describe("taskMessages.saveTaskMessages", () => {
 
 	it("passes the history merge callback only when requested", async () => {
 		const messages: ClineMessage[] = [{ ts: 2, type: "say", say: "text", text: "incoming" }]
-		await saveTaskMessages({
+		hoisted.safeWriteJsonMock.mockImplementationOnce(async (_path, data, options) =>
+			options.merge([{ ts: 1, type: "say", say: "text", text: "disk" }], data),
+		)
+		const savedMessages = await saveTaskMessages({
 			messages,
 			taskId: "task-merge",
 			globalStoragePath: tmpBaseDir,
 			merge: true,
 		})
 
-		const merge = hoisted.safeWriteJsonMock.mock.calls[0][2]?.merge
-		expect(merge).toBeTypeOf("function")
-		expect(merge([{ ts: 1, type: "say", say: "text", text: "disk" }], messages)).toEqual([
+		expect(hoisted.safeWriteJsonMock.mock.calls[0][2]?.merge).toBeTypeOf("function")
+		expect(savedMessages).toEqual([
 			expect.objectContaining({ ts: 1, text: "disk" }),
 			expect.objectContaining({ ts: 2, text: "incoming" }),
 		])

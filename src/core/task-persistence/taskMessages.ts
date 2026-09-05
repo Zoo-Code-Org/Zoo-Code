@@ -1,11 +1,11 @@
-import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 
 import type { ClineMessage } from "@roo-code/types"
 
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
-import { mergeClineMessageSnapshots } from "./mergeMessageSnapshots"
+import { ensureMessageIdentifiers, mergeClineMessageSnapshots } from "./mergeMessageSnapshots"
 import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 
 export type TaskMessagesReadErrorKind = "not_found" | "invalid" | "io_error"
@@ -70,8 +70,22 @@ export async function saveTaskMessages({
 	taskId,
 	globalStoragePath,
 	merge = false,
-}: SaveTaskMessagesOptions) {
+}: SaveTaskMessagesOptions): Promise<ClineMessage[]> {
+	ensureMessageIdentifiers(messages)
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
-	await safeWriteJson(filePath, messages, merge ? { merge: mergeClineMessageSnapshots } : undefined)
+	let savedMessages = messages
+	await safeWriteJson(
+		filePath,
+		messages,
+		merge
+			? {
+					merge: (existing, incoming) => {
+						savedMessages = mergeClineMessageSnapshots(existing, incoming) as ClineMessage[]
+						return savedMessages
+					},
+				}
+			: undefined,
+	)
+	return savedMessages
 }

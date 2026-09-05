@@ -293,7 +293,7 @@ describe("Task persistence", () => {
 
 	describe("saveApiConversationHistory", () => {
 		it("returns true on success", async () => {
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockSaveApiMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -323,6 +323,22 @@ describe("Task persistence", () => {
 			await task.overwriteApiConversationHistory([{ role: "user", content: "replacement" }])
 
 			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
+		})
+
+		it("can hydrate API history without persisting it", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteApiConversationHistory([{ role: "user", content: "merged" }], false)
+
+			expect(task.apiConversationHistory).toEqual([
+				expect.objectContaining({ role: "user", content: "merged", messageId: expect.any(String) }),
+			])
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
 		})
 
 		it("returns false on failure", async () => {
@@ -374,7 +390,7 @@ describe("Task persistence", () => {
 		})
 
 		it("snapshots the array before passing to saveApiMessages", async () => {
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockSaveApiMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -405,7 +421,7 @@ describe("Task persistence", () => {
 
 	describe("saveClineMessages", () => {
 		it("returns true on success", async () => {
-			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockSaveTaskMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -432,6 +448,22 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
 		})
 
+		it("can hydrate UI history without persisting it", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteClineMessages([{ ts: 1, type: "say", say: "text", text: "merged" }], false)
+
+			expect(task.clineMessages).toEqual([
+				expect.objectContaining({ ts: 1, text: "merged", messageId: expect.any(String) }),
+			])
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
 		it("returns false on failure", async () => {
 			mockSaveTaskMessages.mockRejectedValueOnce(new Error("write error"))
 
@@ -447,7 +479,7 @@ describe("Task persistence", () => {
 		})
 
 		it("snapshots the array before passing to saveTaskMessages", async () => {
-			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockSaveTaskMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -475,7 +507,7 @@ describe("Task persistence", () => {
 		})
 
 		it("preserves an existing lifecycle status during metadata saves", async () => {
-			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockSaveTaskMessages.mockResolvedValueOnce([])
 			mockTaskMetadata.mockResolvedValueOnce({
 				historyItem: {
 					id: "task-with-advanced-status",
@@ -1281,7 +1313,7 @@ describe("Task persistence", () => {
 		})
 
 		it("clears userMessageContent on save success", async () => {
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockSaveApiMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,

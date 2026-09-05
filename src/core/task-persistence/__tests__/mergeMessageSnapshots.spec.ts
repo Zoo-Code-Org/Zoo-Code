@@ -1,4 +1,23 @@
-import { mergeApiMessageSnapshots, mergeClineMessageSnapshots } from "../mergeMessageSnapshots"
+import {
+	ensureMessageIdentifiers,
+	mergeApiMessageSnapshots,
+	mergeClineMessageSnapshots,
+} from "../mergeMessageSnapshots"
+
+describe("ensureMessageIdentifiers", () => {
+	it("assigns the same upgrade identifiers to equivalent legacy snapshots", () => {
+		const legacyMessages: Array<{ messageId?: string; ts?: number; role: string }> = [
+			{ ts: 1, role: "user" },
+			{ ts: 1, role: "assistant" },
+			{ role: "user" },
+		]
+		const first = ensureMessageIdentifiers(structuredClone(legacyMessages))
+		const second = ensureMessageIdentifiers(structuredClone(legacyMessages))
+
+		expect(first.map(({ messageId }) => messageId)).toEqual(second.map(({ messageId }) => messageId))
+		expect(new Set(first.map(({ messageId }) => messageId)).size).toBe(3)
+	})
+})
 
 describe("mergeClineMessageSnapshots", () => {
 	it("preserves disk-only messages and applies incoming updates in timestamp order", () => {
@@ -47,6 +66,18 @@ describe("mergeClineMessageSnapshots", () => {
 		).toEqual([{ ts: 1, type: "ask", ask: "followup", text: "new" }])
 	})
 
+	it("preserves unrelated messages with the same timestamp", () => {
+		expect(
+			mergeClineMessageSnapshots(
+				[{ messageId: "disk", ts: 1, type: "say", say: "text", text: "disk message" }],
+				[{ messageId: "incoming", ts: 1, type: "say", say: "text", text: "incoming message" }],
+			),
+		).toEqual([
+			{ messageId: "incoming", ts: 1, type: "say", say: "text", text: "incoming message" },
+			{ messageId: "disk", ts: 1, type: "say", say: "text", text: "disk message" },
+		])
+	})
+
 	it("returns incoming data when either snapshot is not an array", () => {
 		expect(mergeClineMessageSnapshots(null, [{ ts: 1 }])).toEqual([{ ts: 1 }])
 		expect(mergeClineMessageSnapshots([], "invalid")).toBe("invalid")
@@ -54,6 +85,18 @@ describe("mergeClineMessageSnapshots", () => {
 })
 
 describe("mergeApiMessageSnapshots", () => {
+	it("preserves unrelated messages with the same timestamp", () => {
+		expect(
+			mergeApiMessageSnapshots(
+				[{ messageId: "disk", role: "user", content: "disk message", ts: 1 }],
+				[{ messageId: "incoming", role: "user", content: "incoming message", ts: 1 }],
+			),
+		).toEqual([
+			{ messageId: "incoming", role: "user", content: "incoming message", ts: 1 },
+			{ messageId: "disk", role: "user", content: "disk message", ts: 1 },
+		])
+	})
+
 	it("retains equal-timestamp records and keeps tool calls before their results", () => {
 		const result = mergeApiMessageSnapshots(
 			[
