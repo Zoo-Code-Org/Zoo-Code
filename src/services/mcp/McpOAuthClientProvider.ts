@@ -126,7 +126,9 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// Only pick methods we actually implement: "none" or "client_secret_post".
 		const authMethods: string[] = authServerMeta?.token_endpoint_auth_methods_supported ?? []
 		const tokenEndpointAuthMethod = authMethods.includes("none") ? "none" : "client_secret_post"
-		const grantTypes: string[] = authServerMeta?.grant_types_supported ?? ["authorization_code", "refresh_token"]
+		const grantTypes: string[] = (
+			authServerMeta?.grant_types_supported ?? ["authorization_code", "refresh_token"]
+		).filter((grantType: string) => ["authorization_code", "refresh_token"].includes(grantType))
 		const scopes: string[] = authServerMeta?.scopes_supported ?? []
 
 		// Generate a CSRF state token for the OAuth flow.
