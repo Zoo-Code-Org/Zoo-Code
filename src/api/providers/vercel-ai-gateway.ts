@@ -7,6 +7,8 @@ import {
 	VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
 	providerIdentifiers,
+	type ModelInfo,
+	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -23,6 +25,20 @@ import { createAbortError } from "./utils/abort-signal"
 interface VercelAiGatewayUsage extends OpenAI.CompletionUsage {
 	cache_creation_input_tokens?: number
 	cost?: number
+}
+
+function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
+	const configured = options.reasoningEffort
+	const reasoningDisabled =
+		configured === "disable" || configured === "none" || options.enableReasoningEffort === false
+	const supported = info.supportsReasoningEffort
+
+	if (!reasoningDisabled && configured && configured !== "minimal") {
+		if (supported === true || (Array.isArray(supported) && supported.includes(configured))) return configured
+	}
+
+	const fallback = info.reasoningEffort
+	return info.requiredReasoningEffort && fallback && fallback !== "none" ? fallback : undefined
 }
 
 export class VercelAiGatewayHandler extends RouterProvider implements SingleCompletionHandler {
@@ -55,6 +71,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		}
 
 		const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)
+		const reasoningEffort = getReasoningEffort(this.options, info)
 
 		const body: OpenAI.Chat.ChatCompletionCreateParams = {
 			model: modelId,
@@ -68,6 +85,9 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+		}
+		if (reasoningEffort) {
+			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
 		// Per-request controller so an external abort signal (e.g. task
@@ -154,10 +174,14 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {
+			const reasoningEffort = getReasoningEffort(this.options, info)
 			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
 				stream: false,
+			}
+			if (reasoningEffort) {
+				;(requestOptions as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 			}
 
 			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
