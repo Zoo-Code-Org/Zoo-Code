@@ -193,6 +193,7 @@ describe("McpOAuthClientProvider", () => {
 			expect(metadata.grant_types).toContain("authorization_code")
 			expect(metadata.response_types).toContain("code")
 			expect(metadata.token_endpoint_auth_method).toBe("none")
+			expect(metadata).toMatchObject({ application_type: "native" })
 			await provider.close()
 		})
 
@@ -205,6 +206,61 @@ describe("McpOAuthClientProvider", () => {
 			)
 
 			expect(provider.clientMetadata.client_name).toBe("figma")
+			await provider.close()
+		})
+
+		it("should exclude jwt-bearer from advertised grant types", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: [
+							"authorization_code",
+							"refresh_token",
+							"urn:ietf:params:oauth:grant-type:jwt-bearer",
+						],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code", "refresh_token"])
+			await provider.close()
+		})
+
+		it("should exclude unknown advertised grant types", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: ["authorization_code", "urn:example:grant-type:foo"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code"])
+			await provider.close()
+		})
+
+		it("should reject registration metadata when authorization code is unsupported", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: ["refresh_token"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(() => provider.clientMetadata).toThrow("authorization_code")
 			await provider.close()
 		})
 	})
@@ -803,6 +859,47 @@ describe("McpOAuthClientProvider", () => {
 			await provider.registerClientIfNeeded()
 
 			expect((await provider.clientInformation())?.client_id).toBe("new-client-id")
+			await provider.close()
+		})
+
+		it("should register when the endpoint rejects unsupported grant types", async () => {
+			setupCallbackServerMock()
+			const secretStorage = createMockSecretStorage()
+
+			mockFetch.mockClear()
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						authorization_endpoint: "https://auth.example.com/authorize",
+						token_endpoint: "https://auth.example.com/token",
+						registration_endpoint: "https://auth.example.com/register",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: [
+							"authorization_code",
+							"refresh_token",
+							"urn:ietf:params:oauth:grant-type:jwt-bearer",
+						],
+					}),
+			})
+			mockFetch.mockImplementationOnce((_url, init) => {
+				const body = JSON.parse(init?.body as string)
+				const hasUnsupportedGrant = body.grant_types.some(
+					(grantType: string) => !["authorization_code", "refresh_token"].includes(grantType),
+				)
+
+				return Promise.resolve({
+					ok: !hasUnsupportedGrant,
+					status: hasUnsupportedGrant ? 400 : 200,
+					json: () => Promise.resolve({ client_id: "registered-client-id" }),
+				})
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+
+			await expect(provider.registerClientIfNeeded()).resolves.toBeUndefined()
+			expect((await provider.clientInformation())?.client_id).toBe("registered-client-id")
 			await provider.close()
 		})
 
