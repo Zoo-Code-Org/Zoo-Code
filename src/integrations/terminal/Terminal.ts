@@ -122,6 +122,11 @@ export class Terminal extends BaseTerminal {
 				reject(error)
 			})
 
+			if (this.isClosed()) {
+				process.handleTerminalClosed()
+				return
+			}
+
 			if (Terminal.isActiveShellCmdExe()) {
 				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
 				// directly instead of routing through executeCommandInTerminal().
@@ -142,10 +147,6 @@ export class Terminal extends BaseTerminal {
 				this.waitForShellIntegration(Terminal.getShellIntegrationTimeout())
 					.then(() => {
 						if (this.isClosed()) {
-							if (this.process === process) {
-								process.handleTerminalClosed()
-							}
-
 							return
 						}
 
@@ -157,10 +158,6 @@ export class Terminal extends BaseTerminal {
 					})
 					.catch(() => {
 						if (this.isClosed()) {
-							if (this.process === process) {
-								process.handleTerminalClosed()
-							}
-
 							return
 						}
 

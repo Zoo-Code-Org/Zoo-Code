@@ -68,9 +68,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 		// run() has not installed its completion listener yet, so finish the
 		// startup-wait path directly instead of leaving runCommand() pending.
-		this.terminal.activeShellExecution = undefined
-		this.cleanupScriptFile()
-		this.stopHotTimer()
 		this.emit("completed", "")
 		this.emit("continue")
 	}
