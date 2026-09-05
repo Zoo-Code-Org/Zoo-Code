@@ -92,6 +92,8 @@ jobs:
               run: pnpm check-types
             - name: Model-check concurrent task lifecycle
               run: pnpm lifecycle:model-check
+            - name: Validate MCP OAuth integration
+              run: pnpm mcp:integration-check
 
     build-vsix:
         name: Build test VSIX

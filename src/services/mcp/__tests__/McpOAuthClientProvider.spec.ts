@@ -193,6 +193,7 @@ describe("McpOAuthClientProvider", () => {
 			expect(metadata.grant_types).toContain("authorization_code")
 			expect(metadata.response_types).toContain("code")
 			expect(metadata.token_endpoint_auth_method).toBe("none")
+			expect(metadata).toMatchObject({ application_type: "native" })
 			await provider.close()
 		})
 
@@ -243,6 +244,23 @@ describe("McpOAuthClientProvider", () => {
 			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
 
 			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code"])
+			await provider.close()
+		})
+
+		it("should reject registration metadata when authorization code is unsupported", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: ["refresh_token"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(() => provider.clientMetadata).toThrow("authorization_code")
 			await provider.close()
 		})
 	})

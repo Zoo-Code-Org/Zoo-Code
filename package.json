@@ -15,6 +15,7 @@
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && pnpm cleanup-protocol:model-check",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
+		"mcp:integration-check": "tsx scripts/check-mcp-oauth-integration.ts",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",
