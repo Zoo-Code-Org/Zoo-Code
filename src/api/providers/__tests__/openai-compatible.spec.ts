@@ -193,12 +193,15 @@ describe("OpenAICompatibleHandler", () => {
 			expect(mockGenerateText.mock.calls[0][0].abortSignal).toBe(controller.signal)
 		})
 
-		it("should reject with AbortError when abortSignal is already aborted before request", async () => {
+		it("should reject with the real DOMException AbortError when the signal is pre-aborted", async () => {
+			// Emulate the real AI SDK: a pre-aborted signal makes the request reject
+			// with the fetch stack's DOMException abort error rather than a fabricated
+			// Error, so this exercises the provider's pass-through of a real SDK
+			// abort. openai-compatible.ts has no normalization layer, so the
+			// DOMException must surface unchanged (name and message).
 			mockGenerateText.mockImplementation((options: { abortSignal?: AbortSignal }) => {
 				if (options.abortSignal?.aborted) {
-					const error = new Error("This operation was aborted")
-					error.name = "AbortError"
-					return Promise.reject(error)
+					return Promise.reject(new DOMException("The operation was aborted.", "AbortError"))
 				}
 				return Promise.resolve({ text: "response" })
 			})
@@ -210,6 +213,7 @@ describe("OpenAICompatibleHandler", () => {
 				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
 			).rejects.toMatchObject({
 				name: "AbortError",
+				message: "The operation was aborted.",
 			})
 		})
 

@@ -165,17 +165,13 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	}
 
 	/**
-	 * Static canonical entry points for merging abort signals, mirroring the API
-	 * surface providers used before the builder existed. Delegate to the shared
-	 * utils in ../utils/abort-signal so timeout semantics (timeoutMs <= 0 disables
-	 * the timeout; native AbortSignal.timeout self-manages its timer) stay
-	 * single-sourced.
+	 * Static canonical entry point for merging an external signal with a timeout,
+	 * mirroring the API surface providers used before the builder existed. Delegates
+	 * to the shared utils in ../utils/abort-signal so timeout semantics (timeoutMs
+	 * <= 0 disables the timeout; native AbortSignal.timeout self-manages its timer)
+	 * stay single-sourced.
 	 */
 	static mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
 		return mergeAbortSignalAndTimeout(externalSignal, timeoutMs)
-	}
-
-	static mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: AbortSignal): AbortSignal {
-		return mergeAbortSignals(primarySignal, secondarySignal)
 	}
 }

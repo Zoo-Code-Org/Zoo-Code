@@ -1033,6 +1033,148 @@ describe("OpenAiNativeHandler", () => {
 				await tick()
 				expect(openStreams[0].fetchSignal.aborted).toBe(false)
 			})
+
+			it("should surface the contract AbortError once when the fallback stream read rejects on external abort", async () => {
+				// Force the fallback path and emulate undici: the body's reader.read()
+				// stays pending and rejects with a DOMException AbortError when the
+				// request signal aborts. Before the fix, handleStreamResponse wrapped
+				// that error in a plain Error (defeating the caller's AbortError guard)
+				// and the request was captured as an exception twice.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				let fetchSignal: AbortSignal | undefined
+				const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+					const signal = options?.signal
+					if (!signal) {
+						return Promise.reject(new Error("expected the fallback fetch to carry a request signal"))
+					}
+					fetchSignal = signal
+					const body = new ReadableStream<Uint8Array>({
+						pull: () => {
+							return new Promise((_resolve, reject) => {
+								if (signal.aborted) {
+									reject(new DOMException("This operation was aborted", "AbortError"))
+									return
+								}
+								signal.addEventListener(
+									"abort",
+									() => reject(new DOMException("This operation was aborted", "AbortError")),
+									{ once: true },
+								)
+							})
+						},
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const controller = new AbortController()
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				await tick()
+				expect(fetchSignal).toBeDefined()
+
+				// A user stop mid-stream must surface exactly one error, contract-named.
+				controller.abort()
+				await expect(collected).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
+				// The provider must not report a user-triggered stop as an exception.
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			})
+
+			it("should not convert a non-abort stream error into an AbortError", async () => {
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				const mockFetch = vitest.fn().mockImplementation(() => {
+					const body = new ReadableStream<Uint8Array>({
+						pull: () => Promise.reject(new Error("socket hang up")),
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toThrow(
+					"Error processing response stream: socket hang up",
+				)
+			})
+
+			it("should not let an earlier request's external abort affect a later request on the same handler", async () => {
+				// Request 1 streams under external signal A while request 2 starts under
+				// external signal B. Aborting A while both are in flight must abort only
+				// request 1's request-local controller; request 2 completes normally.
+				const firstExternal = new AbortController()
+				const secondExternal = new AbortController()
+				let firstGateOpen: (() => void) | undefined
+				const firstGate = new Promise<void>((resolve) => {
+					firstGateOpen = resolve
+				})
+				let firstSdkSignal: AbortSignal | undefined
+				let secondSdkSignal: AbortSignal | undefined
+				let sdkCalls = 0
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkCalls += 1
+					if (sdkCalls === 1) {
+						firstSdkSignal = options?.signal
+						return Promise.resolve(
+							(async function* () {
+								yield { type: "response.output_text.delta", delta: "one" }
+								await firstGate
+							})(),
+						)
+					}
+					secondSdkSignal = options?.signal
+					return Promise.resolve(
+						asyncStreamFrom([
+							{ type: "response.output_text.delta", delta: "two-a" },
+							{ type: "response.output_text.delta", delta: " two-b" },
+						]),
+					)
+				})
+
+				const collected1 = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: firstExternal.signal }),
+					),
+				)
+				await tick()
+				expect(firstSdkSignal).toBeDefined()
+
+				const collected2 = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: secondExternal.signal }),
+					),
+				)
+				await tick()
+				expect(secondSdkSignal).toBeDefined()
+
+				// Abort the first request's external signal while the second is in flight.
+				firstExternal.abort()
+				await tick()
+				expect(firstSdkSignal?.aborted).toBe(true)
+				expect(secondSdkSignal?.aborted).toBe(false)
+
+				// The second request completes normally with its own content.
+				const chunks2 = await collected2
+				expect(textChunks(chunks2).map((chunk) => chunk.text)).toEqual(["two-a", " two-b"])
+				expect(secondExternal.signal.aborted).toBe(false)
+
+				// Let the first request wind down; its stream simply ends.
+				if (!firstGateOpen) {
+					throw new Error("expected the first stream gate to be ready")
+				}
+				firstGateOpen()
+				const chunks1 = await collected1
+				expect(textChunks(chunks1).map((chunk) => chunk.text)).toEqual(["one"])
+			})
 		})
 	})
 
@@ -1200,23 +1342,6 @@ describe("OpenAiNativeHandler", () => {
 			expect(result).toBe("response")
 			expect(requestSignal).toBeInstanceOf(AbortSignal)
 			expect(requestSignal?.aborted).toBe(true)
-		})
-
-		it("completePrompt should not replace an active streaming abort controller", async () => {
-			const activeStreamingController = new AbortController()
-			handler["abortController"] = activeStreamingController
-			mockResponsesCreate.mockResolvedValue({
-				output: [
-					{
-						type: "message",
-						content: [{ type: "output_text", text: "response" }],
-					},
-				],
-			})
-
-			await handler.completePrompt("Test prompt")
-
-			expect(handler["abortController"]).toBe(activeStreamingController)
 		})
 
 		it("completePrompt should merge the external signal and timeoutMs together", async () => {

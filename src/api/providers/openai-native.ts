@@ -404,6 +404,32 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		return body
 	}
 
+	/**
+	 * Bridges an external abort signal (e.g. task cancellation) onto a request-local
+	 * controller using the Bedrock pattern: a pre-aborted signal aborts the controller
+	 * immediately and registers no listener; otherwise a once-only listener forwards
+	 * the abort. Returns a cleanup function that detaches the listener (or undefined
+	 * when no listener was registered) so the caller can release it in its finally
+	 * block and a late abort can never reach a later request's controller.
+	 */
+	private attachExternalAbort(
+		externalAbortSignal: AbortSignal | undefined,
+		requestController: AbortController,
+	): (() => void) | undefined {
+		if (!externalAbortSignal) {
+			return undefined
+		}
+		if (externalAbortSignal.aborted) {
+			requestController.abort()
+			return undefined
+		}
+		const abortListener = () => requestController.abort()
+		externalAbortSignal.addEventListener("abort", abortListener, { once: true })
+		return () => {
+			externalAbortSignal.removeEventListener("abort", abortListener)
+		}
+	}
+
 	private async *executeRequest(
 		requestBody: any,
 		model: OpenAiNativeModel,
@@ -418,20 +444,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const requestController = new AbortController()
 		this.abortController = requestController
 
-		// Bridge external abort signal to the request controller using the Bedrock pattern:
-		// - pre-aborted guard: check if already aborted before adding listener
-		// - { once: true }: removes the listener after the first abort to avoid leaks
-		// The listener is removed in the finally block when the request completes.
-		let abortListener: (() => void) | undefined
-		const externalAbortSignal = metadata?.abortSignal
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				requestController.abort()
-			} else {
-				abortListener = () => requestController.abort()
-				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-			}
-		}
+		// Bridge the external abort signal onto the request controller; the returned
+		// cleanup detaches the listener in the finally block so a late abort from this
+		// request cannot cancel a later request's controller.
+		const detach = this.attachExternalAbort(metadata?.abortSignal, requestController)
 
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
@@ -471,10 +487,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		} finally {
 			// Detach the bridging listener so a late abort from this request cannot
 			// cancel a later request's controller.
-			if (abortListener) {
-				// Stryker disable next-line OptionalChaining: abortListener is only assigned inside the if (externalAbortSignal) block, so whenever the finally guard is true the signal is non-nullish; dropping the optional chain is behaviorally identical on every reachable path (covered by the abort-signal bridging specs)
-				externalAbortSignal?.removeEventListener("abort", abortListener)
-			}
+			detach?.()
 			// Only clear the field if this request still owns it (the fallback path may
 			// have installed its own controller, which it clears itself).
 			if (this.abortController === requestController) {
@@ -597,20 +610,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const requestController = new AbortController()
 		this.abortController = requestController
 
-		// Bridge external abort signal to the request controller using the Bedrock pattern:
-		// - pre-aborted guard: check if already aborted before adding listener
-		// - { once: true }: removes the listener after the first abort to avoid leaks
-		// The listener is removed in the finally block when the request completes.
-		let abortListener: (() => void) | undefined
-		const externalAbortSignal = metadata?.abortSignal
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				requestController.abort()
-			} else {
-				abortListener = () => requestController.abort()
-				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-			}
-		}
+		// Bridge the external abort signal onto the request controller; the returned
+		// cleanup detaches the listener in the finally block so a late abort from this
+		// request cannot cancel a later request's controller.
+		const detach = this.attachExternalAbort(metadata?.abortSignal, requestController)
 
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
@@ -691,7 +694,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Handle streaming response
-			yield* this.handleStreamResponse(response.body, model)
+			yield* this.handleStreamResponse(response.body, model, requestController)
 		} catch (error) {
 			// Re-throw abort errors as-is so callers can identify cancellations
 			if (error instanceof Error && error.name === "AbortError") {
@@ -716,10 +719,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		} finally {
 			// Detach the bridging listener so a late abort from this request cannot
 			// cancel a later request's controller.
-			if (abortListener) {
-				// Stryker disable next-line OptionalChaining: abortListener is only assigned inside the if (externalAbortSignal) block, so whenever the finally guard is true the signal is non-nullish; dropping the optional chain is behaviorally identical on every reachable path (covered by the abort-signal bridging specs)
-				externalAbortSignal?.removeEventListener("abort", abortListener)
-			}
+			detach?.()
 			if (this.abortController === requestController) {
 				this.abortController = undefined
 			}
@@ -732,8 +732,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * This function iterates through the Server-Sent Events (SSE) stream, parses each event,
 	 * and yields structured data chunks (`ApiStream`). It handles a wide variety of event types,
 	 * including text deltas, reasoning, usage data, and various status/tool events.
+	 *
+	 * @param requestController - The request-local controller. When it aborts (external
+	 * abort or request timeout), a stream error is surfaced as the contract AbortError
+	 * instead of being wrapped, so a cancellation is never misreported as a provider
+	 * error and is not captured twice.
 	 */
-	private async *handleStreamResponse(body: ReadableStream<Uint8Array>, model: OpenAiNativeModel): ApiStream {
+	private async *handleStreamResponse(
+		body: ReadableStream<Uint8Array>,
+		model: OpenAiNativeModel,
+		requestController: AbortController,
+	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
@@ -1185,6 +1194,15 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// If we didn't get any content, don't throw - the API might have returned an empty response
 			// This can happen in certain edge cases and shouldn't break the flow
 		} catch (error) {
+			// The request-local controller is only aborted on external abort or request
+			// timeout, both legitimate cancellations: surface the contract abort error
+			// before any wrapping so the caller's AbortError guard sees one correctly
+			// named error instead of a wrapped DOMException, and the stop is not
+			// captured as an exception here or again by the caller.
+			if (requestController.signal.aborted) {
+				throw new DOMException(`The ${this.providerName} request was aborted`, "AbortError")
+			}
+
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
 			TelemetryService.instance.captureException(apiError)
