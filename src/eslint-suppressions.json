@@ -974,7 +974,7 @@
 			"count": 26
 		}
 	},
-	"core/tools/__tests__/readFileTool.spec.ts": {
+	"core/tools/__tests__/ReadFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 98
 		}
@@ -1139,7 +1139,7 @@
 			"count": 1
 		}
 	},
-	"extension/__tests__/api-send-message.spec.ts": {
+	"extension/__tests__/api.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
 		}
