@@ -311,6 +311,58 @@ describe("MistralHandler", () => {
 			expect(results).toHaveLength(0)
 		})
 
+		it("should yield text for a text chunk that also carries a stray thinking payload", async () => {
+			// Dispatch is on chunk.type, not on payload presence: a text chunk with a
+			// stray thinking array must be emitted as text, never as reasoning.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										content: [
+											{
+												type: "text",
+												text: "hello",
+												thinking: [{ type: "text", text: "reason" }],
+											},
+										],
+									},
+									index: 0,
+								},
+							],
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(1)
+			expect(results[0]).toEqual({ type: "text", text: "hello" })
+		})
+
+		it("should ignore a non-text chunk that carries a text payload", async () => {
+			// Dispatch is on chunk.type, not on payload presence: an unknown chunk
+			// type with a truthy text payload must not be emitted as text.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ data: { choices: [{ delta: { content: [{ type: "other", text: "leak" }] }, index: 0 }] } },
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(0)
+		})
+
 		it("should ignore empty text chunks and unknown chunk types", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([
@@ -650,6 +702,16 @@ describe("MistralHandler", () => {
 		it("should handle errors in completePrompt", async () => {
 			mockComplete.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("Mistral completion error: API Error")
+		})
+
+		it("should wrap a non-abort error when options are provided without an abort signal", async () => {
+			// options is a defined object lacking abortSignal: the optional-chaining
+			// guard must not crash reading a missing abortSignal before wrapping the
+			// provider error.
+			mockComplete.mockRejectedValueOnce(new Error("boom"))
+			await expect(handler.completePrompt("Test prompt", { timeoutMs: 5000 })).rejects.toThrow(
+				"Mistral completion error: boom",
+			)
 		})
 
 		it("should pass abort signal through to client", async () => {

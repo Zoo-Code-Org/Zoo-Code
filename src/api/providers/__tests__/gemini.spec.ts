@@ -872,6 +872,37 @@ describe("GeminiHandler", () => {
 				expect(stub).not.toHaveBeenCalled()
 			})
 
+			it("should reject a non-HTTP loopback scheme such as ftp://localhost", async () => {
+				// The protocol operand (left of the && in the loopback exception) must
+				// still be enforced: a non-HTTP scheme aimed at a loopback host is not
+				// a local test proxy and must be rejected like any other non-HTTPS URL.
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const ftpHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "ftp://localhost:8080",
+				})
+				ftpHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					ftpHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
 			it("should reject an invalid googleGeminiBaseUrl in createMessage", async () => {
 				const messages: Anthropic.Messages.MessageParam[] = [
 					{
