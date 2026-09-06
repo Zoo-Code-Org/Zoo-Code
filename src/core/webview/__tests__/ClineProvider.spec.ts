@@ -1225,6 +1225,48 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// An entry written before updatedAt existed ranks below every timestamped entry
+			// (updatedAt ?? 0) and is the first to fall off the cap.
+			const states = {
+				...Object.fromEntries(
+					Array.from({ length: 50 }, (_, index) => [
+						`view-${index}`,
+						{ mode: `mode-${index}`, updatedAt: index + 1 },
+					]),
+				),
+				"view-missing": { mode: "mode-legacy" },
+			}
+
+			const pruned = provider["prunePersistedViewStates"](states)
+
+			expect(Object.keys(pruned)).toHaveLength(50)
+			expect(pruned["view-missing"]).toBeUndefined()
+			expect(pruned["view-0"]).toBeDefined()
+			expect(pruned["view-49"]).toBeDefined()
+
+			await provider.dispose()
+		})
+
+		it("should keep the earliest inserted entries when updatedAt values tie", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// Equal timestamps preserve insertion order (stable sort), so the first 50
+			// registered views survive and the last 5 fall off the cap.
+			const states = Object.fromEntries(
+				Array.from({ length: 55 }, (_, index) => [`view-${index}`, { mode: `mode-${index}`, updatedAt: 1 }]),
+			)
+
+			const pruned = provider["prunePersistedViewStates"](states)
+
+			expect(Object.keys(pruned)).toHaveLength(50)
+			expect(pruned["view-0"]).toBeDefined()
+			expect(pruned["view-49"]).toBeDefined()
+			expect(pruned["view-50"]).toBeUndefined()
+
+			await provider.dispose()
+		})
 	})
 
 	describe("setViewStateId", () => {
@@ -1334,6 +1376,20 @@ describe("ClineProvider", () => {
 			await provider["clearPersistedViewState"]()
 			expect(mockContext.globalState.get("viewStates")).toEqual({ "stable-editor-view": { mode: "code" } })
 			await provider.dispose()
+		})
+
+		it("should preserve the persisted viewStates entry when the provider is disposed", async () => {
+			// #1065: disposal is retention-only for durable per-view state — the entry must
+			// survive teardown so an editor tab reopens with its saved selections.
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await provider["setViewStateId"]("tab-to-preserve")
+			await provider.saveViewState("mode", "architect")
+			expect(provider.contextProxy.getValue("viewStates")).toHaveProperty("tab-to-preserve")
+
+			await provider.dispose()
+
+			expect(provider.contextProxy.getValue("viewStates")).toHaveProperty("tab-to-preserve")
 		})
 
 		it("should prune by updatedAt regardless of insertion order", async () => {
