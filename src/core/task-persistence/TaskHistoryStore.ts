@@ -85,6 +85,21 @@ export class TaskHistoryStore {
 	private writeLock: Promise<void> = Promise.resolve()
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
+	/**
+	 * Serializes the periodic delegation-reconciliation step across ticks. The
+	 * store lock already prevents interleaved mutations, but overlapping ticks
+	 * would queue stale passes behind each other; skipping a tick instead lets
+	 * the next interval retry with fresher data.
+	 */
+	private delegationTickRunning = false
+	/**
+	 * Task ids this store instance itself persisted with an `active` status.
+	 * Their task sessions live in this window, so periodic delegation
+	 * reconciliation must exclude them from orphan-repair candidates. The set
+	 * is per-instance by design: after a host restart the new store has no
+	 * entries, so startup reconciliation keeps repairing genuine crash orphans.
+	 */
+	private readonly locallyActiveTaskIds = new Set<string>()
 	private disposed = false
 
 	/**
@@ -96,6 +111,13 @@ export class TaskHistoryStore {
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
+
+	/**
+	 * Maximum age (in ms) of a child's history file mtime for the child to be
+	 * considered live in another window. Kept at least as long as the reconcile
+	 * interval so live tasks with sparse writes are not misjudged as orphans.
+	 */
+	private static readonly LIVE_CHILD_MTIME_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
 
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
@@ -250,6 +272,12 @@ export class TaskHistoryStore {
 
 		// Update in-memory cache with what was actually persisted
 		this.cache.set(written.id, written)
+		// Only runtime writes (not `skipTransitionCheck` administrative repairs)
+		// prove a live task session runs in THIS window; repairs go through the
+		// same core but must not suppress future orphan reconciliation.
+		if (!options.skipTransitionCheck) {
+			this.trackLocalSessionOwnership(written)
+		}
 
 		const all = this.getAll()
 
@@ -268,6 +296,7 @@ export class TaskHistoryStore {
 		return this.withLock(async () => {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
+			this.locallyActiveTaskIds.delete(taskId)
 
 			// Remove per-task file (best-effort)
 			try {
@@ -292,6 +321,7 @@ export class TaskHistoryStore {
 			for (const taskId of taskIds) {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
+				this.locallyActiveTaskIds.delete(taskId)
 
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
@@ -386,8 +416,9 @@ export class TaskHistoryStore {
 	/**
 	 * Repair delegation inconsistencies left by a crash mid-transition.
 	 *
-	 * Called once from `initialize()` after `reconcile()`. Runs inside `withLock` to
-	 * prevent interleaving with watcher-triggered reconcile() calls. Iterates until
+	 * Called from `initialize()` and from each periodic reconciliation tick,
+	 * always after `reconcile()`. Runs inside `withLock` to prevent interleaving
+	 * with watcher-triggered reconcile() calls. Iterates until
 	 * convergence so that one-level chained delegations visible at startup are resolved.
 	 *
 	 * Must NOT be called from within `withLock` — `withLock` is non-reentrant (promise
@@ -466,6 +497,20 @@ export class TaskHistoryStore {
 						)
 						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
+						// Cross-instance liveness guard: a child whose history file was written
+						// recently is owned by another live window, not a crash orphan.
+						const mtimeMs = await this.getChildFileMtimeMs(child.id)
+						const isLiveElsewhere =
+							// Stryker disable next-line ConditionalExpression: replacing `mtimeMs !== undefined` with `true` is mutation-equivalent; with a defined mtimeMs `true && X === X`, and with undefined the right operand is `NaN < threshold === false`, identical to the short-circuit result.
+							mtimeMs !== undefined &&
+							Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+						if (isLiveElsewhere) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
+									`(mtime ${Math.round((Date.now() - mtimeMs) / 1000)}s ago) — owned by another window`,
+							)
+							continue
+						}
 						// An active child persisted across startup cannot have a live task session
 						// behind it. Mark it interrupted before releasing the parent's delegation
 						// link so the normal resume/re-delegate flow can take over. This is an
@@ -510,10 +555,29 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Maintain the set of task ids whose live session runs in THIS window.
+	 * A record this store persisted as active belongs to a task running here,
+	 * so the periodic delegation pass must never treat it as a crash orphan —
+	 * its history-file mtime can legitimately go quiet for minutes while the
+	 * task streams a long model turn or waits on a user prompt. Any non-active
+	 * status write ends that ownership.
+	 */
+	private trackLocalSessionOwnership(written: HistoryItem): void {
+		if ((written.status ?? "active") === "active") {
+			this.locallyActiveTaskIds.add(written.id)
+		} else {
+			this.locallyActiveTaskIds.delete(written.id)
+		}
+	}
+
+	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side
 	 * when the other side is already at its target, or when both records still
-	 * describe the original delegated handoff.
+	 * describe the original delegated handoff. Before writing the child, the same
+	 * cross-window liveness guard as `reconcileDelegationStateCore` applies: a
+	 * child whose history file was touched recently belongs to another live
+	 * window, so the stale intent is quarantined instead of replayed.
 	 *
 	 * This method acquires the store's non-reentrant promise-chain lock. It must be
 	 * called outside an existing `withLock` callback; locked callers must use the
@@ -547,6 +611,24 @@ export class TaskHistoryStore {
 			if ((!childAtTarget && !childMatchesExpected) || (!parentMatchesTargetState && !parentMatchesExpected)) {
 				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
 				return
+			}
+
+			// Cross-instance liveness guard (same convention as reconcileDelegationStateCore):
+			// if this window crashed mid-repair and another window restarted the same child,
+			// the child's history file is being actively persisted there. Replaying the stale
+			// intent would overwrite the live child as "interrupted", so quarantine it instead.
+			// Only enforced when the replay would actually write the child record: a child
+			// already at its target needs no write, and parent-only completion must not be
+			// blocked by child liveness. An unreadable mtime conservatively proceeds.
+			if (!childAtTarget) {
+				const mtimeMs = await this.getChildFileMtimeMs(child.id)
+				const isLiveElsewhere =
+					// Stryker disable next-line ConditionalExpression: replacing `mtimeMs !== undefined` with `true` is mutation-equivalent; with a defined mtimeMs `true && X === X`, and with undefined the right operand is `NaN < threshold === false`, identical to the short-circuit result.
+					mtimeMs !== undefined && Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+				if (isLiveElsewhere) {
+					await this.quarantineDelegationRepairIntent(intent, "child live in another window (recent mtime)")
+					return
+				}
 			}
 
 			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
@@ -936,6 +1018,13 @@ export class TaskHistoryStore {
 	/**
 	 * Start periodic reconciliation as a defensive fallback for platforms
 	 * where fs.watch is unreliable.
+	 *
+	 * Each tick refreshes disk→cache via `reconcile()` and then re-runs the same
+	 * delegation repair `initialize()` performs, so a child that skipped repair
+	 * at startup (recent mtime = live in another window) but crashes afterwards
+	 * is caught within one interval instead of waiting for the next extension
+	 * host restart. Intent replay is intentionally NOT part of the tick: the
+	 * durable repair journal is replayed at startup by design.
 	 */
 	private startPeriodicReconciliation(): void {
 		if (this.disposed) {
@@ -951,8 +1040,52 @@ export class TaskHistoryStore {
 			} catch (err) {
 				console.error("[TaskHistoryStore] Periodic reconciliation failed:", err)
 			}
+			try {
+				await this.runPeriodicDelegationReconciliation()
+			} catch (err) {
+				console.error("[TaskHistoryStore] Periodic delegation reconciliation failed:", err)
+			}
 			this.startPeriodicReconciliation()
 		}, TaskHistoryStore.RECONCILE_INTERVAL_MS)
+	}
+
+	/**
+	 * One delegation-reconciliation pass for a periodic tick.
+	 *
+	 * Mirrors the `initialize()` sequence: capture which active task ids exist
+	 * in persisted state (the cache was just refreshed from disk by
+	 * `reconcile()` and no repair has mutated statuses yet), then run the
+	 * reconciliation against that snapshot. The child-mtime liveness guard
+	 * inside `reconcileDelegationStateCore` protects children actively written
+	 * by another window, so ticking is safe for multi-window workspaces.
+	 *
+	 * One mid-session-only refinement over the startup snapshot: ids this
+	 * window itself persisted as active are excluded. At startup no local
+	 * sessions exist, so an active child on disk implies a previous host
+	 * crashed; mid-session, an active child that THIS store wrote belongs to a
+	 * live task here, and a quiet-but-live mtime (long model turn, user
+	 * deliberating over an ask) must not cause it to be repaired away from
+	 * under its own runner. Genuine crashes of this window take the tick with
+	 * them and are handled by the next startup pass instead.
+	 *
+	 * `reconcileDelegationState` acquires the non-reentrant `withLock` chain
+	 * itself (same entry point `initialize()` uses); this method never holds
+	 * the lock. The running flag only guards snapshot→pass adjacency and skips
+	 * (rather than queues) a tick whose previous pass is still in flight.
+	 */
+	private async runPeriodicDelegationReconciliation(): Promise<void> {
+		if (this.disposed || this.delegationTickRunning) {
+			return
+		}
+		this.delegationTickRunning = true
+		try {
+			const persistedActiveIds = new Set(
+				Array.from(this.getPersistedActiveIds()).filter((id) => !this.locallyActiveTaskIds.has(id)),
+			)
+			await this.reconcileDelegationState(persistedActiveIds)
+		} finally {
+			this.delegationTickRunning = false
+		}
 	}
 
 	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
@@ -1045,12 +1178,15 @@ export class TaskHistoryStore {
 				// First record is committed on disk. Update cache so it
 				// reflects disk state before propagating the error.
 				this.cache.set(firstId, writtenFirst)
+				this.trackLocalSessionOwnership(writtenFirst)
 				throw error
 			}
 
 			// Both disk writes succeeded — now update the cache.
 			this.cache.set(firstId, writtenFirst)
 			this.cache.set(secondId, writtenSecond)
+			this.trackLocalSessionOwnership(writtenFirst)
+			this.trackLocalSessionOwnership(writtenSecond)
 
 			const all = this.getAll()
 			if (this.onWrite) {
@@ -1091,5 +1227,20 @@ export class TaskHistoryStore {
 	private async getTaskFilePath(taskId: string): Promise<string> {
 		const tasksDir = await this.getTasksDir()
 		return path.join(tasksDir, taskId, GlobalFileNames.historyItem)
+	}
+
+	/**
+	 * Returns the mtime (ms epoch) of the child's history_item.json, or undefined
+	 * when unreadable. A recent mtime means another live extension host is actively
+	 * persisting this child, so startup repair must not treat it as a crash orphan.
+	 */
+	private async getChildFileMtimeMs(childId: string): Promise<number | undefined> {
+		try {
+			const filePath = await this.getTaskFilePath(childId)
+			const stat = await fs.stat(filePath)
+			return stat.mtimeMs
+		} catch {
+			return undefined // File missing/unreadable → conservatively proceed with repair
+		}
 	}
 }

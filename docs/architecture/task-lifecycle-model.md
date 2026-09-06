@@ -34,17 +34,19 @@ TLA+/PlusCal or Quint with TLC becomes a better fit when the lifecycle needs tem
 
 ## Production mapping
 
-| Model concept             | Production concept                                                                   |
-| ------------------------- | ------------------------------------------------------------------------------------ |
-| Task record and status    | `HistoryItem` persisted by `TaskHistoryStore`                                        |
-| `delegate(parent, child)` | `ClineProvider.delegateParentAndOpenChild`                                           |
-| `interrupt(child)`        | cancellation or eviction through `markDelegatedChildInterrupted`                     |
-| `complete(child)`         | `ClineProvider.reopenParentFromDelegation`                                           |
-| `abandon(child)`          | `ClineProvider.abandonSubtask`                                                       |
-| Atomic event step         | `atomicReadAndUpdate`, `atomicUpdatePair`, and per-parent delegation transition lock |
-| Event interleaving        | Competing completion, cancellation, abandonment, and new delegation calls            |
+| Model concept                                             | Production concept                                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Task record and status                                    | `HistoryItem` persisted by `TaskHistoryStore`                                                                      |
+| `delegate(parent, child)`                                 | `ClineProvider.delegateParentAndOpenChild`                                                                         |
+| `interrupt(child)`                                        | cancellation or eviction through `markDelegatedChildInterrupted`                                                   |
+| `complete(child)`                                         | `ClineProvider.reopenParentFromDelegation`                                                                         |
+| `abandon(child)`                                          | `ClineProvider.abandonSubtask`                                                                                     |
+| `reconcileStartup(parent)`                                | startup/periodic `TaskHistoryStore.reconcileDelegationStateCore` orphan repair                                     |
+| `markLiveElsewhere(child)` / `expireLiveElsewhere(child)` | child history-file mtime recent vs stale past `LIVE_CHILD_MTIME_THRESHOLD_MS` (abstracted; no wall clock in model) |
+| Atomic event step                                         | `atomicReadAndUpdate`, `atomicUpdatePair`, and per-parent delegation transition lock                               |
+| Event interleaving                                        | Competing completion, cancellation, abandonment, and new delegation calls                                          |
 
-The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain. It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion. Named semantic landmarks require the graph to retain interrupted-child re-delegation and nested delegation even when the raw state total changes.
+The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain, plus one abstract boolean per slot recording whether an active child's session is owned by another window (recent history-file mtime). It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion. Named semantic landmarks require the graph to retain interrupted-child re-delegation and nested delegation even when the raw state total changes, a delegated parent whose active child is live in another window surviving startup reconciliation unchanged, and a stale-mtime (crash-orphan) active child being repaired to `interrupted` with the parent returned to `active` only through `reconcileStartup`.
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
 
@@ -89,6 +91,7 @@ The checker currently enforces:
 5. Parent-child lineage is acyclic.
 6. Completed task records cannot be changed by later lifecycle events.
 7. Active-child re-delegation, stale completion after ownership moves to another child, duplicate/late completion, and abandonment of a live child are rejected by the shared production guards.
+8. No transition may clear a delegated parent's link to a child that is active and marked live-elsewhere; startup reconciliation repairs only stale-or-unreadable-mtime (crash-orphan) children. This encodes the PR #1495 cross-window misrepair bug class, which broke delegation links so subtask completion could not return to the parent.
 
 These are safety claims within the documented bounds. The check does not claim liveness, fairness, crash consistency, filesystem-lock correctness, API history correctness, or exhaustive coverage of arbitrary task counts. It also does not distinguish a delayed pre-interruption completion from a legitimate post-resume completion for the same child ID; that requires a persisted attempt/generation token before it can become a sound invariant.
 
