@@ -7,6 +7,7 @@ import {
 	retiredProviderIdentifiers,
 	type ProviderSettings,
 	type ModelInfo,
+	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
 import { getRouterRemovalMessage } from "../core/config/routerRemoval"
@@ -115,6 +116,14 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * when the user clicks stop, preventing wasted API tokens/compute on the provider side.
 	 */
 	abortSignal?: AbortSignal
+	/**
+	 * Per-request thinking effort override (DTE series 2/5).
+	 * When defined, takes precedence over the settings-derived `reasoningEffort`
+	 * wherever the effective effort is resolved (see `resolveEffectiveReasoningEffort`).
+	 * Task-scoped and transient: it applies to this request only (the next request
+	 * after being set — no mid-stream effect) and is never persisted to settings.
+	 */
+	reasoningEffort?: ReasoningEffortExtended
 }
 
 export interface ApiHandler {
