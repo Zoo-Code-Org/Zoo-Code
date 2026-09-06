@@ -3535,6 +3535,98 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("task-start baseline (B1 perWriteCheckpoints)", () => {
+		it("records one suppressed baseline checkpoint per Task instance at loop start", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
+		})
+
+		it("records the baseline checkpoint when the setting is unset (default-on)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline unset task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			// Unset: the property is absent from the state, so default-on applies.
+			const unsetState = { ...state }
+			Reflect.deleteProperty(unsetState, "perWriteCheckpoints")
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(unsetState as typeof state)
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
+		})
+
+		it("does not record a baseline checkpoint when perWriteCheckpoints is disabled", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline disabled task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...state, perWriteCheckpoints: false })
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("awaits the baseline checkpoint before entering the request loop", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline await task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			type SaveResult = Awaited<ReturnType<typeof task.checkpointSave>>
+			let resolveSave: (value: SaveResult | PromiseLike<SaveResult>) => void = () => {}
+			const saveSpy = vi
+				.spyOn(task, "checkpointSave")
+				.mockImplementation(() => new Promise<SaveResult>((resolve) => (resolveSave = resolve)))
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...(await mockProvider.getState()) })
+			const loopPromise = taskAccess.initiateTaskLoop([])
+
+			// The loop must not enter while the baseline checkpoint is still in flight.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(requestSpy).not.toHaveBeenCalled()
+
+			resolveSave()
+			await loopPromise
+			expect(requestSpy).toHaveBeenCalled()
+		})
+	})
+
 	describe("start()", () => {
 		it("should be a no-op if the task was already started in the constructor", () => {
 			const task = new Task({

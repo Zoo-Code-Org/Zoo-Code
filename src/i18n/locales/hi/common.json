@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "संदेशों को हटाने के लिए कोई सक्रिय कार्य नहीं",
+			"no_active_task_to_roll_back": "वापस करने के लिए कोई सक्रिय कार्य नहीं है",
+			"no_active_task_to_restore": "पुनर्स्थापित करने के लिए कोई सक्रिय कार्य नहीं है",
 			"invalid_timestamp_for_deletion": "हटाने के लिए अमान्य संदेश टाइमस्टैम्प",
 			"cannot_delete_missing_timestamp": "संदेश हटाया नहीं जा सकता: टाइमस्टैम्प गुम है",
 			"cannot_delete_invalid_timestamp": "संदेश हटाया नहीं जा सकता: अमान्य टाइमस्टैम्प",

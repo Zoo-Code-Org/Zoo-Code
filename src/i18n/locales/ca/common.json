@@ -102,6 +102,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "No hi ha cap tasca activa de la qual eliminar missatges",
+			"no_active_task_to_roll_back": "No hi ha cap tasca activa per desfer",
+			"no_active_task_to_restore": "No hi ha cap tasca activa per restaurar",
 			"invalid_timestamp_for_deletion": "Marca de temps del missatge no vàlida per a l'eliminació",
 			"cannot_delete_missing_timestamp": "No es pot eliminar el missatge: falta la marca de temps",
 			"cannot_delete_invalid_timestamp": "No es pot eliminar el missatge: marca de temps no vàlida",
