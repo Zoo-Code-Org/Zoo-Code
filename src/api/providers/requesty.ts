@@ -23,6 +23,13 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	throwIfAborted,
+} from "./utils/abort-signal"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -211,7 +218,25 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
+		// Establish the cancellation scope before model lookup: a pre-aborted call, or
+		// one aborted while model metadata is loading, must reject promptly instead of
+		// waiting for the lookup to settle. The configured timeoutMs covers the lookup
+		// as well.
+		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		throwIfAborted(requestAbortSignal)
+
+		let modelData: Awaited<ReturnType<RequestyHandler["fetchModel"]>>
+		try {
+			modelData = requestAbortSignal
+				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
+				: await this.fetchModel()
+		} catch (error) {
+			if (isRequestAborted(error, requestAbortSignal)) {
+				throw createAbortError(this.providerName)
+			}
+			throw error
+		}
+		const { id: model, maxTokens: max_tokens, temperature } = modelData
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
 
@@ -222,11 +247,30 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			temperature: temperature,
 		}
 
+		// The merged abort signal (established before model lookup, above) is forwarded to the
+		// SDK so both abort and timeout reject with a DOM-standard AbortError in the catch
+		// below. The client-level timeout remains the default safety net; 0 is never passed
+		// to the SDK timeout.
+		const createOptions: OpenAI.RequestOptions = {
+			...(requestAbortSignal && { signal: requestAbortSignal }),
+			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+		}
+
 		let response: OpenAI.Chat.ChatCompletion
 		try {
-			response = await this.client.chat.completions.create(completionParams)
+			response = await this.client.chat.completions.create(completionParams, createOptions)
 		} catch (error) {
+			// Aborted requests are user-initiated: surface them as AbortError (this also covers
+			// timeouts, which abort the same signal) instead of a completion error.
+			if (requestAbortSignal?.aborted) {
+				throw createAbortError(this.providerName)
+			}
 			throw handleOpenAIError(error, this.providerName)
+		}
+
+		if (requestAbortSignal?.aborted) {
+			// The response resolved after the request was aborted: do not return the late result.
+			throw createAbortError(this.providerName)
 		}
 		return response.choices[0]?.message.content || ""
 	}
