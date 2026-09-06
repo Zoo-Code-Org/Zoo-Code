@@ -456,6 +456,40 @@ describe("ZooGatewayHandler", () => {
 			])
 		})
 
+		it("yields reasoning chunks from delta.reasoning_content before text", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { reasoning_content: "thinking hard", content: "answer" }, index: 0 }],
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(handler.createMessage("prompt", [{ role: "user", content: "Hi" }]))
+
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "thinking hard" },
+				{ type: "text", text: "answer" },
+			])
+		})
+
+		it("does not yield a reasoning chunk when the delta has no reasoning text", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "just text" }, index: 0 }],
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(handler.createMessage("prompt", [{ role: "user", content: "Hi" }]))
+
+			expect(chunks).toEqual([{ type: "text", text: "just text" }])
+			expect(chunks.some((chunk) => chunk.type === "reasoning")).toBe(false)
+		})
+
 		it("throws the upstream reason when the gateway sends an in-stream error chunk", async () => {
 			mockCreate.mockImplementation(async () =>
 				asyncStreamFrom([
