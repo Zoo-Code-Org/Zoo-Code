@@ -627,6 +627,43 @@ export class ClineProvider
 	}
 
 	/**
+	 * Re-points persisted view pins that reference a removed profile so views do not
+	 * rehydrate a missing profile name after a reload. Runs through the serialized
+	 * write queue like every other viewStates mutation.
+	 */
+	private async repointPersistedViewStates(
+		removedProfileName: string,
+		replacementProfileName: string,
+	): Promise<void> {
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			let changed = false
+
+			for (const [viewId, entry] of Object.entries(states)) {
+				if (entry?.currentApiConfigName !== removedProfileName) {
+					continue
+				}
+
+				changed = true
+				const { currentApiConfigName: _removed, ...rest } = entry
+
+				if (rest.mode) {
+					states[viewId] = { ...rest, currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				} else {
+					states[viewId] = { currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				}
+			}
+
+			if (changed) {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			}
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+
+	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
@@ -2033,8 +2070,20 @@ export class ClineProvider
 	 * @param newMode The mode to switch to
 	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
+	 * A task that is not this view's focused task only receives the task-scoped effects
+	 * (history entry + in-memory mode): the view's durable mode, the ModeChanged
+	 * broadcast, and profile activation keep applying to the focused task's selection.
+	 * Unknown mode slugs are ignored (logged + no-op) so unvalidated callers (the webview
+	 * "mode" message sends message.text as Mode) cannot persist invalid modes.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+		const targetMode = getModeBySlug(newMode, await this.customModesManager.getCustomModes())
+
+		if (!targetMode) {
+			this.log(`[ClineProvider#handleModeSwitch] ignoring unknown mode "${newMode}"`)
+			return
+		}
+
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
@@ -2075,13 +2124,22 @@ export class ClineProvider
 			}
 		}
 
-		await this.updateGlobalState("mode", newMode)
+		// A mode switch requested for a task that is not this view's focused task applies
+		// only to that task (history entry + in-memory mode): pinning the view's durable
+		// mode, broadcasting ModeChanged, or activating a profile on behalf of a
+		// background task would clobber the focused task's selection.
+		const viewScopedSwitch = task === undefined || task === null || this.getCurrentTask() === task
 
-		this.emit(RooCodeEventName.ModeChanged, newMode)
+		if (viewScopedSwitch) {
+			await this.saveViewState("mode", newMode)
+			this.emit(RooCodeEventName.ModeChanged, newMode)
+		}
 
 		// If workspace lock is on, keep the current API config — don't load mode-specific config
 		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		if (lockApiConfigAcrossModes) {
+			// Keep the original post semantics: an explicit null target (pending child)
+			// posts its own state.
 			if (targetTask !== null) {
 				await this.postStateToWebview()
 			}
@@ -2089,6 +2147,9 @@ export class ClineProvider
 		}
 
 		if (signal?.aborted) return
+		if (!viewScopedSwitch) {
+			return
+		}
 
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
@@ -2225,8 +2286,10 @@ export class ClineProvider
 					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 					// We should probably switch to that and verify that it works.
 					// I left the original implementation in just to be safe.
+					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+
 					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+						this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
 						// Route through setValue so the in-memory viewLocalState buffer tracks the
 						// activated profile: a plain global write would leave a stale loaded
 						// currentApiConfigName shadowing the new value in getValues().
@@ -2235,6 +2298,12 @@ export class ClineProvider
 						this.contextProxy.setProviderSettings(providerSettings),
 					])
 
+					await this._saveViewLocalStateFromMutation({
+						listApiConfigMeta,
+						currentApiConfigName: name,
+						apiConfiguration: providerSettings,
+					})
+
 					// Change the provider for the current task.
 					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
@@ -2242,7 +2311,12 @@ export class ClineProvider
 					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+					await this.updateGlobalState("listApiConfigMeta", listApiConfigMeta)
+					// Stryker disable next-line CallExpression,ObjectLiteral: _updateViewLocalStateFromMutation
+					// applies only mode, currentApiConfigName, apiConfiguration and provider-settings keys, so a
+					// listApiConfigMeta-only payload (deleted call or empty object) is a behavior-preserving no-op.
+					this._updateViewLocalStateFromMutation({ listApiConfigMeta })
 				}
 
 				await this.postStateToWebview()
@@ -2288,6 +2362,25 @@ export class ClineProvider
 			)
 		}
 
+		// Re-point any persisted view pin that referenced the deleted profile so views
+		// do not rehydrate a missing profile name after a reload.
+		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+
+		const viewPinsDeletedProfile =
+			this.viewLocalState.currentApiConfigName === undefined ||
+			this.viewLocalState.currentApiConfigName === profileToDelete.name
+
+		if (viewPinsDeletedProfile) {
+			// Apply the replacement through the activation path so this view's
+			// viewLocalState.apiConfiguration and the current task's api handler are
+			// refreshed; a name-only update would leave the deleted profile's settings
+			// behind in both.
+			await this.activateProviderProfile({ name: profileToActivate })
+			return
+		}
+
+		// This view pins an unrelated profile, which must survive the deletion: sync the
+		// shared profile list and post the updated state only.
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
 		// Write the other settings in one bulk call, then route the current-profile write
@@ -2370,14 +2463,22 @@ export class ClineProvider
 
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
+			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+
 			await Promise.all([
-				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 				// Route through setValue so the in-memory viewLocalState buffer tracks the
 				// activated profile: a plain ContextProxy write would leave a stale loaded
 				// currentApiConfigName shadowing the new value in getValues().
 				this.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
+
+			await this._saveViewLocalStateFromMutation({
+				listApiConfigMeta,
+				currentApiConfigName: name,
+				apiConfiguration: providerSettings,
+			})
 		}
 
 		const { mode } = await this.getState()
@@ -4378,7 +4479,8 @@ export class ClineProvider
 		//    The mode switch must happen before createTask() because the Task constructor
 		//    initializes its mode from provider.getState() during initializeTaskMode().
 		try {
-			await this.handleModeSwitch(mode as any)
+			// handleModeSwitch validates the slug and no-ops on unknown modes.
+			await this.handleModeSwitch(mode)
 		} catch (e) {
 			this.log(
 				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
