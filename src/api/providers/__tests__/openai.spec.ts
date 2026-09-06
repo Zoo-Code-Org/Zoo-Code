@@ -171,6 +171,20 @@ describe("OpenAiHandler", () => {
 		})
 	})
 
+	describe("withExtraBody", () => {
+		it("gives request-owned options precedence when an allowed Extra Body field collides", () => {
+			const extraBodyHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiExtraBody: JSON.stringify({ service_tier: "flex" }),
+			})
+
+			expect(extraBodyHandler["withExtraBody"]({})).toEqual({ service_tier: "flex" })
+			expect(extraBodyHandler["withExtraBody"]({ service_tier: "default" })).toEqual({
+				service_tier: "default",
+			})
+		})
+	})
+
 	describe("createMessage", () => {
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [
@@ -259,6 +273,45 @@ describe("OpenAiHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it("adds Extra Body fields to streaming requests without allowing reserved field overrides", async () => {
+			const extraBodyHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiExtraBody: JSON.stringify({
+					metadata: { completion_window: "balanced" },
+					model: "overridden-model",
+					messages: [],
+					stream: false,
+				}),
+			})
+
+			await collectStream(extraBodyHandler.createMessage(systemPrompt, messages))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					metadata: { completion_window: "balanced" },
+					model: mockOptions.openAiModelId,
+					stream: true,
+					messages: expect.arrayContaining([expect.objectContaining({ role: "user" })]),
+				}),
+				{},
+			)
+		})
+
+		it("adds Extra Body fields to non-streaming requests", async () => {
+			const extraBodyHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiStreamingEnabled: false,
+				openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" } }),
+			})
+
+			await collectStream(extraBodyHandler.createMessage(systemPrompt, messages))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ metadata: { completion_window: "balanced" } }),
+				{},
+			)
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
@@ -863,6 +916,20 @@ describe("OpenAiHandler", () => {
 			)
 		})
 
+		it("adds Extra Body fields to single-completion requests", async () => {
+			const extraBodyHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" } }),
+			})
+
+			await extraBodyHandler.completePrompt("Test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ metadata: { completion_window: "balanced" } }),
+				{},
+			)
+		})
+
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error: API Error")
@@ -1119,6 +1186,21 @@ describe("OpenAiHandler", () => {
 					// O3 models do not support deprecated max_tokens but do support max_completion_tokens
 					max_completion_tokens: 32000,
 				}),
+				{},
+			)
+		})
+
+		it.each([true, false])("adds Extra Body fields to O3 requests when streaming is %s", async (streaming) => {
+			const o3Handler = new OpenAiHandler({
+				...o3Options,
+				openAiStreamingEnabled: streaming,
+				openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" } }),
+			})
+
+			await collectStream(o3Handler.createMessage("system", []))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ metadata: { completion_window: "balanced" } }),
 				{},
 			)
 		})
