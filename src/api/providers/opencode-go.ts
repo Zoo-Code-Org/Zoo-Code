@@ -1,6 +1,10 @@
-import { Anthropic } from "@anthropic-ai/sdk"
+import {
+	Anthropic,
+	APIConnectionTimeoutError as AnthropicTimeoutError,
+	APIUserAbortError as AnthropicAbortError,
+} from "@anthropic-ai/sdk"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	type ModelInfo,
@@ -32,6 +36,7 @@ import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
+import { createAbortError, isRequestAborted, rejectOnAbort } from "./utils/abort-signal"
 
 /**
  * The wire formats exposed by the Opencode Go gateway:
@@ -198,24 +203,88 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
+		// Fail fast when the task is already cancelled before any model-catalog
+		// work starts: the standardized AbortError must win over any failure the
+		// fallible resolution could raise.
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal?.aborted) {
+			throw createAbortError("Opencode Go")
+		}
+
+		// Establish the cancellation scope before model resolution: a pre-aborted
+		// call, or one aborted while model metadata is loading, must reject
+		// promptly instead of waiting for the catalog lookup to settle. Abort
+		// failures from the lookup itself are normalized to the provider
+		// AbortError; any other resolution failure propagates unchanged.
+		let resolved: Awaited<ReturnType<OpencodeGoHandler["resolveModel"]>>
+		try {
+			if (externalAbortSignal) {
+				// Stryker disable next-line StringLiteral: the raw rejectOnAbort rejection is re-stamped by the catch's createAbortError below (its name "AbortError" always matches isRequestAborted), so this provider-name literal is unobservable
+				resolved = await rejectOnAbort(this.resolveModel(), externalAbortSignal, "Opencode Go")
+			} else {
+				resolved = await this.resolveModel()
+			}
+		} catch (error) {
+			if (isRequestAborted(error, externalAbortSignal)) {
+				throw createAbortError("Opencode Go")
+			}
+			throw error
+		}
+		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = resolved
+
+		// Per-request controller so an external abort signal (e.g. task
+		// cancellation) can interrupt the in-flight streaming request.
+		// Bridge it to our controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		// The listener is stored so it can be detached when the request ends:
+		// { once: true } only removes it on abort, so a task-scoped signal
+		// would otherwise accumulate one listener per request.
+		const controller = new AbortController()
+		const abortListener = () => controller.abort()
+		if (externalAbortSignal) {
+			// Stryker disable next-line ConditionalExpression: externalAbortSignal.aborted can never be true here - the entry guard rejects a pre-aborted signal and the rejectOnAbort race rejects an abort during model resolution, and no await sits between the race settling and this bridge, so the branch is unreachable
+			if (externalAbortSignal.aborted) {
+				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry guard (and a mid-resolution abort by the race) before this bridge registers
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
+			}
+		}
 
 		if (format === "anthropic") {
-			yield* this.streamAnthropicMessage(modelId, info, temperature, maxTokens, systemPrompt, messages, metadata)
+			try {
+				yield* this.streamAnthropicMessage(
+					modelId,
+					info,
+					temperature,
+					maxTokens,
+					systemPrompt,
+					messages,
+					controller.signal,
+					metadata,
+				)
+			} finally {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
+			}
 			return
 		}
 
 		if (format === "responses") {
-			yield* this.streamResponsesMessage(
-				modelId,
-				info,
-				temperature,
-				maxTokens,
-				reasoningEffort,
-				systemPrompt,
-				messages,
-				metadata,
-			)
+			try {
+				yield* this.streamResponsesMessage(
+					modelId,
+					info,
+					temperature,
+					maxTokens,
+					reasoningEffort,
+					systemPrompt,
+					messages,
+					metadata,
+				)
+			} finally {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
+			}
 			return
 		}
 
@@ -247,46 +316,59 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			}),
 		}
 
-		const completion = metadata?.taskId
-			? await this.client.chat.completions.create(body, {
-					headers: { "x-opencode-session": metadata.taskId },
-				})
-			: await this.client.chat.completions.create(body)
+		try {
+			const completion = metadata?.taskId
+				? await this.client.chat.completions.create(body, {
+						signal: controller.signal,
+						headers: { "x-opencode-session": metadata.taskId },
+					})
+				: await this.client.chat.completions.create(body, { signal: controller.signal })
 
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
 
-			// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+				// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: chunk.usage.prompt_tokens || 0,
+						outputTokens: chunk.usage.completion_tokens || 0,
+						cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
-				}
+		} catch (error) {
+			// Preserve abort identity (series standard): surface a cancelled
+			// request as a DOM-standard AbortError rather than leaking the
+			// raw SDK abort error.
+			if (controller.signal.aborted) {
+				throw createAbortError("Opencode Go")
 			}
+			throw error
+		} finally {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
 	}
 
@@ -462,6 +544,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		maxTokens: number | undefined,
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
+		abortSignal: AbortSignal,
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
@@ -514,10 +597,21 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		try {
 			stream = metadata?.taskId
 				? await this.anthropicClient.messages.create(requestParams, {
+						signal: abortSignal,
 						headers: { "x-opencode-session": metadata.taskId },
 					})
-				: await this.anthropicClient.messages.create(requestParams)
+				: await this.anthropicClient.messages.create(requestParams, { signal: abortSignal })
 		} catch (error) {
+			// Preserve abort identity (series standard): a cancelled request
+			// must surface as a DOM-standard AbortError, not a wrapped
+			// completion error.
+			if (
+				abortSignal.aborted ||
+				error instanceof AnthropicAbortError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Opencode Go")
+			}
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
 			}
@@ -702,24 +796,53 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		if (format === "anthropic") {
 			try {
-				const message = await this.anthropicClient.messages.create({
-					model: modelId,
-					// Honour the same includeMaxTokens/modelMaxTokens override
-					// logic as the streaming path so non-streaming completions
-					// respect the user's max-output slider instead of always
-					// falling back to the model default.
-					max_tokens:
-						this.options.includeMaxTokens === true
-							? this.options.modelMaxTokens || maxTokens || 16_384
-							: (maxTokens ?? 16_384),
-					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
-					messages: [{ role: "user", content: prompt }],
-					stream: false,
-				})
+				// Build request options with abortSignal and/or timeout handling.
+				// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+				// option entirely — the SDKs treat timeout: 0 as an immediate
+				// abort, which would cancel the request right away.
+				const requestOptions: Anthropic.RequestOptions = {}
+				if (options?.abortSignal) {
+					requestOptions.signal = options.abortSignal
+				}
+				if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
+					requestOptions.timeout = options.timeoutMs
+				}
+
+				const message = await this.anthropicClient.messages.create(
+					{
+						model: modelId,
+						// Honour the same includeMaxTokens/modelMaxTokens override
+						// logic as the streaming path so non-streaming completions
+						// respect the user's max-output slider instead of always
+						// falling back to the model default.
+						max_tokens:
+							this.options.includeMaxTokens === true
+								? this.options.modelMaxTokens || maxTokens || 16_384
+								: (maxTokens ?? 16_384),
+						temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
+						messages: [{ role: "user", content: prompt }],
+						stream: false,
+					},
+					Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+				)
 
 				const content = message.content.find(({ type }) => type === "text")
 				return content?.type === "text" ? content.text : ""
 			} catch (error) {
+				// Preserve abort identity (series standard): caller-initiated
+				// cancellations and request timeouts must surface as a
+				// DOM-standard AbortError, not a wrapped completion error. The
+				// Anthropic SDK reports both with messages ending in a period
+				// ("Request was aborted.", "Request timed out."), which would not
+				// match task-level abort detection (message ending in "aborted").
+				if (
+					options?.abortSignal?.aborted ||
+					error instanceof AnthropicAbortError ||
+					error instanceof AnthropicTimeoutError ||
+					(error instanceof Error && error.name === "AbortError")
+				) {
+					throw createAbortError("Opencode Go")
+				}
 				if (error instanceof Error) {
 					throw new Error(`Opencode Go completion error: ${error.message}`)
 				}
@@ -786,9 +909,35 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Build request options with abortSignal and/or timeout for OpenAI path.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
+				createOptions.timeout = options.timeoutMs
+			}
+
+			const response = await this.client.chat.completions.create(requestOptions, createOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			if (
+				options?.abortSignal?.aborted ||
+				error instanceof APIUserAbortError ||
+				error instanceof APIConnectionTimeoutError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Opencode Go")
+			}
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
 			}
