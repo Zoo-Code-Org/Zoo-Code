@@ -27,6 +27,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -462,6 +463,185 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("native tool-call request isolation", () => {
+		it("keeps overlapping Task parser state scoped to each request", async () => {
+			const firstTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "first task",
+				startTask: false,
+			})
+			const secondTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "second task",
+				startTask: false,
+			})
+
+			let releaseFirstStream: (() => void) | undefined
+			let markFirstStreamPaused: (() => void) | undefined
+			const firstStreamRelease = new Promise<void>((resolve) => {
+				releaseFirstStream = resolve
+			})
+			const firstStreamPaused = new Promise<void>((resolve) => {
+				markFirstStreamPaused = resolve
+			})
+			const firstStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield {
+					type: "tool_call_partial",
+					index: 0,
+					id: "call_first",
+					name: "read_file",
+				}
+				yield { type: "tool_call_partial", index: 0, arguments: '{"path":"first' }
+				yield { type: "usage", inputTokens: 0, outputTokens: 0 }
+				markFirstStreamPaused?.()
+				await firstStreamRelease
+				yield { type: "tool_call_partial", index: 0, arguments: 'Task.ts"}' }
+			}
+
+			for (const task of [firstTask, secondTask]) {
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			}
+			vi.spyOn(firstTask, "attemptApiRequest").mockImplementation(() => firstStream())
+			vi.spyOn(secondTask, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "call_second",
+						name: "read_file",
+					},
+					{ type: "tool_call_partial", index: 0, arguments: '{"path":"secondTask.ts"}' },
+				]),
+			)
+
+			const firstRequest = firstTask.recursivelyMakeClineRequests([{ type: "text", text: "first request" }])
+			await firstStreamPaused
+			await secondTask.recursivelyMakeClineRequests([{ type: "text", text: "second request" }])
+			releaseFirstStream?.()
+			await firstRequest
+
+			const firstAssistantMessage = firstTask.apiConversationHistory.find(
+				(message) => message.role === "assistant",
+			)
+			const secondAssistantMessage = secondTask.apiConversationHistory.find(
+				(message) => message.role === "assistant",
+			)
+
+			expect(firstAssistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_first",
+					name: "read_file",
+					input: { path: "firstTask.ts" },
+				},
+			])
+			expect(secondAssistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_second",
+					name: "read_file",
+					input: { path: "secondTask.ts" },
+				},
+			])
+		})
+
+		it("uses a fresh parser scope on retry so stale partial state does not leak", async () => {
+			// First stream: starts a tool call, then throws mid-stream.
+			// Second stream (retry): completes a different tool call cleanly.
+			// If the scope were shared across retries, the old partial state for
+			// "call_stale" would still be in the WeakMap when the retry runs,
+			// and could corrupt finalization of "call_fresh".
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "retry scope test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+
+			const firstStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "tool_call_partial", index: 0, id: "call_stale", name: "read_file" }
+				yield { type: "tool_call_partial", index: 0, arguments: '{"path":"stale' }
+				throw new Error("simulated mid-stream failure")
+			}
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => firstStream())
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_fresh", name: "write_file" },
+						{
+							type: "tool_call_partial",
+							index: 0,
+							arguments: '{"path":"new.ts","content":"hello"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "retry scope test" }])
+
+			// The assistant turn from the successful retry must contain only the
+			// fresh tool call. If scope leaked, "call_stale" partial would pollute
+			// "call_fresh" finalization (wrong args or null result).
+			const assistantMessages = task.apiConversationHistory.filter((m) => m.role === "assistant")
+			const retryAssistant = assistantMessages[assistantMessages.length - 1]
+			expect(retryAssistant?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_fresh",
+					name: "write_file",
+					input: { path: "new.ts", content: "hello" },
+				},
+			])
+		})
+
+		it("finalizes MCP tool call using the request-scoped parser state", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "mcp tool test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "call_mcp",
+						name: "mcp--testServer--myTool",
+					},
+					{ type: "tool_call_partial", index: 0, arguments: '{"param":"value"}' },
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test request" }])
+
+			const assistantMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			// Verifies that finalizeStreamingToolCall receives the request-scoped state.
+			// If the scope argument is removed, finalization returns null and the block
+			// stays as a partial tool_use with input: {} instead of the parsed arguments.
+			expect(assistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_mcp",
+					name: "mcp--testServer--myTool",
+					input: { param: "value" },
+				},
+			])
 		})
 	})
 
@@ -2111,13 +2291,14 @@ describe("Cline", () => {
 			const emitSpy = vi.spyOn(task, "emit")
 
 			// Mock the dispose method to avoid actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			// Call abortTask
 			await task.abortTask()
 
 			// Verify abort flag is set
 			expect(task.abort).toBe(true)
+			expect(task.abandoned).toBe(false)
 
 			// Verify TaskAborted event was emitted
 			expect(emitSpy).toHaveBeenCalledWith("taskAborted")
@@ -2132,7 +2313,7 @@ describe("Cline", () => {
 			})
 
 			// Mock the dispose method to track cleanup
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			// Call abortTask
 			await task.abortTask()
@@ -2140,6 +2321,49 @@ describe("Cline", () => {
 			// Verify the same behavior as Cancel button
 			expect(task.abort).toBe(true)
 			expect(disposeSpy).toHaveBeenCalled()
+		})
+
+		it("does not wait for ancillary disposal cleanup before abort resolves", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			let resolveDisposal: () => void
+			const disposal = new Promise<void>((resolve) => {
+				resolveDisposal = resolve
+			})
+			const disposeSpy = vi.spyOn(task, "dispose").mockReturnValue(disposal)
+
+			const abort = task.abortTask()
+			await vi.waitFor(() => expect(disposeSpy).toHaveBeenCalledOnce())
+			await abort
+
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			resolveDisposal!()
+			await disposal
+		})
+
+		it("memoizes concurrent aborts while preserving abandoned state", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const emitSpy = vi.spyOn(task, "emit")
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+			const firstAbort = task.abortTask()
+			const secondAbort = task.abortTask(true)
+
+			expect(secondAbort).toBe(firstAbort)
+			expect(task.abandoned).toBe(true)
+			await firstAbort
+			expect(
+				(emitSpy.mock.calls as unknown[][]).filter(([event]) => event === RooCodeEventName.TaskAborted),
+			).toHaveLength(1)
 		})
 
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
@@ -2154,7 +2378,7 @@ describe("Cline", () => {
 				queuedMessagesAtFlush = task.messageQueueService.messages.length
 			})
 			const emitSpy = vi.spyOn(task, "emit")
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			task.messageQueueService.addMessage("queued text")
 			await task.abortTask()
@@ -2183,7 +2407,7 @@ describe("Cline", () => {
 			const error = new Error("state flush failed")
 			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockRejectedValueOnce(error)
 			const taskAbortedListener = vi.fn()
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			task.on(RooCodeEventName.TaskAborted, taskAbortedListener)
@@ -2220,7 +2444,7 @@ describe("Cline", () => {
 			expect(typeof taskLike.abortTask).toBe("function")
 
 			// Mock the dispose method to avoid actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			// Call abortTask through interface
 			await taskLike.abortTask()
@@ -2256,6 +2480,28 @@ describe("Cline", () => {
 			expect(task.abort).toBe(true)
 
 			// Restore console.error
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should handle asynchronous disposal errors gracefully", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const disposalError = new Error("Disposal failed asynchronously")
+			vi.spyOn(task, "dispose").mockRejectedValue(disposalError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(task.abortTask()).resolves.toBeUndefined()
+			await vi.waitFor(() =>
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					`Error during task ${task.taskId}.${task.instanceId} disposal:`,
+					disposalError,
+				),
+			)
+
 			consoleErrorSpy.mockRestore()
 		})
 		describe("Stream Failure Retry", () => {
@@ -2374,7 +2620,7 @@ describe("Cline", () => {
 				vi.spyOn(task, "removeAllListeners").mockImplementation(() => task)
 
 				// Call dispose
-				task.dispose()
+				void task.dispose()
 
 				// Verify cancelCurrentRequest was called
 				expect(cancelSpy).toHaveBeenCalled()
@@ -3903,9 +4149,9 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 
 	const createdTasks: Task[] = []
 
-	afterEach(() => {
+	afterEach(async () => {
 		for (const task of createdTasks) {
-			task.dispose()
+			await task.dispose()
 		}
 		createdTasks.length = 0
 		vi.useRealTimers()
@@ -4060,7 +4306,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			task.recordToolUsage("read_file")
 			task.messageCounts = { user: 1, assistant: 1 }
 
-			task.dispose()
+			void task.dispose()
 
 			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
 				task.taskId,
@@ -4076,7 +4322,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			task.flushTelemetryInstallment("attempt_completion")
 			captureTaskCompletedSpy.mockClear()
 
-			task.dispose()
+			void task.dispose()
 
 			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
 		})
@@ -4085,7 +4331,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			vi.useFakeTimers()
 			const task = createTask()
 			task.recordToolUsage("read_file")
-			task.dispose()
+			void task.dispose()
 			captureTaskCompletedSpy.mockClear()
 
 			vi.advanceTimersByTime(60 * 60 * 1000)

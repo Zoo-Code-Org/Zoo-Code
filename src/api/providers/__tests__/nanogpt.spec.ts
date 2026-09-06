@@ -123,8 +123,8 @@ describe("NanoGptHandler", () => {
 			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages),
 		)
 		expect(chunks).toEqual([
-			{ type: "text", text: "answer" },
 			{ type: "reasoning", text: "modern" },
+			{ type: "text", text: "answer" },
 			{ type: "reasoning", text: "legacy" },
 			{ type: "tool_call_partial", index: 0, id: "call-1", name: "read_file", arguments: '{"path":' },
 			{ type: "tool_call_partial", index: 1, id: "call-2", name: "search_files", arguments: '{"query":' },
@@ -169,6 +169,309 @@ describe("NanoGptHandler", () => {
 			{ signal },
 		)
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("max_completion_tokens")
+	})
+
+	it.each([
+		["max", "max"],
+		["none", "medium"],
+	] as const)("uses safe Astra request parameters for %s reasoning", async (reasoningEffort, expectedEffort) => {
+		const modelId = "openai/gpt-6-astra"
+		vi.mocked(getModels).mockResolvedValue({
+			[modelId]: {
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: modelId, modelTemperature: 0.7, reasoningEffort }).createMessage(
+				"sys",
+				messages,
+				{ taskId: "task", parallelToolCalls: true },
+			),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({
+			model: modelId,
+			reasoning_effort: expectedEffort,
+			parallel_tool_calls: false,
+		})
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+	})
+
+	it("uses the model's advertised reasoning effort when settings are unset", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+				reasoningEffort: "high",
+			},
+		})
+
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
+	})
+
+	it("uses the first supported effort when the model cannot disable reasoning", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["high", "medium", "low"],
+			},
+		})
+
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it.each([
+		["an unsupported configured effort", { reasoningEffort: "max" as const }, ["low", "high"] as const, undefined],
+		["a none model default", {}, ["none", "low"] as const, "none" as const],
+		["a minimal model default", {}, ["minimal", "low"] as const, "minimal" as const],
+	])("uses a canonical fallback for %s", async (_name, settings, supportsReasoningEffort, reasoningEffort) => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: [...supportsReasoningEffort],
+				reasoningEffort,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", ...settings }).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("uses a configured effort when reasoning support is boolean", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", reasoningEffort: "high" }).createMessage(
+				"sys",
+				messages,
+			),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
+	})
+
+	it("honors disable when optional reasoning support is boolean", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+				reasoningEffort: "high",
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", reasoningEffort: "disable" }).createMessage(
+				"sys",
+				messages,
+			),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+	})
+
+	it("omits an unset optional effort when disable is supported and no default is advertised", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+			},
+		})
+
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+	})
+
+	it.each([
+		["a stale disable effort", { reasoningEffort: "disable" as const }],
+		["a stale disabled toggle", { enableReasoningEffort: false }],
+	])("uses a supported fallback for %s when the model cannot disable reasoning", async (_name, settings) => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["low", "high"],
+			},
+		})
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking", ...settings }).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it.each([undefined, true] as const)(
+		"omits reasoning effort when the disable option is selected and enableReasoningEffort is %s",
+		async (enableReasoningEffort) => {
+			vi.mocked(getModels).mockResolvedValue({
+				"model:thinking": {
+					maxTokens: 128000,
+					contextWindow: 1050000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: ["disable", "low", "high"],
+					reasoningEffort: "high",
+				},
+			})
+			await collectStream(
+				new NanoGptHandler({
+					nanoGptModelId: "model:thinking",
+					enableReasoningEffort,
+					reasoningEffort: "disable",
+				}).createMessage("sys", messages),
+			)
+
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+		},
+	)
+
+	it("resolves none to the canonical lowest supported effort when reasoning is enabled", async () => {
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("resolves none to the canonical lowest supported effort even when the model supports disable", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it.each([undefined, false] as const)(
+		"omits reasoning effort for stale none when enableReasoningEffort is %s",
+		async (enableReasoningEffort) => {
+			vi.mocked(getModels).mockResolvedValue({
+				"model:thinking": {
+					maxTokens: 128000,
+					contextWindow: 1050000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: ["disable", "low"],
+					reasoningEffort: "high",
+				},
+			})
+			await collectStream(
+				new NanoGptHandler({
+					nanoGptModelId: "model:thinking",
+					enableReasoningEffort,
+					reasoningEffort: "none",
+				}).createMessage("sys", messages),
+			)
+
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+		},
+	)
+
+	it("resolves none to the lowest canonical effort when reasoning support is boolean", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("resolves none to the first supported effort when low is not available", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["high"],
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
+	})
+
+	it("omits reasoning effort when reasoning is explicitly disabled", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+				reasoningEffort: "high",
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: false,
+				reasoningEffort: "high",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
 	})
 
 	it("keeps Muse Spark tool-result history contiguous across turns", async () => {
@@ -337,6 +640,14 @@ describe("NanoGptHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("uses the same default reasoning effort as streaming requests", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt")
+
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+		})
+
 		it("requests cache-capable routing without changing the completion model ID", async () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const handler = new NanoGptHandler({

@@ -2,6 +2,7 @@ import os from "os"
 import * as path from "path"
 import fs from "fs/promises"
 import EventEmitter from "events"
+import crypto from "crypto"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
@@ -110,6 +111,7 @@ import { Task } from "../task/Task"
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
+	type ApiMessage,
 	readApiMessages,
 	saveApiMessages,
 	saveTaskMessages,
@@ -307,7 +309,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.80.1-gateway-promo-models-fixes" // v3.80.1 Zoo Gateway promo, GLM-5.3-Flash, and reliability fixes
+	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -810,6 +812,17 @@ export class ClineProvider
 		}
 	}
 
+	/** Drain one task's memoized cleanup without preventing the remaining provider shutdown work. */
+	private async drainTaskDisposal(task: Task): Promise<void> {
+		try {
+			await task.dispose()
+		} catch (error) {
+			this.log(
+				`[ClineProvider#dispose] Task cleanup failed for ${task.taskId}.${task.instanceId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
 	async dispose() {
 		if (this._disposed) {
 			return
@@ -827,10 +840,14 @@ export class ClineProvider
 		// so an active delegated child is marked interrupted before the extension shuts down,
 		// rather than being left persisted as "active" across the reload.
 		if (this.taskRegistry.length > 0) {
+			const task = this.taskRegistry.current!
 			await this.evictCurrentTask()
+			await this.drainTaskDisposal(task)
 		}
 		while (this.taskRegistry.length > 0) {
+			const task = this.taskRegistry.current!
 			await this.removeClineFromStack()
+			await this.drainTaskDisposal(task)
 		}
 
 		this.log("Cleared all tasks")
@@ -4048,18 +4065,24 @@ export class ClineProvider
 					taskId: parentTaskId,
 					globalStoragePath,
 				})
-			} catch {
-				parentClineMessages = []
+			} catch (error) {
+				this.log(
+					`[reopenParentFromDelegation] Failed to read messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return false
 			}
 
-			let parentApiMessages: any[] = []
+			let parentApiMessages: ApiMessage[] = []
 			try {
-				parentApiMessages = (await readApiMessages({
+				parentApiMessages = await readApiMessages({
 					taskId: parentTaskId,
 					globalStoragePath,
-				})) as any[]
-			} catch {
-				parentApiMessages = []
+				})
+			} catch (error) {
+				this.log(
+					`[reopenParentFromDelegation] Failed to read API messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return false
 			}
 
 			// 2) Inject synthetic records: UI subtask_result and update API tool_result
@@ -4070,6 +4093,7 @@ export class ClineProvider
 			if (!Array.isArray(parentApiMessages)) parentApiMessages = []
 
 			const subtaskUiMessage: ClineMessage = {
+				messageId: crypto.randomUUID(),
 				type: "say",
 				say: "subtask_result",
 				text: completionResultSummary,
@@ -4083,7 +4107,12 @@ export class ClineProvider
 			) {
 				parentClineMessages.push(subtaskUiMessage)
 			}
-			await saveTaskMessages({ messages: parentClineMessages, taskId: parentTaskId, globalStoragePath })
+			parentClineMessages = await saveTaskMessages({
+				messages: parentClineMessages,
+				taskId: parentTaskId,
+				globalStoragePath,
+				merge: true,
+			})
 
 			// Find the tool_use_id from the last assistant message's new_task tool_use
 			let toolUseId: string | undefined
@@ -4122,6 +4151,7 @@ export class ClineProvider
 				// If no existing tool_result found, create a NEW user message with the tool_result
 				if (!alreadyHasToolResult) {
 					parentApiMessages.push({
+						messageId: crypto.randomUUID(),
 						role: "user",
 						content: [
 							{
@@ -4156,6 +4186,7 @@ export class ClineProvider
 					)
 				if (!alreadyHasFallback) {
 					parentApiMessages.push({
+						messageId: crypto.randomUUID(),
 						role: "user",
 						content: [
 							{
@@ -4168,7 +4199,12 @@ export class ClineProvider
 				}
 			}
 
-			await saveApiMessages({ messages: parentApiMessages as any, taskId: parentTaskId, globalStoragePath })
+			parentApiMessages = await saveApiMessages({
+				messages: parentApiMessages,
+				taskId: parentTaskId,
+				globalStoragePath,
+				merge: true,
+			})
 
 			// 4) Close child instance if still open (single-open-task invariant).
 			//    This MUST happen BEFORE marking the child "completed" because
@@ -4236,12 +4272,12 @@ export class ClineProvider
 			// 8) Inject restored histories into the in-memory instance before resuming
 			if (parentInstance) {
 				try {
-					await parentInstance.overwriteClineMessages(parentClineMessages)
+					await parentInstance.overwriteClineMessages(parentClineMessages, false)
 				} catch {
 					// non-fatal
 				}
 				try {
-					await parentInstance.overwriteApiConversationHistory(parentApiMessages as any)
+					await parentInstance.overwriteApiConversationHistory(parentApiMessages, false)
 				} catch {
 					// non-fatal
 				}

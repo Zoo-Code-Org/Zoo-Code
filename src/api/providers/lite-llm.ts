@@ -1,7 +1,13 @@
 import OpenAI from "openai"
 import { Anthropic } from "@anthropic-ai/sdk" // Keep for type usage only
 
-import { litellmDefaultModelId, litellmDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
+import {
+	type ModelInfo,
+	type ReasoningEffortExtended,
+	litellmDefaultModelId,
+	litellmDefaultModelInfo,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
@@ -41,6 +47,17 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// Match gpt-5, gpt5, and variants like gpt-5o, gpt-5-turbo, gpt5-preview, gpt-5.1
 		// Avoid matching gpt-50, gpt-500, etc.
 		return /\bgpt-?5(?!\d)/i.test(modelId)
+	}
+
+	private getReasoningEffort(info: ModelInfo): ReasoningEffortExtended | undefined {
+		const supported = info.supportsReasoningEffort
+		if (!Array.isArray(supported)) return undefined
+
+		const configured = this.options.reasoningEffort
+		if (configured && configured !== "disable" && supported.includes(configured)) return configured
+
+		const fallback = info.reasoningEffort
+		return fallback && supported.includes(fallback) ? fallback : undefined
 	}
 
 	/**
@@ -137,7 +154,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		let systemMessage: OpenAI.Chat.ChatCompletionMessageParam
 		let enhancedMessages: OpenAI.Chat.ChatCompletionMessageParam[]
 
-		if (this.options.litellmUsePromptCache && info.supportsPromptCache) {
+		if (this.options.litellmUsePromptCache && info.supportsPromptCache && !info.requiresResponsesApi) {
 			// Create system message with cache control in the proper format
 			systemMessage = {
 				role: "system",
@@ -200,7 +217,8 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		const maxTokens: number | undefined = info.maxTokens ?? undefined
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
-		const isGPT5Model = this.isGpt5(modelId)
+		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi
+		const reasoningEffort = this.getReasoningEffort(info)
 
 		// For Gemini models with native protocol: inject fake reasoning.encrypted block for tool calls
 		// This is required when switching from other models to Gemini to satisfy API validation.
@@ -223,15 +241,18 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 		}
+		if (reasoningEffort) {
+			;(requestOptions as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
+		}
 
-		// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
-		if (isGPT5Model && maxTokens) {
+		// Newer OpenAI models require max_completion_tokens instead of the deprecated max_tokens parameter.
+		if (usesMaxCompletionTokens && maxTokens) {
 			requestOptions.max_completion_tokens = maxTokens
 		} else if (maxTokens) {
 			requestOptions.max_tokens = maxTokens
 		}
 
-		if (this.supportsTemperature(modelId)) {
+		if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
 			requestOptions.temperature = this.options.modelTemperature ?? 0
 		}
 
@@ -280,13 +301,13 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				const delta = chunk.choices[0]?.delta
 				const usage = chunk.usage as LiteLLMUsage
 
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
-
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
 					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
@@ -311,7 +332,10 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				// Extract cache-related information if available
 				// LiteLLM may use different field names for cache tokens
 				const cacheWriteTokens =
-					lastUsage.cache_creation_input_tokens || (lastUsage as any).prompt_cache_miss_tokens || 0
+					lastUsage.cache_creation_input_tokens ||
+					lastUsage.prompt_tokens_details?.cache_write_tokens ||
+					(lastUsage as any).prompt_cache_miss_tokens ||
+					0
 				const cacheReadTokens =
 					lastUsage.prompt_tokens_details?.cached_tokens ||
 					(lastUsage as any).cache_read_input_tokens ||
@@ -358,20 +382,24 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		const { id: modelId, info } = await this.fetchModel()
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
-		const isGPT5Model = this.isGpt5(modelId)
+		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi
+		const reasoningEffort = this.getReasoningEffort(info)
 
 		try {
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
 			}
+			if (reasoningEffort) {
+				;(requestOptions as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
+			}
 
-			if (this.supportsTemperature(modelId)) {
+			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
 				requestOptions.temperature = this.options.modelTemperature ?? 0
 			}
 
-			// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
-			if (isGPT5Model && info.maxTokens) {
+			// Newer OpenAI models require max_completion_tokens instead of the deprecated max_tokens parameter.
+			if (usesMaxCompletionTokens && info.maxTokens) {
 				requestOptions.max_completion_tokens = info.maxTokens
 			} else if (info.maxTokens) {
 				requestOptions.max_tokens = info.maxTokens
@@ -412,4 +440,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 // LiteLLM usage may include an extra field for Anthropic use cases.
 interface LiteLLMUsage extends OpenAI.CompletionUsage {
 	cache_creation_input_tokens?: number
+	prompt_tokens_details?: OpenAI.CompletionUsage["prompt_tokens_details"] & {
+		cache_write_tokens?: number
+	}
 }

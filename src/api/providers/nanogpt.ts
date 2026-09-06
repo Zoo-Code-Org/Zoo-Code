@@ -7,7 +7,9 @@ import {
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
 	providerIdentifiers,
+	type ModelInfo,
 	type NanoGptRoutingPreference,
+	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -29,21 +31,46 @@ type NanoGptCachingRequest = { caching?: true }
 
 const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
-const OPENAI_REASONING_EFFORTS = ["low", "medium", "high"] as const
-type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number]
+const NANO_GPT_ASTRA_MODEL_IDS = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
+const NANO_GPT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
-function getReasoningEffort(options: ApiHandlerOptions, supported: unknown): OpenAiReasoningEffort | undefined {
-	const effort = options.reasoningEffort
-	const selectedEffort = OPENAI_REASONING_EFFORTS.find((candidate) => candidate === effort)
-	if (!selectedEffort) {
+function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
+	const configured = options.reasoningEffort
+	// "none" with enableReasoningEffort: true is an explicit level selection, not a disable.
+	const reasoningDisabled =
+		configured === "disable" ||
+		(configured === "none" && options.enableReasoningEffort !== true) ||
+		options.enableReasoningEffort === false
+	const supported = info.supportsReasoningEffort
+
+	if (reasoningDisabled && (supported === true || (Array.isArray(supported) && supported.includes("disable")))) {
 		return undefined
 	}
 
-	if (supported === true || (Array.isArray(supported) && supported.includes(selectedEffort))) {
-		return selectedEffort
+	// When "none" is explicitly enabled, resolve it to the lowest canonical supported effort.
+	const noneEnabled = !reasoningDisabled && configured === "none"
+	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
+	if (noneEnabled || (Array.isArray(supported) && !supported.includes("disable"))) {
+		candidates.push(
+			NANO_GPT_REASONING_EFFORTS.find(
+				(effort) => supported === true || (Array.isArray(supported) && supported.includes(effort)),
+			),
+		)
 	}
 
-	return undefined
+	for (const effort of candidates) {
+		if (
+			effort &&
+			effort !== "none" &&
+			effort !== "minimal" &&
+			(supported === true || (Array.isArray(supported) && supported.includes(effort)))
+		) {
+			return effort
+		}
+	}
+
+	const fallback = info.reasoningEffort
+	return info.requiredReasoningEffort && fallback && fallback !== "none" ? fallback : undefined
 }
 
 function mapNanoGptUsage(usage: NanoGptUsage): ApiStreamUsageChunk {
@@ -93,6 +120,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const { id: canonicalModelId, info } = await this.fetchModel()
+		const isAstra = NANO_GPT_ASTRA_MODEL_IDS.has(canonicalModelId)
 		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & NanoGptCachingRequest = {
 			model: this.getRequestModelId(canonicalModelId),
 			messages: [
@@ -106,30 +134,34 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			max_tokens: info.maxTokens ?? undefined,
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			parallel_tool_calls: isAstra ? false : (metadata?.parallelToolCalls ?? true),
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
-		if (this.options.modelTemperature !== undefined && this.supportsTemperature(canonicalModelId)) {
+		if (
+			this.options.modelTemperature !== undefined &&
+			info.supportsTemperature !== false &&
+			this.supportsTemperature(canonicalModelId)
+		) {
 			body.temperature = this.options.modelTemperature
 		}
 
-		const reasoningEffort = getReasoningEffort(this.options, info.supportsReasoningEffort)
+		const reasoningEffort = getReasoningEffort(this.options, info)
 		if (reasoningEffort) {
-			body.reasoning_effort = reasoningEffort
+			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
 		try {
 			const completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
 			for await (const chunk of completion) {
 				const delta = chunk.choices[0]?.delta
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
-
 				const reasoning = extractReasoningFromDelta(delta)
 				if (reasoning) {
 					yield { type: "reasoning", text: reasoning }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
 				}
 
 				for (const toolCall of delta?.tool_calls ?? []) {
@@ -161,13 +193,17 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
-		if (this.options.modelTemperature !== undefined && this.supportsTemperature(canonicalModelId)) {
+		if (
+			this.options.modelTemperature !== undefined &&
+			info.supportsTemperature !== false &&
+			this.supportsTemperature(canonicalModelId)
+		) {
 			body.temperature = this.options.modelTemperature
 		}
 
-		const reasoningEffort = getReasoningEffort(this.options, info.supportsReasoningEffort)
+		const reasoningEffort = getReasoningEffort(this.options, info)
 		if (reasoningEffort) {
-			body.reasoning_effort = reasoningEffort
+			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
 		try {
