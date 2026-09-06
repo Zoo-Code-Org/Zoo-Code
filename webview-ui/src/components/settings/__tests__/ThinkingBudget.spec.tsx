@@ -549,8 +549,9 @@ describe("ThinkingBudget", () => {
 			)
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
-			expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
-			expect(setApiConfigurationField).not.toHaveBeenCalledWith("enableReasoningEffort", expect.anything(), false)
+			const writtenFields = setApiConfigurationField.mock.calls.map(([field]) => field)
+			expect(writtenFields).not.toContain("reasoningEffort")
+			expect(writtenFields).not.toContain("enableReasoningEffort")
 		})
 
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {
