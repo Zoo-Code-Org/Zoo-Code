@@ -328,6 +328,7 @@ export type ExtensionState = Pick<
 	| "includeCurrentCost"
 	| "maxGitStatusFiles"
 	| "requestDelaySeconds"
+	| "showMcpDescriptions"
 	| "showWorktreesInHomeScreen"
 	| "disabledTools"
 > & {

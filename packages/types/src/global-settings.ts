@@ -100,6 +100,11 @@ export const MAX_CHECKPOINT_TIMEOUT_SECONDS = 60
 export const DEFAULT_CHECKPOINT_TIMEOUT_SECONDS = 15
 
 /**
+ * Whether MCP-supplied tool and resource descriptions are shown in the UI.
+ */
+export const DEFAULT_SHOW_MCP_DESCRIPTIONS = true
+
+/**
  * GlobalSettings
  */
 
@@ -241,6 +246,11 @@ export const globalSettingsSchema = z.object({
 	telemetrySetting: telemetrySettingsSchema.optional(),
 
 	mcpEnabled: z.boolean().optional(),
+	/**
+	 * Whether MCP-supplied tool and resource descriptions are shown in the UI.
+	 * @default true
+	 */
+	showMcpDescriptions: z.boolean().optional(),
 
 	mode: z.string().optional(),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),

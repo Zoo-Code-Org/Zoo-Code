@@ -2,9 +2,10 @@ import type { McpResource, McpResourceTemplate } from "@roo-code/types"
 
 type McpResourceRowProps = {
 	item: McpResource | McpResourceTemplate
+	showDescription?: boolean
 }
 
-const McpResourceRow = ({ item }: McpResourceRowProps) => {
+const McpResourceRow = ({ item, showDescription = true }: McpResourceRowProps) => {
 	const hasUri = "uri" in item
 	const uri = hasUri ? item.uri : item.uriTemplate
 
@@ -23,20 +24,22 @@ const McpResourceRow = ({ item }: McpResourceRowProps) => {
 				<span className={`codicon codicon-symbol-file`} style={{ marginRight: "6px" }} />
 				<span style={{ fontWeight: 500, wordBreak: "break-all" }}>{uri}</span>
 			</div>
-			<div
-				style={{
-					fontSize: "12px",
-					opacity: 0.8,
-					margin: "4px 0",
-				}}>
-				{item.name && item.description
-					? `${item.name}: ${item.description}`
-					: !item.name && item.description
-						? item.description
-						: !item.description && item.name
-							? item.name
-							: "No description"}
-			</div>
+			{(item.name || showDescription) && (
+				<div
+					style={{
+						fontSize: "12px",
+						opacity: 0.8,
+						margin: "4px 0",
+					}}>
+					{item.name && showDescription && item.description
+						? `${item.name}: ${item.description}`
+						: !item.name && showDescription && item.description
+							? item.description
+							: item.name
+								? item.name
+								: "No description"}
+				</div>
+			)}
 			<div
 				style={{
 					fontSize: "12px",

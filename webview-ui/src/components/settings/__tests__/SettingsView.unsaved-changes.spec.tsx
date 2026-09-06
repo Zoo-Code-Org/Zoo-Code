@@ -170,13 +170,21 @@ vi.mock("@src/components/modes/ModesView", () => ({
 }))
 
 vi.mock("@src/components/mcp/McpView", () => ({
-	default: ({ mcpEnabled, setMcpEnabled }: any) => (
-		<button
-			data-testid="mcp-enabled-toggle"
-			data-mcp-enabled={String(mcpEnabled)}
-			onClick={() => setMcpEnabled(!mcpEnabled)}>
-			Toggle MCP
-		</button>
+	default: ({ mcpEnabled, setMcpEnabled, showMcpDescriptions, setShowMcpDescriptions }: any) => (
+		<>
+			<button
+				data-testid="mcp-enabled-toggle"
+				data-mcp-enabled={String(mcpEnabled)}
+				onClick={() => setMcpEnabled(!mcpEnabled)}>
+				Toggle MCP
+			</button>
+			<button
+				data-testid="mcp-description-toggle"
+				data-show-mcp-descriptions={String(showMcpDescriptions)}
+				onClick={() => setShowMcpDescriptions(!showMcpDescriptions)}>
+				Toggle MCP descriptions
+			</button>
+		</>
 	),
 }))
 
@@ -283,6 +291,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		maxOpenTabsContext: 10,
 		maxWorkspaceFiles: 200,
 		mcpEnabled: false,
+		showMcpDescriptions: true,
 		soundEnabled: false,
 		ttsEnabled: false,
 		ttsSpeed: 1.0,
@@ -601,6 +610,30 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			expect.objectContaining({
 				type: "updateSettings",
 				updatedSettings: expect.objectContaining({ mcpEnabled: true }),
+			}),
+		)
+	})
+
+	it("buffers MCP description visibility until Save", async () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="mcp" />, { queryClient })
+
+		const toggle = await screen.findByTestId("mcp-description-toggle")
+		fireEvent.click(toggle)
+
+		await waitFor(() => expect(toggle).toHaveAttribute("data-show-mcp-descriptions", "false"))
+		expect(postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ showMcpDescriptions: false }),
+			}),
+		)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ showMcpDescriptions: false }),
 			}),
 		)
 	})

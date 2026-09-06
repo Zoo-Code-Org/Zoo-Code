@@ -8,6 +8,10 @@
 		"title": "MCP-Server aktivieren",
 		"description": "Schalte dies EIN, damit Zoo Tools von verbundenen MCP-Servern verwenden kann. Dies gibt Zoo mehr Möglichkeiten. Wenn du diese zusätzlichen Tools nicht verwenden möchtest, schalte es AUS, um API-Token-Kosten zu senken."
 	},
+	"showDescriptions": {
+		"title": "MCP-Beschreibungen anzeigen",
+		"description": "Beschreibungen anzeigen, die MCP-Server für Tools und Ressourcen bereitstellen."
+	},
 	"editGlobalMCP": "Globale MCP bearbeiten",
 	"editProjectMCP": "Projekt-MCP bearbeiten",
 	"learnMoreEditingSettings": "Mehr über das Bearbeiten von MCP-Einstellungsdateien erfahren",
