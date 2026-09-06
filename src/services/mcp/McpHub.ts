@@ -152,6 +152,35 @@ const McpSettingsSchema = z.object({
 	mcpServers: z.record(ServerConfigSchema),
 })
 
+/**
+ * `fetch` wrapper for Streamable HTTP MCP transports that reports a `404` answer to a
+ * `GET` request as `405 Method Not Allowed`.
+ *
+ * The MCP SDK opens the optional server-to-client SSE stream with a `GET` request. Per the
+ * MCP spec a server that does not offer such a stream must answer `405`, which the SDK
+ * treats as "no SSE stream available" and silently ignores. Servers answering `404`
+ * instead make the SDK fail the whole connection with
+ * `Failed to open SSE stream: Not Found`, even though POST-based requests work fine, so
+ * the status is normalized here.
+ *
+ * Any other request method or status code is passed through untouched.
+ *
+ * See: https://github.com/modelcontextprotocol/typescript-sdk/issues/1150
+ */
+const streamableHttpFetch: typeof fetch = async (url, init) => {
+	const response = await fetch(url, init)
+
+	if (init?.method?.toUpperCase() === "GET" && response.status === 404) {
+		return new Response(response.body, {
+			status: 405,
+			statusText: "Method Not Allowed",
+			headers: response.headers,
+		})
+	}
+
+	return response
+}
+
 export class McpHub {
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
@@ -826,6 +855,7 @@ export class McpHub {
 				transport = new StreamableHTTPClientTransport(new URL(configInjected.url), {
 					authProvider,
 					requestInit: { headers: configInjected.headers },
+					fetch: streamableHttpFetch,
 				})
 
 				// Set up Streamable HTTP specific error handling
