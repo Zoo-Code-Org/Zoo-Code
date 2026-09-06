@@ -40,6 +40,7 @@
 		"update_support_prompt": "サポートメッセージの更新に失敗しました",
 		"reset_support_prompt": "サポートメッセージのリセットに失敗しました",
 		"enhance_prompt": "メッセージの強化に失敗しました",
+		"commit_message_empty_response": "モデルが空のコミットメッセージを返しました。",
 		"get_system_prompt": "システムメッセージの取得に失敗しました",
 		"search_commits": "コミットの検索に失敗しました",
 		"save_api_config": "API設定の保存に失敗しました",
