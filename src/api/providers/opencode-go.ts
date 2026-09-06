@@ -36,7 +36,7 @@ import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
-import { createAbortError } from "./utils/abort-signal"
+import { createAbortError, isRequestAborted, rejectOnAbort } from "./utils/abort-signal"
 
 /**
  * The wire formats exposed by the Opencode Go gateway:
@@ -206,11 +206,28 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// Fail fast when the task is already cancelled before any model-catalog
 		// work starts: the standardized AbortError must win over any failure the
 		// fallible resolution could raise.
-		if (metadata?.abortSignal?.aborted) {
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal?.aborted) {
 			throw createAbortError("Opencode Go")
 		}
 
-		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
+		// Establish the cancellation scope before model resolution: a pre-aborted
+		// call, or one aborted while model metadata is loading, must reject
+		// promptly instead of waiting for the catalog lookup to settle. Abort
+		// failures from the lookup itself are normalized to the provider
+		// AbortError; any other resolution failure propagates unchanged.
+		let resolved: Awaited<ReturnType<OpencodeGoHandler["resolveModel"]>>
+		try {
+			resolved = externalAbortSignal
+				? await rejectOnAbort(this.resolveModel(), externalAbortSignal, "Opencode Go")
+				: await this.resolveModel()
+		} catch (error) {
+			if (isRequestAborted(error, externalAbortSignal)) {
+				throw createAbortError("Opencode Go")
+			}
+			throw error
+		}
+		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = resolved
 
 		// Per-request controller so an external abort signal (e.g. task
 		// cancellation) can interrupt the in-flight streaming request.
@@ -221,7 +238,6 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// { once: true } only removes it on abort, so a task-scoped signal
 		// would otherwise accumulate one listener per request.
 		const controller = new AbortController()
-		const externalAbortSignal = metadata?.abortSignal
 		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {

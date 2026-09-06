@@ -512,37 +512,32 @@ describe("OpencodeGoHandler", () => {
 			)
 			// The fast-fail guard throws before the request starts.
 			expect(mockCreate).not.toHaveBeenCalled()
+			// Pre-flight cancellation must skip the model catalog entirely:
+			// the getModels mock must remain uncalled, not just the SDK create.
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
 			expect(capturedSignal).toBeUndefined()
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
 		})
 
-		it("aborts the internal controller when the external signal aborts during model resolution", async () => {
-			// A signal that passes the entry guard un-aborted but aborts while
-			// resolveModel() is still awaiting the model catalog must take the
-			// bridge's pre-abort branch: a once-listener on a signal that is
-			// already aborted can never fire, so the internal controller has to
-			// be aborted directly before the request starts.
-			let capturedSignal: AbortSignal | undefined
-			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
-				capturedSignal = options?.signal
-				if (options?.signal?.aborted) {
-					throw new DOMException("The operation was aborted.", "AbortError")
-				}
-				return (async function* () {
-					yield { choices: [{ delta: { content: "late" }, index: 0 }], index: 0 }
-				})()
+		it("rejects with the standardized AbortError when the external signal aborts while model resolution is pending", async () => {
+			// The model catalog stays pending while the external signal aborts:
+			// the resolution race must settle with the standardized AbortError
+			// before the lookup is released, and the request itself must never
+			// start. A bridge-only fix would let the lookup finish and abort the
+			// internal controller after the fact; this gate proves the prompt
+			// settles on the abort itself.
+			let releaseResolution!: () => void
+			const resolutionGate = new Promise<void>((resolve) => {
+				releaseResolution = resolve
+			})
+			vitest.mocked(getModels).mockImplementationOnce(async () => {
+				await resolutionGate
+				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
 			})
 
 			const handler = new OpencodeGoHandler(mockOptions)
 			const controller = new AbortController()
-
-			// Abort the external signal inside the catalog await, after the
-			// entry guard has already observed an un-aborted signal.
-			vitest.mocked(getModels).mockImplementationOnce(async () => {
-				controller.abort()
-				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
-			})
 
 			const consumed = collectStream(
 				handler.createMessage(
@@ -552,16 +547,62 @@ describe("OpencodeGoHandler", () => {
 				),
 			)
 
+			// Let the lookup park on the gate, then abort while it is still pending.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
 			const error = await consumed.then(
 				() => undefined,
 				(e: unknown) => e,
 			)
-			// The bridge must have aborted the internal controller before the
-			// request started; a listener-only bridge would leave it
-			// un-aborted and the mock would stream "late" instead of rejecting.
-			expect(capturedSignal?.aborted).toBe(true)
+			// The catalog lookup was attempted but the prompt must have settled
+			// on the abort itself, before the lookup was released: no SDK call.
+			expect(vitest.mocked(getModels)).toHaveBeenCalledTimes(1)
+			expect(mockCreate).not.toHaveBeenCalled()
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+
+			// Releasing the lookup afterwards must not start a late request.
+			releaseResolution()
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("propagates a raw model-lookup failure unchanged when no abort signal is present", async () => {
+			// Without an abort signal the resolution must not be wrapped or
+			// normalized: a catalog failure keeps its own identity so callers
+			// can distinguish a lookup failure from a cancellation.
+			const lookupError = new Error("catalog offline")
+			vitest.mocked(getModels).mockRejectedValueOnce(lookupError)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const error = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }])).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toBe(lookupError)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("normalizes an abort-flavored model-lookup failure to the provider AbortError", async () => {
+			// A lookup that fails with an AbortError-shaped error (e.g. the
+			// catalog fetch itself was aborted) must settle with the provider's
+			// standardized AbortError, not the raw error shape.
+			const abortFlavored = new Error("The operation was aborted.")
+			abortFlavored.name = "AbortError"
+			vitest.mocked(getModels).mockRejectedValueOnce(abortFlavored)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const error = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }])).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).not.toBe(abortFlavored)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
