@@ -23,6 +23,15 @@ vi.mock("@roo-code/core", () => ({
 	},
 }))
 
+// Mock the tool handlers so the tests only exercise validation (toolRequirements)
+// and never the real tool execution logic.
+vi.mock("../../tools/AttemptCompletionTool", () => ({
+	attemptCompletionTool: { handle: vi.fn().mockResolvedValue(undefined) },
+}))
+vi.mock("../../tools/AskFollowupQuestionTool", () => ({
+	askFollowupQuestionTool: { handle: vi.fn().mockResolvedValue(undefined) },
+}))
+
 // presentAssistantMessage records tool usage through TelemetryService.instance.
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -331,6 +340,86 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			expect(toolRequirements).toMatchObject({
 				search_and_replace: false,
 				edit: false,
+			})
+		})
+
+		it("never marks a protocol tool (attempt_completion) as blocked", async () => {
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_protocol_123",
+					name: "attempt_completion",
+					params: {},
+					nativeArgs: {},
+					partial: false,
+				},
+			]
+
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+						experiments: {
+							customTools: false,
+						},
+						disabledTools: ["attempt_completion"],
+					}),
+				}),
+			}
+
+			await presentAssistantMessage(mockTask)
+
+			const validateToolUseMock = vi.mocked(validateToolUse)
+			expect(validateToolUseMock).toHaveBeenCalled()
+			const toolRequirements = validateToolUseMock.mock.calls[0][3]
+			// Protocol tools never enter toolRequirements, so the validator cannot
+			// block them even when disabledTools lists them.
+			expect(toolRequirements).not.toHaveProperty("attempt_completion")
+
+			// With validateToolUse mocked to return normally, the block proceeds
+			// past validation: no validation-error tool_result is pushed.
+			const errorToolResults = mockTask.userMessageContent.filter((block: unknown) => {
+				const b = block as { type?: string; is_error?: boolean }
+				return b.type === "tool_result" && b.is_error
+			})
+			expect(errorToolResults).toEqual([])
+		})
+
+		it("still marks ordinary tools (ask_followup_question) as blocked", async () => {
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_ordinary_123",
+					name: "ask_followup_question",
+					params: { question: "Which option?" },
+					nativeArgs: { question: "Which option?" },
+					partial: false,
+				},
+			]
+
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+						experiments: {
+							customTools: false,
+						},
+						disabledTools: ["ask_followup_question"],
+					}),
+				}),
+			}
+
+			await presentAssistantMessage(mockTask)
+
+			const validateToolUseMock = vi.mocked(validateToolUse)
+			expect(validateToolUseMock).toHaveBeenCalled()
+			const toolRequirements = validateToolUseMock.mock.calls[0][3]
+			// Control/ordinary tools remain blockable — the inverse of the
+			// protocol-tool guarantee.
+			expect(toolRequirements).toMatchObject({
+				ask_followup_question: false,
 			})
 		})
 	})

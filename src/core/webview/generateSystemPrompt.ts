@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import type { ModelInfo } from "@roo-code/types"
 import { WebviewMessage } from "../../shared/WebviewMessage"
 import { defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
@@ -18,6 +19,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		experiments,
 		language,
 		enableSubfolderRules,
+		disabledTools,
 	} = await provider.getState()
 
 	const diffStrategy = new MultiSearchReplaceDiffStrategy()
@@ -29,9 +31,11 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 
 	const rooIgnoreInstructions = provider.getCurrentTask()?.rooIgnoreController?.getInstructions()
 
-	// Create a temporary API handler to check model info for stealth mode.
+	// Create a temporary API handler to fetch the full model info for the preview.
 	// This avoids relying on an active Cline instance which might not exist during preview.
-	let modelInfo: { isStealthModel?: boolean } | undefined
+	// The full ModelInfo flows into SYSTEM_PROMPT so the preview honors
+	// excludedTools/includedTools exactly like the runtime path.
+	let modelInfo: ModelInfo | undefined
 	try {
 		const tempApiHandler = buildApiHandler(apiConfiguration)
 		modelInfo = tempApiHandler.getModel().info
@@ -64,6 +68,8 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		undefined, // todoList
 		undefined, // modelId
 		provider.getSkillsManager(),
+		disabledTools,
+		modelInfo,
 	)
 
 	return systemPrompt

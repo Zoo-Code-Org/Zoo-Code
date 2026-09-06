@@ -761,7 +761,7 @@
 	},
 	"core/prompts/tools/filter-tools-for-mode.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 1
 		}
 	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {

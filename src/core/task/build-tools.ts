@@ -51,6 +51,9 @@ interface BuildToolsResult {
 
 /**
  * Extracts the function name from a tool definition.
+ *
+ * @param tool A chat-completion tool definition (function tool in practice).
+ * @returns The tool's function name.
  */
 function getToolName(tool: OpenAI.Chat.ChatCompletionTool): string {
 	return (tool as OpenAI.Chat.ChatCompletionFunctionTool).function.name

@@ -763,6 +763,70 @@ describe("Cline", () => {
 			expect(settings).toMatchObject({ todoListEnabled: true })
 		})
 
+		it("passes undefined disabledTools when provider state becomes unavailable", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// First getState call: MCP disabled (avoids the MCP hub path). Later
+			// calls (including the state read feeding `state?.disabledTools`):
+			// undefined. Dropping the optional chain on that read makes
+			// getSystemPrompt reject with a TypeError instead of resolving.
+			vi.spyOn(mockProvider, "getState")
+				// ProviderState requires all declared fields; the test deliberately supplies a partial state to exercise the fallback path.
+				.mockResolvedValueOnce({ mcpEnabled: false } as unknown as ProviderState)
+				// ProviderState requires all declared fields; the test deliberately supplies an absent state to exercise the fallback path.
+				.mockResolvedValue(undefined as unknown as ProviderState)
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt()).resolves.toBe("mock system prompt")
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is the disabledTools parameter fed by `state?.disabledTools`.
+			expect(systemPromptCall[16]).toBeUndefined()
+		})
+
+		it("forwards non-empty disabledTools and modelInfo to the system prompt call", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// First getState call: MCP disabled (avoids the MCP hub path). Later
+			// calls supply the state that feeds `state?.disabledTools`.
+			vi.spyOn(mockProvider, "getState")
+				// ProviderState requires all declared fields; the test supplies a partial state.
+				.mockResolvedValueOnce({ mcpEnabled: false } as unknown as ProviderState)
+				// ProviderState requires all declared fields; the test supplies a partial state.
+				.mockResolvedValue({
+					mcpEnabled: false,
+					disabledTools: ["execute_command"],
+				} as unknown as ProviderState)
+
+			const modelInfo: ModelInfo = {
+				contextWindow: 128_000,
+				supportsPromptCache: false,
+				maxTokens: 1234,
+			}
+			vi.spyOn(task.api, "getModel").mockReturnValue({ id: "distinctive-model-id", info: modelInfo })
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt()).resolves.toBe("mock system prompt")
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is the disabledTools parameter fed by `state?.disabledTools`;
+			// index 17 is the modelInfo from `this.api.getModel().info`.
+			expect(systemPromptCall[16]).toEqual(["execute_command"])
+			expect(systemPromptCall[17]).toBe(modelInfo)
+		})
+
 		it("uses the task mode when manually condensing after focused state changes", async () => {
 			vi.spyOn(mockProvider, "getState").mockResolvedValue({
 				mode: "architect",
