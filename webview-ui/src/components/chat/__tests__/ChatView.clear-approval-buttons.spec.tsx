@@ -1,22 +1,13 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/ChatView.clear-approval-buttons.spec.tsx
 
 import React from "react"
-import { renderWithExtensionState, waitFor, act, fireEvent } from "@/utils/test-utils"
+import { hydrateExtensionState, renderWithExtensionState, waitFor, act, fireEvent } from "@/utils/test-utils"
+
+import type { ClineMessage } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 
 import ChatView, { ChatViewProps } from "../ChatView"
-
-interface ClineMessage {
-	type: "say" | "ask"
-	say?: string
-	ask?: string
-	ts: number
-	text?: string
-	partial?: boolean
-	isAnswered?: boolean
-	checkpoint?: Record<string, unknown>
-}
 
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
@@ -112,22 +103,16 @@ const SEE_NEW_CHANGES_BUTTON_LABEL = "chat:seeNewChanges.title"
 const RESTORE_CHANGES_BUTTON_LABEL = "chat:restoreChanges.title"
 
 const hydrateState = (clineMessages: ClineMessage[]) => {
-	window.postMessage(
-		{
-			type: "state",
-			state: {
-				version: "1.0.0",
-				clineMessages,
-				taskHistory: [],
-				shouldShowAnnouncement: false,
-				allowedCommands: [],
-				alwaysAllowExecute: false,
-				cloudIsAuthenticated: false,
-				telemetrySetting: "enabled",
-			},
-		},
-		"*",
-	)
+	hydrateExtensionState({
+		version: "1.0.0",
+		clineMessages,
+		taskHistory: [],
+		shouldShowAnnouncement: false,
+		allowedCommands: [],
+		alwaysAllowExecute: false,
+		cloudIsAuthenticated: false,
+		telemetrySetting: "enabled",
+	})
 }
 
 const defaultProps: ChatViewProps = {

@@ -3,6 +3,7 @@
 import React from "react"
 import {
 	makeExtensionState,
+	hydrateExtensionState,
 	mockVscodePostMessage,
 	renderWithExtensionState,
 	waitFor,
@@ -141,12 +142,13 @@ vi.mock("react-virtuoso", () => ({
 }))
 
 // Mock VersionIndicator - returns null by default to prevent rendering in tests
-vi.mock("../../common/VersionIndicator", () => ({
-	default: vi.fn(() => null),
-}))
+const mockVersionIndicator = vi.hoisted(() =>
+	vi.fn((_props?: { onClick?: () => void; className?: string }): React.ReactNode => null),
+)
 
-// Get the mock function after the module is mocked
-const mockVersionIndicator = vi.mocked((await import("../../common/VersionIndicator")).default)
+vi.mock("../../common/VersionIndicator", () => ({
+	default: mockVersionIndicator,
+}))
 
 vi.mock("../Announcement", () => ({
 	default: function MockAnnouncement({ hideAnnouncement }: { hideAnnouncement: () => void }) {
@@ -349,13 +351,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 const vscodePostMessageMock = mockVscodePostMessage(vi.mocked(vscode.postMessage))
 
 const mockPostMessage = (state: Record<string, unknown>) => {
-	window.postMessage(
-		{
-			type: "state",
-			state: makeExtensionState(state),
-		},
-		"*",
-	)
+	hydrateExtensionState(makeExtensionState(state))
 }
 
 const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
@@ -365,29 +361,31 @@ const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
 }
 
 const dispatchTaskState = async (id: string, taskTs: number, childIds: string[] = []) => {
-	await dispatchExtensionMessage({
-		type: "state",
-		state: makeExtensionState({
-			clineMessages: [
-				{
-					type: "say",
-					say: "task",
+	await act(async () => {
+		hydrateExtensionState(
+			makeExtensionState({
+				clineMessages: [
+					{
+						type: "say",
+						say: "task",
+						ts: taskTs,
+						text: id,
+					},
+				],
+				currentTaskId: id,
+				currentTaskItem: {
+					id,
+					number: 1,
 					ts: taskTs,
-					text: id,
+					task: id,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					childIds,
 				},
-			],
-			currentTaskId: id,
-			currentTaskItem: {
-				id,
-				number: 1,
-				ts: taskTs,
-				task: id,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-				childIds,
-			},
-		}),
+			}),
+			{ taskId: id },
+		)
 	})
 }
 
@@ -802,7 +800,7 @@ describe("ChatView - Version Indicator Tests", () => {
 
 	it("opens announcement modal when version indicator is clicked", async () => {
 		// Mock VersionIndicator to return a button with onClick
-		mockVersionIndicator.mockImplementation(({ onClick }: { onClick?: () => void }) =>
+		mockVersionIndicator.mockImplementation(({ onClick } = {}) =>
 			React.createElement("button", {
 				"data-testid": "version-indicator",
 				onClick,

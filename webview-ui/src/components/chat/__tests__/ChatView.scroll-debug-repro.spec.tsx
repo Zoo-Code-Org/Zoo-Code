@@ -1,5 +1,5 @@
 import React, { useEffect, useImperativeHandle, useRef } from "react"
-import { act, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
+import { act, fireEvent, hydrateExtensionState, renderWithExtensionState } from "@/utils/test-utils"
 
 import type { ClineMessage } from "@roo-code/types"
 
@@ -8,20 +8,6 @@ import { vscode } from "@src/utils/vscode"
 import ChatView, { type ChatViewProps } from "../ChatView"
 
 type FollowOutput = ((isAtBottom: boolean) => "auto" | false) | "auto" | false
-
-interface ExtensionStateMessage {
-	type: "state"
-	state: {
-		version: string
-		clineMessages: ClineMessage[]
-		taskHistory: unknown[]
-		shouldShowAnnouncement: boolean
-		allowedCommands: string[]
-		alwaysAllowExecute: boolean
-		cloudIsAuthenticated: boolean
-		telemetrySetting: "enabled" | "disabled" | "unset"
-	}
-}
 
 interface MockVirtuosoHandle {
 	scrollToIndex: (options: {
@@ -88,13 +74,6 @@ vi.mock("../common/DismissibleUpsell", nullDefaultModule)
 vi.mock("./CheckpointWarning", () => ({ CheckpointWarning: () => null }))
 vi.mock("./QueuedMessages", () => ({ QueuedMessages: () => null }))
 vi.mock("./WorktreeSelector", () => ({ WorktreeSelector: () => null }))
-
-vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeLink: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-	VSCodeButton: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-		<button onClick={onClick}>{children}</button>
-	),
-}))
 
 vi.mock("@/components/ui", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/components/ui")>()
@@ -241,25 +220,16 @@ const resolveFollowOutput = (isAtBottom: boolean): "auto" | false => {
 }
 
 const postState = (clineMessages: ClineMessage[]) => {
-	const message: ExtensionStateMessage = {
-		type: "state",
-		state: {
-			version: "1.0.0",
-			clineMessages,
-			taskHistory: [],
-			shouldShowAnnouncement: false,
-			allowedCommands: [],
-			alwaysAllowExecute: false,
-			cloudIsAuthenticated: false,
-			telemetrySetting: "enabled",
-		},
-	}
-
-	window.dispatchEvent(
-		new MessageEvent("message", {
-			data: message,
-		}),
-	)
+	hydrateExtensionState({
+		version: "1.0.0",
+		clineMessages,
+		taskHistory: [],
+		shouldShowAnnouncement: false,
+		allowedCommands: [],
+		alwaysAllowExecute: false,
+		cloudIsAuthenticated: false,
+		telemetrySetting: "enabled",
+	})
 }
 
 const renderView = () => renderWithExtensionState(<ChatView {...props} />)

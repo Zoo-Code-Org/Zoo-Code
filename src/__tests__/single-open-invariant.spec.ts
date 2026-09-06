@@ -269,6 +269,7 @@ describe("Single-open-task invariant", () => {
 			taskScheduler: { schedule: schedulespy },
 			taskEventListeners: new WeakMap(),
 			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			syncFocusedTaskToWebview: vi.fn().mockResolvedValue(undefined),
 			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
 			contextProxy: {
 				extensionUri: {},
@@ -341,6 +342,7 @@ describe("Single-open-task invariant", () => {
 			taskScheduler: { schedule: schedulespy },
 			taskEventListeners: new WeakMap(),
 			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			syncFocusedTaskToWebview: vi.fn().mockResolvedValue(undefined),
 			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
 			contextProxy: {
 				extensionUri: {},

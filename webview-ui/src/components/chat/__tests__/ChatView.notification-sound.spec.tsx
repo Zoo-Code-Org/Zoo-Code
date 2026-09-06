@@ -1,34 +1,11 @@
 // npx vitest run src/components/chat/__tests__/ChatView.notification-sound.spec.tsx
 
 import React from "react"
-import { renderWithExtensionState, waitFor } from "@/utils/test-utils"
+import { hydrateExtensionState, renderWithExtensionState, waitFor } from "@/utils/test-utils"
+
+import type { ClineMessage, ExtensionState } from "@roo-code/types"
 
 import ChatView, { ChatViewProps } from "../ChatView"
-
-// Define minimal types needed for testing
-interface ClineMessage {
-	type: "say" | "ask"
-	say?: string
-	ask?: string
-	ts: number
-	text?: string
-	partial?: boolean
-}
-
-interface QueuedMessage {
-	id: string
-	text: string
-	images?: string[]
-}
-
-interface ExtensionState {
-	version: string
-	clineMessages: ClineMessage[]
-	taskHistory: any[]
-	shouldShowAnnouncement: boolean
-	messageQueue?: QueuedMessage[]
-	[key: string]: any
-}
 
 // Mock vscode API
 vi.mock("@src/utils/vscode", () => ({
@@ -188,64 +165,18 @@ vi.mock("../ChatTextArea", () => {
 	}
 })
 
-// Mock VSCode components
-vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeButton: function MockVSCodeButton({
-		children,
-		onClick,
-		appearance,
-	}: {
-		children: React.ReactNode
-		onClick?: () => void
-		appearance?: string
-	}) {
-		return (
-			<button onClick={onClick} data-appearance={appearance}>
-				{children}
-			</button>
-		)
-	},
-	VSCodeTextField: function MockVSCodeTextField({
-		value,
-		onInput,
-		placeholder,
-	}: {
-		value?: string
-		onInput?: (e: { target: { value: string } }) => void
-		placeholder?: string
-	}) {
-		return (
-			<input
-				type="text"
-				value={value}
-				onChange={(e) => onInput?.({ target: { value: e.target.value } })}
-				placeholder={placeholder}
-			/>
-		)
-	},
-	VSCodeLink: function MockVSCodeLink({ children, href }: { children: React.ReactNode; href?: string }) {
-		return <a href={href}>{children}</a>
-	},
-}))
-
 // Mock window.postMessage to trigger state hydration
 const mockPostMessage = (state: Partial<ExtensionState>) => {
-	window.postMessage(
-		{
-			type: "state",
-			state: {
-				version: "1.0.0",
-				clineMessages: [],
-				taskHistory: [],
-				shouldShowAnnouncement: false,
-				cloudIsAuthenticated: false,
-				telemetrySetting: "enabled",
-				messageQueue: [],
-				...state,
-			},
-		},
-		"*",
-	)
+	hydrateExtensionState({
+		version: "1.0.0",
+		clineMessages: [],
+		taskHistory: [],
+		shouldShowAnnouncement: false,
+		cloudIsAuthenticated: false,
+		telemetrySetting: "enabled",
+		messageQueue: [],
+		...state,
+	})
 }
 
 const defaultProps: ChatViewProps = {
@@ -270,6 +201,7 @@ describe("ChatView - Notification Sound with Queued Messages", () => {
 			messageQueue: [
 				{
 					id: "msg-1",
+					timestamp: 1,
 					text: "This is a queued message",
 					images: [],
 				},
@@ -293,6 +225,7 @@ describe("ChatView - Notification Sound with Queued Messages", () => {
 			messageQueue: [
 				{
 					id: "msg-1",
+					timestamp: 1,
 					text: "This is a queued message",
 					images: [],
 				},
@@ -381,11 +314,13 @@ describe("ChatView - Notification Sound with Queued Messages", () => {
 			messageQueue: [
 				{
 					id: "msg-1",
+					timestamp: 1,
 					text: "First queued message",
 					images: [],
 				},
 				{
 					id: "msg-2",
+					timestamp: 2,
 					text: "Second queued message",
 					images: [],
 				},
@@ -409,11 +344,13 @@ describe("ChatView - Notification Sound with Queued Messages", () => {
 			messageQueue: [
 				{
 					id: "msg-1",
+					timestamp: 1,
 					text: "First queued message",
 					images: [],
 				},
 				{
 					id: "msg-2",
+					timestamp: 2,
 					text: "Second queued message",
 					images: [],
 				},

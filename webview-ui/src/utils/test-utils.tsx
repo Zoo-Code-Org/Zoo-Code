@@ -3,7 +3,7 @@ import { render as rtlRender, type RenderOptions } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { vi, type Mock } from "vitest"
 
-import type { ExtensionState } from "@roo-code/types"
+import type { ClineMessage, ExtensionMessage, ExtensionState } from "@roo-code/types"
 
 import { TooltipProvider } from "@src/components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "@src/components/ui/standard-tooltip"
@@ -36,6 +36,67 @@ export const makeExtensionState = (overrides: Partial<ExtensionState> = {}): Par
 	telemetrySetting: "enabled",
 	...overrides,
 })
+
+let nextTranscriptSnapshotId = 0
+
+export const dispatchExtensionMessage = (message: ExtensionMessage) => {
+	window.dispatchEvent(new MessageEvent("message", { data: message }))
+}
+
+export const hydrateExtensionState = (
+	state: Partial<ExtensionState>,
+	options: { taskId?: string; clineMessagesSeq?: number } = {},
+) => {
+	const { clineMessages, clineMessagesSeq: stateSeq, ...metadataState } = state
+	const taskId = options.taskId ?? metadataState.currentTaskId ?? undefined
+	const clineMessagesSeq = options.clineMessagesSeq ?? stateSeq ?? 0
+
+	dispatchExtensionMessage({
+		type: "state",
+		state: metadataState,
+	})
+
+	if (clineMessages === undefined) {
+		return
+	}
+
+	const snapshotId = `test-transcript-${++nextTranscriptSnapshotId}`
+	dispatchExtensionMessage({
+		type: "clineMessagesSnapshotStart",
+		taskId,
+		clineMessagesSeq,
+		snapshotId,
+		snapshotTotal: clineMessages.length,
+	})
+
+	if (clineMessages.length > 0) {
+		dispatchExtensionMessage({
+			type: "clineMessagesSnapshotChunk",
+			taskId,
+			clineMessagesSeq,
+			snapshotId,
+			snapshotStartIndex: 0,
+			clineMessages,
+		})
+	}
+
+	dispatchExtensionMessage({
+		type: "clineMessagesSnapshotEnd",
+		taskId,
+		clineMessagesSeq,
+		snapshotId,
+		snapshotTotal: clineMessages.length,
+	})
+}
+
+export const appendClineMessage = (clineMessage: ClineMessage, clineMessagesSeq: number, taskId?: string) => {
+	dispatchExtensionMessage({
+		type: "clineMessageAppended",
+		taskId,
+		clineMessagesSeq,
+		clineMessage,
+	})
+}
 
 export function mockVscodePostMessage(existing?: Mock) {
 	const postMessage = existing ?? vi.fn()

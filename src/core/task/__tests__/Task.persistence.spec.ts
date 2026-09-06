@@ -285,6 +285,9 @@ describe("Task persistence", () => {
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postClineMessageAppended = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postClineMessageUpdated = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postClineMessagesSnapshot = vi.fn().mockResolvedValue(undefined)
 		mockProvider.updateTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.log = vi.fn()
 	})
@@ -820,10 +823,22 @@ describe("Task persistence", () => {
 			})
 			const replay = vi
 				.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
-				.mockResolvedValue(undefined)
+				.mockImplementation(async () => {
+					expect(task.isInitialized).toBe(true)
+				})
 			const ask = vi.spyOn(task, "ask")
+			const snapshotDeferred = createDeferred<void>()
+			const snapshot = vi
+				.mocked(mockProvider.postClineMessagesSnapshot)
+				.mockReturnValueOnce(snapshotDeferred.promise)
 
-			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await vi.waitFor(() => expect(snapshot).toHaveBeenCalledWith(task.taskId, { bumpSeq: true }))
+			expect(replay).not.toHaveBeenCalled()
+			expect(task.clineMessages).toEqual([expect.objectContaining({ text: "Child" })])
+			expect(task.apiConversationHistory).toHaveLength(1)
+			snapshotDeferred.resolve()
+			await resumePromise
 
 			expect(replay).toHaveBeenCalledWith(pendingAction)
 			expect(ask).not.toHaveBeenCalled()
@@ -864,6 +879,49 @@ describe("Task persistence", () => {
 			expect(replay).not.toHaveBeenCalled()
 			expect(task.ask).toHaveBeenCalledWith("resume_task")
 		})
+
+		it.each(["abort", "abandoned"] as const)(
+			"does not publish resumed history when %s occurs during pending-action reconciliation",
+			async (flag) => {
+				mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
+				mockReadApiMessages.mockResolvedValue([
+					{
+						role: "user",
+						content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+					},
+				])
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "child-1",
+						number: 1,
+						ts: 1,
+						task: "Child",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						pendingAction,
+					},
+					startTask: false,
+				})
+				const clearing = createDeferred<boolean>()
+				mockProvider.clearPendingTaskAction = vi.fn().mockReturnValueOnce(clearing.promise)
+				const ask = vi.spyOn(task, "ask")
+				const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+				const resumePromise = task.run()
+
+				await vi.waitFor(() => expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledOnce())
+				task[flag] = true
+				clearing.resolve(true)
+				await resumePromise
+
+				expect(mockProvider.postClineMessagesSnapshot).not.toHaveBeenCalled()
+				expect(ask).not.toHaveBeenCalled()
+				expect(replay).not.toHaveBeenCalled()
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			},
+		)
 
 		it("clears pending metadata after the matching tool result is saved", async () => {
 			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
@@ -1126,6 +1184,156 @@ describe("Task persistence", () => {
 	})
 
 	describe("resumeTaskFromHistory", () => {
+		it.each(["active", "completed"] as const)(
+			"publishes hydrated history before the %s task resume prompt",
+			async (status) => {
+				const messages = [
+					{ ts: 1, type: "say", say: "text", text: "Saved transcript" },
+				] satisfies ClineMessage[]
+				const apiMessages: Task["apiConversationHistory"] = [{ role: "user", content: "Saved API history" }]
+				const apiRead = createDeferred<typeof apiMessages>()
+				const snapshotDeferred = createDeferred<void>()
+				mockReadTaskMessages.mockResolvedValue(messages)
+				mockReadApiMessages.mockReturnValueOnce(apiRead.promise)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "history-snapshot",
+						number: 1,
+						ts: 1,
+						task: "Saved task",
+						status,
+						tokensIn: 10,
+						tokensOut: 5,
+						totalCost: 0.001,
+					},
+					initialStatus: status,
+					startTask: false,
+				})
+				const snapshot = vi.mocked(mockProvider.postClineMessagesSnapshot).mockImplementationOnce(() => {
+					expect(task.clineMessages).toEqual(messages)
+					expect(task.apiConversationHistory).toEqual(apiMessages)
+					return snapshotDeferred.promise
+				})
+				const stopAfterPrompt = new Error("stop after resume prompt")
+				const ask = vi.spyOn(task, "ask").mockRejectedValueOnce(stopAfterPrompt)
+				const resumePromise = task.run()
+				const completion = expect(resumePromise).rejects.toThrow(stopAfterPrompt)
+
+				await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalledOnce())
+				expect(snapshot).not.toHaveBeenCalled()
+				expect(ask).not.toHaveBeenCalled()
+				apiRead.resolve(apiMessages)
+
+				await vi.waitFor(() => expect(snapshot).toHaveBeenCalledWith(task.taskId, { bumpSeq: true }))
+				expect(ask).not.toHaveBeenCalled()
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+				snapshotDeferred.resolve()
+				await completion
+
+				expect(snapshot).toHaveBeenCalledOnce()
+				expect(ask).toHaveBeenCalledWith(status === "completed" ? "resume_completed_task" : "resume_task")
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+			},
+		)
+
+		it.each(["abort", "abandoned"] as const)(
+			"does not prompt when %s occurs during resume snapshot delivery",
+			async (flag) => {
+				mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Saved transcript" }])
+				mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Saved API history" }])
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "cancel-resume-snapshot",
+						number: 1,
+						ts: 1,
+						task: "Saved task",
+						tokensIn: 10,
+						tokensOut: 5,
+						totalCost: 0.001,
+					},
+					startTask: false,
+				})
+				const snapshotDeferred = createDeferred<void>()
+				const snapshot = vi
+					.mocked(mockProvider.postClineMessagesSnapshot)
+					.mockReturnValueOnce(snapshotDeferred.promise)
+				const ask = vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+				const resumePromise = task.run()
+
+				await vi.waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
+				task[flag] = true
+				snapshotDeferred.resolve()
+				await resumePromise
+
+				expect(ask).not.toHaveBeenCalled()
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+			},
+		)
+
+		it("does not prompt or persist when the resume snapshot fails", async () => {
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Saved transcript" }])
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Saved API history" }])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "failed-resume-snapshot",
+					number: 1,
+					ts: 1,
+					task: "Saved task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const snapshotError = new Error("resume snapshot failed")
+			vi.mocked(mockProvider.postClineMessagesSnapshot).mockRejectedValueOnce(snapshotError)
+			const ask = vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+
+			await expect(task.run()).rejects.toThrow(snapshotError)
+
+			expect(ask).not.toHaveBeenCalled()
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+		})
+
+		it("can hydrate and reach the resume prompt without a provider reference", async () => {
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Saved transcript" }])
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Saved API history" }])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "missing-provider-resume",
+					number: 1,
+					ts: 1,
+					task: "Saved task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task["providerRef"], "deref").mockReturnValue(undefined)
+			const stopAfterPrompt = new Error("stop after resume prompt")
+			const ask = vi.spyOn(task, "ask").mockRejectedValueOnce(stopAfterPrompt)
+
+			await expect(task.run()).rejects.toThrow(stopAfterPrompt)
+
+			expect(task.clineMessages).toEqual([expect.objectContaining({ text: "Saved transcript" })])
+			expect(task.apiConversationHistory).toEqual([expect.objectContaining({ content: "Saved API history" })])
+			expect(ask).toHaveBeenCalledWith("resume_task")
+			expect(mockProvider.postClineMessagesSnapshot).not.toHaveBeenCalled()
+		})
+
 		it.each(["not_found", "invalid", "io_error"] as const)(
 			"does not persist when hydration fails with %s",
 			async (kind) => {
@@ -1155,6 +1363,7 @@ describe("Task persistence", () => {
 				expect(askSpy).not.toHaveBeenCalled()
 				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 				expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+				expect(mockProvider.postClineMessagesSnapshot).not.toHaveBeenCalled()
 			},
 		)
 
@@ -1272,6 +1481,7 @@ describe("Task persistence", () => {
 			expect(task.clineMessages).toHaveLength(0)
 			expect(task.apiConversationHistory).toHaveLength(0)
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(mockProvider.postClineMessagesSnapshot).not.toHaveBeenCalled()
 		})
 
 		it("stops after API history hydration when the task is aborted", async () => {
@@ -1309,6 +1519,7 @@ describe("Task persistence", () => {
 			expect(askSpy).not.toHaveBeenCalled()
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+			expect(mockProvider.postClineMessagesSnapshot).not.toHaveBeenCalled()
 		})
 	})
 

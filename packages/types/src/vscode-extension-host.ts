@@ -37,7 +37,12 @@ export interface ExtensionMessage {
 		| "theme"
 		| "workspaceUpdated"
 		| "invoke"
-		| "messageUpdated"
+		| "clineMessageAppended"
+		| "clineMessageUpdated"
+		| "clineMessagesSnapshotStart"
+		| "clineMessagesSnapshotChunk"
+		| "clineMessagesSnapshotEnd"
+		| "messageUpdated" // Legacy: a patched webview requests a full resync instead of applying this.
 		| "mcpServers"
 		| "enhancedPrompt"
 		| "commitSearchResults"
@@ -138,7 +143,13 @@ export interface ExtensionMessage {
 		isActive: boolean
 		path?: string
 	}>
+	taskId?: string
 	clineMessage?: ClineMessage
+	clineMessages?: ClineMessage[]
+	clineMessagesSeq?: number
+	snapshotId?: string
+	snapshotStartIndex?: number
+	snapshotTotal?: number
 	routerModels?: RouterModels
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
@@ -334,7 +345,11 @@ export type ExtensionState = Pick<
 	lockApiConfigAcrossModes?: boolean
 	version: string
 	clineMessages: ClineMessage[]
-	currentTaskId?: string
+	/**
+	 * Focused task identity. Omitted means this partial state update does not
+	 * change task focus; null authoritatively means no task is focused.
+	 */
+	currentTaskId?: string | null
 	currentTaskItem?: HistoryItem
 	currentTaskTodos?: TodoItem[] // Initial todos for the current task
 	apiConfiguration: ProviderSettings
@@ -426,10 +441,9 @@ export type ExtensionState = Pick<
 	arch?: string
 
 	/**
-	 * Monotonically increasing sequence number for clineMessages state pushes.
-	 * When present, the frontend should only apply clineMessages from a state push
-	 * if its seq is greater than the last applied seq. This prevents stale state
-	 * (captured during async getStateToPostToWebview) from overwriting newer messages.
+	 * Last sequence applied by the dedicated task-scoped transcript transport.
+	 * Generic `state` messages intentionally omit this field and `clineMessages`;
+	 * snapshots and append/update messages carry both transcript data and sequence.
 	 */
 	clineMessagesSeq?: number
 }
@@ -646,8 +660,11 @@ export interface WebviewMessage {
 		| "openRuleFile"
 		| "openRulesDirectory"
 		| "themeFixtureProbeResponse"
+		| "requestClineMessagesResync"
 	text?: string
 	taskId?: string
+	expectedSeq?: number
+	receivedSeq?: number
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
 	disabled?: boolean

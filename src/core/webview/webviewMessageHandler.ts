@@ -369,8 +369,9 @@ export const webviewMessageHandler = async (
 					globalStoragePath: provider.contextProxy.globalStorageUri.fsPath,
 				})
 
-				// Update the UI to reflect the deletion
-				await provider.postStateToWebview()
+				// Rewind posts before checkpoint metadata is restored. Publish the
+				// persisted transcript so checkpoint filtering and controls stay current.
+				await currentCline.overwriteClineMessages(currentCline.clineMessages)
 			}
 		} catch (error) {
 			console.error("Error in delete message:", error)
@@ -539,9 +540,9 @@ export const webviewMessageHandler = async (
 				globalStoragePath: provider.contextProxy.globalStorageUri.fsPath,
 			})
 
-			// Update the UI to reflect the deletion
-			await provider.postStateToWebview()
-
+			// Rewind posts before checkpoint metadata is restored. Publish that
+			// restored state before the edited message starts a new delta stream.
+			await currentCline.overwriteClineMessages(currentCline.clineMessages)
 			await currentCline.submitUserMessage(editedContent, images)
 		} catch (error) {
 			console.error("Error in edit message:", error)
@@ -574,6 +575,9 @@ export const webviewMessageHandler = async (
 	}
 
 	switch (message.type) {
+		case "requestClineMessagesResync":
+			await provider.resyncClineMessagesToWebview(message.taskId)
+			break
 		case "themeFixtureProbeResponse":
 			if (process.env.ROO_CODE_THEME_FIXTURE_PROBE === "1" && message.requestId && message.themeFixture) {
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
@@ -584,7 +588,7 @@ export const webviewMessageHandler = async (
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
 
-			await provider.postStateToWebview()
+			await provider.syncFocusedTaskToWebview({ includeTaskHistory: true })
 			void provider.workspaceTracker
 				?.initializeFilePaths()
 				.catch((err) => provider.log(`Workspace initialization error: ${err}`)) // Don't await.
@@ -873,7 +877,7 @@ export const webviewMessageHandler = async (
 			// handled via metadata; parent resumption occurs through
 			// reopenParentFromDelegation, not via finishSubTask.
 			await provider.clearTask()
-			await provider.postStateToWebview()
+			await provider.syncFocusedTaskToWebview({ includeTaskHistory: true })
 			break
 		case "didShowAnnouncement":
 			await updateGlobalState("lastShownAnnouncementId", provider.latestAnnouncementId)
@@ -1932,13 +1936,7 @@ export const webviewMessageHandler = async (
 				const existingPrompts = getGlobalState("customModePrompts") ?? {}
 				const updatedPrompts = { ...existingPrompts, [message.promptMode]: message.customPrompt }
 				await updateGlobalState("customModePrompts", updatedPrompts)
-				const currentState = await provider.getStateToPostToWebview()
-				const stateWithPrompts = {
-					...currentState,
-					customModePrompts: updatedPrompts,
-					hasOpenedModeSelector: currentState.hasOpenedModeSelector ?? false,
-				}
-				await provider.postMessageToWebview({ type: "state", state: stateWithPrompts })
+				await provider.postStateToWebviewWithoutClineMessages()
 
 				if (TelemetryService.hasInstance()) {
 					// Determine which setting was changed by comparing objects
