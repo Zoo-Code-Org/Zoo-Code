@@ -71,10 +71,15 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	const isReasoningBudgetSupported = !!modelInfo && modelInfo.supportsReasoningBudget
 	const isReasoningBudgetRequired = !!modelInfo && modelInfo.requiredReasoningBudget
 	const isReasoningEffortSupported = !!modelInfo && modelInfo.supportsReasoningEffort
+	const isAnthropicModel = !!selectedModelId && selectedModelId.includes("claude")
 	// Models that advertise a user-configurable max output budget (e.g. Z.ai GLM) but do not
 	// use the reasoning-budget slider. The reasoning-budget branch already renders its own
 	// max-tokens control, so only surface this standalone slider when that branch is inactive.
-	const isMaxTokensConfigurable = !!modelInfo && modelInfo.supportsMaxTokens && !isReasoningBudgetSupported
+	// Anthropic models also get a configurable max output slider so users can override the
+	// conservative 8K default when reasoning is disabled.
+	const isMaxTokensConfigurable =
+		!!modelInfo &&
+		((modelInfo.supportsMaxTokens && !isReasoningBudgetSupported) || (isAnthropicModel && !!modelInfo.maxTokens))
 
 	// "disable" turns off reasoning entirely; "none" is a valid reasoning level.
 	// Both display as "None" in the UI but behave differently.
@@ -161,6 +166,29 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		}
 	}, [isReasoningBudgetSupported, customMaxThinkingTokens, modelMaxThinkingTokens, setApiConfigurationField])
 
+	// Anthropic hybrid reasoning requires max output tokens to be at least 8192. If the user
+	// toggles reasoning on with a persisted value below that floor, raise it to keep the
+	// reasoning-budget slider range valid and the thinking budget within its own 1024 min.
+	useEffect(() => {
+		const ANTHROPIC_REASONING_MIN_OUTPUT_TOKENS = 8192
+		if (
+			isReasoningBudgetSupported &&
+			isAnthropicModel &&
+			enableReasoningEffort &&
+			apiConfiguration.modelMaxTokens != null &&
+			apiConfiguration.modelMaxTokens > 0 &&
+			apiConfiguration.modelMaxTokens < ANTHROPIC_REASONING_MIN_OUTPUT_TOKENS
+		) {
+			setApiConfigurationField("modelMaxTokens", ANTHROPIC_REASONING_MIN_OUTPUT_TOKENS, false)
+		}
+	}, [
+		isReasoningBudgetSupported,
+		isAnthropicModel,
+		enableReasoningEffort,
+		apiConfiguration.modelMaxTokens,
+		setApiConfigurationField,
+	])
+
 	// Default max output budget for models that expose a standalone max-tokens slider.
 	// When the user hasn't set an explicit `modelMaxTokens`, fall back to the same value
 	// the runtime would use (the default output clamp) so behavior is unchanged.
@@ -170,7 +198,10 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 			: undefined) ??
 		modelInfo?.maxTokens ??
 		DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS
-	const standaloneMaxOutputTokens = apiConfiguration.modelMaxTokens ?? defaultMaxOutputTokens
+	const standaloneMaxOutputTokens = Math.min(
+		apiConfiguration.modelMaxTokens ?? defaultMaxOutputTokens,
+		modelInfo?.maxTokens ?? defaultMaxOutputTokens,
+	)
 
 	if (!modelInfo) {
 		return null
@@ -196,9 +227,17 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 
 	// Standalone max output tokens slider for models that advertise `supportsMaxTokens`
 	// (e.g. Z.ai GLM) but do not surface the reasoning-budget control.
+	// Anthropic hybrid reasoning requires a minimum output budget of 8192, so keep the
+	// standalone slider aligned with the reasoning-on branch's floor for those models.
+	const maxOutputTokensMin = isAnthropicModel && isReasoningBudgetSupported ? 8192 : 1024
 	const maxOutputTokensControl =
 		isMaxTokensConfigurable && modelInfo.maxTokens
-			? renderMaxTokensSlider(1024, modelInfo.maxTokens, standaloneMaxOutputTokens, "max-output-tokens")
+			? renderMaxTokensSlider(
+					maxOutputTokensMin,
+					modelInfo.maxTokens,
+					standaloneMaxOutputTokens,
+					"max-output-tokens",
+				)
 			: null
 
 	// Models with supportsReasoningBinary (binary reasoning) show a simple on/off toggle.
@@ -234,7 +273,7 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 					</Checkbox>
 				</div>
 			)}
-			{(isReasoningBudgetRequired || enableReasoningEffort) && (
+			{isReasoningBudgetRequired || enableReasoningEffort ? (
 				<>
 					{renderMaxTokensSlider(
 						8192,
@@ -259,6 +298,8 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 						</div>
 					</div>
 				</>
+			) : (
+				maxOutputTokensControl
 			)}
 		</>
 	) : isReasoningEffortSupported ? (
