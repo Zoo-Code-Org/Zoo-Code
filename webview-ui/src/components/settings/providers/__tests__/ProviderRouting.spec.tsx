@@ -15,10 +15,14 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeTextField: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	VSCodeCheckbox: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
 vi.mock("@src/components/ui", () => ({
 	Button: ({ children, onClick }: React.ComponentProps<"button">) => <button onClick={onClick}>{children}</button>,
+	Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
 vi.mock("../../ModelPicker", () => ({ ModelPicker: modelPickerMock }))

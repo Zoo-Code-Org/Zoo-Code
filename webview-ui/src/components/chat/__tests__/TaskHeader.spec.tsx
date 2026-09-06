@@ -329,5 +329,40 @@ describe("TaskHeader", () => {
 
 			expect(screen.getByText("25%")).toBeInTheDocument()
 		})
+
+		it("should clamp over-limit usage to 100% and mark it as an error", () => {
+			renderTaskHeader({ contextTokens: 1000 })
+
+			const percentage = screen.getByText("100%")
+			expect(percentage).toHaveClass("text-vscode-errorForeground")
+			expect(screen.queryByText("125%")).not.toBeInTheDocument()
+		})
+
+		it("should keep the condense action available when context metadata is unavailable", () => {
+			mockModelInfo = undefined
+			mockMaxOutputTokens = 0
+
+			renderTaskHeader()
+
+			const condenseButton = screen
+				.getAllByRole("button")
+				.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
+
+			expect(condenseButton).toBeDefined()
+			expect(screen.queryByText(/%$/)).not.toBeInTheDocument()
+		})
+
+		it("should not display context progress when the context window is infinite", () => {
+			mockModelInfo = { contextWindow: Number.POSITIVE_INFINITY, maxTokens: 200 }
+
+			renderTaskHeader()
+
+			// Positive assertion: the component rendered and the task text is visible.
+			expect(screen.getByText("Test task")).toBeInTheDocument()
+
+			expect(screen.queryByTestId("context-tokens-count")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("context-window-size")).not.toBeInTheDocument()
+			expect(screen.queryByText(/%$/)).not.toBeInTheDocument()
+		})
 	})
 })

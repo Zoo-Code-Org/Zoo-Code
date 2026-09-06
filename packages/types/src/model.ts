@@ -185,6 +185,86 @@ export const modelInfoSchema = z.object({
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>
 
+/**
+ * User-supplied metadata for a model whose discovered metadata is incomplete
+ * or unavailable. This is intentionally narrower than ModelInfo: prices and
+ * other accounting fields must remain provider-owned.
+ */
+const positiveSafeIntegerSchema = z
+	.number()
+	.int()
+	.positive()
+	.refine(Number.isSafeInteger, { message: "Expected a safe integer" })
+
+export const customModelInfoSchema = z
+	.object({
+		maxTokens: positiveSafeIntegerSchema.optional(),
+		contextWindow: positiveSafeIntegerSchema.optional(),
+		supportsImages: z.boolean().optional(),
+		supportsPromptCache: z.boolean().optional(),
+	})
+	.strict()
+
+export type CustomModelInfo = z.infer<typeof customModelInfoSchema>
+
+export type CustomModelInfoSettings = {
+	customModelInfo?: Partial<CustomModelInfo> | null
+}
+
+const isPositiveInteger = (value: unknown): value is number =>
+	typeof value === "number" && Number.isSafeInteger(value) && value > 0
+
+/**
+ * Applies the user metadata overlay without allowing invalid values to enter
+ * model arithmetic or cost/capability fields outside the supported override.
+ * When no discovered info exists, a context-window override is required to
+ * synthesize a usable ModelInfo.
+ */
+export const applyCustomModelInfo = (
+	info: ModelInfo | undefined,
+	settings: CustomModelInfoSettings | undefined,
+): ModelInfo | undefined => {
+	const override = settings?.customModelInfo
+
+	if (!override) {
+		return info
+	}
+
+	const validOverride: CustomModelInfo = {}
+
+	if (isPositiveInteger(override.contextWindow)) {
+		validOverride.contextWindow = override.contextWindow
+	}
+
+	if (isPositiveInteger(override.maxTokens)) {
+		validOverride.maxTokens = override.maxTokens
+	}
+
+	if (typeof override.supportsImages === "boolean") {
+		validOverride.supportsImages = override.supportsImages
+	}
+
+	if (typeof override.supportsPromptCache === "boolean") {
+		validOverride.supportsPromptCache = override.supportsPromptCache
+	}
+
+	if (info) {
+		return Object.keys(validOverride).length > 0 ? { ...info, ...validOverride } : info
+	}
+
+	if (!validOverride.contextWindow) {
+		return undefined
+	}
+
+	return {
+		maxTokens: undefined,
+		contextWindow: validOverride.contextWindow,
+		supportsImages: false,
+		supportsPromptCache: false,
+		...validOverride,
+	}
+}
+
 export type ModelRecord = Record<string, ModelInfo>
 
 export type RouterModels = Record<DynamicProvider | LocalProvider, ModelRecord>
