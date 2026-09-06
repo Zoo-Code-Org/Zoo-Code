@@ -1152,6 +1152,10 @@
 		"configureModes": "モード可用性",
 		"modeAny": "任意のモード",
 		"modeCount": "{{count}} モード",
+		"diagnostics": {
+			"title": "一部のスキルを読み込めませんでした",
+			"description": "該当する SKILL.md ファイルの YAML フロントマターを修正してから、このページを再表示してください。"
+		},
 		"deleteDialog": {
 			"title": "スキルを削除",
 			"description": "スキル「{{name}}」を削除してもよろしいですか？この操作は元に戻せません。",

@@ -176,6 +176,10 @@
 		"configureModes": "Mode availability",
 		"modeAny": "Any mode",
 		"modeCount": "{{count}} modes",
+		"diagnostics": {
+			"title": "Some skills could not be loaded",
+			"description": "Fix the YAML frontmatter in the listed SKILL.md files, then reopen or refresh this page."
+		},
 		"deleteDialog": {
 			"title": "Delete Skill",
 			"description": "Are you sure you want to delete the skill \"{{name}}\"? This action cannot be undone.",

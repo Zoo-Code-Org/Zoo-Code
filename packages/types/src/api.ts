@@ -6,6 +6,7 @@ import type { RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
+import type { SkillDiagnostic, SkillMetadata } from "./skills.js"
 import type { WebviewThemeFixture } from "./vscode-extension-host.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
@@ -52,6 +53,15 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * @returns The number of persisted API conversation history entries, or 0 if unavailable.
 	 */
 	getTaskApiConversationHistoryLength(taskId: string): Promise<number>
+	/**
+	 * Returns the skill metadata and load diagnostics currently discovered by the
+	 * extension host. Intended for use in tests only.
+	 * @returns The discovered skills and any diagnostics for skills that failed to load.
+	 */
+	getSkillsState(): {
+		skills: SkillMetadata[]
+		skillDiagnostics: SkillDiagnostic[]
+	}
 	/**
 	 * Returns the current task stack.
 	 * @returns An array of task IDs.
