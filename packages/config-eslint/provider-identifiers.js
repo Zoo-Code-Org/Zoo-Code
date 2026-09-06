@@ -80,7 +80,7 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 		return undefined
 	}
 
-	function getProviderExpressionBranches(node) {
+	function getProviderExpressionChildren(node) {
 		node = unwrapExpression(node)
 
 		if (node?.type === "LogicalExpression") {
@@ -93,6 +93,14 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 
 		if (node?.type === "AssignmentPattern") {
 			return [node.right]
+		}
+
+		if (node?.type === "CallExpression") {
+			return node.arguments
+		}
+
+		if (node?.type === "ArrayExpression") {
+			return node.elements.filter((element) => element !== null)
 		}
 
 		return []
@@ -119,8 +127,8 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 		},
 		create(context) {
 			function reportIfRawProvider(node) {
-				for (const branch of getProviderExpressionBranches(node)) {
-					reportIfRawProvider(branch)
+				for (const child of getProviderExpressionChildren(node)) {
+					reportIfRawProvider(child)
 				}
 
 				const provider = getRawProvider(node)

@@ -201,6 +201,16 @@ ruleTester.run("no-raw-provider-identifiers provider-like values", rule, {
 			],
 		},
 		{
+			code: 'const schema = { imageGenerationProvider: z.enum(["openrouter"]) }',
+			errors: [
+				{
+					messageId: "useCanonical",
+					data: { replacement: "providerIdentifiers.openrouter", value: "openrouter" },
+					type: "Literal",
+				},
+			],
+		},
+		{
 			code: 'const imageProvider = useGemini ? "gemini" : "openrouter"',
 			errors: [
 				{
