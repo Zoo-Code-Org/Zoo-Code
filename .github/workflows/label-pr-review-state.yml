@@ -89,6 +89,7 @@ jobs:
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'Zoo Code / PR review gate';
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
+            const workflowRunUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
 
             if (context.eventName === 'issue_comment' &&
                 (!context.payload.issue?.pull_request ||
@@ -365,8 +366,7 @@ jobs:
               }
               if (!lookupSucceeded && passed) return;
               if (latestGateStatus?.state === state &&
-                  latestGateStatus.description === description &&
-                  latestGateStatus.target_url === pr.html_url) {
+                  latestGateStatus.description === description) {
                 return;
               }
               const mustInvalidateSuccess = !passed &&
@@ -380,7 +380,7 @@ jobs:
                   state,
                   context: reviewGateName,
                   description,
-                  target_url: pr.html_url,
+                  target_url: workflowRunUrl,
                 });
               } catch (error) {
                 if (required || mustInvalidateSuccess) throw error;
