@@ -21,12 +21,12 @@
 		"useUnknownInCatchVariables": false
 	},
 	"include": ["."],
-	"exclude": ["node_modules"],
+	"exclude": ["**/.stryker-tmp", "node_modules"],
 	"watchOptions": {
 		"watchFile": "useFsEvents",
 		"watchDirectory": "useFsEvents",
 		"fallbackPolling": "dynamicPriority",
 		"synchronousWatchDirectory": true,
-		"excludeDirectories": ["**/node_modules", "**/dist", "**/.turbo"]
+		"excludeDirectories": ["**/node_modules", "**/dist", "**/.stryker-tmp", "**/.turbo"]
 	}
 }
