@@ -1436,6 +1436,21 @@ describe("LiteLLMHandler", () => {
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("LiteLLM completion aborted")
 		})
+
+		it("should surface the wrapped provider error when the request fails without options", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await handler.completePrompt("test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("LiteLLM completion error: boom")
+		})
+
+		it("should surface the wrapped provider error when the request fails with options but no signal", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
+			expect((error as Error).message).toBe("LiteLLM completion error: boom")
+		})
 	})
 
 	describe("createMessage abort signal (bridging)", () => {
@@ -1459,11 +1474,14 @@ describe("LiteLLMHandler", () => {
 			const error = await collectStream(stream).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("LiteLLM streaming aborted")
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("should abort the in-flight stream when the external signal is triggered", async () => {
 			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
 			let capturedSignal: AbortSignal | undefined
 			// Readiness barrier: resolves once the request-local signal is captured and
 			// the (mocked) request has started, instead of guessing a fixed delay.
@@ -1503,11 +1521,47 @@ describe("LiteLLMHandler", () => {
 			await requestStarted
 			controller.abort()
 
-			const error = await collector
+			// Bound the wait so a broken abort bridge fails this test fast (and fails
+			// the Stryker mutant) instead of hanging until the runner timeout.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("LiteLLM streaming aborted")
 			expect(capturedSignal).toBeDefined()
 			expect(capturedSignal?.aborted).toBe(true)
+			// The bridge registers a once-only listener on the external signal and
+			// detaches it when the request settles.
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		})
+
+		it("should wrap a non-abort stream failure with the i18n-free provider message and no metadata", async () => {
+			// createMessage awaits create(...).withResponse(), so the failure must
+			// surface from the withResponse() call, not from create() itself.
+			mockCreate.mockReturnValueOnce({
+				withResponse: vi.fn().mockRejectedValue(new Error("boom")),
+			})
+
+			const error = await collectStream(handler.createMessage("system", messages)).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
+		})
+
+		it("should wrap a non-abort stream failure when metadata exists without an abort signal", async () => {
+			mockCreate.mockReturnValueOnce({
+				withResponse: vi.fn().mockRejectedValue(new Error("boom")),
+			})
+
+			const error = await collectStream(
+				handler.createMessage("system", messages, makeCreateMessageMetadata()),
+			).catch((e: unknown) => e)
+			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
 		})
 	})
 })

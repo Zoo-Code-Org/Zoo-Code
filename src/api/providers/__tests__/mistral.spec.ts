@@ -158,6 +158,14 @@ describe("MistralHandler", () => {
 		it("should handle errors gracefully", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow("API Error")
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "API Error",
+					provider: "Mistral",
+					operation: "createMessage",
+				}),
+			)
 		})
 
 		it("should handle thinking content as reasoning chunks", async () => {
@@ -238,6 +246,121 @@ describe("MistralHandler", () => {
 			expect(results[0]).toEqual({ type: "text", text: "First text" })
 			expect(results[1]).toEqual({ type: "reasoning", text: "Some reasoning" })
 			expect(results[2]).toEqual({ type: "text", text: "Second text" })
+		})
+
+		it("should ignore non-string, non-array delta content", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([{ data: { choices: [{ delta: { content: 42 }, index: 0 }] } }]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(0)
+		})
+
+		it("should ignore a thinking chunk with no thinking payload", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [{ delta: { content: [{ type: "thinking", thinking: undefined }] }, index: 0 }],
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(0)
+		})
+
+		it("should ignore non-text thinking parts", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										content: [
+											{
+												type: "thinking",
+												thinking: [{ type: "reference", text: "A reference" }],
+											},
+										],
+									},
+									index: 0,
+								},
+							],
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(0)
+		})
+
+		it("should ignore empty text chunks and unknown chunk types", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										content: [{ type: "text", text: "" }, { type: "other" }],
+									},
+									index: 0,
+								},
+							],
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(0)
+		})
+
+		it("should yield a tool call partial without function details when only an id is provided", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [{ delta: { toolCalls: [{ id: "t1" }] }, index: 0 }],
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: unknown[] = []
+			for await (const chunk of iterator) {
+				results.push(chunk)
+			}
+			expect(results).toHaveLength(1)
+			expect(results[0]).toEqual({
+				type: "tool_call_partial",
+				index: 0,
+				id: "t1",
+				name: undefined,
+				arguments: undefined,
+			})
 		})
 
 		it("should yield a usage chunk when the stream event carries usage data", async () => {
@@ -642,11 +765,14 @@ describe("MistralHandler", () => {
 			const error = await collectStream(stream).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("Mistral completion aborted")
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("should abort the in-flight stream when the external signal is triggered", async () => {
 			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
 			let capturedSignal: AbortSignal | undefined
 			mockCreate.mockImplementationOnce(
 				async (_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) => {
@@ -684,14 +810,37 @@ describe("MistralHandler", () => {
 			await new Promise((resolve) => setTimeout(resolve, 10))
 			controller.abort()
 
-			const error = await collector
+			// Bound the wait so a broken abort bridge fails this test fast (and fails
+			// the Stryker mutant) instead of hanging until the runner timeout.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("Mistral completion aborted")
 			expect(capturedSignal).toBeDefined()
 			// The in-flight stream must run against a request-local signal, not the
 			// external one forwarded by reference.
 			expect(capturedSignal).not.toBe(controller.signal)
 			expect(capturedSignal?.aborted).toBe(true)
+			// The bridge registers a once-only listener on the external signal and
+			// detaches it when the request settles.
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		})
+
+		it("should wrap a non-abort stream failure when metadata is provided without a signal", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await collectStream(
+				handler.createMessage(systemPrompt, messages, makeCreateMessageMetadata()),
+			).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("Mistral completion error: boom")
 		})
 
 		it("should not pass a signal to the stream call when no external signal is provided", async () => {

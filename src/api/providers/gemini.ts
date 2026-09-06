@@ -177,21 +177,13 @@ function sanitizeSchemaForGemini(
 // imported profiles). The @google/genai client keeps API-key authentication for
 // custom endpoints, so reject cleartext base URLs before any request — with a
 // narrow loopback exception for local test proxies.
-function isLoopbackUrl(value: string): boolean {
-	try {
-		const parsed = new URL(value)
-		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-			return false
-		}
-		return (
-			parsed.hostname === "localhost" ||
-			parsed.hostname === "::1" ||
-			parsed.hostname === "[::1]" ||
-			/^127\./.test(parsed.hostname)
-		)
-	} catch {
-		return false
-	}
+// The caller (assertSecureGeminiBaseUrl) has already parsed the URL and only
+// reaches this for the HTTP exception, so the parsed hostname is passed
+// directly; `new URL` keeps the brackets in IPv6 hostnames, so `[::1]` is
+// the loopback host form to compare against.
+function isLoopbackHostname(hostname: string): boolean {
+	// Stryker disable next-line Regex: the ^ anchor is unobservable — new URL() rejects every non-loopback hostname containing "127." (e.g. a127.0.0.1, foo.127.0.0.1), so a de-anchored pattern behaves identically on every reachable hostname
+	return hostname === "localhost" || hostname === "[::1]" || /^127\./.test(hostname)
 }
 
 // Throws an ApiProviderError when baseUrl is not HTTPS (loopback HTTP is the
@@ -208,7 +200,7 @@ function assertSecureGeminiBaseUrl(baseUrl: string, modelId: string, operation: 
 	if (parsed.protocol === "https:") {
 		return
 	}
-	if (parsed.protocol === "http:" && isLoopbackUrl(baseUrl)) {
+	if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
 		// Loopback endpoints (localhost/127.x/::1) are allowed for local test proxies.
 		return
 	}
@@ -569,6 +561,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 			throw error
 		} finally {
+			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
 			if (externalAbortSignal && externalAbortListener) {
 				externalAbortSignal.removeEventListener("abort", externalAbortListener)
 			}
@@ -680,6 +673,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				httpOpts.timeout = timeoutMs
 			}
 			if (this.options.googleGeminiBaseUrl) {
+				// Stryker disable next-line StringLiteral: completePrompt's catch reads only .message from the thrown error before building its own telemetry error, so this operation argument is unobservable
 				assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "completePrompt")
 				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
 			}

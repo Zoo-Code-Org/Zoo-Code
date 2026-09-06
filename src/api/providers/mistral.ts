@@ -191,6 +191,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			TelemetryService.instance.captureException(apiError)
 			throw new Error(`Mistral completion error: ${errorMessage}`)
 		} finally {
+			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
 			if (externalAbortSignal && externalAbortListener) {
 				externalAbortSignal.removeEventListener("abort", externalAbortListener)
 			}

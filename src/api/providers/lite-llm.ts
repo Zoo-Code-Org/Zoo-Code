@@ -372,6 +372,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			}
 			throw error
 		} finally {
+			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
 			if (externalAbortSignal && externalAbortListener) {
 				externalAbortSignal.removeEventListener("abort", externalAbortListener)
 			}
