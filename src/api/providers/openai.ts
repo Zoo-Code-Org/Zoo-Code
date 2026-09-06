@@ -300,7 +300,15 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			settings: this.options,
 			defaultTemperature: 0,
 		})
-		return { id, info, ...params }
+		// Local OpenAI-compatible reasoning models (llama.cpp, LM Studio, Ollama)
+		// stream reasoning_content, but Roo strips it from the follow-up context
+		// unless info.preserveReasoning is set. When the user enables the R1 format
+		// toggle, treat the model as preserving reasoning so the chain is fed back.
+		return {
+			id,
+			info: this.options.openAiR1FormatEnabled ? { ...info, preserveReasoning: true } : info,
+			...params,
+		}
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {

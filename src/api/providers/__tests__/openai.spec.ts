@@ -968,6 +968,20 @@ describe("OpenAiHandler", () => {
 			expect(model.id).toBe("")
 			expect(model.info).toBeDefined()
 		})
+
+		it("should set preserveReasoning when openAiR1FormatEnabled is on", () => {
+			const r1Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiR1FormatEnabled: true,
+			})
+			const model = r1Handler.getModel()
+			expect(model.info).toEqual({ ...openAiModelInfoSaneDefaults, preserveReasoning: true })
+		})
+
+		it("should not set preserveReasoning by default", () => {
+			const model = handler.getModel()
+			expect(model.info.preserveReasoning).toBeUndefined()
+		})
 	})
 
 	describe("Azure AI Inference Service", () => {
