@@ -26,7 +26,7 @@
 	},
 	"__tests__/history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 72
+			"count": 71
 		}
 	},
 	"__tests__/migrateSettings.spec.ts": {
@@ -191,7 +191,7 @@
 	},
 	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 23
+			"count": 22
 		}
 	},
 	"api/providers/__tests__/openai-codex.spec.ts": {
@@ -791,7 +791,7 @@
 	},
 	"core/task/Task.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 17
 		}
 	},
 	"core/task/__tests__/Task.dispose.test.ts": {
@@ -1021,7 +1021,7 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 8
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {

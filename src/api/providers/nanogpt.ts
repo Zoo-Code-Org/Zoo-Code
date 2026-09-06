@@ -32,15 +32,41 @@ type NanoGptCachingRequest = { caching?: true }
 const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
 const NANO_GPT_ASTRA_MODEL_IDS = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
+const NANO_GPT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
 function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
 	const configured = options.reasoningEffort
+	// "none" with enableReasoningEffort: true is an explicit level selection, not a disable.
 	const reasoningDisabled =
-		configured === "disable" || configured === "none" || options.enableReasoningEffort === false
+		configured === "disable" ||
+		(configured === "none" && options.enableReasoningEffort !== true) ||
+		options.enableReasoningEffort === false
 	const supported = info.supportsReasoningEffort
 
-	if (!reasoningDisabled && configured && configured !== "minimal") {
-		if (supported === true || (Array.isArray(supported) && supported.includes(configured))) return configured
+	if (reasoningDisabled && (supported === true || (Array.isArray(supported) && supported.includes("disable")))) {
+		return undefined
+	}
+
+	// When "none" is explicitly enabled, resolve it to the lowest canonical supported effort.
+	const noneEnabled = !reasoningDisabled && configured === "none"
+	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
+	if (noneEnabled || (Array.isArray(supported) && !supported.includes("disable"))) {
+		candidates.push(
+			NANO_GPT_REASONING_EFFORTS.find(
+				(effort) => supported === true || (Array.isArray(supported) && supported.includes(effort)),
+			),
+		)
+	}
+
+	for (const effort of candidates) {
+		if (
+			effort &&
+			effort !== "none" &&
+			effort !== "minimal" &&
+			(supported === true || (Array.isArray(supported) && supported.includes(effort)))
+		) {
+			return effort
+		}
 	}
 
 	const fallback = info.reasoningEffort
