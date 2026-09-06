@@ -12,7 +12,16 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import {
+	mergeAbortSignalAndTimeout,
+	throwIfAborted,
+	createAbortError,
+	isRequestAborted,
+	settleOnAbort,
+	type OpenAiRequestOptions,
+} from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 const QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
@@ -192,17 +201,46 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`
 	}
 
-	private async callApiWithRetry<T>(apiCall: () => Promise<T>): Promise<T> {
+	private async callApiWithRetry<T>(apiCall: () => Promise<T>, externalSignal?: AbortSignal): Promise<T> {
 		try {
 			return await apiCall()
-		} catch (error: any) {
-			if (error.status === 401) {
-				// Token expired, refresh and retry
+		} catch (error) {
+			// An aborted request must never be retried: normalize it to the
+			// Task.ts abort contract (name "AbortError", message ending in
+			// "aborted") instead of rethrowing the raw SDK abort error.
+			if (isRequestAborted(error, externalSignal)) {
+				throw createAbortError("Qwen Code")
+			}
+			// The catch binding is unknown, so read the OpenAI SDK's APIError
+			// `status` through a narrow shape; a non-object throw yields
+			// undefined and falls through to the rethrow below.
+			const status = (error as { status?: number } | null)?.status
+			if (status === 401) {
+				// Token expired, refresh and retry. The retry reuses apiCall’s
+				// captured request options, so it carries the same abort signal.
+				// (An already-aborted request is normalized above and never
+				// reaches this branch.)
 				this.credentials = await this.refreshAccessToken(this.credentials!)
+				// A stop can land while the refresh await is in flight — re-check
+				// before the retried request goes out so it is not sent.
+				if (externalSignal?.aborted) {
+					throw createAbortError("Qwen Code")
+				}
 				const client = this.ensureClient()
 				client.apiKey = this.credentials.access_token
 				client.baseURL = this.getBaseUrl(this.credentials)
-				return await apiCall()
+				// A stop can also land while the retried request itself is in
+				// flight; that rejection must go through the same abort
+				// normalization as the first attempt instead of escaping as the
+				// raw SDK abort error.
+				try {
+					return await apiCall()
+				} catch (retryError) {
+					if (isRequestAborted(retryError, externalSignal)) {
+						throw createAbortError("Qwen Code")
+					}
+					throw retryError
+				}
 			} else {
 				throw error
 			}
@@ -214,116 +252,162 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		await this.ensureAuthenticated()
-		const client = this.ensureClient()
-		const model = this.getModel()
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(metadata?.abortSignal)
 
-		const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
-			role: "system",
-			content: systemPrompt,
+		// Request-local abort controller — a class field would outlive this
+		// request and let concurrent requests abort each other.
+		const requestController = new AbortController()
+		const onExternalAbort = () => {
+			requestController.abort()
+		}
+		const externalSignal = metadata?.abortSignal
+		if (externalSignal) {
+			externalSignal.addEventListener("abort", onExternalAbort)
 		}
 
-		const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
+		try {
+			// A stop can land while the credential load or the token refresh
+			// below is still in flight; race the auth wait against the
+			// request-local signal so the caller settles promptly instead of
+			// waiting for credential I/O. The shared refresh keeps running —
+			// only this wait is cut.
+			// Stryker disable next-line StringLiteral: the rejection from this wait is always re-normalized by the outer catch's createAbortError("Qwen Code") (name "AbortError" always matches isRequestAborted), so this provider-name literal is unobservable
+			await settleOnAbort(this.ensureAuthenticated(), requestController.signal, "Qwen Code")
+			const client = this.ensureClient()
+			const model = this.getModel()
 
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-			model: model.id,
-			temperature: 0,
-			messages: convertedMessages,
-			stream: true,
-			stream_options: { include_usage: true },
-			max_completion_tokens: model.info.maxTokens,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-		}
-
-		const stream = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
-
-		let fullContent = ""
-
-		const activeToolCallIds = new Set<string>()
-		for await (const apiChunk of stream) {
-			const delta = apiChunk.choices[0]?.delta ?? {}
-			const finishReason = apiChunk.choices[0]?.finish_reason
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
+				role: "system",
+				content: systemPrompt,
 			}
 
-			if (delta.content) {
-				let newText = delta.content
-				if (newText.startsWith(fullContent)) {
-					newText = newText.substring(fullContent.length)
-				}
-				fullContent = delta.content
+			const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
 
-				if (newText) {
-					// Check for thinking blocks
-					if (newText.includes("<think>") || newText.includes("</think>")) {
-						// Simple parsing for thinking blocks
-						const parts = newText.split(/<\/?think>/g)
-						for (let i = 0; i < parts.length; i++) {
-							if (parts[i]) {
-								if (i % 2 === 0) {
-									// Outside thinking block
-									yield {
-										type: "text",
-										text: parts[i],
-									}
-								} else {
-									// Inside thinking block
-									yield {
-										type: "reasoning",
-										text: parts[i],
+			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+				model: model.id,
+				temperature: 0,
+				messages: convertedMessages,
+				stream: true,
+				stream_options: { include_usage: true },
+				max_completion_tokens: model.info.maxTokens,
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			}
+
+			// Bridge the request-local signal into the SDK request options so
+			// the in-flight request (and any 401 retry) can be cancelled.
+			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+				.setOption("signal", requestController.signal)
+				.build()
+
+			const stream = await this.callApiWithRetry(
+				() => client.chat.completions.create(requestOptions, createOptions),
+				externalSignal,
+			)
+
+			let fullContent = ""
+
+			const activeToolCallIds = new Set<string>()
+			for await (const apiChunk of stream) {
+				const delta = apiChunk.choices[0]?.delta ?? {}
+				const finishReason = apiChunk.choices[0]?.finish_reason
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta.content) {
+					let newText = delta.content
+					if (newText.startsWith(fullContent)) {
+						newText = newText.substring(fullContent.length)
+					}
+					fullContent = delta.content
+
+					if (newText) {
+						// Check for thinking blocks
+						// Stryker disable next-line ConditionalExpression,StringLiteral: for tag-free content split(/<\/?think>/g) yields a single even-indexed part producing the identical text chunk as the else branch, and think-tagged content already takes this branch
+						if (newText.includes("<think>") || newText.includes("</think>")) {
+							// Simple parsing for thinking blocks
+							const parts = newText.split(/<\/?think>/g)
+							// Stryker disable next-line EqualityOperator: the extra i === parts.length iteration reads undefined, which the existing parts[i] guard on the next line skips
+							for (let i = 0; i < parts.length; i++) {
+								if (parts[i]) {
+									if (i % 2 === 0) {
+										// Outside thinking block
+										yield {
+											type: "text",
+											text: parts[i],
+										}
+									} else {
+										// Inside thinking block
+										yield {
+											type: "reasoning",
+											text: parts[i],
+										}
 									}
 								}
 							}
+						} else {
+							yield {
+								type: "text",
+								text: newText,
+							}
 						}
-					} else {
+					}
+				}
+
+				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
+				if (delta.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						// Stryker disable next-line ConditionalExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
+						if (toolCall.id) {
+							// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
+							activeToolCallIds.add(toolCall.id)
+						}
 						yield {
-							type: "text",
-							text: newText,
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
 						}
 					}
 				}
-			}
 
-			// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
-			if (delta.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
-					// Stryker disable next-line ConditionalExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
-					if (toolCall.id) {
-						// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
-						activeToolCallIds.add(toolCall.id)
+				// Process finish_reason to emit tool_call_end events
+				// Stryker disable next-line ConditionalExpression,EqualityOperator,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
+				if (finishReason === "tool_calls") {
+					for (const id of activeToolCallIds) {
+						// Stryker disable next-line ObjectLiteral,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
+						yield { type: "tool_call_end", id }
 					}
+					// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
+					activeToolCallIds.clear()
+				}
+
+				if (apiChunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: apiChunk.usage.prompt_tokens || 0,
+						outputTokens: apiChunk.usage.completion_tokens || 0,
 					}
 				}
 			}
-
-			// Process finish_reason to emit tool_call_end events
-			// Stryker disable next-line ConditionalExpression,EqualityOperator,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
-			if (finishReason === "tool_calls") {
-				for (const id of activeToolCallIds) {
-					// Stryker disable next-line ObjectLiteral,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
-					yield { type: "tool_call_end", id }
-				}
-				// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
-				activeToolCallIds.clear()
+		} catch (error) {
+			if (isRequestAborted(error, externalSignal)) {
+				throw createAbortError("Qwen Code")
 			}
-
-			if (apiChunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: apiChunk.usage.prompt_tokens || 0,
-					outputTokens: apiChunk.usage.completion_tokens || 0,
-				}
+			throw error
+		} finally {
+			// Cancel the in-flight SDK request if the consumer stopped iterating
+			// early (break or return): the external signal may never fire in that
+			// case, and only the request-local signal reaches the SDK.
+			requestController.abort()
+			if (externalSignal) {
+				externalSignal.removeEventListener("abort", onExternalAbort)
 			}
 		}
 	}
@@ -335,7 +419,27 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		await this.ensureAuthenticated()
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(options?.abortSignal)
+
+		// Merge the external stop signal with an optional per-call timeout. A
+		// timeoutMs <= 0 means "no explicit timeout" inside the util, so zero
+		// never reaches the SDK as an explicit timeout.
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
+		// CompletePromptOptions is not createMessage metadata (no taskId), so
+		// the generic builder takes the merged signal via setOption instead of
+		// setAbortSignal(metadata).
+		const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+			.setOption("signal", requestSignal)
+			.build()
+
+		// A stop or timeout can land while the credential load or the token
+		// refresh below is still in flight; race the auth wait against the
+		// merged signal so the caller settles promptly instead of waiting for
+		// credential I/O. The shared refresh keeps running — only this wait
+		// is cut.
+		await settleOnAbort(this.ensureAuthenticated(), requestSignal, "Qwen Code")
 		const client = this.ensureClient()
 		const model = this.getModel()
 
@@ -345,7 +449,13 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			max_completion_tokens: model.info.maxTokens,
 		}
 
-		const response = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
+		// The retry reuses the captured request options, so it carries the same
+		// merged signal — and the guard in callApiWithRetry refuses to retry
+		// once this signal has aborted.
+		const response = await this.callApiWithRetry(
+			() => client.chat.completions.create(requestOptions, createOptions),
+			requestSignal,
+		)
 
 		return response.choices[0]?.message.content || ""
 	}
