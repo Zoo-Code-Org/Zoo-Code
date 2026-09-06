@@ -218,9 +218,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// AbortError; any other resolution failure propagates unchanged.
 		let resolved: Awaited<ReturnType<OpencodeGoHandler["resolveModel"]>>
 		try {
-			resolved = externalAbortSignal
-				? await rejectOnAbort(this.resolveModel(), externalAbortSignal, "Opencode Go")
-				: await this.resolveModel()
+			if (externalAbortSignal) {
+				// Stryker disable next-line StringLiteral: the raw rejectOnAbort rejection is re-stamped by the catch's createAbortError below (its name "AbortError" always matches isRequestAborted), so this provider-name literal is unobservable
+				resolved = await rejectOnAbort(this.resolveModel(), externalAbortSignal, "Opencode Go")
+			} else {
+				resolved = await this.resolveModel()
+			}
 		} catch (error) {
 			if (isRequestAborted(error, externalAbortSignal)) {
 				throw createAbortError("Opencode Go")
@@ -240,7 +243,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		const controller = new AbortController()
 		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
+			// Stryker disable next-line ConditionalExpression: externalAbortSignal.aborted can never be true here - the entry guard rejects a pre-aborted signal and the rejectOnAbort race rejects an abort during model resolution, and no await sits between the race settling and this bridge, so the branch is unreachable
 			if (externalAbortSignal.aborted) {
+				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry guard (and a mid-resolution abort by the race) before this bridge registers
 				controller.abort()
 			} else {
 				externalAbortSignal.addEventListener("abort", abortListener, { once: true })

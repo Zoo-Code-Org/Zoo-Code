@@ -682,7 +682,13 @@ describe("OpencodeGoHandler", () => {
 			expect(chunks).toContainEqual({ type: "text", text: "ok" })
 			// Assert the exact listener reference so a bridge that removes a
 			// different callback than the one it registered cannot pass.
-			const addedListener = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")?.[1]
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
 			expect(typeof addedListener).toBe("function")
 			// The listener is registered with { once: true } — assert the exact
 			// options so a bridge that drops them (and relies on the finally
@@ -722,7 +728,13 @@ describe("OpencodeGoHandler", () => {
 
 			const chunks = await collectStream(stream)
 			expect(chunks).toContainEqual({ type: "text", text: "ok" })
-			const addedListener = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")?.[1]
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
 			expect(typeof addedListener).toBe("function")
 			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
 			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
@@ -1587,7 +1599,13 @@ describe("OpencodeGoHandler", () => {
 				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
 			)
 			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
-			const addedListener = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")?.[1]
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
 			expect(typeof addedListener).toBe("function")
 			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
 			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
