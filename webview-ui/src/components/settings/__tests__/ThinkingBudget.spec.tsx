@@ -525,7 +525,7 @@ describe("ThinkingBudget", () => {
 					apiConfiguration={{ reasoningEffort: "medium" }}
 					modelInfo={{
 						...reasoningEffortModelInfo,
-						supportsReasoningEffort: [] as any,
+						supportsReasoningEffort: [] as const,
 					}}
 				/>,
 			)
@@ -535,18 +535,22 @@ describe("ThinkingBudget", () => {
 		})
 
 		it("should retain the disabled fallback when availableOptions is empty and settings are unset", () => {
+			const setApiConfigurationField = vi.fn()
 			render(
 				<ThinkingBudget
 					{...defaultProps}
 					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
 					modelInfo={{
 						...reasoningEffortModelInfo,
-						supportsReasoningEffort: [] as any,
+						supportsReasoningEffort: [] as const,
 					}}
 				/>,
 			)
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("enableReasoningEffort", expect.anything(), false)
 		})
 
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {
