@@ -41,7 +41,12 @@ export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined
 }
 
 /**
- * Set panel references
+ * Set panel references.
+ *
+ * The two refs are independent: each surface keeps its own ref for its whole
+ * lifetime, so resolving the sidebar view never wipes a live tab panel (and
+ * vice versa). Callers pass `undefined` only when the surface itself is
+ * disposed (see the `onDidDispose` wiring in `openClineInNewTab`).
  */
 export function setPanel(
 	newPanel: vscode.WebviewPanel | vscode.WebviewView | undefined,
@@ -49,11 +54,20 @@ export function setPanel(
 ): void {
 	if (type === "sidebar") {
 		sidebarPanel = newPanel as vscode.WebviewView
-		tabPanel = undefined
 	} else {
 		tabPanel = newPanel as vscode.WebviewPanel
-		sidebarPanel = undefined
 	}
+}
+
+/**
+ * The instance that owns the tracked tab panel, if it is still alive.
+ *
+ * Title-bar commands on the editor-tab surface use this instead of the
+ * visible-instance heuristic, so a click on the tab's title bar always
+ * targets that tab even when the sidebar is visible side-by-side.
+ */
+function getTabProvider(): ClineProvider | undefined {
+	return tabPanel ? ClineProvider.getInstanceForView(tabPanel) : undefined
 }
 
 export type RegisterCommandOptions = {
@@ -91,21 +105,35 @@ const getCommandsMap = ({
 	provider,
 }: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, CommandCallback> => ({
 	activationCompleted: () => {},
+	// The `view/title` menu is scoped to the sidebar view, so the click
+	// origin of these handlers is the sidebar provider wired in at
+	// activation (`provider`). Target it directly instead of the
+	// visible-instance heuristic, which would follow the user's focus to a
+	// tab instance when both surfaces are open side-by-side. The `*InTab`
+	// variants serve the `editor/title` menu and target the tab instance
+	// through `getTabProvider()` instead.
 	plusButtonClicked: async () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		TelemetryService.instance.captureTitleButtonClicked("plus")
 
-		if (!visibleProvider) {
+		await provider.evictCurrentTask()
+		await provider.refreshWorkspace()
+		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		// Send focusInput action immediately after chatButtonClicked
+		// This ensures the focus happens after the view has switched
+		await provider.postMessageToWebview({ type: "action", action: "focusInput" })
+	},
+	plusButtonClickedInTab: async () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
 			return
 		}
 
 		TelemetryService.instance.captureTitleButtonClicked("plus")
 
-		await visibleProvider.evictCurrentTask()
-		await visibleProvider.refreshWorkspace()
-		await visibleProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
-		// Send focusInput action immediately after chatButtonClicked
-		// This ensures the focus happens after the view has switched
-		await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+		await tabProvider.evictCurrentTask()
+		await tabProvider.refreshWorkspace()
+		await tabProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
 	},
 	popoutButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("popout")
@@ -114,42 +142,72 @@ const getCommandsMap = ({
 	},
 	openInNewTab: () => openClineInNewTab({ context, outputChannel }),
 	settingsButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		if (!visibleProvider) {
+		void provider
+			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
+		// Also explicitly post the visibility message to trigger scroll reliably
+		void provider
+			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
+	},
+	settingsButtonClickedInTab: () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
 			return
 		}
 
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void visibleProvider
+		void tabProvider
 			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
-		// Also explicitly post the visibility message to trigger scroll reliably
-		void visibleProvider
+			.catch((error) =>
+				outputChannel.appendLine(`[settingsButtonClickedInTab] postMessageToWebview failed: ${error}`),
+			)
+		void tabProvider
 			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
+			.catch((error) =>
+				outputChannel.appendLine(`[settingsButtonClickedInTab] postMessageToWebview failed: ${error}`),
+			)
 	},
 	historyButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		if (!visibleProvider) {
+		void provider
+			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`[historyButtonClicked] postMessageToWebview failed: ${error}`))
+	},
+	historyButtonClickedInTab: () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
 			return
 		}
 
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void visibleProvider
+		void tabProvider
 			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[historyButtonClicked] postMessageToWebview failed: ${error}`))
+			.catch((error) =>
+				outputChannel.appendLine(`[historyButtonClickedInTab] postMessageToWebview failed: ${error}`),
+			)
 	},
 	marketplaceButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
-		if (!visibleProvider) return
-		void visibleProvider
+		void provider
 			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
 			.catch((error) =>
 				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
+			)
+	},
+	marketplaceButtonClickedInTab: () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
+			return
+		}
+		void tabProvider
+			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
+			.catch((error) =>
+				outputChannel.appendLine(`[marketplaceButtonClickedInTab] postMessageToWebview failed: ${error}`),
 			)
 	},
 	newTask: handleNewTask,
@@ -177,8 +235,11 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only for sidebar panels
-			if (sidebarPanel && getPanel() === sidebarPanel) {
+			// Send focus input message only when the sidebar panel was
+			// focused: the tab takes selection priority in focusPanel, so
+			// the sidebar receives the message only when no tab panel is
+			// tracked.
+			if (sidebarPanel && !tabPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {
@@ -222,6 +283,17 @@ const getCommandsMap = ({
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
+	// Reuse the tracked tab instead of opening a second one: a repeated
+	// "Open in editor" click reveals the existing tab's panel.
+	if (tabPanel) {
+		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
+		if (existingProvider) {
+			await tabPanel.reveal()
+			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+			return existingProvider
+		}
+	}
+
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).
