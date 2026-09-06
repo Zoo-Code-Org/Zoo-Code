@@ -788,6 +788,10 @@ describe("RequestyHandler", () => {
 				message: "This operation was aborted",
 			})
 			expect(mockCreate).not.toHaveBeenCalled()
+			// Pre-flight cancellation must skip model lookup entirely: the
+			// getModels mock must remain uncalled, not just the SDK create call.
+			const { getModels } = await import("../fetchers/modelCache")
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
 		})
 
 		it("rejects with AbortError when the signal aborts during model lookup", async () => {
