@@ -464,6 +464,55 @@ describe("Cline", () => {
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
+
+		it("gives up after MAX_EMPTY_RESPONSE_RETRIES consecutive empty responses (real retry loop)", async () => {
+			const task = await createTaskWithManualRetries()
+
+			// Drive the REAL request loop: auto-approval is off, so answer the retry prompt
+			// affirmatively until the hard cap trips. Each attempt surfaces a finish_reason
+			// (e.g. a model that hit max_tokens) but yields no assistant content.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			// Call-through spy: records error announcements while still letting the real `say`
+			// run so the `api_req_started` placeholder is added to clineMessages
+			// (recursivelyMakeClineRequests updates that placeholder and would otherwise index
+			// an empty list).
+			const saySpy = vi.spyOn(task, "say")
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				stream([{ type: "usage", inputTokens: 0, outputTokens: 0, finishReason: "max_tokens" }]),
+			)
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			// Loop exits with a terminal failure (does not hang).
+			expect(result).toBe(false)
+
+			// Retry counters/timer are reset on the terminal give-up path so a later Stop on
+			// the same task would not hit cancelTask's hard-abort gate.
+			expect(task.consecutiveNoAssistantMessagesCount).toBe(0)
+			expect(task.emptyResponseRetryLoopStartTimeMs).toBe(0)
+
+			// Repeated empty responses announce the MODEL_NO_ASSISTANT_MESSAGES marker...
+			const errorCalls = saySpy.mock.calls.filter(([type]) => type === "error")
+			expect(errorCalls.some(([, text]) => text === "MODEL_NO_ASSISTANT_MESSAGES")).toBe(true)
+
+			// ...and the hard cap trips with the terminal give-up error carrying the diagnostic
+			// detail, including the finish_reason propagated from the (mocked) provider stream.
+			const giveUpCall = errorCalls.find(([, text]) =>
+				String(text).startsWith("Unexpected API Response: The language model repeatedly"),
+			)
+			expect(giveUpCall).toBeDefined()
+			expect(String(giveUpCall?.[1])).toContain("consecutive empty responses: 5")
+			expect(String(giveUpCall?.[1])).toContain("finish_reason: max_tokens")
+
+			// History ends with the synthetic Failure message, never a trailing user message.
+			expect(task.apiConversationHistory).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "Failure: I repeatedly did not provide a response." }],
+				},
+			])
+		})
 	})
 
 	describe("native tool-call request isolation", () => {

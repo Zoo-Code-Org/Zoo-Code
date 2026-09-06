@@ -3521,6 +3521,24 @@ export class ClineProvider
 			return
 		}
 
+		// Hard-abort instead of graceful rehydrate when the task is confirmed mid
+		// empty-response retry loop. The graceful path below cancels the request, marks the
+		// task "interrupted", and REHYDRATES the same task with its still-oversized history —
+		// so an unbounded empty-response retry loop would resume immediately after Stop.
+		// For a task already stuck resending an unchanged retry
+		// (consecutiveNoAssistantMessagesCount > 0), evict it from the stack entirely
+		// (abortTask(true) via removeClineFromStack, no rehydrate) so a fresh task/context is
+		// required to continue. Normal Stops for tasks NOT in this retry loop (counter === 0)
+		// are completely unaffected.
+		if (task.consecutiveNoAssistantMessagesCount > 0) {
+			this.log(
+				`[cancelTask] Task ${task.taskId}.${task.instanceId} is mid empty-response retry loop ` +
+					`(${task.consecutiveNoAssistantMessagesCount} consecutive empty responses); using hard abort instead of rehydrate`,
+			)
+			await this.evictCurrentTask()
+			return
+		}
+
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
 		await this.cancelTaskInternal(task)
 	}
