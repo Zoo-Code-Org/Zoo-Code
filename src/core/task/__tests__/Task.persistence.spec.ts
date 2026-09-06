@@ -293,7 +293,7 @@ describe("Task persistence", () => {
 
 	describe("saveApiConversationHistory", () => {
 		it("returns true on success", async () => {
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockSaveApiMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -309,6 +309,36 @@ describe("Task persistence", () => {
 
 			const result = await task.retrySaveApiConversationHistory()
 			expect(result).toBe(true)
+			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: true }))
+		})
+
+		it("uses authoritative replacement for explicit API history overwrites", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteApiConversationHistory([{ role: "user", content: "replacement" }])
+
+			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
+		})
+
+		it("can hydrate API history without persisting it", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteApiConversationHistory([{ role: "user", content: "merged" }], false)
+
+			expect(task.apiConversationHistory).toEqual([
+				expect.objectContaining({ role: "user", content: "merged", messageId: expect.any(String) }),
+			])
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
 		})
 
 		it("returns false on failure", async () => {
@@ -360,7 +390,7 @@ describe("Task persistence", () => {
 		})
 
 		it("snapshots the array before passing to saveApiMessages", async () => {
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockSaveApiMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -391,7 +421,7 @@ describe("Task persistence", () => {
 
 	describe("saveClineMessages", () => {
 		it("returns true on success", async () => {
-			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockSaveTaskMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -402,6 +432,36 @@ describe("Task persistence", () => {
 
 			const result = await (task as Record<string, any>).saveClineMessages()
 			expect(result).toBe(true)
+			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: true }))
+		})
+
+		it("uses authoritative replacement for explicit UI history overwrites", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteClineMessages([{ ts: 1, type: "say", say: "text", text: "replacement" }])
+
+			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
+		})
+
+		it("can hydrate UI history without persisting it", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteClineMessages([{ ts: 1, type: "say", say: "text", text: "merged" }], false)
+
+			expect(task.clineMessages).toEqual([
+				expect.objectContaining({ ts: 1, text: "merged", messageId: expect.any(String) }),
+			])
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
 		it("returns false on failure", async () => {
@@ -419,7 +479,7 @@ describe("Task persistence", () => {
 		})
 
 		it("snapshots the array before passing to saveTaskMessages", async () => {
-			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockSaveTaskMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
@@ -447,7 +507,7 @@ describe("Task persistence", () => {
 		})
 
 		it("preserves an existing lifecycle status during metadata saves", async () => {
-			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockSaveTaskMessages.mockResolvedValueOnce([])
 			mockTaskMetadata.mockResolvedValueOnce({
 				historyItem: {
 					id: "task-with-advanced-status",
@@ -767,13 +827,10 @@ describe("Task persistence", () => {
 
 			expect(replay).toHaveBeenCalledWith(pendingAction)
 			expect(ask).not.toHaveBeenCalled()
-			expect(mockSaveTaskMessages).toHaveBeenCalledWith(
-				expect.objectContaining({
-					messages: expect.not.arrayContaining([
-						expect.objectContaining({ text: pendingAction.approvalText }),
-					]),
-				}),
+			expect(task.clineMessages).not.toEqual(
+				expect.arrayContaining([expect.objectContaining({ text: pendingAction.approvalText })]),
 			)
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
 		it("reconciles an already-persisted tool result before generic resume", async () => {
@@ -1068,6 +1125,193 @@ describe("Task persistence", () => {
 		})
 	})
 
+	describe("resumeTaskFromHistory", () => {
+		it.each(["not_found", "invalid", "io_error"] as const)(
+			"does not persist when hydration fails with %s",
+			async (kind) => {
+				mockReadTaskMessages.mockRejectedValue(Object.assign(new Error(`history ${kind}`), { kind }))
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: `issue-1279-${kind}`,
+						number: 1,
+						ts: 1,
+						task: "Original task",
+						status: "completed",
+						tokensIn: 10,
+						tokensOut: 5,
+						totalCost: 0.001,
+					},
+					initialStatus: "completed",
+					startTask: false,
+				})
+				const askSpy = vi.spyOn(task, "ask")
+
+				await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow(`history ${kind}`)
+				await task.abortTask(true)
+
+				expect(askSpy).not.toHaveBeenCalled()
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+				expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+			},
+		)
+
+		it("preserves finalized trailing reasoning without rewriting history during hydration", async () => {
+			const messages = [
+				{ ts: 1, type: "say" as const, say: "text" as const, text: "Original task" },
+				{ ts: 2, type: "say" as const, say: "completion_result" as const, text: "Initial result" },
+				{ ts: 3, type: "ask" as const, ask: "resume_completed_task" as const },
+				{ ts: 4, type: "say" as const, say: "user_feedback" as const, text: "Continue investigating" },
+				{
+					ts: 5,
+					type: "say" as const,
+					say: "reasoning" as const,
+					text: "Critical current conclusion",
+					partial: false,
+				},
+			]
+			mockReadTaskMessages.mockResolvedValue(messages)
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Continue investigating" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-current",
+					number: 1,
+					ts: 5,
+					task: "Original task",
+					status: "completed",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				initialStatus: "completed",
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async (type) => {
+				expect(type).toBe("resume_completed_task")
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ text: "Critical current conclusion", partial: false }),
+				)
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("removes incomplete trailing reasoning before prompting to resume", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "reasoning", text: "Incomplete conclusion", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-partial-reasoning",
+					number: 1,
+					ts: 2,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				expect(task.clineMessages).not.toContainEqual(
+					expect.objectContaining({ say: "reasoning", partial: true }),
+				)
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("stops before hydrating either history when the task is evicted during the API read", async () => {
+			const apiMessagesDeferred =
+				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "UI message" }])
+			mockReadApiMessages.mockReturnValue(apiMessagesDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-evict-during-api-read",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalled())
+
+			await task.abortTask(true)
+			mockSaveTaskMessages.mockClear()
+			vi.mocked(mockProvider.updateTaskHistory).mockClear()
+			apiMessagesDeferred.resolve([{ role: "user", content: [{ type: "text", text: "API message" }] }])
+			await resumePromise
+
+			// Neither UI nor API history should have been hydrated or persisted.
+			expect(task.clineMessages).toHaveLength(0)
+			expect(task.apiConversationHistory).toHaveLength(0)
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("stops after API history hydration when the task is aborted", async () => {
+			const apiMessagesDeferred =
+				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Original task" }])
+			mockReadApiMessages.mockReturnValue(apiMessagesDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-api-abort",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const askSpy = vi.spyOn(task, "ask")
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalled())
+
+			await task.abortTask(true)
+			// abortTask persists its own cancellation state. Reset those calls so the
+			// assertions below isolate work performed by the resumed hydration path.
+			mockSaveTaskMessages.mockClear()
+			vi.mocked(mockProvider.updateTaskHistory).mockClear()
+			apiMessagesDeferred.resolve([{ role: "user", content: [{ type: "text", text: "Original task" }] }])
+			await resumePromise
+
+			expect(askSpy).not.toHaveBeenCalled()
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+		})
+	})
+
 	// ── flushPendingToolResultsToHistory — save failure/success ───────────
 
 	describe("flushPendingToolResultsToHistory persistence", () => {
@@ -1104,7 +1348,7 @@ describe("Task persistence", () => {
 		})
 
 		it("clears userMessageContent on save success", async () => {
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockSaveApiMessages.mockResolvedValueOnce([])
 
 			const task = new Task({
 				provider: mockProvider,
