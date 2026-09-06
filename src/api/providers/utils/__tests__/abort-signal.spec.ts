@@ -6,27 +6,7 @@ import {
 	rejectOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
-
-/**
- * Fail fast when a promise never settles. Mutations that remove the settle,
- * reject, or abort wiring would otherwise hang the test until Stryker's
- * per-mutant timeout, marking the mutant "Timeout" instead of "Killed".
- */
-function settlesWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error("promise did not settle within " + ms + "ms")), ms)
-		void promise.then(
-			(value) => {
-				clearTimeout(timer)
-				resolve(value)
-			},
-			(error) => {
-				clearTimeout(timer)
-				reject(error)
-			},
-		)
-	})
-}
+import { settlesWithin } from "../../../../test-utils/promise"
 
 const SETTLE_MS = 200
 
@@ -116,7 +96,9 @@ describe("rejectOnAbort", () => {
 		controller.abort()
 
 		await expect(settlesWithin(race, SETTLE_MS)).rejects.toMatchObject({ name: "AbortError" })
-		expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+		const registeredListener = addSpy.mock.calls[0]?.[1]
+		expect(registeredListener).toBeTypeOf("function")
+		expect(addSpy).toHaveBeenCalledWith("abort", registeredListener, { once: true })
 		addSpy.mockRestore()
 	})
 })
