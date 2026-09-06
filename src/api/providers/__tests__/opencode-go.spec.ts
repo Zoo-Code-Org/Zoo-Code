@@ -1362,8 +1362,12 @@ describe("OpencodeGoHandler", () => {
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
 		})
 
-		it("classifies gpt-5.6-luna as Responses-format and other models as not", () => {
+		it("classifies documented Responses models as Responses-format and other models as not", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.2-contributor")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("glm-5.3")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("qwen3.7-max")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("some-unknown-model")).toBe(false)
@@ -1372,6 +1376,7 @@ describe("OpencodeGoHandler", () => {
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
 		it("classifies Qwen and MiniMax Go models as Anthropic-format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.8-flash")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-max")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-plus")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.6-plus")).toBe(true)
@@ -1385,6 +1390,7 @@ describe("OpencodeGoHandler", () => {
 			expect(isOpencodeGoAnthropicFormatModel("kimi-k2.6")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("deepseek-v4-pro")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("mimo-v2.5")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.5-plus")).toBe(false)
 		})
 
 		it("defaults unknown model IDs to the OpenAI-compatible format", () => {

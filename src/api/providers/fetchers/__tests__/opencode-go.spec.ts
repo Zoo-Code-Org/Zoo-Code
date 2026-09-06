@@ -87,6 +87,38 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("uses native model info when the endpoint returns only an OpenCode Go model ID", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "gpt-5.6-luna" },
+						{ id: "hy4-preview" },
+						{ id: "deepseek-v4-flash-vision-exp" },
+						{ id: "muse-spark-1.3-contributor" },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 1_050_000, maxTokens: 128_000 })
+			expect(models["hy4-preview"]).toMatchObject({ contextWindow: 1_024_000, maxTokens: 64_000 })
+			expect(models["deepseek-v4-flash-vision-exp"]).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 384_000,
+			})
+			expect(models["muse-spark-1.3-contributor"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+				inputPrice: 0.1,
+				outputPrice: 0.2,
+				cacheReadsPrice: 0.002,
+			})
+		})
+
 		it("returns an empty map on network error", async () => {
 			mockedAxios.get.mockRejectedValue(new Error("network"))
 			expect(await getOpencodeGoModels("k")).toEqual({})
@@ -121,6 +153,59 @@ describe("Opencode Go Fetchers", () => {
 	})
 
 	describe("parseOpencodeGoModel", () => {
+		it("has complete model info for every model returned by OpenCode Go", () => {
+			const modelIds = [
+				"minimax-m3",
+				"minimax-m2.7",
+				"minimax-m2.5",
+				"kimi-k3",
+				"kimi-k2.7-code",
+				"kimi-k2.6",
+				"longcat-2.0",
+				"kimi-k2.5",
+				"glm-5.2",
+				"glm-5.3-flash",
+				"glm-5.3",
+				"glm-5.1",
+				"glm-5",
+				"deepseek-v4-pro",
+				"deepseek-v4-flash",
+				"deepseek-v4-flash-vision-exp",
+				"qwen3.7-max",
+				"qwen3.8-max",
+				"qwen3.8-flash",
+				"qwen3.7-plus",
+				"qwen3.6-plus",
+				"qwen3.5-plus",
+				"mimo-v2-pro",
+				"mimo-v2-omni",
+				"mimo-v2.5-pro",
+				"mimo-v2.5",
+				"hy4-preview",
+				"hy3",
+				"hy3-preview",
+				"gpt-5.6-luna",
+				"grok-4.5",
+				"grok-4.6",
+				"muse-spark-1.3-contributor",
+				"muse-spark-1.2-contributor",
+			]
+			expect(Object.keys(opencodeGoModels).sort()).toEqual([...modelIds].sort())
+
+			for (const modelId of modelIds) {
+				const info = getOpencodeGoModelInfo(modelId)
+				expect(info, modelId).toBeDefined()
+				expect(info?.contextWindow, modelId).toBeGreaterThan(0)
+				expect(info?.maxTokens, modelId).toBeGreaterThan(0)
+				expect(info?.supportsImages, modelId).toEqual(expect.any(Boolean))
+				expect(info?.supportsPromptCache, modelId).toEqual(expect.any(Boolean))
+				expect(info?.inputPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.outputPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.cacheReadsPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.description, modelId).toBeTruthy()
+			}
+		})
+
 		it("merges live endpoint values over the native registry for a curated model", () => {
 			const info = parseOpencodeGoModel({ id: "glm-5.1", context_window: 150000, max_output_tokens: 8000 })
 			// Live values win for volatile fields.
