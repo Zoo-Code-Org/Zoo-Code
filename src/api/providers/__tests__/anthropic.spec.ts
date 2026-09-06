@@ -3,6 +3,7 @@
 import { AnthropicHandler } from "../anthropic"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock TelemetryService
@@ -501,20 +502,226 @@ describe("AnthropicHandler", () => {
 			expect(requestBody?.model).toBe("claude-sonnet-5-bf")
 			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
 		})
+
+		it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
+			const abortedController = new AbortController()
+			abortedController.abort()
+
+			mockCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					const error = new Error("The operation was aborted")
+					error.name = "AbortError"
+					throw error
+				}
+				return asyncStreamFrom([])
+			})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+			)
+
+			await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should abort the request when the external signal aborts mid-flight", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation((_params: unknown, options?: { signal?: AbortSignal }) => {
+				return new Promise<void>((_resolve, reject) => {
+					const signal = options?.signal
+					if (!signal) {
+						return
+					}
+					if (signal.aborted) {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						reject(error)
+						return
+					}
+					signal.addEventListener(
+						"abort",
+						() => {
+							const error = new Error("The operation was aborted")
+							error.name = "AbortError"
+							reject(error)
+						},
+						{ once: true },
+					)
+				})
+			})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const promise = stream.next()
+			controller.abort()
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should not pre-abort the bridged signal for a pending external signal", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.signal?.aborted).toBe(false)
+		})
+
+		it("should register the external abort listener with the once option", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			// The listener is registered once so it detaches itself when the signal aborts.
+			expect(addEventListenerSpy.mock.calls[0][2]).toEqual({ once: true })
+		})
+
+		it("should remove the external abort listener when the stream completes", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached once the stream is done.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should remove the external abort listener when message creation fails", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached when creation fails.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should propagate the creation error when no external abort signal is provided", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+		})
+
+		it("should remove the external abort listener when message creation fails for a non-cached model", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = customHandler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached when creation fails.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should propagate the creation error for a non-cached model when no external abort signal is provided", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = customHandler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+		})
+
+		it("should join beta headers with a comma for the default model", async () => {
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await collectStream(stream)
+
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.headers?.["anthropic-beta"]).toBe(
+				"fine-grained-tool-streaming-2025-05-14,prompt-caching-2024-07-31",
+			)
+		})
 	})
 
 	describe("completePrompt", () => {
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.apiModelId,
-				messages: [{ role: "user", content: "Test prompt" }],
-				max_tokens: 8192,
-				temperature: 0,
-				thinking: undefined,
-				stream: false,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "Test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				undefined,
+			)
 		})
 
 		it("should handle API errors", async () => {
@@ -536,6 +743,95 @@ describe("AnthropicHandler", () => {
 			}))
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should pass abort signal through to client", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				{ signal: controller.signal },
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				undefined,
+			)
+		})
+
+		it("should merge signal and timeout together", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
+			)
+		})
+
+		it("should pass timeoutMs through to client alongside abortSignal", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: mockOptions.apiModelId }),
+				expect.objectContaining({ signal: controller.signal, timeout: 5000 }),
+			)
+		})
+
+		it("should pass the same signal instance", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+			// Verify it's the exact same instance, not just equal
+			const callOptions = mockCreate.mock.calls[0][1]
+			expect(callOptions?.signal).toBe(controller.signal)
+		})
+
+		it("should not include signal-related options when not provided", async () => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt")
+			expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
+		})
+
+		it("should pass timeout when timeoutMs=0 (defined check)", async () => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			// timeoutMs=0 must be forwarded as an explicit 0 timeout, not dropped as if unset
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.apiModelId }), {
+				timeout: 0,
+			})
 		})
 	})
 
