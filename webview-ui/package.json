@@ -89,8 +89,8 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",
-		"@testing-library/react": "16.3.2",
-		"@testing-library/user-event": "14.6.1",
+		"@testing-library/react": "16.3.3",
+		"@testing-library/user-event": "14.6.7",
 		"@types/diff": "5.2.3",
 		"@types/jest": "29.5.14",
 		"@types/katex": "0.16.7",
@@ -100,12 +100,12 @@
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
 		"@vitejs/plugin-react": "5.2.0",
-		"@vitest/coverage-v8": "4.1.9",
-		"@vitest/ui": "4.1.9",
+		"@vitest/coverage-v8": "4.1.11",
+		"@vitest/ui": "4.1.11",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
 		"monocart-reporter": "^2.9.20",
-		"vite": "8.1.0",
-		"vitest": "4.1.9"
+		"vite": "8.2.2",
+		"vitest": "4.1.11"
 	}
 }
