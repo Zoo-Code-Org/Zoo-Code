@@ -4077,8 +4077,11 @@ export class ClineProvider
 					taskId: parentTaskId,
 					globalStoragePath,
 				})) as any[]
-			} catch {
-				parentApiMessages = []
+			} catch (error) {
+				this.log(
+					`[reopenParentFromDelegation] Failed to read API messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return false
 			}
 
 			// 2) Inject synthetic records: UI subtask_result and update API tool_result

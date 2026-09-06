@@ -417,18 +417,26 @@ describe("History resume delegation - parent metadata transitions", () => {
 				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
 			}),
 			taskHistoryStore,
-		} as any)
+		})
 
 		vi.mocked(readTaskMessages).mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "initial UI" }])
 		vi.mocked(readApiMessages).mockResolvedValue([{ ts: 1, role: "user", content: "initial API" }])
-		vi.mocked(saveTaskMessages).mockResolvedValueOnce([
-			{ ts: 1, type: "say", say: "text", text: "initial UI" },
-			{ ts: 2, type: "say", say: "text", text: "concurrent UI" },
-		] satisfies ClineMessage[])
-		vi.mocked(saveApiMessages).mockResolvedValueOnce([
-			{ ts: 1, role: "user", content: "initial API" },
-			{ ts: 2, role: "assistant", content: "concurrent API" },
-		] satisfies ApiMessage[])
+		vi.mocked(saveTaskMessages).mockImplementationOnce(
+			async ({ messages }) =>
+				[
+					{ ts: 1, type: "say", say: "text", text: "initial UI" },
+					{ ts: 2, type: "say", say: "text", text: "concurrent UI" },
+					messages.at(-1)!, // injected subtask_result
+				] as ClineMessage[],
+		)
+		vi.mocked(saveApiMessages).mockImplementationOnce(
+			async ({ messages }) =>
+				[
+					{ ts: 1, role: "user", content: "initial API" },
+					{ ts: 2, role: "assistant", content: "concurrent API" },
+					messages.at(-1)!, // injected tool_result / fallback
+				] as ApiMessage[],
+		)
 
 		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
 			parentTaskId: "parent-merge",
@@ -437,17 +445,19 @@ describe("History resume delegation - parent metadata transitions", () => {
 		})
 
 		expect(overwriteClineMessages).toHaveBeenCalledWith(
-			[
+			expect.arrayContaining([
 				{ ts: 1, type: "say", say: "text", text: "initial UI" },
 				{ ts: 2, type: "say", say: "text", text: "concurrent UI" },
-			],
+				expect.objectContaining({ type: "say", say: "subtask_result", text: "Done" }),
+			]),
 			false,
 		)
 		expect(overwriteApiConversationHistory).toHaveBeenCalledWith(
-			[
+			expect.arrayContaining([
 				{ ts: 1, role: "user", content: "initial API" },
 				{ ts: 2, role: "assistant", content: "concurrent API" },
-			],
+				expect.objectContaining({ role: "user" }),
+			]),
 			false,
 		)
 	})
@@ -484,6 +494,46 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(result).toBe(false)
 		expect(log).toHaveBeenCalledWith(expect.stringContaining("history unavailable"))
 		expect(readApiMessages).not.toHaveBeenCalled()
+		expect(saveTaskMessages).not.toHaveBeenCalled()
+		expect(saveApiMessages).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
+	})
+
+	it("does not reopen or overwrite a parent when its API history cannot be read", async () => {
+		const parentItem = {
+			id: "parent-api-read-failure",
+			status: "delegated",
+			awaitingChildId: "child-api-read-failure",
+			childIds: ["child-api-read-failure"],
+			ts: 100,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const log = vi.fn()
+		const taskHistoryStore = makeTaskHistoryStoreStub(
+			{ id: "child-api-read-failure", status: "active" },
+			parentItem,
+		)
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-api-read-failure" })),
+			taskHistoryStore,
+			log,
+		})
+		vi.mocked(readTaskMessages).mockResolvedValue([])
+		vi.mocked(readApiMessages).mockRejectedValue(new Error("api history unavailable"))
+
+		const result = await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "parent-api-read-failure",
+			childTaskId: "child-api-read-failure",
+			completionResultSummary: "Child done",
+		})
+
+		expect(result).toBe(false)
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("api history unavailable"))
 		expect(saveTaskMessages).not.toHaveBeenCalled()
 		expect(saveApiMessages).not.toHaveBeenCalled()
 		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()

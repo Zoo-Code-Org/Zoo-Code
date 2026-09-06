@@ -48,6 +48,15 @@ describe("mergeClineMessageSnapshots", () => {
 		expect(result).toEqual([expect.objectContaining({ ts: 1, partial: false, isAnswered: true })])
 	})
 
+	it("preserves finalized disk text when the incoming match is a stale partial", () => {
+		const result = mergeClineMessageSnapshots(
+			[{ messageId: "msg-1", ts: 1, type: "say", say: "text", text: "finalized text", partial: false }],
+			[{ messageId: "msg-1", ts: 1, type: "say", say: "text", text: "stale partial", partial: true }],
+		)
+
+		expect(result).toEqual([expect.objectContaining({ ts: 1, text: "finalized text", partial: false })])
+	})
+
 	it("keeps incoming completed and answered state when disk state is stale", () => {
 		const result = mergeClineMessageSnapshots(
 			[{ ts: 1, type: "ask", ask: "tool", partial: true, isAnswered: false }],

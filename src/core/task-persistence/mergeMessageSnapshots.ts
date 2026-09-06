@@ -107,10 +107,10 @@ export function mergeClineMessageSnapshots(existing: unknown, incoming: unknown)
 			return next
 		}
 
-		const merged = { ...disk, ...next }
 		if (disk.partial === false && next.partial === true) {
-			merged.partial = false
+			return disk
 		}
+		const merged = { ...disk, ...next }
 		if (disk.isAnswered === true) {
 			merged.isAnswered = true
 		}
