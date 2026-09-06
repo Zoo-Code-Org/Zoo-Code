@@ -1,5 +1,4 @@
 import path from "path"
-import delay from "delay"
 import fs from "fs/promises"
 
 import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
@@ -146,7 +145,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					true,
 				)
 
-				await delay(300)
 				task.diffViewProvider.scrollToFirstDiff()
 
 				let unified = fileExists

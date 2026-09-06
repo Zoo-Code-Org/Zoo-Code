@@ -17,10 +17,12 @@ import { languagesSchema } from "./vscode.js"
 
 /**
  * Default delay in milliseconds after writes to allow diagnostics to detect potential problems.
- * This delay is particularly important for Go and other languages where tools like goimports
- * need time to automatically clean up unused imports.
+ * Defaults to 0: the write path adds no artificial pacing by default, and post-save
+ * diagnostics are reported after the (zero) delay. Users who rely on auto-formatters that
+ * settle asynchronously (e.g. goimports for Go) can raise this setting to give formatters
+ * time to settle before diagnostics are captured.
  */
-export const DEFAULT_WRITE_DELAY_MS = 1000
+export const DEFAULT_WRITE_DELAY_MS = 0
 
 /**
  * Default values for the "auto-close files Zoo opened" settings.

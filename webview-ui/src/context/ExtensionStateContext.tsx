@@ -23,6 +23,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
 import { findLastIndex } from "@roo/array"
@@ -197,7 +198,7 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	}
 }
 
-const createInitialExtensionState = (): ExtensionState => ({
+export const createInitialExtensionState = (): ExtensionState => ({
 	apiConfiguration: {},
 	version: "",
 	clineMessages: [],
@@ -214,7 +215,10 @@ const createInitialExtensionState = (): ExtensionState => ({
 	enableCheckpoints: true,
 	checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
 	language: "en", // Default language code
-	writeDelayMs: 1000,
+	// Placeholder before the extension state hydrates: use the shared default
+	// (the pre-hydration value must not disagree with the extension's own
+	// DEFAULT_WRITE_DELAY_MS fallback).
+	writeDelayMs: DEFAULT_WRITE_DELAY_MS,
 	diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
 	terminalShellIntegrationTimeout: 4000,
 	mcpEnabled: true,
