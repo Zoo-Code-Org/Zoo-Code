@@ -111,6 +111,7 @@ import { Task } from "../task/Task"
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
+	type ApiMessage,
 	readApiMessages,
 	saveApiMessages,
 	saveTaskMessages,
@@ -4071,12 +4072,12 @@ export class ClineProvider
 				return false
 			}
 
-			let parentApiMessages: any[] = []
+			let parentApiMessages: ApiMessage[] = []
 			try {
-				parentApiMessages = (await readApiMessages({
+				parentApiMessages = await readApiMessages({
 					taskId: parentTaskId,
 					globalStoragePath,
-				})) as any[]
+				})
 			} catch (error) {
 				this.log(
 					`[reopenParentFromDelegation] Failed to read API messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
@@ -4199,7 +4200,7 @@ export class ClineProvider
 			}
 
 			parentApiMessages = await saveApiMessages({
-				messages: parentApiMessages as any,
+				messages: parentApiMessages,
 				taskId: parentTaskId,
 				globalStoragePath,
 				merge: true,
@@ -4276,7 +4277,7 @@ export class ClineProvider
 					// non-fatal
 				}
 				try {
-					await parentInstance.overwriteApiConversationHistory(parentApiMessages as any, false)
+					await parentInstance.overwriteApiConversationHistory(parentApiMessages, false)
 				} catch {
 					// non-fatal
 				}

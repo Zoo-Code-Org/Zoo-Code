@@ -115,6 +115,9 @@ export async function readApiMessages({
 	// Persist the successfully parsed legacy history before deleting its source.
 	// The next ordinary task-history save may not happen until after user input,
 	// so returning the in-memory data alone would leave a data-loss window.
+	console.warn(
+		`[readApiMessages] Migrating legacy API conversation history for task ${taskId} from claude_messages.json to api_conversation_history.json.`,
+	)
 	await safeWriteJson(filePath, legacyMessages, { merge: mergeApiMessageSnapshots })
 
 	try {

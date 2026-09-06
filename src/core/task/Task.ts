@@ -2184,6 +2184,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
+			// Read API history before hydrating either side. If the task is aborted
+			// or abandoned after the UI read completes but before this point, the
+			// abort guard below will fire and neither history will be written.
+			const savedApiConversationHistory = await this.getSavedApiConversationHistory()
+			if (this.abort || this.abandoned) {
+				return
+			}
+
 			// Avoid a standalone write during hydration. The resume ask will persist only
 			// after all history reads succeed and the task is still active.
 			this.hydrateClineMessages(modifiedClineMessages)
@@ -2194,7 +2202,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// task, and it was because we were waiting for resume).
 			// This is important in case the user deletes messages without resuming
 			// the task first.
-			this.hydrateApiConversationHistory(await this.getSavedApiConversationHistory())
+			this.hydrateApiConversationHistory(savedApiConversationHistory)
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(

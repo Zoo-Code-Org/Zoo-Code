@@ -1239,6 +1239,41 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
+		it("stops before hydrating either history when the task is evicted during the API read", async () => {
+			const apiMessagesDeferred =
+				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "UI message" }])
+			mockReadApiMessages.mockReturnValue(apiMessagesDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-evict-during-api-read",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalled())
+
+			await task.abortTask(true)
+			mockSaveTaskMessages.mockClear()
+			vi.mocked(mockProvider.updateTaskHistory).mockClear()
+			apiMessagesDeferred.resolve([{ role: "user", content: [{ type: "text", text: "API message" }] }])
+			await resumePromise
+
+			// Neither UI nor API history should have been hydrated or persisted.
+			expect(task.clineMessages).toHaveLength(0)
+			expect(task.apiConversationHistory).toHaveLength(0)
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
 		it("stops after API history hydration when the task is aborted", async () => {
 			const apiMessagesDeferred =
 				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()

@@ -6,14 +6,26 @@ function isRecord(value: unknown): value is MessageRecord {
 }
 
 export function ensureMessageIdentifiers<T extends IdentifiedMessage>(messages: T[]): T[] {
+	// Pre-scan: collect all IDs already present so generated ones stay unique.
+	const usedIds = new Set<string>()
+	for (const message of messages) {
+		if (typeof message.messageId === "string") usedIds.add(message.messageId)
+	}
+
 	const timestampOrdinals = new Map<string, number>()
 	for (const message of messages) {
 		if (typeof message.messageId === "string") continue
 
 		const timestampKey = typeof message.ts === "number" ? String(message.ts) : "none"
-		const ordinal = timestampOrdinals.get(timestampKey) ?? 0
+		let ordinal = timestampOrdinals.get(timestampKey) ?? 0
+		let candidate = `legacy:${timestampKey}:${ordinal}`
+		while (usedIds.has(candidate)) {
+			ordinal++
+			candidate = `legacy:${timestampKey}:${ordinal}`
+		}
 		timestampOrdinals.set(timestampKey, ordinal + 1)
-		message.messageId = `legacy:${timestampKey}:${ordinal}`
+		usedIds.add(candidate)
+		message.messageId = candidate
 	}
 	return messages
 }
@@ -107,7 +119,7 @@ export function mergeClineMessageSnapshots(existing: unknown, incoming: unknown)
 			return next
 		}
 
-		if (disk.partial === false && next.partial === true) {
+		if (disk.partial !== true && next.partial === true) {
 			return disk
 		}
 		const merged = { ...disk, ...next }

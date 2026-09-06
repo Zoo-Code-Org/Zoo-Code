@@ -17,6 +17,31 @@ describe("ensureMessageIdentifiers", () => {
 		expect(first.map(({ messageId }) => messageId)).toEqual(second.map(({ messageId }) => messageId))
 		expect(new Set(first.map(({ messageId }) => messageId)).size).toBe(3)
 	})
+
+	it("assigns unique IDs in a partially upgraded snapshot with an existing legacy ID at the same timestamp", () => {
+		const messages: Array<{ messageId?: string; ts: number; role: string }> = [
+			{ messageId: "legacy:1:0", ts: 1, role: "user" },
+			{ ts: 1, role: "assistant" },
+		]
+		ensureMessageIdentifiers(messages)
+		expect(messages[0]!.messageId).toBe("legacy:1:0")
+		expect(messages[1]!.messageId).toBe("legacy:1:1")
+		expect(new Set(messages.map((m) => m.messageId)).size).toBe(2)
+	})
+
+	it("preserves existing messageIds and does not reassign them", () => {
+		const messages: Array<{ messageId?: string; ts: number; role: string }> = [
+			{ messageId: "stable-id", ts: 1, role: "user" },
+		]
+		ensureMessageIdentifiers(messages)
+		expect(messages[0]!.messageId).toBe("stable-id")
+	})
+
+	it("uses 'none' as the timestamp key for messages without a ts field", () => {
+		const messages: Array<{ messageId?: string; role: string }> = [{ role: "user" }]
+		ensureMessageIdentifiers(messages)
+		expect(messages[0]!.messageId).toBe("legacy:none:0")
+	})
 })
 
 describe("mergeClineMessageSnapshots", () => {
@@ -55,6 +80,15 @@ describe("mergeClineMessageSnapshots", () => {
 		)
 
 		expect(result).toEqual([expect.objectContaining({ ts: 1, text: "finalized text", partial: false })])
+	})
+
+	it("preserves a disk message whose partial field is omitted when the incoming match is a stale partial", () => {
+		const result = mergeClineMessageSnapshots(
+			[{ messageId: "msg-1", ts: 1, type: "say", say: "text", text: "finalized text" }],
+			[{ messageId: "msg-1", ts: 1, type: "say", say: "text", text: "stale partial", partial: true }],
+		)
+
+		expect(result).toEqual([expect.objectContaining({ ts: 1, text: "finalized text" })])
 	})
 
 	it("keeps incoming completed and answered state when disk state is stale", () => {
