@@ -30,7 +30,6 @@ vi.mock("openai", () => {
 
 import { promises as fs } from "node:fs"
 import { QwenCodeHandler } from "../qwen-code"
-import { NativeToolCallParser } from "../../../core/assistant-message/NativeToolCallParser"
 import type { ApiHandlerOptions } from "../../../shared/api"
 
 describe("QwenCodeHandler abort wiring", () => {
@@ -95,9 +94,6 @@ describe("QwenCodeHandler abort wiring", () => {
 			apiModelId: "qwen3-coder-plus",
 		}
 		handler = new QwenCodeHandler(mockOptions)
-
-		// Clear NativeToolCallParser state before each test
-		NativeToolCallParser.clearRawChunkState()
 	})
 
 	describe("callApiWithRetry", () => {
@@ -447,18 +443,11 @@ describe("QwenCodeHandler abort wiring", () => {
 
 			const stream = handler.createMessage("test prompt", [])
 
-			// Collect the provider stream and process tool_call_partial chunks
-			// through NativeToolCallParser, exactly as Task.ts does.
+			// Collect the provider stream; the provider itself emits the
+			// tool_call_end events for the tool calls seen in the partial
+			// chunks once the finish chunk arrives.
 			const chunks = []
 			for await (const chunk of stream) {
-				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
-				}
 				chunks.push(chunk)
 			}
 
