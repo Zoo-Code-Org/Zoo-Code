@@ -29,6 +29,8 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { createAbortError } from "./utils/abort-signal"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
@@ -290,6 +292,13 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				yield* this.executeRequest(requestBody, model, accessToken, effectiveSessionId, abortSignal)
 				return
 			} catch (error) {
+				// The caller's cancellation wins over the retry: force-refreshing a token for a
+				// request that is already gone would spend a network round trip on a dead request
+				// and surface the cancellation as an authentication failure.
+				if (abortSignal?.aborted) {
+					throw createAbortError(this.providerName)
+				}
+
 				const message = error instanceof Error ? error.message : String(error)
 				const isAuthFailure = /unauthorized|invalid token|not authenticated|authentication|401/i.test(message)
 
@@ -456,16 +465,19 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		effectiveSessionId: string,
 		abortSignal?: AbortSignal,
 	): ApiStream {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		// Request-local controller: a stale abort arriving after this request finishes must never
+		// reach the controller of a later request, so the bridge listener captures this controller
+		// directly instead of reading `this.abortController` at abort time.
+		const abortController = new AbortController()
+		this.abortController = abortController
 
 		// A caller's signal has to be linked rather than used directly, since both transports below
-		// abort through `this.abortController`. Without this the signal never reaches the wire.
-		const abortFromCaller = () => this.abortController?.abort()
+		// abort through the request controller. Without this the signal never reaches the wire.
+		const abortFromCaller = () => abortController.abort()
 
 		if (abortSignal) {
 			if (abortSignal.aborted) {
-				this.abortController.abort()
+				abortController.abort()
 			} else {
 				abortSignal.addEventListener("abort", abortFromCaller, { once: true })
 			}
@@ -492,7 +504,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					})
 
 				const stream = (await (client as any).responses.create(requestBody, {
-					signal: this.abortController.signal,
+					signal: abortController.signal,
 					// If the SDK supports per-request overrides, ensure headers are present.
 					headers: codexHeaders,
 				})) as AsyncIterable<any>
@@ -504,7 +516,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 
 				for await (const event of stream) {
-					if (this.abortController.signal.aborted) {
+					if (abortController.signal.aborted) {
 						break
 					}
 
@@ -527,16 +539,26 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				// A cancellation is not a transport failure either. Falling back would spend a
 				// second request on an already-aborted signal and report the cancellation as a
 				// connection error.
-				if (this.sawSdkEventInCurrentResponse || this.abortController?.signal.aborted) {
+				if (this.sawSdkEventInCurrentResponse || abortController.signal.aborted) {
 					throw sdkErr
 				}
 
 				// Fallback to manual SSE via fetch (Codex backend).
-				yield* this.makeCodexRequest(requestBody, model, accessToken, effectiveSessionId)
+				yield* this.makeCodexRequest(
+					requestBody,
+					model,
+					accessToken,
+					effectiveSessionId,
+					abortController.signal,
+				)
 			}
 		} finally {
 			abortSignal?.removeEventListener("abort", abortFromCaller)
-			this.abortController = undefined
+			// Only clear the field if this request still owns it: a concurrent request may have
+			// installed its own controller after this one started.
+			if (this.abortController === abortController) {
+				this.abortController = undefined
+			}
 		}
 	}
 
@@ -628,6 +650,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		effectiveSessionId: string,
+		abortSignal: AbortSignal,
 	): ApiStream {
 		// Per the implementation guide: route to Codex backend with Bearer token
 		const url = `${CODEX_API_BASE_URL}/responses`
@@ -647,7 +670,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController?.signal,
+				signal: abortSignal,
 			})
 
 			if (!response.ok) {
@@ -707,8 +730,15 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				throw new Error(t("common:errors.openAiCodex.noResponseBody"))
 			}
 
-			yield* this.handleStreamResponse(response.body, model)
+			yield* this.handleStreamResponse(response.body, model, abortSignal)
 		} catch (error) {
+			// The caller cancelled, so this is not a transport fault: hand back the shared abort
+			// contract instead of reporting the caller's own cancellation to telemetry or wrapping it
+			// as a connection failure.
+			if (abortSignal.aborted) {
+				throw createAbortError(this.providerName)
+			}
+
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
 			TelemetryService.instance.captureException(apiError)
@@ -723,7 +753,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private async *handleStreamResponse(body: ReadableStream<Uint8Array>, model: OpenAiCodexModel): ApiStream {
+	private async *handleStreamResponse(
+		body: ReadableStream<Uint8Array>,
+		model: OpenAiCodexModel,
+		abortSignal: AbortSignal,
+	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
@@ -731,7 +765,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 		try {
 			while (true) {
-				if (this.abortController?.signal.aborted) {
+				if (abortSignal.aborted) {
 					break
 				}
 
@@ -986,6 +1020,13 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 			}
 		} catch (error) {
+			// The caller cancelled while the fallback stream was being read: that is not a
+			// stream-processing failure, so hand back the shared abort contract instead of reporting
+			// the caller's own cancellation to telemetry.
+			if (abortSignal.aborted) {
+				throw createAbortError(this.providerName)
+			}
+
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
 			TelemetryService.instance.captureException(apiError)
@@ -1329,6 +1370,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	 * from having to be duplicated here.
 	 */
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Merge an optional timeout into the caller's abort signal so a timeout cancels the
+		// completion the same way an external abort does (timeoutMs <= 0 disables it).
+		const requestSignal = RequestConfigBuilder.mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
 		try {
 			const model = this.getModel()
 
@@ -1343,7 +1388,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				// `taskId` is required, and resolves to the same session id this used to send
 				// directly, so `prompt_cache_key` is unchanged.
 				{ taskId: this.sessionId },
-				options?.abortSignal,
+				requestSignal,
 			)) {
 				// Refusals are streamed as text for the chat, but they are not output: the
 				// non-streaming request this replaced read `output_text`, which never carries them.
@@ -1356,20 +1401,18 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			// Both transports end quietly on abort - they break out of their loops rather than
 			// throwing - so returning here would report a cancelled generation as a finished one and
 			// hand the caller whatever partial text had arrived.
-			if (options?.abortSignal?.aborted) {
-				throw new DOMException("OpenAI Codex completion was aborted", "AbortError")
+			if (requestSignal?.aborted) {
+				throw createAbortError(this.providerName)
 			}
 
 			return text
 		} catch (error) {
 			// Cancelling is the caller's own doing, not a provider failure, so it is neither
-			// reported to telemetry nor relabelled as a completion error. A transport that rejects
-			// on abort reports it in its own words, so it is restated here: callers get one abort
-			// result whether the stream ended quietly or the request threw.
-			if (options?.abortSignal?.aborted) {
-				throw error instanceof DOMException && error.name === "AbortError"
-					? error
-					: new DOMException("OpenAI Codex completion was aborted", "AbortError")
+			// reported to telemetry nor relabelled as a completion error: a timed-out or
+			// cancelled request is normalized to the shared abort contract whether the stream
+			// ended quietly or the request threw.
+			if (requestSignal?.aborted) {
+				throw createAbortError(this.providerName)
 			}
 
 			const errorModel = this.getModel()
