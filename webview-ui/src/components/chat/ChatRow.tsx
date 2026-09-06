@@ -1590,6 +1590,19 @@ export const ChatRowContent = ({
 						/>
 					)
 				}
+				case "mcp_server_response":
+					return (
+						<div style={{ paddingTop: 10 }}>
+							<Markdown markdown={message.text} partial={message.partial} />
+							{message.images && message.images.length > 0 && (
+								<div style={{ marginTop: "10px" }}>
+									{message.images.map((image, index) => (
+										<ImageBlock key={index} imageData={image} />
+									))}
+								</div>
+							)}
+						</div>
+					)
 				default:
 					return (
 						<>
@@ -1601,6 +1614,13 @@ export const ChatRowContent = ({
 							)}
 							<div style={{ paddingTop: 10 }}>
 								<Markdown markdown={message.text} partial={message.partial} />
+								{message.images && message.images.length > 0 && (
+									<div style={{ marginTop: "10px" }}>
+										{message.images.map((image, index) => (
+											<ImageBlock key={index} imageData={image} />
+										))}
+									</div>
+								)}
 							</div>
 						</>
 					)
