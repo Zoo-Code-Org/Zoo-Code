@@ -32,6 +32,7 @@ import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -409,6 +410,32 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		return body
 	}
 
+	/**
+	 * Bridges an external abort signal (e.g. task cancellation) onto a request-local
+	 * controller using the Bedrock pattern: a pre-aborted signal aborts the controller
+	 * immediately and registers no listener; otherwise a once-only listener forwards
+	 * the abort. Returns a cleanup function that detaches the listener (or undefined
+	 * when no listener was registered) so the caller can release it in its finally
+	 * block and a late abort can never reach a later request's controller.
+	 */
+	private attachExternalAbort(
+		externalAbortSignal: AbortSignal | undefined,
+		requestController: AbortController,
+	): (() => void) | undefined {
+		if (!externalAbortSignal) {
+			return undefined
+		}
+		if (externalAbortSignal.aborted) {
+			requestController.abort()
+			return undefined
+		}
+		const abortListener = () => requestController.abort()
+		externalAbortSignal.addEventListener("abort", abortListener, { once: true })
+		return () => {
+			externalAbortSignal.removeEventListener("abort", abortListener)
+		}
+	}
+
 	private async *executeRequest(
 		requestBody: any,
 		model: OpenAiNativeModel,
@@ -416,8 +443,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		// Create a request-local AbortController for cancellation. It is exposed via
+		// this.abortController so the stop-button path can observe it, but all bridging
+		// below captures the local reference so a late abort from an earlier request can
+		// never reach a later request's controller.
+		const requestController = new AbortController()
+		this.abortController = requestController
+
+		// Bridge the external abort signal onto the request controller; the returned
+		// cleanup detaches the listener in the finally block so a late abort from this
+		// request cannot cancel a later request's controller.
+		const detach = this.attachExternalAbort(metadata?.abortSignal, requestController)
 
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
@@ -431,7 +467,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		try {
 			// Use the official SDK with per-request headers
 			const stream = (await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal: requestController.signal,
 				headers: requestHeaders,
 			})) as AsyncIterable<any>
 
@@ -443,7 +479,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			for await (const event of stream) {
 				// Check if request was aborted
-				if (this.abortController.signal.aborted) {
+				if (requestController.signal.aborted) {
 					break
 				}
 
@@ -455,7 +491,14 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// For errors, fallback to manual SSE via fetch
 			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages)
 		} finally {
-			this.abortController = undefined
+			// Detach the bridging listener so a late abort from this request cannot
+			// cancel a later request's controller.
+			detach?.()
+			// Only clear the field if this request still owns it (the fallback path may
+			// have installed its own controller, which it clears itself).
+			if (this.abortController === requestController) {
+				this.abortController = undefined
+			}
 		}
 	}
 
@@ -566,8 +609,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
 		const url = `${baseUrl}/v1/responses`
 
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		// Create a request-local AbortController for cancellation. It is exposed via
+		// this.abortController so the stop-button path can observe it, but the bridging
+		// listener captures the local reference so a late abort from an earlier request
+		// can never reach a later request's controller.
+		const requestController = new AbortController()
+		this.abortController = requestController
+
+		// Bridge the external abort signal onto the request controller; the returned
+		// cleanup detaches the listener in the finally block so a late abort from this
+		// request cannot cancel a later request's controller.
+		const detach = this.attachExternalAbort(metadata?.abortSignal, requestController)
 
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
@@ -584,7 +636,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					"User-Agent": userAgent,
 				},
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal: requestController.signal,
 			})
 
 			if (!response.ok) {
@@ -648,8 +700,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Handle streaming response
-			yield* this.handleStreamResponse(response.body, model)
+			yield* this.handleStreamResponse(response.body, model, requestController)
 		} catch (error) {
+			// Re-throw abort errors as-is so callers can identify cancellations
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			const model = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
@@ -666,7 +723,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Handle non-Error objects
 			throw new Error(`Unexpected error connecting to Responses API`)
 		} finally {
-			this.abortController = undefined
+			// Detach the bridging listener so a late abort from this request cannot
+			// cancel a later request's controller.
+			detach?.()
+			if (this.abortController === requestController) {
+				this.abortController = undefined
+			}
 		}
 	}
 
@@ -676,8 +738,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * This function iterates through the Server-Sent Events (SSE) stream, parses each event,
 	 * and yields structured data chunks (`ApiStream`). It handles a wide variety of event types,
 	 * including text deltas, reasoning, usage data, and various status/tool events.
+	 *
+	 * @param requestController - The request-local controller. When it aborts (external
+	 * abort or request timeout), a stream error is surfaced as the contract AbortError
+	 * instead of being wrapped, so a cancellation is never misreported as a provider
+	 * error and is not captured twice.
 	 */
-	private async *handleStreamResponse(body: ReadableStream<Uint8Array>, model: OpenAiNativeModel): ApiStream {
+	private async *handleStreamResponse(
+		body: ReadableStream<Uint8Array>,
+		model: OpenAiNativeModel,
+		requestController: AbortController,
+	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
@@ -1129,6 +1200,15 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// If we didn't get any content, don't throw - the API might have returned an empty response
 			// This can happen in certain edge cases and shouldn't break the flow
 		} catch (error) {
+			// The request-local controller is only aborted on external abort or request
+			// timeout, both legitimate cancellations: surface the contract abort error
+			// before any wrapping so the caller's AbortError guard sees one correctly
+			// named error instead of a wrapped DOMException, and the stop is not
+			// captured as an exception here or again by the caller.
+			if (requestController.signal.aborted) {
+				throw new DOMException(`The ${this.providerName} request was aborted`, "AbortError")
+			}
+
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
 			TelemetryService.instance.captureException(apiError)
@@ -1506,9 +1586,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		return this.lastResponseId
 	}
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		try {
-			this.abortController = new AbortController()
+		// Request-local abort signal: merges the external abort signal with an optional
+		// timeout without touching this.abortController (owned by streaming requests).
+		const requestSignal =
+			RequestConfigBuilder.mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs) ??
+			new AbortController().signal
 
+		try {
 			const model = this.getModel()
 			const { verbosity } = model
 
@@ -1567,7 +1651,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			// Make the non-streaming request
 			const response = await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal: requestSignal,
 			})
 
 			// Extract text from the response
@@ -1590,6 +1674,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			return ""
 		} catch (error) {
+			// Re-throw abort errors as-is so callers can identify cancellations
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			const errorModel = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, errorModel.id, "completePrompt")
@@ -1599,8 +1688,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw new Error(`OpenAI Native completion error: ${error.message}`)
 			}
 			throw error
-		} finally {
-			this.abortController = undefined
 		}
 	}
 }
