@@ -703,6 +703,10 @@
 		"enable": {
 			"label": "启用自动存档点",
 			"description": "开启后自动创建任务存档点，方便回溯修改。 <0>了解更多</0>"
+		},
+		"perWrite": {
+			"label": "每次文件写入后创建存档点",
+			"description": "智能体每次成功写入文件后都会记录一个存档点快照"
 		}
 	},
 	"notifications": {

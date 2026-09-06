@@ -722,6 +722,7 @@ describe("ClineProvider", () => {
 			soundEnabled: false,
 			ttsEnabled: false,
 			enableCheckpoints: false,
+			perWriteCheckpoints: false,
 			writeDelayMs: 1000,
 			mcpEnabled: true,
 			mode: defaultModeSlug,
@@ -1564,6 +1565,48 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
+	})
+
+	test("getState returns the saved per-write checkpoints setting", async () => {
+		await provider.contextProxy.setValue("perWriteCheckpoints", false)
+
+		const state = await provider.getState()
+
+		expect(state.perWriteCheckpoints).toBe(false)
+	})
+
+	test("getState defaults per-write checkpoints to true when unset", async () => {
+		const state = await provider.getState()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
+	test("getStateToPostToWebview returns the saved per-write checkpoints setting", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("perWriteCheckpoints", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
+	test("getStateToPostToWebview returns false when per-write checkpoints is saved as false", async () => {
+		// The default is also true, so only an explicit false proves that the
+		// stored value (rather than the default) reaches the webview state.
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("perWriteCheckpoints", false)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.perWriteCheckpoints).toBe(false)
+	})
+
+	test("getStateToPostToWebview defaults per-write checkpoints to true when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.perWriteCheckpoints).toBe(true)
 	})
 
 	test("language is set to VSCode language", async () => {

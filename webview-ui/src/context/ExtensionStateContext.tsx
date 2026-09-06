@@ -197,7 +197,7 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	}
 }
 
-const createInitialExtensionState = (): ExtensionState => ({
+export const createInitialExtensionState = (): ExtensionState => ({
 	apiConfiguration: {},
 	version: "",
 	clineMessages: [],
@@ -212,6 +212,7 @@ const createInitialExtensionState = (): ExtensionState => ({
 	ttsEnabled: false,
 	ttsSpeed: 1.0,
 	enableCheckpoints: true,
+	perWriteCheckpoints: true,
 	checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
 	language: "en", // Default language code
 	writeDelayMs: 1000,

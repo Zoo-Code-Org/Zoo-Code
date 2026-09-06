@@ -14,7 +14,12 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 } from "@roo-code/types"
 
-import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import {
+	ExtensionStateContextProvider,
+	useExtensionState,
+	mergeExtensionState,
+	createInitialExtensionState,
+} from "../ExtensionStateContext"
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -399,6 +404,16 @@ describe("ExtensionStateContext", () => {
 			}),
 		)
 	})
+
+	it("initializes the per-write checkpoint default before hydration", () => {
+		// The initializer itself (not a merge fixture) must carry the per-write
+		// checkpoint default: a regression that dropped it from
+		// createInitialExtensionState would otherwise stay hidden because the
+		// merge tests supply the key manually.
+		const state = createInitialExtensionState()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+	})
 })
 
 describe("mergeExtensionState", () => {
@@ -410,6 +425,7 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
+			perWriteCheckpoints: true,
 			writeDelayMs: 1000,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
@@ -480,6 +496,7 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
+			perWriteCheckpoints: true,
 			writeDelayMs: 1000,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
