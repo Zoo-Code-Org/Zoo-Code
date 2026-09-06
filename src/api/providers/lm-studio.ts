@@ -31,8 +31,8 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		super()
 		this.options = options
 
-		// LM Studio uses "noop" as a placeholder API key
-		const apiKey = "noop"
+		// LM Studio uses "noop" as a placeholder API key when none is configured.
+		const apiKey = this.options.lmStudioApiKey || "noop"
 
 		this.client = new OpenAI({
 			baseURL: (this.options.lmStudioBaseUrl || "http://localhost:1234") + "/v1",
@@ -199,6 +199,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		const models = getModelsFromCache({
 			provider: providerIdentifiers.lmstudio,
 			baseUrl: this.options.lmStudioBaseUrl,
+			apiKey: this.options.lmStudioApiKey,
 		})
 		if (models && this.options.lmStudioModelId && models[this.options.lmStudioModelId]) {
 			return {

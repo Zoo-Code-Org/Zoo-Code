@@ -13,6 +13,7 @@ export const lmStudioProviderDefinition = createProviderDefinition({
 		...baseProviderSettingsShape,
 		[LM_STUDIO_MODEL_ID_FIELD]: z.string().optional(),
 		lmStudioBaseUrl: z.string().optional(),
+		lmStudioApiKey: z.string().optional(),
 		lmStudioDraftModelId: z.string().optional(),
 		lmStudioSpeculativeDecodingEnabled: z.boolean().optional(),
 	},

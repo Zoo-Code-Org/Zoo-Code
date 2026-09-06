@@ -4,10 +4,10 @@ import { type ModelRecord, type ExtensionMessage, LmStudioModelsMessageType } fr
 
 import { vscode } from "@src/utils/vscode"
 
-export const requestLmStudioModels = (baseUrl?: string) =>
+export const requestLmStudioModels = (baseUrl?: string, apiKey?: string) =>
 	vscode.postMessage({
 		type: LmStudioModelsMessageType.requestLmStudioModels,
-		values: typeof baseUrl === "string" ? { baseUrl } : undefined,
+		values: typeof baseUrl === "string" || typeof apiKey === "string" ? { baseUrl, apiKey } : undefined,
 	})
 
 const getLmStudioModels = async (baseUrl?: string) =>
