@@ -375,30 +375,90 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	): ApiStream {
 		// Ensure clean state before starting a new request
 		this.ensureCleanState()
-		const client: vscode.LanguageModelChat = await this.getClient()
 
-		// Process messages
-		const cleanedMessages = messages.map((msg) => ({
-			...msg,
-			content: this.cleanMessageContent(msg.content),
-		}))
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal, so the
+		// request cancellation is established before client initialization and a
+		// pre-aborted external signal is reported immediately instead of being
+		// sent to the host.
+		const externalAbortSignal = metadata?.abortSignal
 
-		// Convert Anthropic messages to VS Code LM messages
-		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(systemPrompt),
-			...convertToVsCodeLmMessages(cleanedMessages),
-		]
-
-		// Initialize cancellation token for the request
+		// Initialize cancellation token for the request before getClient() so the
+		// client-initialization await is covered by the abort bridge and the
+		// finally cleanup below.
 		this.currentRequestCancellation = new vscode.CancellationTokenSource()
+		const cancellationTokenSource = this.currentRequestCancellation
 
-		// Calculate input tokens before starting the stream
-		const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
+		// Bridge the caller's abort signal (e.g. a task abort) into the request's
+		// cancellation token: the VS Code LM API cannot carry an AbortSignal
+		// directly, so cancellation is signalled to the host through the token.
+		// The listener is kept in a named const and removed in the finally block
+		// because { once: true } only detaches it when the signal actually aborts.
+		let onExternalAbort: (() => void) | undefined
+		if (externalAbortSignal) {
+			onExternalAbort = () => cancellationTokenSource.cancel()
+			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+		}
 
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
 
 		try {
+			// Fail fast if the caller already aborted before we even started: do not
+			// initialize or invoke the host request for a cancelled request.
+			if (externalAbortSignal?.aborted) {
+				cancellationTokenSource.cancel()
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
+			const client: vscode.LanguageModelChat = await this.getClient()
+
+			// Re-check immediately after client initialization: the request-local token
+			// may have been cancelled while getClient() was pending — either because the
+			// external signal aborted (bridged into the token) or because a newer request
+			// superseded this one and cancelled its token. Bail before counting input
+			// tokens or invoking the host so no work happens for a cancelled request.
+			// The token is the superset here: the bridge makes every external abort cancel it.
+			if (cancellationTokenSource.token.isCancellationRequested) {
+				cancellationTokenSource.cancel()
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
+			// Process messages
+			const cleanedMessages = messages.map((msg) => ({
+				...msg,
+				content: this.cleanMessageContent(msg.content),
+			}))
+
+			// Convert Anthropic messages to VS Code LM messages
+			const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
+				vscode.LanguageModelChatMessage.Assistant(systemPrompt),
+				...convertToVsCodeLmMessages(cleanedMessages),
+			]
+
+			// Calculate input tokens before starting the stream
+			const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
+
+			// Re-check the request-local token after counting: the external signal may
+			// have aborted while counting was in flight (bridged into the token) or a
+			// newer request may have superseded this one and cancelled its token. Bail
+			// before invoking the host so no work happens for a cancelled request. The
+			// token is the superset here: the bridge makes every external abort cancel it.
+			if (cancellationTokenSource.token.isCancellationRequested) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
 				justification: `Zoo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
@@ -408,11 +468,22 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			const response: vscode.LanguageModelChatResponse = await client.sendRequest(
 				vsCodeLmMessages,
 				requestOptions,
-				this.currentRequestCancellation.token,
+				cancellationTokenSource.token,
 			)
 
 			// Consume the stream and handle both text and tool call chunks
 			for await (const chunk of response.stream) {
+				// A late abort while consuming must stop the stream instead of
+				// yielding stale chunks. The request-local token also covers local
+				// supersession (a newer request cancels this one), which the external
+				// signal alone cannot see.
+				if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+					// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+					const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+					// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+					abortError.name = "AbortError"
+					throw abortError
+				}
 				if (chunk instanceof vscode.LanguageModelTextPart) {
 					// Validate text part value
 					if (typeof chunk.value !== "string") {
@@ -482,10 +553,23 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
-			this.ensureCleanState()
+			// When the external signal wins during client initialization (the signal
+			// was already aborted while getClient() was pending or rejected), surface a
+			// standard abort error instead of wrapping the getClient() failure as a
+			// generic stream error.
+			if (externalAbortSignal?.aborted) {
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
 
 			if (error instanceof vscode.CancellationError) {
-				throw new Error("Zoo Code <Language Model API>: Request cancelled by user")
+				// The host rejected because the request was cancelled: either the
+				// bridged external signal aborted or the user cancelled the request
+				// in VS Code. Both are aborts, so surface a standard abort error.
+				const abortError = new Error("Zoo Code <Language Model API>: Request cancelled by user")
+				abortError.name = "AbortError"
+				throw abortError
 			}
 
 			if (error instanceof Error) {
@@ -507,6 +591,28 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				const errorMessage = String(error)
 				console.error("Zoo Code <Language Model API>: Unknown stream error:", errorMessage)
 				throw new Error(`Zoo Code <Language Model API>: Response stream error: ${errorMessage}`)
+			}
+		} finally {
+			// Detach the abort bridge listener on every path (success, error, and
+			// early consumer break); { once: true } alone would leak it when the
+			// request completes without the signal ever aborting.
+			// Stryker disable next-line LogicalOperator: set only when the signal is truthy, so && and || are equivalent
+			if (externalAbortSignal && onExternalAbort) {
+				externalAbortSignal.removeEventListener("abort", onExternalAbort)
+			}
+			// Cancel before disposing: VS Code's CancellationTokenSource.dispose()
+			// frees resources without cancelling the token, so a premature consumer
+			// closure (break/return) would otherwise leave the host request running and
+			// consuming model quota. Cancel is idempotent, so this is a no-op on paths
+			// where the token was already cancelled (aborted or timed-out request).
+			cancellationTokenSource.cancel()
+			// Dispose the request-local source. Clear the shared field only if it still
+			// points at this request's source: a newer request may have replaced it, and
+			// disposing the shared field here would cancel and dispose the newer request's
+			// token.
+			cancellationTokenSource.dispose()
+			if (this.currentRequestCancellation === cancellationTokenSource) {
+				this.currentRequestCancellation = null
 			}
 		}
 	}
@@ -589,12 +695,69 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal: sendRequest
+		// only accepts a CancellationToken. Bridge the external signal and timeout
+		// into a request-local CancellationTokenSource instead. Cancellation is
+		// established before client initialization so the getClient() await is covered
+		// by the timeout, the abort bridge, and the finally cleanup below.
+		const tokenSource = new vscode.CancellationTokenSource()
+		const externalAbortSignal = options?.abortSignal
+
+		// Apply the timeout only when it is a positive value: cancelling at once for a
+		// zero/negative timeout would abort every such request immediately. Starting
+		// the timer before getClient() means a timeout that fires during a slow client
+		// lookup still cancels the request before any sendRequest call.
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
+			timeoutId = setTimeout(() => tokenSource.cancel(), options.timeoutMs)
+		}
+
+		// Bridge the external abort signal: a pre-aborted signal cancels the token
+		// immediately, otherwise a one-shot listener relays the abort to the host.
+		let onAbort: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				tokenSource.cancel()
+			} else {
+				onAbort = () => tokenSource.cancel()
+				externalAbortSignal.addEventListener("abort", onAbort, { once: true })
+			}
+		}
+
+		// The request counts as aborted when the host-side token was cancelled
+		// (timeout or bridged signal) or when the external signal itself aborted.
+		const isAborted = () =>
+			tokenSource.token.isCancellationRequested === true || externalAbortSignal?.aborted === true
+
 		try {
+			// Fail fast if the caller already aborted before we even started: do not
+			// initialize or invoke the host request for a cancelled request.
+			if (isAborted()) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("VSCode LM completion aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			const client = await this.getClient()
+
+			// Re-check after client initialization: the signal may have aborted (or the
+			// timeout fired) while getClient() was pending. Bail before invoking the host
+			// so a timeout that fired during a slow client lookup can never lead to a
+			// sendRequest call.
+			if (isAborted()) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("VSCode LM completion aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
 				{},
-				new vscode.CancellationTokenSource().token,
+				tokenSource.token,
 			)
 			let result = ""
 			for await (const chunk of response.stream) {
@@ -602,12 +765,43 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					result += chunk.value
 				}
 			}
+
+			// Guard against a quiet completion after the request was aborted.
+			if (isAborted()) {
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				const abortError = new Error("VSCode LM completion aborted")
+				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			return result
 		} catch (error) {
+			// Report an aborted request (external signal, timeout, or host
+			// cancellation) as a standard AbortError instead of a generic
+			// completion error. A host CancellationError is treated as a cancellation
+			// even if the token flag was not observed (e.g. the host cancelled the
+			// request through the token without the flag being set).
+			if (isAborted() || error instanceof vscode.CancellationError) {
+				const abortError = new Error("VSCode LM completion aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			if (error instanceof Error) {
 				throw new Error(`VSCode LM completion error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			// clearTimeout(undefined) is a spec no-op, so clear unconditionally.
+			clearTimeout(timeoutId)
+			// { once: true } only detaches the listener when the signal actually
+			// aborts, so remove it explicitly on every path.
+			// Stryker disable next-line LogicalOperator: set only when the signal is truthy, so && and || are equivalent
+			if (externalAbortSignal && onAbort) {
+				externalAbortSignal.removeEventListener("abort", onAbort)
+			}
+			tokenSource.dispose()
 		}
 	}
 }
