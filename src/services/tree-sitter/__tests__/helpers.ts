@@ -2,7 +2,7 @@ import { parseSourceCodeDefinitionsForFile, setMinComponentLines } from ".."
 import * as fs from "fs/promises"
 import * as path from "path"
 import tsxQuery from "../queries/tsx"
-import { Parser, Language } from "web-tree-sitter"
+import { Parser, Language, Query } from "web-tree-sitter"
 
 vi.mock("fs/promises")
 export const mockedFs = vi.mocked(fs)
@@ -23,6 +23,61 @@ export const debugLog = (message: string, ...args: any[]) => {
 	if (DEBUG) {
 		console.debug(message, ...args)
 	}
+}
+
+// Log always (for timing/warmup info)
+export const infoLog = (message: string, ...args: any[]) => {
+	console.log(`[swift-tree-sitter] ${message}`, ...args)
+}
+
+// Default timeout for query captures (in ms) — first WASM call needs JIT
+export const QUERY_CAPTURES_TIMEOUT_MS = 15_000
+
+/**
+ * Execute a synchronous tree-sitter operation wrapped in a JS timeout.
+ * NOTE: Since query.captures() is synchronous WASM, the timeout cannot
+ * abort the WASM execution — the operation will still complete in the
+ * background. However, the caller gets a timely response (null on timeout).
+ *
+ * This is useful for tests/prod code to avoid hanging on slow first query.
+ */
+export async function executeWithTimeout<T>(fn: () => T, timeoutMs: number, onTimeout?: () => void): Promise<T | null> {
+	return new Promise<T | null>((resolve) => {
+		const timeoutId = setTimeout(() => {
+			onTimeout?.()
+			resolve(null)
+		}, timeoutMs)
+
+		try {
+			const result = fn()
+			clearTimeout(timeoutId)
+			resolve(result)
+		} catch (err) {
+			clearTimeout(timeoutId)
+			throw err
+		}
+	})
+}
+
+/**
+ * Pre-warm a tree-sitter language by doing one throw-away parse + query.
+ * The first query.captures() call for Swift WASM is slow (~22-24s) due to
+ * WASM JIT compilation. Subsequent calls are fast (~1.4ms).
+ *
+ * @returns time taken for the warmup query in ms
+ */
+export async function warmUpLanguage(language: Language, queryString: string, sample?: string): Promise<number> {
+	const shim = new Parser()
+	shim.setLanguage(language)
+	const tinySample = sample ?? "class Foo {}"
+	const shimTree = shim.parse(tinySample)
+	const shimQuery = new Query(language, queryString)
+
+	const start = performance.now()
+	shimQuery.captures(shimTree.rootNode)
+	const elapsed = performance.now() - start
+
+	return elapsed
 }
 
 // Store the initialized TreeSitter for reuse
@@ -88,8 +143,8 @@ export async function testParseSourceCodeDefinitions(
 	const lang = await Language.load(wasmPath)
 	parser.setLanguage(lang)
 
-	// Create a real query
-	const query = lang.query(queryString)
+	// Create a real query — using new Query() instead of deprecated Language.query()
+	const query = new Query(lang, queryString)
 
 	// Set up our language parser with real parser and query
 	const mockLanguageParser: any = {}
