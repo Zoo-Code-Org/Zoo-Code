@@ -142,6 +142,8 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	private client: OpenAI
 	protected models: ModelRecord = {}
 	protected endpoints: ModelRecord = {}
+	// Display name for user-facing error messages only; telemetry uses
+	// providerIdentifiers.openrouter as the canonical provider identifier.
 	private readonly providerName = "OpenRouter"
 	private currentReasoningDetails: any[] = []
 
