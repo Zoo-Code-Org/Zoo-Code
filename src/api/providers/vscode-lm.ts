@@ -416,10 +416,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 			const client: vscode.LanguageModelChat = await this.getClient()
 
-			// Re-check immediately after client initialization: the signal may have
-			// aborted while getClient() was pending. Bail before counting input
+			// Re-check immediately after client initialization: the request-local token
+			// may have been cancelled while getClient() was pending — either because the
+			// external signal aborted (bridged into the token) or because a newer request
+			// superseded this one and cancelled its token. Bail before counting input
 			// tokens or invoking the host so no work happens for a cancelled request.
-			if (externalAbortSignal?.aborted) {
+			// The token is the superset here: the bridge makes every external abort cancel it.
+			if (cancellationTokenSource.token.isCancellationRequested) {
 				cancellationTokenSource.cancel()
 				// Stryker disable next-line StringLiteral: caught below; the catch re-throws its own canonical abort error here
 				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")

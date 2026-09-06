@@ -16,6 +16,39 @@ vi.mock("vscode", () => {
 		) {}
 	}
 
+	class MockLanguageModelToolResultPart {
+		type = "tool_result"
+		constructor(
+			public callId: string,
+			public content: unknown,
+		) {}
+	}
+
+	// A real class (not a plain object): internalCountTokens() and
+	// extractTextCountFromMessage() branch on `instanceof` against the message
+	// type, and a plain-object constructor throws "Right-hand side of
+	// 'instanceof' is not callable".
+	class MockLanguageModelChatMessage {
+		role: string
+		content: unknown
+		constructor(role: string, content: unknown) {
+			this.role = role
+			this.content = content
+		}
+		static Assistant(content: string | unknown[]): MockLanguageModelChatMessage {
+			return new MockLanguageModelChatMessage(
+				"assistant",
+				Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
+			)
+		}
+		static User(content: string | unknown[]): MockLanguageModelChatMessage {
+			return new MockLanguageModelChatMessage(
+				"user",
+				Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
+			)
+		}
+	}
+
 	return {
 		workspace: {
 			getConfiguration: vi.fn(() => ({
@@ -46,18 +79,10 @@ vi.mock("vscode", () => {
 				this.name = "CancellationError"
 			}
 		},
-		LanguageModelChatMessage: {
-			Assistant: vi.fn((content) => ({
-				role: "assistant",
-				content: Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
-			})),
-			User: vi.fn((content) => ({
-				role: "user",
-				content: Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
-			})),
-		},
+		LanguageModelChatMessage: MockLanguageModelChatMessage,
 		LanguageModelTextPart: MockLanguageModelTextPart,
 		LanguageModelToolCallPart: MockLanguageModelToolCallPart,
+		LanguageModelToolResultPart: MockLanguageModelToolResultPart,
 		lm: {
 			selectChatModels: vi.fn(),
 		},
@@ -81,7 +106,9 @@ const mockLanguageModelChat = {
 	version: "1.0",
 	maxInputTokens: 4096,
 	sendRequest: vi.fn(),
-	countTokens: vi.fn(),
+	// Default to a valid numeric count so the createMessage input-token counting
+	// (which now reaches the host mock) does not log a non-numeric warning.
+	countTokens: vi.fn(async () => 0),
 }
 
 /**
@@ -979,10 +1006,10 @@ describe("VsCodeLmHandler", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
 
 			const controller = new AbortController()
-			// Token counting takes long enough that the caller's abort lands while it
-			// is in flight; the bridge cancels the request token during the count.
-			// @ts-ignore – access private method to drive the counting window
-			vi.spyOn(handler, "calculateTotalInputTokens").mockImplementation(async () => {
+			// The host's token-counting call is in flight when the caller aborts; the
+			// bridge cancels the request token during the count, so the post-counting
+			// check must stop the request before sendRequest is invoked.
+			mockLanguageModelChat.countTokens.mockImplementationOnce(async () => {
 				controller.abort()
 				return 10
 			})
@@ -1000,6 +1027,81 @@ describe("VsCodeLmHandler", () => {
 			// The post-counting check must stop the request before the host is invoked.
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
+		})
+
+		it("should abort a superseded request before counting tokens when superseded during client initialization", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			// Distinct per-request clients so A's host calls can be attributed to A
+			// alone; B proceeds on its own client and must not pollute A's counters.
+			const clientA = { ...mockLanguageModelChat, sendRequest: vi.fn(), countTokens: vi.fn() }
+			const clientB = { ...mockLanguageModelChat, sendRequest: vi.fn(), countTokens: vi.fn(async () => 0) }
+			clientB.sendRequest.mockResolvedValue({
+				stream: (async function* () {})(),
+				text: (async function* () {})(),
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			let releaseA: () => void = () => {}
+			const gateA = new Promise<void>((resolve) => {
+				releaseA = resolve
+			})
+			let releaseB: () => void = () => {}
+			const gateB = new Promise<void>((resolve) => {
+				releaseB = resolve
+			})
+			// Gate each client-initialization lookup deterministically. mockReset() drops
+			// any mockImplementationOnce entries left behind by earlier tests (clearAllMocks
+			// does not clear the once-queue); a stale entry would otherwise consume A's
+			// lookup and hand B the wrong gate.
+			const selectChatModels = vscode.lm.selectChatModels as Mock
+			selectChatModels.mockReset()
+			let lookup = 0
+			selectChatModels.mockImplementation(() => {
+				const k = lookup++
+				if (k === 0) {
+					return gateA.then(() => [clientA])
+				}
+				if (k === 1) {
+					return gateB.then(() => [clientB])
+				}
+				return Promise.resolve([mockLanguageModelChat])
+			})
+			handler["client"] = null
+
+			// A parks inside getClient() on gateA.
+			const streamA = handler.createMessage(systemPrompt, messages)
+			const nextA = streamA.next()
+
+			// B's ensureCleanState() synchronously cancels A's token; B parks on gateB.
+			const streamB = handler.createMessage(systemPrompt, messages)
+			const nextB = streamB.next()
+			expect(tokenSourceInstance(0).token.isCancellationRequested).toBe(true)
+
+			// Release A so it resumes into the post-init guard, which must see the
+			// cancelled token and abort A before it counts tokens or invokes the host.
+			releaseA()
+			await expect(nextA).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+
+			// Supersession must stop A before any host work: A never counted tokens or
+			// invoked the host.
+			expect(clientA.countTokens).not.toHaveBeenCalled()
+			expect(clientA.sendRequest).not.toHaveBeenCalled()
+
+			// Release B so it runs to completion on clientB (empty stream), draining
+			// the request slot so afterEach's dispose() finds a clean handler.
+			releaseB()
+			await nextB
+			await streamB.next()
+			expect(handler["currentRequestCancellation"]).toBeNull()
+			consoleErrorSpy.mockRestore()
 		})
 
 		it("should throw a Zoo Code branded error on stream error with error-like object", async () => {
