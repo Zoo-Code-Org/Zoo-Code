@@ -369,6 +369,66 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
 	})
 
+	it("resolves none to the canonical lowest supported effort even when the model supports disable", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("resolves none to the lowest canonical effort when reasoning support is boolean", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("resolves none to the first supported effort when low is not available", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["high"],
+			},
+		})
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
+	})
+
 	it("omits reasoning effort when reasoning is explicitly disabled", async () => {
 		vi.mocked(getModels).mockResolvedValue({
 			"model:thinking": {

@@ -379,6 +379,38 @@ describe("ThinkingBudget", () => {
 			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
 		})
 
+		it("should normalize stale disable to the first supported effort after switching to a required model", () => {
+			const setApiConfigurationField = vi.fn()
+			const { rerender } = render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable" }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{ ...reasoningEffortModelInfo, supportsReasoningEffort: true }}
+				/>,
+			)
+
+			setApiConfigurationField.mockClear()
+
+			rerender(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable" }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high"],
+						requiredReasoningEffort: true,
+					}}
+				/>,
+			)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+			// The two effects fire only what is needed: no third enableReasoningEffort write.
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", "disable")
+		})
+
 		it("should use medium when boolean reasoning support is required without an advertised default", () => {
 			const setApiConfigurationField = vi.fn()
 			render(

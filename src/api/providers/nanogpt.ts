@@ -36,17 +36,26 @@ const NANO_GPT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as 
 
 function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
 	const configured = options.reasoningEffort
+	// "none" with enableReasoningEffort: true is an explicit level selection, not a disable.
 	const reasoningDisabled =
-		configured === "disable" || configured === "none" || options.enableReasoningEffort === false
+		configured === "disable" ||
+		(configured === "none" && options.enableReasoningEffort !== true) ||
+		options.enableReasoningEffort === false
 	const supported = info.supportsReasoningEffort
 
 	if (reasoningDisabled && (supported === true || (Array.isArray(supported) && supported.includes("disable")))) {
 		return undefined
 	}
 
+	// When "none" is explicitly enabled, resolve it to the lowest canonical supported effort.
+	const noneEnabled = !reasoningDisabled && configured === "none"
 	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
-	if (Array.isArray(supported) && !supported.includes("disable")) {
-		candidates.push(NANO_GPT_REASONING_EFFORTS.find((effort) => supported.includes(effort)))
+	if (noneEnabled || (Array.isArray(supported) && !supported.includes("disable"))) {
+		candidates.push(
+			NANO_GPT_REASONING_EFFORTS.find(
+				(effort) => supported === true || (Array.isArray(supported) && supported.includes(effort)),
+			),
+		)
 	}
 
 	for (const effort of candidates) {
