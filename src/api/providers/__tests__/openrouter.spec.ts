@@ -25,6 +25,7 @@ import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { settlesWithin } from "../../../test-utils/promise"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -108,27 +109,6 @@ vitest.mock("../fetchers/modelCache", () => ({
 		return getModels(options)
 	}),
 }))
-
-/**
- * Fail fast when an awaited operation never settles. Mutations that break abort
- * propagation would otherwise hang the test until Stryker's per-mutant timeout,
- * marking the mutant "Timeout" instead of "Killed".
- */
-function settlesWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error("operation did not settle within " + ms + "ms")), ms)
-		void promise.then(
-			(value) => {
-				clearTimeout(timer)
-				resolve(value)
-			},
-			(error) => {
-				clearTimeout(timer)
-				reject(error)
-			},
-		)
-	})
-}
 
 const ABORT_SETTLE_MS = 150
 
@@ -858,6 +838,45 @@ describe("OpenRouterHandler", () => {
 				message: "The OpenRouter request was aborted",
 			})
 			expect(chunks).toContainEqual({ type: "text", text: "first" })
+		})
+		it("cancels the in-flight stream when the consumer abandons the generator", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			// Emulate the OpenAI SDK: the first chunk arrives, then the response body
+			// stalls until the request signal aborts — no further chunk arrives on its own.
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					return (async function* () {
+						yield { id: "1", choices: [{ delta: { content: "first" } }] }
+						await new Promise<void>((resolve) => {
+							expect(requestSignal).toBeDefined()
+							if (requestSignal!.aborted) {
+								resolve()
+							} else {
+								requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+							}
+						})
+						yield { id: "2", choices: [{ delta: { content: "second" } }] }
+					})()
+				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }])
+
+			const first = await settlesWithin(generator.next(), ABORT_SETTLE_MS)
+			expect(first.value).toEqual({ type: "text", text: "first" })
+			expect(requestSignal?.aborted).toBe(false)
+
+			// Abandon the generator mid-stream: the finally block must abort the per-request
+			// controller so the in-flight stream is cancelled instead of lingering until
+			// the client-level timeout.
+			await settlesWithin(generator.return(undefined), ABORT_SETTLE_MS)
+			expect(requestSignal?.aborted).toBe(true)
 		})
 		it("does not emit buffered chunks after a mid-stream abort (iterator keeps delivering)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
@@ -2501,7 +2520,7 @@ describe("OpenRouterHandler", () => {
 				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
 			).rejects.toMatchObject({
 				name: "AbortError",
-				message: "This operation was aborted",
+				message: "The OpenRouter request was aborted",
 			})
 			// The pre-abort guard rejects before any model lookup beyond the constructor's own.
 			const { getModels } = await import("../fetchers/modelCache")

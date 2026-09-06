@@ -36,13 +36,7 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import {
-	createAbortError,
-	isRequestAborted,
-	mergeAbortSignalAndTimeout,
-	rejectOnAbort,
-	throwIfAborted,
-} from "./utils/abort-signal"
+import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -628,6 +622,10 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			}
 		} finally {
 			removeExternalAbortListener?.()
+			// Cancel the in-flight request when the consumer abandons the generator
+			// (early break / downstream error). No-op once the stream has completed
+			// or the controller is already aborted.
+			controller.abort()
 		}
 	}
 
@@ -678,9 +676,8 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// waiting for the lookup to settle. The configured timeoutMs covers the lookup
 		// as well.
 		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
-		// Stryker disable next-line ConditionalExpression: without signal or timeout the merged signal is undefined and throwIfAborted(undefined) is a no-op, so forcing the branch is unobservable
-		if (requestAbortSignal) {
-			throwIfAborted(requestAbortSignal)
+		if (requestAbortSignal?.aborted) {
+			throw createAbortError(this.providerName)
 		}
 
 		let model: Awaited<ReturnType<OpenRouterHandler["fetchModel"]>>
