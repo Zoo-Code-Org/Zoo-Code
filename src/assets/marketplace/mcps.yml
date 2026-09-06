@@ -2888,6 +2888,49 @@ items:
           - name: Local Timezone
             key: LOCAL_TIMEZONE
             placeholder: America/New_York
+  - id: toolrouter
+    name: ToolRouter
+    description: The OpenRouter for tools. One connection gives an agent a hosted catalog of 250+ specialist tools for
+      web search, scraping, image and video generation, SEO, finance, property and compliance, discovered at runtime
+      and billed per call.
+    author: Humanleap
+    url: https://github.com/Humanleap/toolrouter-mcp
+    tags:
+      - tool-gateway
+      - web-search
+      - web-scraping
+      - image-generation
+      - video-generation
+      - seo
+    content:
+      - name: Remote Server
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://api.toolrouter.com/mcp"
+          }
+      - name: Remote Server with API Key
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://api.toolrouter.com/mcp",
+            "headers": {
+              "Authorization": "Bearer {{TOOLROUTER_API_KEY}}"
+            }
+          }
+        parameters:
+          - name: ToolRouter API Key
+            key: TOOLROUTER_API_KEY
+            placeholder: your_toolrouter_api_key
+            optional: true
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "toolrouter-mcp"]
+          }
   - id: verodat
     name: Verodat
     description: Enables AI systems to interact with Verodat's data management platform, providing capabilities for dataset
