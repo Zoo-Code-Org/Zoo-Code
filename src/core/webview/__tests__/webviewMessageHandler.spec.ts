@@ -64,6 +64,8 @@ vi.mock("@roo-code/telemetry", () => ({
 		hasInstance: vi.fn().mockReturnValue(false),
 		instance: {
 			updateTelemetryState: vi.fn(),
+			captureCustomModeCreated: vi.fn(),
+			captureModeSettingChanged: vi.fn(),
 			captureTelemetrySettingsChanged: vi.fn(),
 		},
 	},
@@ -102,6 +104,7 @@ const mockClineProvider = {
 	saveViewState: vi.fn(),
 	customModesManager: {
 		getCustomModes: vi.fn(),
+		updateCustomMode: vi.fn(),
 		deleteCustomMode: vi.fn(),
 	},
 	context: {
@@ -133,6 +136,7 @@ const mockClineProvider = {
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	getSkillsManager: vi.fn(),
+	handleModeSwitch: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
 
@@ -255,6 +259,7 @@ import { getWorkspacePath } from "../../../utils/path"
 import { ensureSettingsDirectoryExists } from "../../../utils/globalContext"
 import { generateErrorDiagnostics } from "../diagnosticsHandler"
 import type { ModeConfig } from "@roo-code/types"
+import { defaultModeSlug } from "../../../shared/modes"
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
