@@ -1026,7 +1026,7 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 11
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
@@ -1041,7 +1041,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 36
+			"count": 33
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {

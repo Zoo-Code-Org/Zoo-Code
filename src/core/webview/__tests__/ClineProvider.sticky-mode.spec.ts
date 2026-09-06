@@ -215,6 +215,18 @@ describe("ClineProvider - Sticky Mode", () => {
 	beforeEach(async () => {
 		vi.clearAllMocks()
 
+		// The "mode deletion between sessions" test overrides the module-level
+		// getModeBySlug mock to return undefined; vi.clearAllMocks() does not clear
+		// mock implementations, so restore the factory default per-test. handleModeSwitch
+		// validates slugs through getModeBySlug, so later tests rely on the default.
+		const { getModeBySlug } = await import("../../../shared/modes")
+		vi.mocked(getModeBySlug).mockReturnValue({
+			slug: "code",
+			name: "Code Mode",
+			roleDefinition: "You are a code assistant",
+			groups: ["read", "edit"],
+		})
+
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
 		}
@@ -348,11 +360,19 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask)
 
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Switch mode
 			await provider.handleModeSwitch("architect")
 
-			// Verify mode was updated in global state
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was updated in durable per-view state
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"viewStates",
+				expect.objectContaining({
+					["stable-test-view"]: expect.objectContaining({ mode: "architect" }),
+				}),
+			)
 
 			// Verify task history was updated with new mode
 			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
@@ -367,7 +387,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a mock task with initial mode
 			const mockTask = {
 				taskId: "test-task-id",
-				taskMode: "code", // Initial mode
+				_taskMode: "code", // Initial mode
 				emit: vi.fn(),
 				saveClineMessages: vi.fn(),
 				clineMessages: [],
@@ -401,8 +421,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Switch mode
 			await provider.handleModeSwitch("architect")
 
-			// Verify task's _taskMode property was updated (using private property)
-			expect((mockTask as any)._taskMode).toBe("architect")
+			// Verify task's _taskMode property was updated (accessed via bracket notation)
+			expect(mockTask["_taskMode"]).toBe("architect")
 
 			// Verify emit was called with taskModeSwitched event
 			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
@@ -472,7 +492,6 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Saved mode
 			}
 
-			// Register a stable view id so the durable per-view write is persisted
 			await provider["setViewStateId"]("stable-test-view")
 
 			// Initialize task with history item
@@ -681,11 +700,19 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask)
 
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Switch mode - should not throw
 			await expect(provider.handleModeSwitch("architect")).resolves.not.toThrow()
 
-			// Verify mode was still updated in global state
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was still updated in durable per-view state
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"viewStates",
+				expect.objectContaining({
+					["stable-test-view"]: expect.objectContaining({ mode: "architect" }),
+				}),
+			)
 		})
 
 		it("should handle null/undefined mode gracefully", async () => {
@@ -761,11 +788,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify that the mode was restored into this view's durable pin. The
-			// getState() merge of hydrated per-view values lands with the F1b follow-up.
-			expect(provider["viewLocalState"].mode).toBe("architect")
-
+			// Verify that the mode was restored
 			const state = await provider.getState()
+			expect(state.mode).toBe("architect")
 
 			// Verify that the API configuration was also restored
 			expect(state.currentApiConfigName).toBe("architect-config")
@@ -851,6 +876,9 @@ describe("ClineProvider - Sticky Mode", () => {
 				return Promise.resolve([])
 			})
 
+			// Register a stable view id so the durable per-view writes are persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Clear previous calls to globalState.update
 			vi.mocked(mockContext.globalState.update).mockClear()
 
@@ -863,12 +891,16 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			await Promise.all(switches)
 
-			// Find the last mode update call
-			const modeCalls = vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode")
-			const lastModeCall = modeCalls[modeCalls.length - 1]
+			// Find the last durable view state update call
+			const viewStateCalls = vi
+				.mocked(mockContext.globalState.update)
+				.mock.calls.filter((call) => call[0] === "viewStates")
+			const lastViewStateCall = viewStateCalls[viewStateCalls.length - 1]
 
 			// Verify the last mode switch wins
-			expect(lastModeCall).toEqual(["mode", "code"])
+			expect(lastViewStateCall?.[1]).toMatchObject({
+				["stable-test-view"]: { mode: "code" },
+			})
 
 			// Verify task history was updated with final mode
 			const lastCall = updateTaskHistorySpy.mock.calls[updateTaskHistorySpy.mock.calls.length - 1]
@@ -929,16 +961,14 @@ describe("ClineProvider - Sticky Mode", () => {
 			await savePromise
 
 			// Task should have the new mode
-			expect((mockTask as any)._taskMode).toBe("architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
 		})
 	})
 
 	describe("Mode switch failure scenarios", () => {
-		it("should handle invalid mode gracefully", async () => {
+		it("should ignore invalid modes", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			// The provider actually does switch to invalid modes
-			// This test should verify that behavior
 			const mockTask = {
 				taskId: "test-task-id",
 				_taskMode: "code",
@@ -952,14 +982,23 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
+			// Register a stable view id so a durable write would be observable
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Clear previous calls
 			vi.mocked(mockContext.globalState.update).mockClear()
 
-			// Try to switch to invalid mode - it will actually switch
-			await provider.handleModeSwitch("invalid-mode" as any)
+			// Simulate an unknown slug: the module mock resolves nothing for it.
+			// (The outer beforeEach restores the mock's default return per test, so
+			// this override does not leak into later tests.)
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug).mockReturnValue(undefined)
 
-			// The mode WILL be updated to invalid-mode (this is the actual behavior)
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "invalid-mode")
+			// An unknown mode slug is ignored: no durable write and no in-memory change
+			await provider.handleModeSwitch("invalid-mode")
+
+			expect(mockContext.globalState.update).not.toHaveBeenCalled()
+			expect(mockTask["_taskMode"]).toBe("code")
 		})
 
 		it("should handle errors during mode switch gracefully", async () => {
@@ -1215,19 +1254,21 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Start initialization
 			const initPromise = provider.createTaskWithHistoryItem(historyItem)
 
+			// Let the restore's early durable mode write settle first (its custom-mode
+			// resolution completes in microtasks with the mocked fs). In production the
+			// user's switch is issued after the restore's early write, and both durable
+			// writes then land in that order, so the mid-init switch wins.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
 			// Try to switch mode during initialization
 			await provider.handleModeSwitch("code")
 
 			// Wait for initialization to complete
 			await initPromise
 
-			// Check all mode update calls
-			const modeCalls = vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode")
-
-			// Based on the actual behavior, the mode switch to "code" happens and persists
-			// The history mode restoration doesn't override it
-			const lastModeCall = modeCalls[modeCalls.length - 1]
-			expect(lastModeCall).toEqual(["mode", "code"])
+			// Both mutations now land in the view-local buffer. The history restore runs
+			// early (before the slow getTaskWithId), so the mid-init switch to "code" wins.
+			expect(provider["viewLocalState"].mode).toBe("code")
 		})
 
 		it("should handle rapid task switches during mode changes", async () => {
