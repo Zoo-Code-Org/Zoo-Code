@@ -32,6 +32,12 @@ export function getVisibleProviderOrLog(outputChannel: vscode.OutputChannel): Cl
 let sidebarPanel: vscode.WebviewView | undefined = undefined
 let tabPanel: vscode.WebviewPanel | undefined = undefined
 
+// In-flight "open in editor" creation shared by overlapping calls: a
+// double-click starts before the first call tracks its new panel, so
+// concurrent callers must share one creation instead of racing to create
+// two tab panels.
+let pendingTabPanelCreation: Promise<ClineProvider> | undefined
+
 /**
  * Get the currently active panel
  * @returns WebviewPanel或WebviewView
@@ -283,88 +289,109 @@ const getCommandsMap = ({
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
-	// Reuse the tracked tab instead of opening a second one: a repeated
-	// "Open in editor" click reveals the existing tab's panel.
-	if (tabPanel) {
-		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
-		if (existingProvider) {
-			await tabPanel.reveal()
-			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			return existingProvider
-		}
+	// Serialize overlapping "Open in editor" calls: a double-click starts
+	// before the first call tracks its new panel, so without a shared
+	// in-flight creation both calls would race to create two tab panels.
+	// Concurrent callers await the same promise: exactly one panel is
+	// created and every caller receives the same provider.
+	if (pendingTabPanelCreation) {
+		return pendingTabPanelCreation
 	}
 
-	// (This example uses webviewProvider activation event which is necessary to
-	// deserialize cached webview, but since we use retainContextWhenHidden, we
-	// don't need to use that event).
-	// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
-	const contextProxy = await ContextProxy.getInstance(context)
-	const codeIndexManager = CodeIndexManager.getInstance(context)
-
-	// Get the existing MDM service instance to ensure consistent policy enforcement
-	let mdmService: MdmService | undefined
-	try {
-		mdmService = MdmService.getInstance()
-	} catch (error) {
-		// MDM service not initialized, which is fine - extension can work without it
-		mdmService = undefined
-	}
-
-	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
-	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
-
-	// Check if there are any visible text editors, otherwise open a new group
-	// to the right.
-	const hasVisibleEditors = vscode.window.visibleTextEditors.length > 0
-
-	if (!hasVisibleEditors) {
-		await vscode.commands.executeCommand("workbench.action.newGroupRight")
-	}
-
-	const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
-
-	const newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
-		enableScripts: true,
-		retainContextWhenHidden: true,
-		localResourceRoots: [context.extensionUri],
-	})
-
-	// Save as tab type panel.
-	setPanel(newPanel, "tab")
-
-	// TODO: Use better svg icon with light and dark variants (see
-	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
-	newPanel.iconPath = {
-		light: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_light.png"),
-		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
-	}
-
-	await tabProvider.resolveWebviewView(newPanel)
-
-	// Add listener for visibility changes to notify webview
-	newPanel.onDidChangeViewState(
-		(e) => {
-			const panel = e.webviewPanel
-			if (panel.visible) {
-				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
+	const creation = (async () => {
+		// Reuse the tracked tab instead of opening a second one: a repeated
+		// "Open in editor" click reveals the existing tab's panel.
+		if (tabPanel) {
+			const existingProvider = ClineProvider.getInstanceForView(tabPanel)
+			if (existingProvider) {
+				await tabPanel.reveal()
+				await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+				return existingProvider
 			}
-		},
-		null, // First null is for `thisArgs`
-		context.subscriptions, // Register listener for disposal
-	)
+		}
 
-	// Handle panel closing events.
-	newPanel.onDidDispose(
-		() => {
-			setPanel(undefined, "tab")
-		},
-		null,
-		context.subscriptions, // Also register dispose listener
-	)
+		// (This example uses webviewProvider activation event which is necessary to
+		// deserialize cached webview, but since we use retainContextWhenHidden, we
+		// don't need to use that event).
+		// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
+		const contextProxy = await ContextProxy.getInstance(context)
+		const codeIndexManager = CodeIndexManager.getInstance(context)
 
-	// Lock the editor group so clicking on files doesn't open them over the panel.
-	await delay(100)
-	await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+		// Get the existing MDM service instance to ensure consistent policy enforcement
+		let mdmService: MdmService | undefined
+		try {
+			mdmService = MdmService.getInstance()
+		} catch (error) {
+			// MDM service not initialized, which is fine - extension can work without it
+			mdmService = undefined
+		}
 
-	return tabProvider
+		const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
+		const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
+
+		// Check if there are any visible text editors, otherwise open a new group
+		// to the right.
+		const hasVisibleEditors = vscode.window.visibleTextEditors.length > 0
+
+		if (!hasVisibleEditors) {
+			await vscode.commands.executeCommand("workbench.action.newGroupRight")
+		}
+
+		const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
+
+		const newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [context.extensionUri],
+		})
+
+		// Save as tab type panel.
+		setPanel(newPanel, "tab")
+
+		// TODO: Use better svg icon with light and dark variants (see
+		// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
+		newPanel.iconPath = {
+			light: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_light.png"),
+			dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
+		}
+
+		await tabProvider.resolveWebviewView(newPanel)
+
+		// Add listener for visibility changes to notify webview
+		newPanel.onDidChangeViewState(
+			(e) => {
+				const panel = e.webviewPanel
+				if (panel.visible) {
+					panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
+				}
+			},
+			null, // First null is for `thisArgs`
+			context.subscriptions, // Register listener for disposal
+		)
+
+		// Handle panel closing events.
+		newPanel.onDidDispose(
+			() => {
+				setPanel(undefined, "tab")
+			},
+			null,
+			context.subscriptions, // Also register dispose listener
+		)
+
+		// Lock the editor group so clicking on files doesn't open them over the panel.
+		await delay(100)
+		await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+
+		return tabProvider
+	})()
+
+	pendingTabPanelCreation = creation
+
+	try {
+		return await creation
+	} finally {
+		// Clear once settled (success or failure) so the next call starts
+		// fresh: the reuse path above then takes over for the tracked panel.
+		pendingTabPanelCreation = undefined
+	}
 }

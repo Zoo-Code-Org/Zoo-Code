@@ -136,7 +136,11 @@ describe("registerCommands handlers", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockContext: vscode.ExtensionContext
 	let mockVisibleProvider: { postMessageToWebview: Mock }
-	let mockProvider: { postMessageToWebview: Mock }
+	let mockProvider: {
+		postMessageToWebview: Mock
+		evictCurrentTask: Mock
+		refreshWorkspace: Mock
+	}
 	let handlers: Record<string, (...args: unknown[]) => unknown>
 
 	beforeEach(() => {
@@ -164,6 +168,8 @@ describe("registerCommands handlers", () => {
 
 		mockProvider = {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 		}
 		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(mockVisibleProvider)
 		;(vscode.commands.registerCommand as Mock).mockImplementation(
@@ -514,16 +520,11 @@ describe("registerCommands handlers", () => {
 	})
 
 	it("plusButtonClicked calls evictCurrentTask on the registered sidebar provider", async () => {
-		const evictCurrentTask = vi.fn().mockResolvedValue(undefined)
-		const refreshWorkspace = vi.fn().mockResolvedValue(undefined)
-		;(mockProvider as any).evictCurrentTask = evictCurrentTask
-		;(mockProvider as any).refreshWorkspace = refreshWorkspace
-
 		await handlers["zoo-code.plusButtonClicked"]()
 
 		expect(TelemetryService.instance.captureTitleButtonClicked).toHaveBeenCalledWith("plus")
-		expect(evictCurrentTask).toHaveBeenCalledTimes(1)
-		expect(refreshWorkspace).toHaveBeenCalledTimes(1)
+		expect(mockProvider.evictCurrentTask).toHaveBeenCalledTimes(1)
+		expect(mockProvider.refreshWorkspace).toHaveBeenCalledTimes(1)
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "chatButtonClicked" })
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 	})
@@ -637,6 +638,19 @@ describe("openClineInNewTab", () => {
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
 		expect(mockPanel.reveal).not.toHaveBeenCalled()
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {
+		const [first, second] = await Promise.all([
+			openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel }),
+			openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel }),
+		])
+
+		// Overlapping "Open in editor" calls must share the in-flight
+		// creation: exactly one tab panel is created and both callers
+		// receive the same provider.
+		expect(first).toBe(second)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 })

@@ -568,9 +568,8 @@ describe("ClineProvider", () => {
 	})
 
 	describe("getInstanceForView", () => {
-		it("returns the instance that owns the given view", () => {
-			// @ts-ignore - accessing private property for testing
-			provider.view = mockWebviewView
+		it("returns the instance that owns the given view", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
 
 			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBe(provider)
 		})
