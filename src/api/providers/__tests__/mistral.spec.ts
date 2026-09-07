@@ -890,9 +890,14 @@ describe("MistralHandler", () => {
 			expect(capturedSignal).not.toBe(controller.signal)
 			expect(capturedSignal?.aborted).toBe(true)
 			// The bridge registers a once-only listener on the external signal and
-			// detaches it when the request settles.
-			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// detaches it when the request settles. Target the last "abort"
+			// registration (the bridge's listener) and assert the exact reference
+			// so a bridge that removes a different callback cannot pass.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addedListener)
 		})
 
 		it("should wrap a non-abort stream failure when metadata is provided without a signal", async () => {

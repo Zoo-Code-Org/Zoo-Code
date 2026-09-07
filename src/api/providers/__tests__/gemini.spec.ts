@@ -842,9 +842,11 @@ describe("GeminiHandler", () => {
 
 			it("should reject hostnames that only resemble the 127. range", async () => {
 				// "127a.b" shares the 127 prefix but is not a loopback address and
-				// must not pass the anchored, dot-escaped 127. check. (Hosts such
-				// as a127.0.0.1 are rejected by new URL() outright, which is also
-				// why a de-anchored 127. pattern is unobservable.)
+				// must not pass the anchored, dot-escaped 127. check. This case pins
+				// the dot escape itself: an unescaped /^127/ pattern would match
+				// "127a.b" and wrongly allow cleartext. (Hosts such as a127.0.0.1
+				// are rejected by new URL() outright — its mixed digit-led/letter-led
+				// label rule — so they never reach the check.)
 				const messages: Anthropic.Messages.MessageParam[] = [
 					{
 						role: "user",
@@ -857,6 +859,38 @@ describe("GeminiHandler", () => {
 					apiModelId: GEMINI_MODEL_NAME,
 					geminiApiKey: "test-key",
 					googleGeminiBaseUrl: "http://127a.b:8080",
+				})
+				restrictedHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					restrictedHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			it("should reject a valid hostname containing the 127. substring that is not loopback", async () => {
+				// "foo127.bar" is accepted by new URL() (a syntactically valid
+				// hostname), contains the "127." substring, yet is not a loopback
+				// address: only the anchored 127. check rejects it. A de-anchored
+				// /127\./ pattern would match it and wrongly allow cleartext.
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const restrictedHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://foo127.bar:8080",
 				})
 				restrictedHandler["client"] = handler["client"]
 				handler["client"].models.generateContentStream = stub
@@ -1008,9 +1042,14 @@ describe("GeminiHandler", () => {
 			expect(capturedSignal).not.toBe(controller.signal)
 			expect(capturedSignal?.aborted).toBe(true)
 			// The bridge registers a once-only listener on the external signal and
-			// detaches it when the request settles.
-			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// detaches it when the request settles. Target the last "abort"
+			// registration (the bridge's listener) and assert the exact reference
+			// so a bridge that removes a different callback cannot pass.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addedListener)
 		})
 
 		it("should not set config.abortSignal when no external signal is provided", async () => {

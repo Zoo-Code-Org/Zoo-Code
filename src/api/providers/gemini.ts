@@ -182,7 +182,9 @@ function sanitizeSchemaForGemini(
 // directly; `new URL` keeps the brackets in IPv6 hostnames, so `[::1]` is
 // the loopback host form to compare against.
 function isLoopbackHostname(hostname: string): boolean {
-	// Stryker disable next-line Regex: the ^ anchor is unobservable — new URL() rejects every non-loopback hostname containing "127." (e.g. a127.0.0.1, foo.127.0.0.1), so a de-anchored pattern behaves identically on every reachable hostname
+	// The ^ anchor is observable: new URL() accepts non-loopback hostnames that
+	// contain the "127." substring (e.g. foo127.bar), so a de-anchored pattern
+	// would misclassify them as loopback and allow cleartext.
 	return hostname === "localhost" || hostname === "[::1]" || /^127\./.test(hostname)
 }
 
