@@ -481,7 +481,7 @@ describe("importExport", () => {
 			)
 			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "test")
 			expect(result).toMatchObject({
-				warnings: [`Profile "undefined" was not available; defaulting to "test".`],
+				warnings: [`No current profile was specified; defaulting to "test".`],
 			})
 		})
 

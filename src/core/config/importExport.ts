@@ -209,9 +209,12 @@ export async function importSettingsFromPath(
 			currentApiConfigName = undefined
 		} else if (currentApiConfigName === undefined || !validApiConfigs[currentApiConfigName]) {
 			if (validProfileNames.length > 0) {
+				const previousName = currentApiConfigName
 				currentApiConfigName = validProfileNames[0]
 				warnings.push(
-					`Profile "${rawProviderProfiles.currentApiConfigName}" was not available; defaulting to "${currentApiConfigName}".`,
+					previousName === undefined
+						? `No current profile was specified; defaulting to "${currentApiConfigName}".`
+						: `Profile "${previousName}" was not available; defaulting to "${currentApiConfigName}".`,
 				)
 			} else {
 				// No valid imported profiles; keep the existing currentApiConfigName
