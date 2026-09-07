@@ -2204,6 +2204,18 @@ describe("CodeIndexConfigManager", () => {
 			configManager = new CodeIndexConfigManager(mockContextProxy)
 			expect(configManager.isConfigured()).toBe(false)
 		})
+
+		it("should return false from isConfigured for OpenRouter when the API key is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.openrouter,
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
 	})
 
 	describe("isConfigured defensive fallback", () => {
@@ -2219,9 +2231,13 @@ describe("CodeIndexConfigManager", () => {
 			mockContextProxy.getSecret.mockReturnValue(undefined)
 
 			configManager = new CodeIndexConfigManager(mockContextProxy)
-			// The private `embedderProvider` field has no public setter; the cast is the
-			// only way to reach the defensive branch without changing source logic.
-			Object.defineProperty(configManager, "embedderProvider", { value: "not-a-provider" })
+			// The defensive `return false` is unreachable through the public API because
+			// EmbedderProvider is a closed union, so exercise it by forcing the private field
+			// to a value outside the union. `embedderProvider` is TypeScript `private`, not
+			// `#`-private, so a runtime property write reaches it. The double assertion is a
+			// last resort: the private field is not part of the public type surface, and
+			// `as any` is avoided to keep the file's no-explicit-any suppression budget flat.
+			;(configManager as unknown as Record<string, unknown>)["embedderProvider"] = "not-a-provider"
 			expect(configManager.isConfigured()).toBe(false)
 		})
 	})
