@@ -303,6 +303,49 @@ describe("History resume delegation - parent metadata transitions", () => {
 		)
 	})
 
+	it("releases the parent transition lock before resuming so the parent can delegate again", async () => {
+		const parentHistoryItem = {
+			id: "parent-sequential",
+			status: "delegated",
+			awaitingChildId: "child-first",
+			ts: Date.now(),
+			task: "Parent task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const childHistoryItem = { id: "child-first", status: "active" }
+		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
+		const parentInstance = {
+			resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+			overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+		}
+
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-first" })),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
+			taskHistoryStore,
+			emit: vi.fn(),
+		})
+		parentInstance.resumeAfterDelegation.mockImplementation(async () => {
+			await provider["runDelegationTransition"]("parent-sequential", async () => undefined)
+		})
+
+		await expect(
+			ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-sequential",
+				childTaskId: "child-first",
+				completionResultSummary: "First child done",
+			}),
+		).resolves.toBe(true)
+
+		expect(parentInstance.resumeAfterDelegation).toHaveBeenCalledTimes(1)
+	})
+
 	it("reopenParentFromDelegation invalidates the child's projection state at the durable commit boundary so a later reconstruction failure cannot retain it", async () => {
 		const parentHistoryItem = {
 			id: "parent-1",

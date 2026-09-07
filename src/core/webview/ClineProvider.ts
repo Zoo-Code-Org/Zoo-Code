@@ -5301,7 +5301,8 @@ export class ClineProvider
 		pendingActionId?: string
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
-		return this.runDelegationTransition(parentTaskId, async (transitionOwner) => {
+		let parentToResume: Task | undefined
+		const didReopen = await this.runDelegationTransition(parentTaskId, async (transitionOwner) => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
@@ -5574,15 +5575,7 @@ export class ClineProvider
 					// non-fatal
 				}
 
-				// Auto-resume parent without ask("resume_task")
-				await parentInstance.resumeAfterDelegation()
-			}
-
-			// 9) Emit TaskDelegationResumed (provider-level)
-			try {
-				this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-			} catch {
-				// non-fatal
+				parentToResume = parentInstance
 			}
 
 			this.cancelledDelegationChildIds.delete(childTaskId)
@@ -5590,6 +5583,21 @@ export class ClineProvider
 			// durable commit boundary above.
 			return true
 		})
+
+		if (didReopen && parentToResume) {
+			// Resume only after releasing the per-parent transition lock. The
+			// resumed parent may immediately delegate another child; awaiting it
+			// while still holding this lock deadlocks that next delegation.
+			await parentToResume.resumeAfterDelegation()
+
+			try {
+				this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+			} catch {
+				// non-fatal
+			}
+		}
+
+		return didReopen
 	}
 
 	/** Emits completion after delegated child disposal through the provider-owned event channel. */
