@@ -285,11 +285,15 @@ describe("VsCodeLmHandler", () => {
 			})
 		})
 
-		it("still trims oversized tool_results when the system prompt consumes the whole budget", async () => {
-			// A system prompt larger than the derived char budget drives the raw budget negative; the
-			// clamp keeps trimming active for the case where the request is most oversized.
+		it("still trims oversized tool_results when the system prompt consumes most of the budget", async () => {
+			// A system prompt large enough to drive the raw budget negative; the clamp keeps trimming
+			// active for the case where the request is most oversized.
 			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
 			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "hi" }],
+				},
 				{
 					role: "assistant",
 					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
@@ -297,6 +301,33 @@ describe("VsCodeLmHandler", () => {
 				{
 					role: "user",
 					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			// No sendRequest response is queued: the request must be refused before it is sent, and a
+			// queued-but-unconsumed response would leak into later tests.
+			// The clamped floor cannot be met once the tool_result bottoms out at its minimum, so the
+			// request must be refused rather than sent over-window (which orphans the tool_result).
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(/too large for this model's context window/)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("sends the request when trimming brings the conversation back under budget", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(500_000) }],
 				},
 			]
 
@@ -311,14 +342,14 @@ describe("VsCodeLmHandler", () => {
 				})(),
 			})
 
-			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const stream = handler.createMessage("system", messages, { taskId: "test-task" })
 			for await (const _chunk of stream) {
 				// drain
 			}
 
 			const sent = JSON.stringify(mockLanguageModelChat.sendRequest.mock.calls[0][0])
 			expect(sent).toContain("characters truncated")
-			expect(sent).not.toContain("X".repeat(10_000))
+			expect(sent).not.toContain("X".repeat(400_000))
 		})
 
 		describe("leaked tool-call recovery during streaming", () => {
@@ -459,8 +490,17 @@ describe("VsCodeLmHandler", () => {
 				])
 				const chunks = await drain()
 
-				const lastText = chunks.map((chunk) => chunk.type).lastIndexOf("text")
-				const firstToolCall = chunks.map((chunk) => chunk.type).indexOf("tool_call")
+				// The ordering comparison is only meaningful once both kinds of chunk exist: a
+				// silently broken flush emits no text at all, and -1 < firstToolCall would still hold.
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([
+					{ type: "text", text: "partial " },
+					{ type: "text", text: '<invoke name="calculator">' },
+				])
+				const types = chunks.map((chunk) => chunk.type)
+				const lastText = types.lastIndexOf("text")
+				const firstToolCall = types.indexOf("tool_call")
+				expect(lastText).toBeGreaterThanOrEqual(0)
+				expect(firstToolCall).toBeGreaterThanOrEqual(0)
 				expect(firstToolCall).toBeGreaterThan(lastText)
 			})
 
@@ -1443,7 +1483,7 @@ describe("leaked tool-call recovery", () => {
 			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
 			expect(calls).toHaveLength(0)
-			expect(leftoverText).toContain("invoke")
+			expect(leftoverText).toBe(text)
 		})
 
 		it("does not recover an invoke block inside an inline code span", () => {
@@ -1484,8 +1524,7 @@ describe("leaked tool-call recovery", () => {
 
 		it("does not recover an invoke inside a four-backtick fence containing a three-backtick fence", () => {
 			// A narrower inner fence must not close the wider outer one, so the invoke stays quoted.
-			const text =
-				"````\n```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```\n````"
+			const text = "````\n```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```\n````"
 
 			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
@@ -1524,6 +1563,179 @@ describe("leaked tool-call recovery", () => {
 			const text = `<function_calls>${invoke("some_other_tool", param("x", "1"))}</function_calls>`
 
 			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+	})
+
+	// The bare-invoke cases above short-circuit at the wrapper check, so they never exercise the
+	// quoting guards. These keep the wrapper open so each guard is actually reached.
+	describe("quoted markup inside an open function_calls wrapper", () => {
+		const tools = new Set(["update_todo_list"])
+		const quoted = (body: string) => `<function${"_calls"}>\n${body}`
+
+		it("suppresses an invoke inside a three-backtick fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("```\n" + block + "\n```")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses an invoke inside a tilde fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("~~~\n" + block + "\n~~~")
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("suppresses an invoke inside a four-backtick fence containing a narrower fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("````\n```\n" + block + "\n```\n````")
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("recovers an invoke that follows a CLOSED fence, proving the fence guard reopens", () => {
+			const text = quoted("```\nexample\n```\n" + invoke("update_todo_list", param("todos", "[x] one")))
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
+		})
+
+		it("suppresses an invoke inside an inline code span", () => {
+			const text = quoted("avoid `" + invoke("update_todo_list", param("todos", "x")) + "`")
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("suppresses an invoke introduced by a quoting cue that ends its line", () => {
+			const text = quoted("You must never emit " + invoke("update_todo_list", param("todos", "x")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses an invoke followed by narrative text on the same line", () => {
+			const text = quoted(invoke("update_todo_list", param("todos", "x")) + " is what you must not do.")
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+		})
+	})
+
+	describe("schema-aware recovered parameters", () => {
+		const schemas = new Map<string, Record<string, unknown> | undefined>([
+			[
+				"update_todo_list",
+				{ type: "object", properties: { todos: { type: "array" }, note: { type: "string" } } },
+			],
+			[
+				"read_file",
+				{
+					type: "object",
+					properties: {
+						path: { type: "string" },
+						indentation: { type: "object" },
+						limit: { type: "integer" },
+						ratio: { type: "number" },
+						recursive: { type: "boolean" },
+						optional: { type: ["object", "null"] },
+					},
+				},
+			],
+		])
+
+		it("converts a declared array parameter into a real array", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", '["a","b"]')))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: ["a", "b"] } }])
+		})
+
+		it("converts declared object, number, integer and boolean parameters", () => {
+			const body =
+				param("path", "src/app.ts") +
+				param("indentation", '{"anchor_line":42}') +
+				param("limit", "10") +
+				param("ratio", "1.5") +
+				param("recursive", "true")
+			const { calls } = extractLeakedToolCalls(wrap(invoke("read_file", body)), schemas)
+
+			expect(calls).toEqual([
+				{
+					name: "read_file",
+					input: {
+						path: "src/app.ts",
+						indentation: { anchor_line: 42 },
+						limit: 10,
+						ratio: 1.5,
+						recursive: true,
+					},
+				},
+			])
+		})
+
+		it("resolves a nullable union to its non-null type", () => {
+			const text = wrap(invoke("read_file", param("optional", '{"a":1}')))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { optional: { a: 1 } } }])
+		})
+
+		it("keeps a declared string parameter literal even when it looks like JSON", () => {
+			const text = wrap(invoke("update_todo_list", param("note", "123")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { note: "123" } }])
+		})
+
+		it("keeps every parameter literal when no schemas are supplied", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", '["a"]')))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: '["a"]' } }])
+		})
+
+		it("fails closed to unchanged text when a structured parameter is not valid JSON", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", "[x] not json")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a parsed value has the wrong type for its schema", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", '{"a":1}')))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("still requires the function_calls wrapper for a schema-typed call", () => {
+			const text = invoke("update_todo_list", param("todos", '["a"]'))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
 
 			expect(calls).toHaveLength(0)
 			expect(leftoverText).toBe(text)

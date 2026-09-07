@@ -75,6 +75,12 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * tool call. Recovery is deliberately conservative: only `<invoke>` blocks whose name matches a
  * tool we actually offered this turn are treated as calls; everything else is passed through
  * unchanged as text.
+ *
+ * SCOPE: only the WRAPPED variant — an `<invoke>` inside an open `<function_calls>` wrapper — is
+ * recovered. A bare, unwrapped `<invoke>` is deliberately left as text: we have no observation of
+ * this backend emitting one, while quoted examples and prompt-injected file content routinely
+ * contain bare markup, so passing it through is the safer default rather than a security boundary.
+ * Widening to the bare case needs a reproduction first.
  */
 // Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
 // the rest of the response, so the marker only counts once the `name="` attribute has arrived.
@@ -165,10 +171,10 @@ export function trailingPartialToolMarkerLength(text: string): number {
 /**
  * True when an unclosed `<function_calls>` wrapper is open at the end of `before`.
  *
- * Probing live Copilot models, every genuine invocation observed was wrapped and every
- * quoted-in-prose case was bare, making the wrapper the sharpest discriminator available.
- * Requiring it keeps untrusted bare `<invoke>` markup — which a prompt-injected file or a quoted
- * example can contain — from becoming a real call.
+ * Every wrapped-leak sample we have came with this wrapper, and the quoted-in-prose cases were
+ * bare, making the wrapper the sharpest discriminator available. Requiring it keeps untrusted bare
+ * `<invoke>` markup — which a prompt-injected file or a quoted example can contain — from becoming
+ * a real call. It is a heuristic filter, not a security boundary.
  */
 function isInsideFunctionCallsWrapper(before: string): boolean {
 	const lastOpen = before.search(/<(?:antml:)?function_calls\s*>(?![\s\S]*<(?:antml:)?function_calls\s*>)/i)
@@ -208,27 +214,109 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 	return QUOTING_CUE.test(stripTagsCompletely(sameLineBefore))
 }
 
-function parseLeakedInvokeParams(body: string): Record<string, string> {
-	const input: Record<string, string> = {}
+/**
+ * JSON Schema (draft 2020-12 subset) for one tool's parameters, keyed by tool name. Supplied by
+ * `createMessage` from the very schemas offered to the model, so recovery converts a leaked
+ * parameter to the type the tool actually declares.
+ */
+export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | undefined>
+
+/** Non-string JSON Schema types a leaked parameter may be converted into. */
+const STRUCTURED_PARAM_TYPES = new Set(["object", "array", "number", "integer", "boolean"])
+
+/** Declared type of `paramName`, ignoring a nullable `["T","null"]` union. */
+function declaredParamType(schema: Record<string, unknown> | undefined, paramName: string): string | undefined {
+	const properties = schema?.["properties"] as Record<string, unknown> | undefined
+	const property = properties?.[paramName] as Record<string, unknown> | undefined
+	const type = property?.["type"]
+	if (typeof type === "string") {
+		return type
+	}
+	if (Array.isArray(type)) {
+		return type.find((entry): entry is string => typeof entry === "string" && entry !== "null")
+	}
+	return undefined
+}
+
+/**
+ * Converts one leaked parameter's raw text to the type its schema declares.
+ *
+ * Leaked markup carries no types — every value arrives as text — so a tool declaring an object or
+ * array (`update_todo_list.todos`, `read_file.indentation`) would otherwise receive a flat string
+ * and fail downstream. Only declared non-string types are JSON-parsed; a declared (or unknown)
+ * string stays literal, because parsing every value would silently turn the text `"123"` or
+ * `"null"` into a number or null. A value that does not parse, or parses to the wrong type, is
+ * reported as a failure so the caller can pass the block through as text rather than dispatch a
+ * malformed call.
+ */
+function convertLeakedParamValue(raw: string, declaredType: string | undefined): { value: unknown } | undefined {
+	if (declaredType === undefined || declaredType === "string") {
+		return { value: raw }
+	}
+	if (!STRUCTURED_PARAM_TYPES.has(declaredType)) {
+		return undefined
+	}
+
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch {
+		return undefined
+	}
+
+	const matchesDeclaredType =
+		declaredType === "object"
+			? typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+			: declaredType === "array"
+				? Array.isArray(parsed)
+				: declaredType === "boolean"
+					? typeof parsed === "boolean"
+					: declaredType === "integer"
+						? Number.isInteger(parsed)
+						: typeof parsed === "number" && Number.isFinite(parsed)
+
+	return matchesDeclaredType ? { value: parsed } : undefined
+}
+
+/**
+ * Parses the parameters of a leaked `<invoke>` body against the tool's schema. Returns `undefined`
+ * when any parameter cannot be converted, so the whole block is failed closed to unchanged text.
+ */
+function parseLeakedInvokeParams(
+	body: string,
+	schema: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const input: Record<string, unknown> = {}
 	LEAKED_INVOKE_PARAM.lastIndex = 0
 	let match: RegExpExecArray | null
 	while ((match = LEAKED_INVOKE_PARAM.exec(body)) !== null) {
-		input[match[1]] = match[2].trim()
+		const name = match[1]
+		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
+		if (!converted) {
+			LEAKED_INVOKE_PARAM.lastIndex = 0
+			return undefined
+		}
+		input[name] = converted.value
 	}
 	return input
 }
 
 /**
  * Extracts complete leaked `<invoke>` tool-call blocks from `text`. Only blocks whose name
- * is present in `validToolNames` are returned as calls; all other text (including `<invoke>`
+ * is present in `validTools` are returned as calls; all other text (including `<invoke>`
  * blocks for unknown names) is returned as `leftoverText` so legitimate prose is preserved.
+ *
+ * `validTools` may be a bare name set (no schemas, so every parameter stays a literal string) or a
+ * map from tool name to its parameter schema, which enables typed conversion.
  */
 export function extractLeakedToolCalls(
 	text: string,
-	validToolNames: ReadonlySet<string>,
+	validTools: ReadonlySet<string> | LeakedToolSchemas,
 	precedingText = "",
-): { calls: Array<{ name: string; input: Record<string, string> }>; leftoverText: string } {
-	const calls: Array<{ name: string; input: Record<string, string> }> = []
+): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
+	const schemaFor = (name: string) =>
+		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
+	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
 	// Text between recovered/passed-through blocks, kept as segments so the wrapper cleanup below
 	// only touches segments adjacent to a block that was actually recovered.
 	const segments: Array<{ text: string; nearRecovery: boolean }> = []
@@ -241,22 +329,24 @@ export function extractLeakedToolCalls(
 		pending += text.slice(lastIndex, match.index)
 		const name = match[1]
 		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
-		if (
-			validToolNames.has(name) &&
+		const recoverable =
+			validTools.has(name) &&
 			isInsideFunctionCallsWrapper(precedingText + text.slice(0, match.index)) &&
 			!isQuotedAsCode(
 				precedingText + text,
 				precedingText.length + match.index,
 				precedingText.length + match.index + match[0].length,
 			)
-		) {
-			calls.push({ name, input: parseLeakedInvokeParams(match[2]) })
+		// Parsing may still fail closed when a parameter doesn't match its declared type.
+		const input = recoverable ? parseLeakedInvokeParams(match[2], schemaFor(name)) : undefined
+		if (input) {
+			calls.push({ name, input })
 			segments.push({ text: pending, nearRecovery: true })
 			pending = ""
 			// The segment that follows a recovery also holds that call's closing wrapper.
 			segments.push({ text: "", nearRecovery: true })
 		} else {
-			// Not one of our tools, or quoted as code — keep the block as literal text.
+			// Not one of our tools, quoted as code, or un-convertible — keep the block as literal text.
 			pending += match[0]
 		}
 		lastIndex = match.index + match[0].length
@@ -296,9 +386,15 @@ export function extractLeakedToolCalls(
 
 /**
  * Conservative characters-per-token ratio used to turn a token window into a character budget.
- * The token-dense JSON, logs, and code that dominate oversized tool results tokenize to fewer
- * characters per token than prose, so we intentionally under-count (3, not the ~4 typical of
- * English) to keep the resulting budget on the safe side of the enforced window.
+ *
+ * `client.countTokens` is the model's real tokenizer, but it counts only a string: it cannot price
+ * the tool schemas, image placeholders, or per-message framing the backend adds, so it cannot give
+ * the true total for the request we are about to send. It is also an async, per-call RPC, and the
+ * budget is needed for every message on every turn. We therefore keep a character estimate here
+ * and stay deliberately conservative — 3 chars/token rather than the ~4 typical of English —
+ * because the token-dense JSON, logs, and code that dominate oversized tool results tokenize to
+ * fewer characters per token than prose. Under-counting biases toward trimming too early, which is
+ * recoverable; over-counting sends an over-window request, which is not.
  */
 const VSCODE_LM_BUDGET_CHARS_PER_TOKEN = 3
 
@@ -311,6 +407,13 @@ const VSCODE_LM_INPUT_BUDGET_FRACTION = 0.8
 
 /** A tool_result is never shrunk below this many characters, so a truncated result stays useful. */
 const MIN_TOOL_RESULT_CHARS = 2000
+
+/**
+ * Length charged for an image block. VS Code LM cannot carry image data, so
+ * `convertToVsCodeLmMessages` replaces each image with a sentence-long textual placeholder; this
+ * is that placeholder's approximate length.
+ */
+const IMAGE_PLACEHOLDER_CHARS = 64
 
 function readToolResultText(block: Anthropic.Messages.ContentBlockParam): string | undefined {
 	if (!block || (block as { type?: string }).type !== "tool_result") {
@@ -377,6 +480,11 @@ export function middleOutTruncate(text: string, maxChars: number): string {
 	return `${head}${buildMarker(removed)}${tail}`
 }
 
+/** Estimated character cost of a whole conversation, using the same accounting as truncation. */
+export function estimateMessagesChars(messages: Anthropic.Messages.MessageParam[]): number {
+	return messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
+}
+
 function estimateContentChars(content: Anthropic.Messages.MessageParam["content"]): number {
 	if (typeof content === "string") {
 		return content.length
@@ -394,7 +502,9 @@ function estimateContentChars(content: Anthropic.Messages.MessageParam["content"
 		} else if (type === "tool_use") {
 			total += JSON.stringify((block as Anthropic.Messages.ToolUseBlockParam).input ?? {}).length
 		} else if (type === "image") {
-			total += 8 // "[IMAGE]" placeholder — VS Code LM drops image data anyway.
+			// VS Code LM cannot send image data; convertToVsCodeLmMessages substitutes a textual
+			// placeholder, so charge that placeholder's real length rather than a token-sized guess.
+			total += IMAGE_PLACEHOLDER_CHARS
 		}
 	}
 	return total
@@ -793,6 +903,21 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// non-positive budget, which disables trimming exactly when the request is most oversized.
 			const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
 			truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+
+			// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
+			// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
+			// prompt) that we must not touch. Dropping messages here would orphan a tool_result from
+			// its tool_use — the exact 400 this guard exists to prevent — so fail loudly instead of
+			// sending a request we already know is over the window.
+			const remainingChars = estimateMessagesChars(cleanedMessages)
+			if (remainingChars > messagesBudgetChars) {
+				throw new Error(
+					"Zoo Code <Language Model API>: The request is too large for this model's context window " +
+						`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
+						`${messagesBudgetChars.toLocaleString("en-US")}), and it cannot be reduced further without ` +
+						"breaking tool-call pairing. Condense the conversation or start a new task.",
+				)
+			}
 		}
 
 		// Convert Anthropic messages to VS Code LM messages
@@ -812,13 +937,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Leaked tool-call recovery state (see `extractLeakedToolCalls`). Only enabled when we
 		// actually offered tools this turn, so it can never misfire on plain conversations.
-		const providedToolNames = new Set(
+		// Carries each tool's parameter schema, so a recovered parameter is converted to the type
+		// the tool declares instead of always arriving as a string.
+		const providedToolSchemas: LeakedToolSchemas = new Map(
 			(metadata?.tools ?? [])
 				.filter((tool) => tool.type === "function")
-				.map((tool) => tool.function.name)
-				.filter((name) => name.length > 0),
+				.filter((tool) => tool.function.name.length > 0)
+				.map((tool) => [tool.function.name, tool.function.parameters as Record<string, unknown> | undefined]),
 		)
-		const salvageLeakedToolCalls = providedToolNames.size > 0
+		const salvageLeakedToolCalls = providedToolSchemas.size > 0
 		let salvageBuffering = false
 		let salvageBuffer = ""
 		let salvageCarry = ""
@@ -849,7 +976,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				return flushed
 			}
 
-			const { calls, leftoverText } = extractLeakedToolCalls(buffered, providedToolNames, salvageEmittedText)
+			const { calls, leftoverText } = extractLeakedToolCalls(buffered, providedToolSchemas, salvageEmittedText)
 			salvageEmittedText += buffered
 			if (leftoverText) {
 				flushed.push({ type: "text", text: leftoverText })
