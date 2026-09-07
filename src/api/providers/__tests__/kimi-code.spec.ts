@@ -298,7 +298,7 @@ describe("KimiCodeHandler", () => {
 		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
 	})
 
-	it("forwards completePrompt abort options through the override on both 401 retry attempts", async () => {
+	it("forwards completePrompt abort options and timeoutMs through the override on both 401 retry attempts", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
 		const createCompletion = completionsCreate(handler)
@@ -306,11 +306,25 @@ describe("KimiCodeHandler", () => {
 			.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
 		const controller = new AbortController()
 
-		await expect(handler.completePrompt("test", { abortSignal: controller.signal })).resolves.toBe("retried")
+		await expect(
+			handler.completePrompt("test", { abortSignal: controller.signal, timeoutMs: 30_000 }),
+		).resolves.toBe("retried")
 		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
 		expect(createCompletion).toHaveBeenCalledTimes(2)
 		for (const call of createCompletion.mock.calls) {
-			expect(call[1]).toEqual({ signal: controller.signal })
+			// A positive timeoutMs must reach the per-request config on both
+			// attempts: the external signal is merged in (never passed raw) and
+			// the SDK-level timeout is set, so a retry that dropped either would
+			// be caught here.
+			expect(call[1].timeout).toBe(30_000)
+			expect(call[1].signal).toBeInstanceOf(AbortSignal)
+			expect(call[1].signal).not.toBe(controller.signal)
+			expect(call[1].signal.aborted).toBe(false)
+		}
+		// The merged signals follow the external abort on both attempts.
+		controller.abort()
+		for (const call of createCompletion.mock.calls) {
+			expect(call[1].signal.aborted).toBe(true)
 		}
 	})
 
