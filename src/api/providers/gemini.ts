@@ -182,10 +182,20 @@ function sanitizeSchemaForGemini(
 // directly; `new URL` keeps the brackets in IPv6 hostnames, so `[::1]` is
 // the loopback host form to compare against.
 function isLoopbackHostname(hostname: string): boolean {
-	// The ^ anchor is observable: new URL() accepts non-loopback hostnames that
-	// contain the "127." substring (e.g. foo127.bar), so a de-anchored pattern
-	// would misclassify them as loopback and allow cleartext.
-	return hostname === "localhost" || hostname === "[::1]" || /^127\./.test(hostname)
+	if (hostname === "localhost" || hostname === "[::1]") {
+		return true
+	}
+	// Only literal IPv4 loopback (127.0.0.0/8) qualifies: public hostnames may
+	// start with a "127." label (e.g. 127.example.test), which a prefix test
+	// would misclassify as loopback and allow cleartext.
+	const parts = hostname.split(".")
+	if (parts.length !== 4 || parts[0] !== "127") {
+		return false
+	}
+	// The remaining parts must be decimal octets 0-255. Non-numeric parts
+	// (e.g. "example" in 127.example.test) fail the digit check, and Number()
+	// of a non-numeric string is NaN, which also fails the <= 255 check.
+	return parts.slice(1).every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
 }
 
 // Throws an ApiProviderError when baseUrl is not HTTPS (loopback HTTP is the
