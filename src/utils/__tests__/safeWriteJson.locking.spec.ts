@@ -260,6 +260,31 @@ describe("lockJsonFile", () => {
 		}
 	})
 
+	it("restores the backup when a caller-held lock has no compromise state", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
+		const filePath = path.join(tempDir, "history_item.json")
+		const initial = { owner: "original" }
+		const commitError = new Error("commit rename failed")
+		let renameCalls = 0
+		renameMock.mockImplementation(async (source, destination) => {
+			renameCalls++
+			if (renameCalls === 2) throw commitError
+			return actuals.rename!(source, destination)
+		})
+
+		try {
+			await fs.writeFile(filePath, JSON.stringify(initial))
+
+			await expect(safeWriteJson(filePath, { owner: "writer" }, { lockAcquired: true })).rejects.toBe(commitError)
+
+			expect(lockMock).not.toHaveBeenCalled()
+			expect(renameMock).toHaveBeenCalledTimes(3)
+			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual(initial)
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves an operation error when release also fails", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
