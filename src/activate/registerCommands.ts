@@ -1,7 +1,7 @@
 import * as vscode from "vscode"
 import delay from "delay"
 
-import type { CommandId } from "@roo-code/types"
+import type { CommandId, ExtensionMessage } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Package } from "../shared/package"
@@ -105,6 +105,23 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // `filePath?: string`, others take none) and VS Code dispatches positional
 // args dynamically.
 type CommandCallback = (...args: any[]) => unknown
+
+// Posts each action in order to the target instance. Failures are logged
+// (not thrown) with the handler-specific prefix so a failed post stays
+// attributable in the output channel.
+const postActions = (
+	outputChannel: vscode.OutputChannel,
+	target: ClineProvider,
+	actions: readonly NonNullable<ExtensionMessage["action"]>[],
+	logPrefix: string,
+) => {
+	for (const action of actions) {
+		void target
+			.postMessageToWebview({ type: "action", action })
+			.catch((error) => outputChannel.appendLine(`[${logPrefix}] postMessageToWebview failed: ${error}`))
+	}
+}
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -150,13 +167,8 @@ const getCommandsMap = ({
 	settingsButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void provider
-			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
-		// Also explicitly post the visibility message to trigger scroll reliably
-		void provider
-			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
+		// Also explicitly post the visibility message to trigger scroll reliably.
+		postActions(outputChannel, provider, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
 	},
 	settingsButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -166,23 +178,17 @@ const getCommandsMap = ({
 
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[settingsButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			.catch((error) =>
-				outputChannel.appendLine(`[settingsButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
+		postActions(
+			outputChannel,
+			tabProvider,
+			["settingsButtonClicked", "didBecomeVisible"],
+			"settingsButtonClickedInTab",
+		)
 	},
 	historyButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void provider
-			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[historyButtonClicked] postMessageToWebview failed: ${error}`))
+		postActions(outputChannel, provider, ["historyButtonClicked"], "historyButtonClicked")
 	},
 	historyButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -192,29 +198,17 @@ const getCommandsMap = ({
 
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[historyButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, tabProvider, ["historyButtonClicked"], "historyButtonClickedInTab")
 	},
 	marketplaceButtonClicked: () => {
-		void provider
-			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, provider, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
 	},
 	marketplaceButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
 		if (!tabProvider) {
 			return
 		}
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[marketplaceButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, tabProvider, ["marketplaceButtonClicked"], "marketplaceButtonClickedInTab")
 	},
 	newTask: handleNewTask,
 	setCustomStoragePath: async () => {
@@ -292,106 +286,128 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 	// Serialize overlapping "Open in editor" calls: a double-click starts
 	// before the first call tracks its new panel, so without a shared
 	// in-flight creation both calls would race to create two tab panels.
-	// Concurrent callers await the same promise: exactly one panel is
-	// created and every caller receives the same provider.
+	// The shared promise is stored before the creation body awaits
+	// ContextProxy.getInstance, so every caller started while the creation
+	// is in flight — openInNewTab and popoutButtonClicked both dispatch
+	// through here — awaits it instead of creating a second panel: exactly
+	// one panel is created and every caller receives the same provider.
 	if (pendingTabPanelCreation) {
 		return pendingTabPanelCreation
 	}
 
-	const creation = (async () => {
-		// Reuse the tracked tab instead of opening a second one: a repeated
-		// "Open in editor" click reveals the existing tab's panel.
-		if (tabPanel) {
-			const existingProvider = ClineProvider.getInstanceForView(tabPanel)
-			if (existingProvider) {
-				await tabPanel.reveal()
-				await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-				return existingProvider
-			}
-		}
-
-		// (This example uses webviewProvider activation event which is necessary to
-		// deserialize cached webview, but since we use retainContextWhenHidden, we
-		// don't need to use that event).
-		// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
-		const contextProxy = await ContextProxy.getInstance(context)
-		const codeIndexManager = CodeIndexManager.getInstance(context)
-
-		// Get the existing MDM service instance to ensure consistent policy enforcement
-		let mdmService: MdmService | undefined
-		try {
-			mdmService = MdmService.getInstance()
-		} catch (error) {
-			// MDM service not initialized, which is fine - extension can work without it
-			mdmService = undefined
-		}
-
-		const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
-		const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
-
-		// Check if there are any visible text editors, otherwise open a new group
-		// to the right.
-		const hasVisibleEditors = vscode.window.visibleTextEditors.length > 0
-
-		if (!hasVisibleEditors) {
-			await vscode.commands.executeCommand("workbench.action.newGroupRight")
-		}
-
-		const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
-
-		const newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
-			enableScripts: true,
-			retainContextWhenHidden: true,
-			localResourceRoots: [context.extensionUri],
-		})
-
-		// Save as tab type panel.
-		setPanel(newPanel, "tab")
-
-		// TODO: Use better svg icon with light and dark variants (see
-		// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
-		newPanel.iconPath = {
-			light: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_light.png"),
-			dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
-		}
-
-		await tabProvider.resolveWebviewView(newPanel)
-
-		// Add listener for visibility changes to notify webview
-		newPanel.onDidChangeViewState(
-			(e) => {
-				const panel = e.webviewPanel
-				if (panel.visible) {
-					panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
-				}
-			},
-			null, // First null is for `thisArgs`
-			context.subscriptions, // Register listener for disposal
-		)
-
-		// Handle panel closing events.
-		newPanel.onDidDispose(
-			() => {
-				setPanel(undefined, "tab")
-			},
-			null,
-			context.subscriptions, // Also register dispose listener
-		)
-
-		// Lock the editor group so clicking on files doesn't open them over the panel.
-		await delay(100)
-		await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
-
-		return tabProvider
-	})()
-
+	const creation = createTabPanelUnlocked({ context, outputChannel })
 	pendingTabPanelCreation = creation
 
 	try {
 		return await creation
 	} finally {
 		// Clear once settled (success or failure) so the next call starts
-		// fresh: the reuse path above then takes over for the tracked panel.
-		pendingTabPanelCreation = undefined
+		// fresh: the reuse path in createTabPanelUnlocked then takes over
+		// for the tracked panel. Guard the clear so this settlement cannot
+		// clobber a replacement already stored in the slot. That clobber is
+		// unreachable in single-threaded settlement order: while the slot
+		// holds this in-flight creation, every other caller receives that
+		// same promise (guard above), so no replacement can be stored before
+		// this finally block runs — the equality check pins the invariant.
+		// Stryker disable next-line ConditionalExpression: defensive clobber guard, unreachable per the ordering argument above.
+		if (pendingTabPanelCreation === creation) {
+			pendingTabPanelCreation = undefined
+		}
 	}
+}
+
+// The unserialized tab-creation body. Only openClineInNewTab may call it,
+// after it has stored the shared in-flight promise.
+const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
+	// Reuse the tracked tab instead of opening a second one: a repeated
+	// "Open in editor" click reveals the existing tab's panel.
+	if (tabPanel) {
+		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
+		if (existingProvider) {
+			await tabPanel.reveal()
+			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+			return existingProvider
+		}
+	}
+
+	// (This example uses webviewProvider activation event which is necessary to
+	// deserialize cached webview, but since we use retainContextWhenHidden, we
+	// don't need to use that event).
+	// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
+	const contextProxy = await ContextProxy.getInstance(context)
+	const codeIndexManager = CodeIndexManager.getInstance(context)
+
+	// Get the existing MDM service instance to ensure consistent policy enforcement
+	let mdmService: MdmService | undefined
+	try {
+		mdmService = MdmService.getInstance()
+	} catch (error) {
+		// MDM service unavailable: log the fallback and continue without it.
+		outputChannel.appendLine(`[openClineInNewTab] MDM service unavailable, continuing without it: ${error}`)
+		mdmService = undefined
+	}
+
+	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
+	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
+
+	// Check if there are any visible text editors, otherwise open a new group
+	// to the right.
+	const hasVisibleEditors = vscode.window.visibleTextEditors.length > 0
+
+	if (!hasVisibleEditors) {
+		await vscode.commands.executeCommand("workbench.action.newGroupRight")
+	}
+
+	const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
+
+	const newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
+		enableScripts: true,
+		retainContextWhenHidden: true,
+		localResourceRoots: [context.extensionUri],
+	})
+
+	// Save as tab type panel.
+	// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+	setPanel(newPanel, "tab")
+
+	// TODO: Use better svg icon with light and dark variants (see
+	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
+	newPanel.iconPath = {
+		light: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_light.png"),
+		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
+	}
+
+	await tabProvider.resolveWebviewView(newPanel)
+
+	// Add listener for visibility changes to notify webview
+	newPanel.onDidChangeViewState(
+		(e) => {
+			const panel = e.webviewPanel
+			if (panel.visible) {
+				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
+			}
+		},
+		null, // First null is for `thisArgs`
+		context.subscriptions, // Register listener for disposal
+	)
+
+	// Handle panel closing events: clear the tracked ref only if this panel
+	// is still the tracked one, so a late disposal of an already-replaced
+	// panel cannot clobber the replacement's ref.
+	newPanel.onDidDispose(
+		() => {
+			if (tabPanel === newPanel) {
+				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+				setPanel(undefined, "tab")
+			}
+		},
+		null,
+		context.subscriptions, // Also register dispose listener
+	)
+
+	// Lock the editor group so clicking on files doesn't open them over the panel.
+	await delay(100)
+	await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+
+	return tabProvider
 }

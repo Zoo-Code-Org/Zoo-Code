@@ -2,6 +2,7 @@ import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 
+import { ContextProxy } from "../../core/config/ContextProxy"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
@@ -283,7 +284,7 @@ describe("registerCommands handlers", () => {
 		"zoo-code.historyButtonClickedInTab",
 		"zoo-code.marketplaceButtonClickedInTab",
 	]
-	it.each(inTabNoOpCommands)("$command is a no-op when no tab panel is tracked", async (command) => {
+	it.each(inTabNoOpCommands)("%s is a no-op when no tab panel is tracked", async (command) => {
 		await handlers[command]()
 
 		expect(ClineProvider.getInstanceForView as Mock).not.toHaveBeenCalled()
@@ -291,12 +292,14 @@ describe("registerCommands handlers", () => {
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it.each(inTabNoOpCommands)("$command is a no-op when the tab instance is disposed", async (command) => {
-		setPanel({} as vscode.WebviewPanel, "tab")
+	it.each(inTabNoOpCommands)("%s is a no-op when the tab instance is disposed", async (command) => {
+		const disposedPanel = {} as vscode.WebviewPanel
+		setPanel(disposedPanel, "tab")
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
 
 		await handlers[command]()
 
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(disposedPanel)
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
@@ -657,6 +660,11 @@ describe("openClineInNewTab", () => {
 		expect(ctor).toHaveBeenCalledWith(mockContext, mockOutputChannel, "editor", undefined, undefined)
 		expect(provider).toBe(ctor.mock.instances[0])
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+
+		// The fallback is observable in the output channel.
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			"[openClineInNewTab] MDM service unavailable, continuing without it: Error: MDM service not initialized",
+		)
 	})
 
 	it("opens a new group to the right and targets ViewColumn.Two when no editors are visible", async () => {
@@ -704,6 +712,27 @@ describe("openClineInNewTab", () => {
 			"zoo-code.TabPanelProvider",
 			"Zoo Code",
 			1,
+			expect.objectContaining({ enableScripts: true }),
+		)
+	})
+
+	it("places the tab panel one column right of the rightmost visible editor", async () => {
+		// openClineInNewTab only reads viewColumn from each editor, so the
+		// fixtures keep that single field.
+		;(vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = [
+			{ viewColumn: 1 } as unknown as vscode.TextEditor,
+			{ viewColumn: 3 } as unknown as vscode.TextEditor,
+		]
+
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		// lastCol is 3, so the panel lands on column 4 without opening a new
+		// editor group.
+		expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.newGroupRight")
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+			"zoo-code.TabPanelProvider",
+			"Zoo Code",
+			4,
 			expect.objectContaining({ enableScripts: true }),
 		)
 	})
@@ -766,5 +795,122 @@ describe("openClineInNewTab", () => {
 		expect(first).toBe(constructed)
 		expect(second).toBe(constructed)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("shares one in-flight creation when openInNewTab and popoutButtonClicked start before it resolves", async () => {
+		// Defer the first creation at ContextProxy.getInstance so both command
+		// handlers can start while the creation is still in flight.
+		let resolveContextProxy!: () => void
+		;(ContextProxy.getInstance as Mock).mockReturnValue(
+			new Promise<void>((resolve) => {
+				resolveContextProxy = resolve
+			}),
+		)
+
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, cb: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = cb
+				return { dispose: vi.fn() }
+			},
+		)
+		const sidebarProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		registerCommands({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			provider: sidebarProvider as unknown as ClineProvider,
+		})
+
+		const started = [commandHandlers["zoo-code.openInNewTab"](), commandHandlers["zoo-code.popoutButtonClicked"]()]
+
+		// While the shared creation is suspended at ContextProxy.getInstance,
+		// neither caller has created a panel yet.
+		expect(vscode.window.createWebviewPanel).not.toHaveBeenCalled()
+
+		resolveContextProxy()
+		const [first, second] = await Promise.all(started)
+
+		// Both command entry points await the shared in-flight creation:
+		// exactly one tab panel is created and both results are the same
+		// constructed provider.
+		const ctor = ClineProvider as unknown as Mock
+		const constructed = ctor.mock.instances[0]
+		expect(constructed).toBeDefined()
+		expect(first).toBe(constructed)
+		expect(second).toBe(constructed)
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("creates a fresh panel for a new call once the previous creation settled and its provider disposed", async () => {
+		// The first open settles and tracks its panel.
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+
+		// The tracked provider is disposed, so the next open cannot reuse the
+		// existing tab: the settled (and cleared) in-flight promise must not
+		// be returned, and a fresh panel is created.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+
+		const secondProvider = await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		const ctor = ClineProvider as unknown as Mock
+		const second = ctor.mock.instances[1]
+		expect(second).toBeDefined()
+		expect(secondProvider).toBe(second)
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps the replacement panel tracked when a stale panel's disposal fires late", async () => {
+		// Capture each created panel so the first panel's (stale) dispose
+		// handler can fire after the replacement is already tracked.
+		const createdPanels: { onDidDispose: Mock }[] = []
+		;(vscode.window.createWebviewPanel as Mock).mockImplementation(() => {
+			const panel = {
+				webview: { postMessage: vi.fn() },
+				onDidChangeViewState: vi.fn(),
+				onDidDispose: vi.fn(),
+			}
+			createdPanels.push(panel)
+			return panel
+		})
+
+		// First open creates and tracks panel A.
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		expect(getPanel()).toBe(createdPanels[0])
+
+		// Panel A's provider is disposed before the second open, so the
+		// second open creates the replacement panel B.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+		expect(getPanel()).toBe(createdPanels[1])
+
+		// Panel A's stale dispose handler fires after the replacement is
+		// tracked; it must not clobber the replacement's ref.
+		createdPanels[0].onDidDispose.mock.calls[0][0]()
+
+		expect(getPanel()).toBe(createdPanels[1])
+
+		// Tab-surface commands still reach the provider that owns the
+		// replacement panel after the stale disposal.
+		const replacementProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(replacementProvider)
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, cb: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = cb
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			provider: {} as ClineProvider,
+		})
+		await commandHandlers["zoo-code.historyButtonClickedInTab"]()
+		expect(replacementProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "historyButtonClicked",
+		})
 	})
 })
