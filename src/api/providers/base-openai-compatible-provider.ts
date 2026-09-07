@@ -11,9 +11,11 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
-import { handleOpenAIError } from "./utils/error-handler"
+import { handleOpenAIError, handleOpenAIRequestError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -21,6 +23,13 @@ type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerO
 	defaultProviderModelId: ModelName
 	providerModels: Record<ModelName, ModelInfo>
 	defaultTemperature?: number
+}
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	signal?: AbortSignal
+	/** Per-request SDK timeout (ms); overrides the client-level default when set. */
+	timeout?: number
 }
 
 export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
@@ -67,7 +76,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		})
 	}
 
-	protected createStream(
+	protected async createStream(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
@@ -104,9 +113,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 
 		try {
-			return this.client.chat.completions.create(params, requestOptions)
+			return await this.client.chat.completions.create(params, requestOptions)
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 		}
 	}
 
@@ -115,7 +124,12 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const stream = await this.createStream(systemPrompt, messages, metadata)
+		throwIfAborted(metadata?.abortSignal)
+
+		// Per-request abort wiring (RequestConfigBuilder adoption): subclasses inherit
+		// it by receiving the built config as createStream's requestOptions.
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>().setAbortSignal(metadata).build()
+		const stream = await this.createStream(systemPrompt, messages, metadata, requestConfig)
 
 		const matcher = new TagMatcher(
 			["think", "thought"],
@@ -129,57 +143,84 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
 
-		for await (const chunk of stream) {
-			// Check for provider-specific error responses (e.g., MiniMax base_resp)
-			const chunkAny = chunk as any
-			if (chunkAny.base_resp?.status_code && chunkAny.base_resp.status_code !== 0) {
-				throw new Error(
-					`${this.providerName} API Error (${chunkAny.base_resp.status_code}): ${chunkAny.base_resp.status_msg || "Unknown error"}`,
-				)
-			}
-
-			const delta = chunk.choices?.[0]?.delta
-			const finishReason = chunk.choices?.[0]?.finish_reason
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
-
-			if (delta?.content) {
-				for (const processedChunk of matcher.update(delta.content)) {
-					yield processedChunk
+		try {
+			for await (const chunk of stream) {
+				// Check for provider-specific error responses (e.g., MiniMax base_resp).
+				// ChatCompletionChunk has no base_resp member, so read it through an
+				// unknown guard instead of casting the whole chunk.
+				const chunkUnknown: unknown = chunk
+				const baseResp: unknown =
+					typeof chunkUnknown === "object" && chunkUnknown !== null && "base_resp" in chunkUnknown
+						? (chunkUnknown as { base_resp?: unknown }).base_resp
+						: undefined
+				const baseRespFields =
+					// Stryker disable next-line ConditionalExpression,LogicalOperator: equivalent for all JSON-reachable baseResp values: null/undefined/primitive yield undefined through the optional-chained status reads and object values behave identically under every guard variant
+					baseResp !== null && typeof baseResp === "object"
+						? (baseResp as Record<string, unknown>)
+						: undefined
+				const baseRespStatusCode = baseRespFields?.["status_code"]
+				const baseRespStatusMsg = baseRespFields?.["status_msg"]
+				if (
+					baseRespStatusCode &&
+					// Stryker disable next-line ConditionalExpression: a truthy baseRespStatusCode is necessarily !== 0 and the trailing typeof gate reproduces the original result for falsy values
+					baseRespStatusCode !== 0 &&
+					(typeof baseRespStatusCode === "number" || typeof baseRespStatusCode === "string")
+				) {
+					throw new Error(
+						`${this.providerName} API Error (${baseRespStatusCode}): ${
+							typeof baseRespStatusMsg === "string" ? baseRespStatusMsg : "Unknown error"
+						}`,
+					)
 				}
-			}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
-					if (toolCall.id) {
-						activeToolCallIds.add(toolCall.id)
+				const delta = chunk.choices?.[0]?.delta
+				const finishReason = chunk.choices?.[0]?.finish_reason
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					for (const processedChunk of matcher.update(delta.content)) {
+						yield processedChunk
 					}
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						if (toolCall.id) {
+							activeToolCallIds.add(toolCall.id)
+						}
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
 					}
 				}
-			}
 
-			// Emit tool_call_end events when finish_reason is "tool_calls"
-			// This ensures tool calls are finalized even if the stream doesn't properly close
-			if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
-				for (const id of activeToolCallIds) {
-					yield { type: "tool_call_end", id }
+				// Emit tool_call_end events when finish_reason is "tool_calls"
+				// This ensures tool calls are finalized even if the stream doesn't properly close
+				// Stryker disable next-line ConditionalExpression,EqualityOperator: with an empty activeToolCallIds the guarded loop yields nothing and clear() is a no-op, so the size guard is unobservable
+				if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
+					for (const id of activeToolCallIds) {
+						yield { type: "tool_call_end", id }
+					}
+					activeToolCallIds.clear()
 				}
-				activeToolCallIds.clear()
-			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+				if (chunk.usage) {
+					lastUsage = chunk.usage
+				}
 			}
+		} catch (error) {
+			// The creation-site catch does not cover errors raised by the async
+			// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 		}
 
 		if (lastUsage) {
@@ -213,6 +254,8 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+
 		const { id: modelId, info: modelInfo } = this.getModel()
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
@@ -225,8 +268,20 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			;(params as any).thinking = { type: "enabled" }
 		}
 
+		// CompletePromptOptions is not ApiHandlerCreateMessageMetadata (required taskId),
+		// so the abort/timeout merge goes through setOption; the helper treats
+		// timeoutMs <= 0 as "no explicit timeout". The per-request timeout is
+		// forwarded as well: without it the SDK falls back to the client-level
+		// default, which can still expire before a larger per-request timeoutMs.
+		const requestTimeout =
+			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
+			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.setOption("timeout", requestTimeout)
+			.build()
+
 		try {
-			const response = await this.client.chat.completions.create(params)
+			const response = await this.client.chat.completions.create(params, requestConfig)
 
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const responseAny = response as any
@@ -238,7 +293,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
 		}
 	}
 

@@ -1,6 +1,6 @@
 // npx vitest run src/api/providers/__tests__/zai.spec.ts
 
-import OpenAI from "openai"
+import OpenAI, { APIUserAbortError } from "openai"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import {
@@ -17,10 +17,13 @@ import {
 import { ZAiHandler } from "../zai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { captureError } from "../../../test-utils/errors"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
 	return {
+		// Named export consumed by the provider for abort-error normalization
+		APIUserAbortError: class extends Error {},
 		default: vitest.fn(function () {
 			return { chat: { completions: { create: createMock } } }
 		}),
@@ -593,6 +596,225 @@ describe("ZAiHandler", () => {
 		})
 	})
 
+	describe("abort signal wiring", () => {
+		beforeEach(() => {
+			handler = new ZAiHandler({ zaiApiKey: "test-zai-api-key", zaiApiLine: "international_coding" })
+		})
+
+		it("createMessage should pass the abort signal on the GLM thinking path", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const gen = thinkingHandler.createMessage("system prompt", [], {
+				taskId: "test-task",
+				abortSignal: controller.signal,
+			})
+			await gen.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "glm-4.7", thinking: { type: "enabled" } }),
+				{ signal: controller.signal },
+			)
+		})
+
+		it("createMessage should pass the abort signal for non-thinking models via the base path", async () => {
+			const plainHandler = new ZAiHandler({
+				apiModelId: "glm-4.6",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const gen = plainHandler.createMessage("system prompt", [], {
+				taskId: "test-task",
+				abortSignal: controller.signal,
+			})
+			await gen.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "glm-4.6" }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("createMessage should reject before any request when the abort signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(async () => {
+				for await (const _ of handler.createMessage("system prompt", [], {
+					taskId: "test-task",
+					abortSignal: controller.signal,
+				})) {
+					// consume
+				}
+			}).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("createMessage should normalize the SDK APIUserAbortError on the thinking path", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// The thinking path inherits stream iteration from the base provider; a
+			// mid-stream abort must normalize to the Task.ts contract shape.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("completePrompt should pass the abort signal through to the client", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			const result = await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+			expect(result).toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), { signal: controller.signal })
+		})
+
+		it("completePrompt should reject before any request when the signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "This operation was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("completePrompt should normalize the SDK APIUserAbortError", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+
+			const result = await captureError(handler.completePrompt("test prompt"))
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+		})
+
+		it("glm-5.3 completePrompt should cancel the in-flight request when the caller signal aborts", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const controller = new AbortController()
+			// Emulate the OpenAI SDK: the pending request rejects when its signal aborts.
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) => {
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new APIUserAbortError()
+				},
+			)
+
+			// The request stays pending while the caller's signal is still live.
+			const requestPromise = h53.completePrompt("prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			controller.abort()
+
+			const result = await captureError(requestPromise)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+
+			const requestCall = mockCreate.mock.calls.at(-1)
+			expect(requestCall?.[0]).toEqual(
+				expect.objectContaining({ model: "glm-5.3", thinking: { type: "enabled", clear_thinking: false } }),
+			)
+			const requestOptions = requestCall?.[1]
+			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+			// A positive timeoutMs must be forwarded as the per-request SDK timeout.
+			expect(requestOptions?.timeout).toBe(5000)
+			// Aborting the caller's controller propagates to the merged request signal.
+			expect(requestOptions?.signal?.aborted).toBe(true)
+		})
+
+		it("glm-5.3 completePrompt should normalize the SDK APIUserAbortError", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+
+			const result = await captureError(h53.completePrompt("prompt"))
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+		})
+
+		it("glm-5.3 completePrompt should omit the request timeout when timeoutMs is zero", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await expect(h53.completePrompt("prompt", { timeoutMs: 0 })).resolves.toBe("response")
+
+			// Values <= 0 mean "no explicit timeout": with no caller signal either,
+			// the built request config is empty and nothing is forwarded to the SDK.
+			expect(mockCreate.mock.calls.at(-1)?.[1]).toBeUndefined()
+		})
+	})
+
 	describe("GLM-4.7 Thinking Mode", () => {
 		it("should cap GLM-5.1 max_tokens to 20% of context window by default", async () => {
 			const handlerWithModel = new ZAiHandler({
@@ -611,6 +833,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5.1",
 					max_tokens: 40_000,
 				}),
+				undefined,
 			)
 		})
 
@@ -643,6 +866,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5.1",
 					max_tokens: 100_000,
 				}),
+				undefined,
 			)
 		})
 
@@ -665,6 +889,7 @@ describe("ZAiHandler", () => {
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -687,6 +912,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "high",
 				}),
+				undefined,
 			)
 		})
 
@@ -709,6 +935,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "max",
 				}),
+				undefined,
 			)
 		})
 
@@ -732,6 +959,7 @@ describe("ZAiHandler", () => {
 					reasoning_effort: "max",
 					temperature: 1,
 				}),
+				undefined,
 			)
 		})
 
@@ -755,6 +983,7 @@ describe("ZAiHandler", () => {
 					reasoning_effort: "max",
 					temperature: 1,
 				}),
+				undefined,
 			)
 		})
 
@@ -777,6 +1006,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled", clear_thinking: false },
 					reasoning_effort: "max",
 				}),
+				undefined,
 			)
 		})
 
@@ -791,13 +1021,16 @@ describe("ZAiHandler", () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
 			await expect(handlerWithModel.completePrompt("prompt")).resolves.toBe("response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "glm-5.3",
-				messages: [{ role: "user", content: "prompt" }],
-				temperature: 1,
-				thinking: { type: "enabled", clear_thinking: false },
-				reasoning_effort: "low",
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "glm-5.3",
+					messages: [{ role: "user", content: "prompt" }],
+					temperature: 1,
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "low",
+				},
+				undefined,
+			)
 		})
 
 		it("should use the official GLM-5.3-Flash parameters for completePrompt", async () => {
@@ -811,13 +1044,16 @@ describe("ZAiHandler", () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
 			await expect(handlerWithModel.completePrompt("prompt")).resolves.toBe("response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "glm-5.3-flash",
-				messages: [{ role: "user", content: "prompt" }],
-				temperature: 1,
-				thinking: { type: "enabled", clear_thinking: false },
-				reasoning_effort: "low",
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "glm-5.3-flash",
+					messages: [{ role: "user", content: "prompt" }],
+					temperature: 1,
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "low",
+				},
+				undefined,
+			)
 		})
 
 		it("should omit reasoning_effort for GLM-5.2 when reasoningEffort is set to disable", async () => {
@@ -857,6 +1093,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "high",
 				}),
+				undefined,
 			)
 		})
 
@@ -880,6 +1117,7 @@ describe("ZAiHandler", () => {
 					model: "glm-4.7",
 					thinking: { type: "disabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -903,6 +1141,7 @@ describe("ZAiHandler", () => {
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -940,6 +1179,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5-turbo",
 					thinking: { type: "enabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -962,6 +1202,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5-turbo",
 					thinking: { type: "disabled" },
 				}),
+				undefined,
 			)
 		})
 	})
