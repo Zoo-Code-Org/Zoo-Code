@@ -17,7 +17,7 @@ overrides:
   '@types/react': 18.3.31
   '@types/react-dom': 18.3.7
   csstype: 3.2.3
-  zod: 3.25.76
+  zod: 4.5.4
 
 importers:
 
@@ -220,8 +220,8 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -293,10 +293,10 @@ importers:
         version: 7.0.5
       openai:
         specifier: ^5.12.2
-        version: 5.23.2(ws@8.21.0)(zod@3.25.76)
+        version: 5.23.2(ws@8.21.0)(zod@4.5.4)
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -345,8 +345,8 @@ importers:
         specifier: ^5.0.0
         version: 5.1.1
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -371,10 +371,10 @@ importers:
     dependencies:
       ai-sdk-provider-poe:
         specifier: 2.0.18
-        version: 2.0.18(ai@6.0.218(zod@3.25.76))(zod@3.25.76)
+        version: 2.0.18(ai@6.0.218(zod@4.5.4))(zod@4.5.4)
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -399,7 +399,7 @@ importers:
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(jsdom@26.1.0)(vite@8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       zod-to-json-schema:
         specifier: 3.25.2
-        version: 3.25.2(zod@3.25.76)
+        version: 3.25.2(zod@4.5.4)
 
   packages/vscode-shim:
     devDependencies:
@@ -420,10 +420,10 @@ importers:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.109.0
-        version: 0.109.1(zod@3.25.76)
+        version: 0.109.1(zod@4.5.4)
       '@anthropic-ai/vertex-sdk':
         specifier: ^0.19.0
-        version: 0.19.0(zod@3.25.76)
+        version: 0.19.0(zod@4.5.4)
       '@aws-sdk/client-bedrock-runtime':
         specifier: ^3.922.0
         version: 3.1078.0
@@ -432,7 +432,7 @@ importers:
         version: 3.1078.0
       '@google/genai':
         specifier: ^1.29.1
-        version: 1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+        version: 1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@4.5.4))
       '@lmstudio/sdk':
         specifier: ^1.1.1
         version: 1.5.0
@@ -441,7 +441,7 @@ importers:
         version: 1.15.1
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
-        version: 1.29.0(zod@3.25.76)
+        version: 1.29.0(zod@4.5.4)
       '@qdrant/js-client-rest':
         specifier: ^1.14.0
         version: 1.18.0(typescript@5.9.3)
@@ -465,7 +465,7 @@ importers:
         version: 4.9.3
       ai-sdk-provider-poe:
         specifier: 2.0.18
-        version: 2.0.18(ai@6.0.218(zod@3.25.76))(zod@3.25.76)
+        version: 2.0.18(ai@6.0.218(zod@4.5.4))(zod@4.5.4)
       async-mutex:
         specifier: ^0.5.0
         version: 0.5.0
@@ -546,7 +546,7 @@ importers:
         version: 0.6.3
       openai:
         specifier: ^5.12.2
-        version: 5.23.2(ws@8.21.0)(zod@3.25.76)
+        version: 5.23.2(ws@8.21.0)(zod@4.5.4)
       os-name:
         specifier: ^6.0.0
         version: 6.1.0
@@ -623,12 +623,12 @@ importers:
         specifier: ^2.8.0
         version: 2.9.0
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       '@ai-sdk/openai-compatible':
         specifier: 2.0.56
-        version: 2.0.56(zod@3.25.76)
+        version: 2.0.56(zod@4.5.4)
       '@roo-code/build':
         specifier: workspace:^
         version: link:../packages/build
@@ -673,7 +673,7 @@ importers:
         version: 3.9.2
       ai:
         specifier: 6.0.218
-        version: 6.0.218(zod@3.25.76)
+        version: 6.0.218(zod@4.5.4)
       esbuild-wasm:
         specifier: 0.28.1
         version: 0.28.1
@@ -891,8 +891,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2(@types/react@18.3.31)(react@18.3.1)
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       '@playwright/test':
         specifier: 1.62.1
@@ -970,37 +970,37 @@ packages:
     resolution: {integrity: sha512-snoLXB9DmvAmmngbPN/Io8IGzZ9zWpC208EgIIztYf1e1JhwuMkgKCYkL30vGhSen4PrBafu2+sO4G/17wu45A==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/gateway@3.0.142':
     resolution: {integrity: sha512-Y1iwdxdebYXpoK5y/4CrcCfJGeFwEJWlEx+pMWIg/ZVWGi9KA+JXM7YBkhxcshpq/jAXx8YyQeFMyZr0TGfXZQ==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/openai-compatible@2.0.56':
     resolution: {integrity: sha512-cQrN6OUn/jvsY3OdsU6Wn+ss7vp1iwIcakZKSlSRMnYqShBfyT7Qht+eqmgxs7w9ttrw6FAG6o11AiBs+iEsTA==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/openai@3.0.27':
     resolution: {integrity: sha512-pLMxWOypwroXiK9dxNpn60/HGhWWWDEOJ3lo9vZLoxvpJNtKnLKojwVIvlW3yEjlD7ll1+jUO2uzsABNTaP5Yg==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/provider-utils@4.0.14':
     resolution: {integrity: sha512-7bzKd9lgiDeXM7O4U4nQ8iTxguAOkg8LZGD9AfDVZYjO5cKYRwBPwVjboFcVrxncRHu0tYxZtXZtiLKpG4pEng==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/provider-utils@4.0.35':
     resolution: {integrity: sha512-bjYld/2KGPLt78kpqbya+fD4LYS7BqVQJyUjE3qAHrYB0FR2Q90BaWEVIBZaguTWXf/A8L6uG1zO1v9TxVlGWg==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/provider@3.0.13':
     resolution: {integrity: sha512-ZPtVYt5QIJzOta1kdUiDuCx4HhFkvNPv/rvmZ2b1iXwybYjJsCnNYR4PAw4kW7rgVfDARvHXcU64efWuqNp6bw==}
@@ -1021,7 +1021,7 @@ packages:
     resolution: {integrity: sha512-q9OnEKLr5H9nxSuXdgDgJhxfYMiE+AaUEBze2Gk91UcaaLnsN+Lx5fbCYywiqurU/APLdwv23x03Wm6WN3EBsg==}
     hasBin: true
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
     peerDependenciesMeta:
       zod:
         optional: true
@@ -2057,7 +2057,7 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
-      zod: 3.25.76
+      zod: 4.5.4
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
@@ -3866,7 +3866,7 @@ packages:
     resolution: {integrity: sha512-HsyCUNaaYgX/b/kGOoYfKkqfT1HvpUKKDb8YkN1FKeCNZjKdqXLGY+cKBpYGIRAvsPuOHskxLxZ46cK1dTBWQQ==}
     engines: {node: '>=18'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   ajv-formats@3.0.1:
     resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
@@ -4235,9 +4235,6 @@ packages:
 
   character-reference-invalid@2.0.1:
     resolution: {integrity: sha512-iBZ4F4wRbyORVsu0jPV7gXkOsGYjGHPmAyv+HiHG8gi5PtC9KI2j1+v8/tlibRvjoWX027ypmG/n0HtO5t7unw==}
-
-  chardet@2.1.0:
-    resolution: {integrity: sha512-bNFETTG/pM5ryzQ9Ad0lJOTa6HWD/YsScAR3EnCPZRPlQh77JocYktSHOUHelyhm8IARL+o4c4F1bP5KVOjiRA==}
 
   chardet@2.2.0:
     resolution: {integrity: sha512-rddelWYNPRrXq6PtNEN2S3f6t9ILzvqaN5pVgi4kqt9jHQaXIial9PznB5iSPVlQSLNaaH22ItWz3EJtQ10+OA==}
@@ -4876,9 +4873,6 @@ packages:
   electron-to-chromium@1.5.152:
     resolution: {integrity: sha512-xBOfg/EBaIlVsHipHl2VdTPJRSvErNUaqW8ejTq5OlOlIYx1wOllCHsAvAIrr55jD1IYEfdR86miUEt8H5IeJg==}
 
-  emoji-regex@10.4.0:
-    resolution: {integrity: sha512-EC+0oUMY1Rqm4O6LLrgjtYDvcVYTy7chDnM4Q7030tP4Kwj3u/pR6gP9ygnp2CJMK5Gq+9Q2oqmrFJAz01DXjw==}
-
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
 
@@ -5037,6 +5031,7 @@ packages:
   eslint@9.39.4:
     resolution: {integrity: sha512-XoMjdBOwe/esVgEvLmNsD3IRHkm7fbKIUGvrleloJXUZgDHig2IPWNniv+GwjyJXzuNqVjlr5+4yVUZjycJwfQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -5626,10 +5621,6 @@ packages:
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
-    engines: {node: '>=0.10.0'}
-
-  iconv-lite@0.7.0:
-    resolution: {integrity: sha512-cf6L2Ds3h57VVmkZe+Pn+5APsT7FpqJtEhhieDCvrE2MK5Qk9MyffgQyuxQTm6BChfeZNtcOLHp9IcWRVcIcBQ==}
     engines: {node: '>=0.10.0'}
 
   iconv-lite@0.7.3:
@@ -6958,7 +6949,7 @@ packages:
     hasBin: true
     peerDependencies:
       ws: ^8.18.0
-      zod: 3.25.76
+      zod: 4.5.4
     peerDependenciesMeta:
       ws:
         optional: true
@@ -7734,11 +7725,6 @@ packages:
 
   semver@6.3.1:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
-    hasBin: true
-
-  semver@7.7.3:
-    resolution: {integrity: sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q==}
-    engines: {node: '>=10'}
     hasBin: true
 
   semver@7.8.5:
@@ -8905,16 +8891,16 @@ packages:
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   zod-validation-error@3.5.4:
     resolution: {integrity: sha512-+hEiRIiPobgyuFlEojnqjJnhFvg4r/i3cqgcm67eehZf/WBaK3g6cD02YU9mtdVxZjv8CzCA9n/Rhrs3yAAvAw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.5.4:
+    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
   zustand@5.0.14:
     resolution: {integrity: sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==}
@@ -8941,44 +8927,44 @@ snapshots:
 
   '@adobe/css-tools@4.4.2': {}
 
-  '@ai-sdk/anthropic@3.0.42(zod@3.25.76)':
+  '@ai-sdk/anthropic@3.0.42(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.14(zod@3.25.76)
-      zod: 3.25.76
+      '@ai-sdk/provider-utils': 4.0.14(zod@4.5.4)
+      zod: 4.5.4
 
-  '@ai-sdk/gateway@3.0.142(zod@3.25.76)':
+  '@ai-sdk/gateway@3.0.142(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
+      '@ai-sdk/provider-utils': 4.0.35(zod@4.5.4)
       '@vercel/oidc': 3.2.0
-      zod: 3.25.76
+      zod: 4.5.4
 
-  '@ai-sdk/openai-compatible@2.0.56(zod@3.25.76)':
+  '@ai-sdk/openai-compatible@2.0.56(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
-      zod: 3.25.76
+      '@ai-sdk/provider-utils': 4.0.35(zod@4.5.4)
+      zod: 4.5.4
 
-  '@ai-sdk/openai@3.0.27(zod@3.25.76)':
+  '@ai-sdk/openai@3.0.27(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.14(zod@3.25.76)
-      zod: 3.25.76
+      '@ai-sdk/provider-utils': 4.0.14(zod@4.5.4)
+      zod: 4.5.4
 
-  '@ai-sdk/provider-utils@4.0.14(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.14(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.5.4
 
-  '@ai-sdk/provider-utils@4.0.35(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.35(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.13
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.5.4
 
   '@ai-sdk/provider@3.0.13':
     dependencies:
@@ -8998,16 +8984,16 @@ snapshots:
       package-manager-detector: 1.8.0
       tinyexec: 1.3.0
 
-  '@anthropic-ai/sdk@0.109.1(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.109.1(zod@4.5.4)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
-  '@anthropic-ai/vertex-sdk@0.19.0(zod@3.25.76)':
+  '@anthropic-ai/vertex-sdk@0.19.0(zod@4.5.4)':
     dependencies:
-      '@anthropic-ai/sdk': 0.109.1(zod@3.25.76)
+      '@anthropic-ai/sdk': 0.109.1(zod@4.5.4)
       google-auth-library: 10.9.0
     transitivePeerDependencies:
       - supports-color
@@ -9687,7 +9673,7 @@ snapshots:
       outdent: 0.5.0
       prettier: 2.8.8
       resolve-from: 5.0.0
-      semver: 7.7.3
+      semver: 7.8.5
 
   '@changesets/assemble-release-plan@6.0.10':
     dependencies:
@@ -9696,7 +9682,7 @@ snapshots:
       '@changesets/should-skip-package': 0.1.2
       '@changesets/types': 6.1.0
       '@manypkg/get-packages': 1.1.3
-      semver: 7.7.3
+      semver: 7.8.5
 
   '@changesets/changelog-git@0.2.1':
     dependencies:
@@ -9727,7 +9713,7 @@ snapshots:
       package-manager-detector: 0.2.11
       picocolors: 1.1.1
       resolve-from: 5.0.0
-      semver: 7.7.3
+      semver: 7.8.5
       spawndamnit: 3.0.1
       term-size: 2.2.1
     transitivePeerDependencies:
@@ -9753,7 +9739,7 @@ snapshots:
       '@changesets/types': 6.1.0
       '@manypkg/get-packages': 1.1.3
       picocolors: 1.1.1
-      semver: 7.7.3
+      semver: 7.8.5
 
   '@changesets/get-release-plan@4.0.16':
     dependencies:
@@ -10035,14 +10021,14 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
+  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@4.5.4))':
     dependencies:
       google-auth-library: 10.9.0
       p-retry: 4.6.2
       protobufjs: 7.6.4
       ws: 8.21.0
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.29.0(zod@4.5.4)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -10128,8 +10114,8 @@ snapshots:
 
   '@inquirer/external-editor@1.0.2(@types/node@22.20.1)':
     dependencies:
-      chardet: 2.1.0
-      iconv-lite: 0.7.0
+      chardet: 2.2.0
+      iconv-lite: 0.7.3
     optionalDependencies:
       '@types/node': 22.20.1
 
@@ -10272,8 +10258,8 @@ snapshots:
       '@lmstudio/lms-isomorphic': 0.4.6
       chalk: 4.1.2
       jsonschema: 1.5.0
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -10324,13 +10310,13 @@ snapshots:
   '@mistralai/mistralai@1.15.1':
     dependencies:
       ws: 8.21.0
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.29.0(zod@4.5.4)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.23)
       ajv: 8.20.0
@@ -10347,8 +10333,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.0
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     transitivePeerDependencies:
       - supports-color
 
@@ -11337,7 +11323,7 @@ snapshots:
       npm-run-path: 6.0.0
       progress: 2.0.3
       rxjs: 7.8.2
-      semver: 7.7.3
+      semver: 7.8.5
       source-map: 0.7.6
       tree-kill: 1.2.2
       tslib: 2.8.1
@@ -11880,7 +11866,7 @@ snapshots:
       fast-glob: 3.3.3
       is-glob: 4.0.3
       minimatch: 9.0.5
-      semver: 7.7.3
+      semver: 7.8.5
       ts-api-utils: 2.1.0(typescript@5.9.3)
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -12056,7 +12042,7 @@ snapshots:
       https-proxy-agent: 7.0.6
       jszip: 3.10.1
       ora: 8.2.0
-      semver: 7.7.3
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
 
@@ -12123,7 +12109,7 @@ snapshots:
       parse-semver: 1.1.1
       read: 1.0.7
       secretlint: 10.2.2
-      semver: 7.7.3
+      semver: 7.8.5
       tmp: 0.2.4
       typed-rest-client: 1.8.11
       url-join: 4.0.1
@@ -12180,24 +12166,24 @@ snapshots:
 
   agent-base@7.1.3: {}
 
-  ai-sdk-provider-poe@2.0.18(ai@6.0.218(zod@3.25.76))(zod@3.25.76):
+  ai-sdk-provider-poe@2.0.18(ai@6.0.218(zod@4.5.4))(zod@4.5.4):
     dependencies:
-      '@ai-sdk/anthropic': 3.0.42(zod@3.25.76)
-      '@ai-sdk/openai': 3.0.27(zod@3.25.76)
-      '@ai-sdk/openai-compatible': 2.0.56(zod@3.25.76)
+      '@ai-sdk/anthropic': 3.0.42(zod@4.5.4)
+      '@ai-sdk/openai': 3.0.27(zod@4.5.4)
+      '@ai-sdk/openai-compatible': 2.0.56(zod@4.5.4)
       '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.14(zod@3.25.76)
-      ai: 6.0.218(zod@3.25.76)
+      '@ai-sdk/provider-utils': 4.0.14(zod@4.5.4)
+      ai: 6.0.218(zod@4.5.4)
     transitivePeerDependencies:
       - zod
 
-  ai@6.0.218(zod@3.25.76):
+  ai@6.0.218(zod@4.5.4):
     dependencies:
-      '@ai-sdk/gateway': 3.0.142(zod@3.25.76)
+      '@ai-sdk/gateway': 3.0.142(zod@4.5.4)
       '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
+      '@ai-sdk/provider-utils': 4.0.35(zod@4.5.4)
       '@opentelemetry/api': 1.9.0
-      zod: 3.25.76
+      zod: 4.5.4
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -12466,7 +12452,7 @@ snapshots:
       content-type: 1.0.5
       debug: 4.4.3(supports-color@8.1.1)
       http-errors: 2.0.1
-      iconv-lite: 0.7.0
+      iconv-lite: 0.7.3
       on-finished: 2.4.1
       qs: 6.15.2
       raw-body: 3.0.2
@@ -12588,8 +12574,6 @@ snapshots:
   character-reference-invalid@1.1.4: {}
 
   character-reference-invalid@2.0.1: {}
-
-  chardet@2.1.0: {}
 
   chardet@2.2.0: {}
 
@@ -13226,8 +13210,6 @@ snapshots:
   eight-colors@1.3.3: {}
 
   electron-to-chromium@1.5.152: {}
-
-  emoji-regex@10.4.0: {}
 
   emoji-regex@10.6.0: {}
 
@@ -13943,7 +13925,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.3
+      semver: 7.8.5
       serialize-error: 7.0.1
 
   globals@14.0.0: {}
@@ -14223,10 +14205,6 @@ snapshots:
       typescript: 5.9.3
 
   iconv-lite@0.6.3:
-    dependencies:
-      safer-buffer: 2.1.2
-
-  iconv-lite@0.7.0:
     dependencies:
       safer-buffer: 2.1.2
 
@@ -14705,7 +14683,7 @@ snapshots:
       lodash.isstring: 4.0.1
       lodash.once: 4.1.1
       ms: 2.1.3
-      semver: 7.7.3
+      semver: 7.8.5
 
   jsx-ast-utils@3.3.5:
     dependencies:
@@ -14784,8 +14762,8 @@ snapshots:
       smol-toml: 1.7.0
       strip-json-comments: 5.0.2
       typescript: 5.9.3
-      zod: 3.25.76
-      zod-validation-error: 3.5.4(zod@3.25.76)
+      zod: 4.5.4
+      zod-validation-error: 3.5.4(zod@4.5.4)
 
   koa-compose@4.1.0: {}
 
@@ -15032,7 +15010,7 @@ snapshots:
 
   make-dir@4.0.0:
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.5
 
   mammoth@1.11.0:
     dependencies:
@@ -15640,7 +15618,7 @@ snapshots:
 
   mutation-server-protocol@0.4.1:
     dependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
   mutation-testing-elements@3.8.4: {}
 
@@ -15692,7 +15670,7 @@ snapshots:
 
   node-abi@3.75.0:
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.5
     optional: true
 
   node-addon-api@4.3.0:
@@ -15734,7 +15712,7 @@ snapshots:
   normalize-package-data@6.0.2:
     dependencies:
       hosted-git-info: 7.0.2
-      semver: 7.7.3
+      semver: 7.8.5
       validate-npm-package-license: 3.0.4
 
   normalize-path@3.0.0: {}
@@ -15833,10 +15811,10 @@ snapshots:
       is-inside-container: 1.0.0
       is-wsl: 3.1.0
 
-  openai@5.23.2(ws@8.21.0)(zod@3.25.76):
+  openai@5.23.2(ws@8.21.0)(zod@4.5.4):
     optionalDependencies:
       ws: 8.21.0
-      zod: 3.25.76
+      zod: 4.5.4
 
   option@0.2.4: {}
 
@@ -15877,7 +15855,7 @@ snapshots:
       follow-redirects: 1.16.0
       is-ci: 2.0.0
       leven: 3.1.0
-      semver: 7.7.3
+      semver: 7.8.5
       tmp: 0.2.4
       yauzl-promise: 4.0.0
     transitivePeerDependencies:
@@ -16246,7 +16224,7 @@ snapshots:
     dependencies:
       bytes: 3.1.2
       http-errors: 2.0.1
-      iconv-lite: 0.7.0
+      iconv-lite: 0.7.3
       unpipe: 1.0.0
 
   rc-config-loader@4.1.4:
@@ -16774,8 +16752,6 @@ snapshots:
 
   semver@6.3.1: {}
 
-  semver@7.7.3: {}
-
   semver@7.8.5: {}
 
   send@1.2.0:
@@ -17055,7 +17031,7 @@ snapshots:
 
   string-width@7.2.0:
     dependencies:
-      emoji-regex: 10.4.0
+      emoji-regex: 10.6.0
       get-east-asian-width: 1.6.0
       strip-ansi: 7.2.0
 
@@ -17973,15 +17949,15 @@ snapshots:
       compress-commons: 4.1.2
       readable-stream: 3.6.2
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@4.5.4):
     dependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
-  zod-validation-error@3.5.4(zod@3.25.76):
+  zod-validation-error@3.5.4(zod@4.5.4):
     dependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
-  zod@3.25.76: {}
+  zod@4.5.4: {}
 
   zustand@5.0.14(@types/react@18.3.31)(react@19.2.7):
     optionalDependencies:
