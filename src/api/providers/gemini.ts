@@ -177,25 +177,27 @@ function sanitizeSchemaForGemini(
 // imported profiles). The @google/genai client keeps API-key authentication for
 // custom endpoints, so reject cleartext base URLs before any request — with a
 // narrow loopback exception for local test proxies.
-// The caller (assertSecureGeminiBaseUrl) has already parsed the URL and only
-// reaches this for the HTTP exception, so the parsed hostname is passed
-// directly; `new URL` keeps the brackets in IPv6 hostnames, so `[::1]` is
-// the loopback host form to compare against.
+// A decimal octet is a 1-3 digit string; a non-numeric part also fails the
+// range check, because Number() of a non-numeric string is NaN, which is not
+// <= 255.
+function isOctet(octet: string): boolean {
+	// Stryker disable next-line Regex,LogicalOperator,ConditionalExpression: a malformed octet newly accepted by a mutated regex or operand is non-numeric (Number() is NaN, failing <= 255), out of range (e.g. 256), or 4+ digits, all of which are unreachable because new URL() rejects the all-digit host; the ->false and stricter-regex variants are killed by the 127.0.0.1 and 127.255.255.255 accept tests
+	return /^\d{1,3}$/.test(octet) && Number(octet) <= 255
+}
+
+// Only literal IPv4 loopback (127.0.0.0/8) qualifies: public hostnames may
+// start with a "127." label (e.g. 127.example.test), which a prefix test would
+// misclassify as loopback and allow cleartext. assertSecureGeminiBaseUrl has
+// already parsed the URL and only reaches this for the HTTP exception, so the
+// parsed hostname is passed directly; `new URL` keeps the brackets in IPv6
+// hostnames, so `[::1]` is the loopback host form to compare against.
 function isLoopbackHostname(hostname: string): boolean {
 	if (hostname === "localhost" || hostname === "[::1]") {
 		return true
 	}
-	// Only literal IPv4 loopback (127.0.0.0/8) qualifies: public hostnames may
-	// start with a "127." label (e.g. 127.example.test), which a prefix test
-	// would misclassify as loopback and allow cleartext.
 	const parts = hostname.split(".")
-	if (parts.length !== 4 || parts[0] !== "127") {
-		return false
-	}
-	// The remaining parts must be decimal octets 0-255. Non-numeric parts
-	// (e.g. "example" in 127.example.test) fail the digit check, and Number()
-	// of a non-numeric string is NaN, which also fails the <= 255 check.
-	return parts.slice(1).every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+	// Stryker disable next-line ConditionalExpression: the ->true variants of isOctet(parts[1]) and isOctet(parts[2]) are unobservable because any four-part host with a non-numeric or out-of-range middle octet is rejected by new URL() before reaching this check; the remaining variants are killed by the 127.0.0.1, 127.255.255.255, 10.0.0.1, 127.0.0.a and 127.0.0.1.a tests
+	return parts.length === 4 && parts[0] === "127" && isOctet(parts[1]) && isOctet(parts[2]) && isOctet(parts[3])
 }
 
 // Throws an ApiProviderError when baseUrl is not HTTPS (loopback HTTP is the
