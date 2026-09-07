@@ -727,7 +727,7 @@ describe("ReadFileTool", () => {
 			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
 				Object.assign(fileResults.find(({ path }) => path === filePath)!, update)
 			})
-			Object.assign(fileResults[0], { status: "approved", feedbackImages: undefined })
+			Object.assign(fileResults[0], { feedbackImages: undefined })
 			readFileTool["buildAndPushResult"](task, fileResults, callbacks.pushToolResult)
 
 			expect(task.say).toHaveBeenCalledWith("user_feedback", undefined, queuedImages)
