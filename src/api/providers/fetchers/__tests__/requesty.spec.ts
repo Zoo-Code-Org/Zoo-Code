@@ -140,4 +140,29 @@ describe("getRequestyModels", () => {
 		expect(sonnet.supportsReasoningBinary).toBeUndefined()
 		expect(sonnet.supportsTemperature).toBeUndefined()
 	})
+
+	it("threads the cancellation signal and the bounded timeout into the models request", async () => {
+		const controller = new AbortController()
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
+
+		await getRequestyModels(undefined, undefined, controller.signal)
+
+		// The shared axios mock accumulates calls across this file's tests, so assert on
+		// the call this test just made (the last one) rather than a global call count.
+		const calls = mockAxiosGet.mock.calls
+		const config = calls[calls.length - 1]?.[1]
+		expect(config?.signal).toBe(controller.signal)
+		expect(config?.timeout).toBe(10_000)
+	})
+
+	it("applies the bounded timeout without a signal key when no signal is provided", async () => {
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
+
+		await getRequestyModels()
+
+		const calls = mockAxiosGet.mock.calls
+		const config = calls[calls.length - 1]?.[1]
+		expect(config?.signal).toBeUndefined()
+		expect(config?.timeout).toBe(10_000)
+	})
 })

@@ -86,8 +86,8 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		})
 	}
 
-	public async fetchModel() {
-		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL })
+	public async fetchModel(signal?: AbortSignal) {
+		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL, signal })
 		return this.getModel()
 	}
 
@@ -168,9 +168,10 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				throw createAbortError("Requesty")
 			}
 
-			// Model discovery is not signal-aware: race it against the per-request signal so an
-			// abort during the lookup rejects with AbortError instead of calling the API with an
-			// already-aborted signal.
+			// Model discovery is signal-aware: the per-request signal is threaded into the lookup so
+			// the underlying models request is cancelled on abort. The race below remains as a
+			// second line of defence for the window in which the fetcher swallows the cancellation
+			// and resolves with an empty model list.
 			const {
 				id: model,
 				info,
@@ -178,7 +179,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				temperature,
 				reasoningEffort: reasoning_effort,
 				reasoning: thinking,
-			} = await rejectOnAbort(this.fetchModel(), controller.signal, this.providerName)
+			} = await rejectOnAbort(this.fetchModel(controller.signal), controller.signal, this.providerName)
 
 			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 				{ role: "system", content: systemPrompt },
@@ -291,7 +292,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		let modelData: Awaited<ReturnType<RequestyHandler["fetchModel"]>>
 		try {
 			modelData = requestAbortSignal
-				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
+				? await rejectOnAbort(this.fetchModel(requestAbortSignal), requestAbortSignal, this.providerName)
 				: await this.fetchModel()
 		} catch (error) {
 			if (isRequestAborted(error, requestAbortSignal)) {

@@ -827,6 +827,40 @@ describe("RequestyHandler", () => {
 			resolveModelLookup({})
 		})
 
+		it("threads the per-request signal into model discovery", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "c1", choices: [{ delta: { content: "ok" } }] }]))
+
+			let discoverySignal: AbortSignal | undefined
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce((options) => {
+				discoverySignal = options.signal
+				return Promise.resolve({
+					"coding/claude-4-sonnet": {
+						maxTokens: 8192,
+						contextWindow: 200000,
+						supportsImages: true,
+						supportsPromptCache: true,
+						inputPrice: 3,
+						outputPrice: 15,
+						description: "Claude 4 Sonnet",
+					},
+				})
+			})
+
+			const controller = new AbortController()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata))
+
+			expect(discoverySignal).toBeInstanceOf(AbortSignal)
+			// Discovery must receive the same per-request signal that is forwarded to the
+			// SDK, so a single abort cancels both the lookup and the completion request.
+			const sdkOptions = mockCreate.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+			expect(sdkOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(discoverySignal).toBe(sdkOptions?.signal)
+		})
+
 		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
@@ -1191,6 +1225,35 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
 				signal: controller.signal,
 			})
+		})
+
+		it("threads the merged abort signal into model discovery", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			let discoverySignal: AbortSignal | undefined
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce((options) => {
+				discoverySignal = options.signal
+				return Promise.resolve({
+					"coding/claude-4-sonnet": {
+						maxTokens: 8192,
+						contextWindow: 200000,
+						supportsImages: true,
+						supportsPromptCache: true,
+						inputPrice: 3,
+						outputPrice: 15,
+						description: "Claude 4 Sonnet",
+					},
+				})
+			})
+
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+			// Without a timeout the merged signal is the external signal itself, so the
+			// lookup receives exactly the caller's signal (identity, not just type).
+			expect(discoverySignal).toBe(controller.signal)
 		})
 
 		it("should pass timeout through to client", async () => {
