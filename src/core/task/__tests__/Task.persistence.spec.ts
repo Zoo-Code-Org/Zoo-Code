@@ -980,7 +980,7 @@ describe("Task persistence", () => {
 			})
 			const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "replacement" }] }]
 
-			await task.overwriteApiConversationHistory(messages, persist === undefined ? {} : { persist })
+			await task.overwriteApiConversationHistory(messages, persist)
 
 			expect(task.apiConversationHistory).toBe(messages)
 			expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
@@ -995,7 +995,7 @@ describe("Task persistence", () => {
 			})
 			const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "replacement" }] }]
 
-			await task.overwriteApiConversationHistory(messages, { persist: false })
+			await task.overwriteApiConversationHistory(messages, false)
 
 			expect(task.apiConversationHistory).toBe(messages)
 			expect(mockSaveApiMessages).not.toHaveBeenCalled()
@@ -1013,7 +1013,7 @@ describe("Task persistence", () => {
 			})
 			const messages = [{ type: "say" as const, say: "text" as const, text: "replacement", ts: 1 }]
 
-			await task.overwriteClineMessages(messages, persist === undefined ? {} : { persist })
+			await task.overwriteClineMessages(messages, persist)
 
 			expect(task.clineMessages).toBe(messages)
 			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
@@ -1028,7 +1028,7 @@ describe("Task persistence", () => {
 			})
 			const messages = [{ type: "say" as const, say: "text" as const, text: "replacement", ts: 1 }]
 
-			await task.overwriteClineMessages(messages, { persist: false })
+			await task.overwriteClineMessages(messages, false)
 
 			expect(task.clineMessages).toBe(messages)
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()

@@ -4018,21 +4018,29 @@ export class ClineProvider
 		//    slip between the status snapshot and the write. An active child must never be
 		//    silently detached.
 		try {
-			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
-				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
-					throw new Error(
-						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
-					)
-				}
-				const awaitedChildStatus = historyItem.awaitingChildId
-					? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
-					: undefined
-				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
-				return {
-					...delegated,
-					pendingAction:
-						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
-				}
+			await this.taskHistoryStore.withTaskFileLock(parentTaskId, async () => {
+				await this.taskHistoryStore.atomicReadAndUpdate(
+					parentTaskId,
+					(historyItem) => {
+						if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
+							throw new Error(
+								`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
+							)
+						}
+						const awaitedChildStatus = historyItem.awaitingChildId
+							? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
+							: undefined
+						const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
+						return {
+							...delegated,
+							pendingAction:
+								delegated.pendingAction?.actionId === pendingActionId
+									? undefined
+									: delegated.pendingAction,
+						}
+					},
+					{ fileLockAcquired: true, storeLockAcquired: true },
+				)
 			})
 			this.recentTasksCache = undefined
 			if (this.isViewLaunched) {
