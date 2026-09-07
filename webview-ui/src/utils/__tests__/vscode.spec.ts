@@ -214,6 +214,58 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "replaced-string-view" })
 	})
 
+	it("returns the normalized id when the persisted id needs the extension-side cleanup", () => {
+		const randomUUID = vi.fn(() => "should-not-be-generated")
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID },
+		})
+		// ClineProvider.setViewStateId trims and rewrites unsafe characters, so the
+		// webview must report the same normalized id instead of the raw stored value.
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "  side 1  " }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("side_1")
+		expect(wrapper.getViewStateId()).toBe("side_1")
+		expect(randomUUID).not.toHaveBeenCalled()
+	})
+
+	it("generates a fresh id when the persisted id is whitespace-only", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "ws-refilled-view") },
+		})
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "   " }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("ws-refilled-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "ws-refilled-view" })
+	})
+
+	it("generates a fresh id when the persisted id is the __proto__ string", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "proto-refused-view") },
+		})
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "__proto__" }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("proto-refused-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "proto-refused-view" })
+	})
+
 	it("keeps one generated id when a write fails while stale persisted state stays readable", () => {
 		const randomUUID = vi.fn().mockReturnValueOnce("gen-one").mockReturnValueOnce("gen-two")
 		Object.defineProperty(globalThis, "crypto", {
