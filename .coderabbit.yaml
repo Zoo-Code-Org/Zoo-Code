@@ -11,6 +11,8 @@ chat:
 knowledge_base:
     web_search:
         enabled: true
+    learnings:
+        scope: local
 
 reviews:
     profile: assertive
@@ -27,7 +29,7 @@ reviews:
         enabled: false
         drafts: false
         auto_incremental_review: true
-        auto_pause_after_reviewed_commits: 0
+        auto_pause_after_reviewed_commits: 5
         labels:
             - "coderabbit-review-active"
 
@@ -128,8 +130,20 @@ reviews:
               during release preparation. Verify documentation describes real behavior and contracts,
               and deprioritize prose-only nits that do not affect correctness or usability.
 
+    finishing_touches:
+        docstrings:
+            enabled: false
+
     pre_merge_checks:
         override_requested_reviewers_only: true
+        docstrings:
+            mode: off
+        title:
+            mode: warning
+        description:
+            mode: warning
+        issue_assessment:
+            mode: warning
         custom_checks:
             - name: Regression evidence
               mode: warning
@@ -140,17 +154,31 @@ reviews:
                   snapshot. Do not demand tests for unchanged behavior, mechanical configuration, or every
                   branch without a plausible regression scenario. Cite the changed behavior and missing
                   evidence.
-            - name: Trust and persistence invariants
+            - name: Security boundaries
               mode: error
               instructions: >-
-                  Fail only for a concrete changed path that leaks secrets or PII, trusts or executes
-                  unvalidated input, bypasses approval or allowlist controls, can lose persisted state due
-                  to a missing await, non-atomic write, or omitted default propagation, or leaks lifecycle
-                  resources. Cite the path and a plausible triggering scenario; pass when no such changed
-                  path exists.
+                  Fail only when a concrete changed path leaks secrets or PII, trusts or executes
+                  unvalidated input, or bypasses approval or allowlist controls. Cite the changed path
+                  and a plausible triggering scenario; pass when no such changed path exists.
+            - name: Persistence integrity
+              mode: error
+              instructions: >-
+                  Fail only when a concrete changed persistence path can lose or corrupt state because an
+                  operation is not awaited, a write is non-atomic, rollback or explicit partial-failure
+                  behavior is missing, or a persisted default is not propagated to a consumer. Cite the
+                  changed path and a plausible triggering scenario; pass when no such changed path exists.
+            - name: Lifecycle resource cleanup
+              mode: error
+              instructions: >-
+                  Fail only when a concrete changed lifecycle path can leak a listener, watcher, provider,
+                  timer, task, or other resource, or can duplicate work after cancellation, disposal, or
+                  restart. Cite the changed path and a plausible triggering scenario; pass when no such
+                  changed path exists.
 
     tools:
         eslint:
+            enabled: true
+        github-checks:
             enabled: true
         actionlint:
             enabled: true
