@@ -22,6 +22,7 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 /**
  * LiteLLM provider handler
@@ -267,9 +268,31 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
 		}
 
+		// Bridge the external abort signal from Task (metadata.abortSignal) into a
+		// request-local controller so the in-flight streaming request can be
+		// cancelled. A pre-aborted signal rejects immediately with an AbortError.
+		const externalAbortSignal = metadata?.abortSignal
+		let requestAbortController: AbortController | undefined
+		let externalAbortListener: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				throw new DOMException("LiteLLM streaming aborted", "AbortError")
+			}
+			const controller = new AbortController()
+			requestAbortController = controller
+			const onExternalAbort = () => controller.abort()
+			externalAbortListener = onExternalAbort
+			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+		}
+
 		try {
 			const { data: completion } = await this.client.chat.completions
-				.create(requestOptions, { headers: requestHeaders })
+				.create(
+					requestOptions,
+					requestAbortController
+						? { headers: requestHeaders, signal: requestAbortController.signal }
+						: { headers: requestHeaders },
+				)
 				.withResponse()
 
 			let lastUsage
@@ -339,10 +362,20 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				yield usageData
 			}
 		} catch (error) {
+			// User-initiated abort: surface a standard AbortError rather than the
+			// wrapped provider error so callers can distinguish cancellation.
+			if (metadata?.abortSignal?.aborted) {
+				throw new DOMException("LiteLLM streaming aborted", "AbortError")
+			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM streaming error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
+			if (externalAbortSignal && externalAbortListener) {
+				externalAbortSignal.removeEventListener("abort", externalAbortListener)
+			}
 		}
 	}
 
@@ -373,9 +406,30 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				requestOptions.max_tokens = info.maxTokens
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Build request options with abortSignal and/or timeout. Per the
+			// abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely, because the OpenAI SDK treats
+			// a timeout of 0 as an immediate timeout.
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				createOptions.timeout = timeoutMs
+			}
+
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				Object.keys(createOptions).length > 0 ? createOptions : undefined,
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// User-initiated abort: surface a standard AbortError rather than the
+			// wrapped provider error so callers can distinguish cancellation.
+			if (options?.abortSignal?.aborted) {
+				throw new DOMException("LiteLLM completion aborted", "AbortError")
+			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM completion error: ${error.message}`)
 			}

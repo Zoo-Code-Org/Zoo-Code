@@ -6,6 +6,7 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 // Mock vscode first to avoid import errors
 vi.mock("vscode", () => ({
@@ -1378,6 +1379,194 @@ describe("LiteLLMHandler", () => {
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+	})
+
+	describe("completePrompt", () => {
+		it("should pass abort signal through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should merge signal and timeoutMs together", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+
+		it("should omit the timeout option for timeoutMs=0 (0 would abort immediately in the OpenAI SDK)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
+
+		it("should surface a standard AbortError when the signal was aborted and the request fails", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("LiteLLM API error"))
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(DOMException)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("LiteLLM completion aborted")
+		})
+
+		it("should surface the wrapped provider error when the request fails without options", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await handler.completePrompt("test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("LiteLLM completion error: boom")
+		})
+
+		it("should surface the wrapped provider error when the request fails with options but no signal", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
+			expect((error as Error).message).toBe("LiteLLM completion error: boom")
+		})
+	})
+
+	describe("createMessage abort signal (bridging)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("LiteLLM streaming aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight stream when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			let capturedSignal: AbortSignal | undefined
+			// Readiness barrier: resolves once the request-local signal is captured and
+			// the (mocked) request has started, instead of guessing a fixed delay.
+			let requestStartedResolve!: () => void
+			const requestStarted = new Promise<void>((resolve) => {
+				requestStartedResolve = resolve
+			})
+			// The stream is built inside the mock implementation so that capturedSignal
+			// is already set before the abort-aware chunk is created.
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				requestStartedResolve()
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "partial" } }],
+						usage: undefined,
+					},
+					new Promise<never>((_resolve, reject) => {
+						const onAbort = () => reject(new DOMException("aborted", "AbortError"))
+						if (capturedSignal?.aborted) {
+							onAbort()
+							return
+						}
+						capturedSignal?.addEventListener("abort", onAbort, { once: true })
+					}),
+				])
+				return { withResponse: vi.fn().mockResolvedValue({ data: mockStream }) }
+			})
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await requestStarted
+			controller.abort()
+
+			// Bound the wait so a broken abort bridge fails this test fast (and fails
+			// the Stryker mutant) instead of hanging until the runner timeout.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("LiteLLM streaming aborted")
+			expect(capturedSignal).toBeDefined()
+			expect(capturedSignal?.aborted).toBe(true)
+			// The bridge registers a once-only listener on the external signal and
+			// detaches it when the request settles. Target the last "abort"
+			// registration (the bridge's listener) and assert the exact reference
+			// so a bridge that removes a different callback cannot pass.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+		})
+
+		it("should wrap a non-abort stream failure with the i18n-free provider message and no metadata", async () => {
+			// createMessage awaits create(...).withResponse(), so the failure must
+			// surface from the withResponse() call, not from create() itself.
+			mockCreate.mockReturnValueOnce({
+				withResponse: vi.fn().mockRejectedValue(new Error("boom")),
+			})
+
+			const error = await collectStream(handler.createMessage("system", messages)).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
+		})
+
+		it("should wrap a non-abort stream failure when metadata exists without an abort signal", async () => {
+			mockCreate.mockReturnValueOnce({
+				withResponse: vi.fn().mockRejectedValue(new Error("boom")),
+			})
+
+			const error = await collectStream(
+				handler.createMessage("system", messages, makeCreateMessageMetadata()),
+			).catch((e: unknown) => e)
+			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
 		})
 	})
 })
