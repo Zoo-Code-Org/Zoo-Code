@@ -46,7 +46,7 @@
 	},
 	"__tests__/ClineProvider.delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 2
 		}
 	},
 	"activate/CodeActionProvider.ts": {
@@ -1026,12 +1026,12 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 6
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 34
+			"count": 32
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 2
 		}
 	},
 	"utils/tts.ts": {

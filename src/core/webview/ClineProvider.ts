@@ -106,7 +106,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { Task } from "../task/Task"
+import { isCompleteTaskHandoffExecutionContext, Task, type TaskHandoffExecutionContext } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
@@ -116,15 +116,26 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
+	type StrictTaskReadResult,
 	abandonDelegatedChild,
 	completeDelegatedChild,
+	createPreparedProviderHandoffContext,
+	classifyProviderHandoffProjectionResults,
 	createProviderHandoffPlan,
+	createProviderHandoffTransaction,
 	decideProviderHandoffProfile,
 	delegateTaskToChild,
 	getProviderHandoffActivationOptions,
 	interruptDelegatedChild,
 	publishProviderHandoffState,
+	type NamedProviderHandoffProjectionResult,
+	type PreparedProviderHandoffContext,
+	type ProviderHandoffCommitObservation,
 	type ProviderHandoffPolicy,
+	type ProviderHandoffProfileIntent,
+	type ProviderHandoffProjectionOperation,
+	type ProviderHandoffProjectionOutcome,
+	type ProviderHandoffTransaction,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -176,6 +187,19 @@ function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): voi
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
+}
+
+/**
+ * Registration of an in-flight background handoff projection for a child task
+ * ID. `token` is an immutable projection identity allocated synchronously when
+ * the projection is initiated; every settlement must present the exact token.
+ * `admittedGeneration` is bound only when the bounded queue admits the
+ * projection and tightens the relevance fence to additionally require that
+ * exact generation.
+ */
+interface ProviderHandoffProjectionTargetRegistration {
+	token: number
+	admittedGeneration?: number
 }
 
 export class ClineProvider
@@ -240,34 +264,230 @@ export class ClineProvider
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
+	/**
+	 * Live AbortControllers for every queued-or-started profile mutation.
+	 * Provider disposal aborts each one so queued-but-not-started callbacks
+	 * are cancelled at admission and started callbacks stop before their next
+	 * write. Controllers unregister when their operation settles.
+	 */
+	private profileMutationAbortControllers = new Set<AbortController>()
+	/**
+	 * Bounded deadline for draining started (non-cancellable) profile writes
+	 * during provider disposal. Past the deadline the queue is detached with
+	 * handled promises — disposal is never unbounded.
+	 */
+	private static readonly PROFILE_MUTATION_DISPOSAL_DRAIN_TIMEOUT_MS = 5000
+	/**
+	 * Monotonic enqueue reservation counter. Every queued operation reserves
+	 * the next number when it is enqueued, before it is admitted. Reservations
+	 * order the log only: they never gate relevance or supersession, so a
+	 * newer reservation that is cancelled before admission (zero writes) can
+	 * never supersede an admitted older mutation.
+	 */
+	private providerProfileMutationReservation = 0
+	/**
+	 * Monotonic fence for profile mutations, bound ONLY at admission (when the
+	 * queue actually invokes the operation). A successfully settled mutation
+	 * with this generation supersedes stale handoff projection markers recorded
+	 * by older admitted generations. Because the counter advances at admission,
+	 * merely enqueuing a newer operation never supersedes an admitted older
+	 * projection that is still in flight.
+	 */
+	private providerProfileMutationGeneration = 0
+	/** Admitted generation of the last successfully settled (non-aborted) profile mutation. */
+	private providerProfileMutationSettledGeneration = 0
 
-	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		this.delegationTransitionLocks ??= new Map()
-		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, fn)
+	/**
+	 * In-memory marker for a post-commit provider handoff projection that
+	 * failed. The committed child's task-local context remains authoritative;
+	 * publication derives mode/profile/apiConfiguration from this marker so
+	 * partial global writes cannot misreport the child. Never persisted.
+	 */
+	private staleProviderHandoffProjection?: {
+		childTaskId: string
+		requestedMode: string
+		apiConfigName: string | undefined
+		/** Explicit profile projection intent the stale projection was carrying. */
+		profileIntent: ProviderHandoffProfileIntent
+		apiConfiguration: ProviderSettings
+		/**
+		 * Admitted mutation generation the marker was recorded under
+		 * (supersession fence). `undefined` marks a projection that was never
+		 * admitted — it performed zero writes, so its marker is superseded by
+		 * any later successful admitted mutation. Never used as a wildcard:
+		 * relevance checks compare exact identity, never this value.
+		 */
+		generation: number | undefined
 	}
 
-	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+	/**
+	 * In-flight background handoff projections keyed by the prepared child's
+	 * task ID, holding the projection's immutable token (plus the admitted
+	 * generation once the bounded queue admits it). Registered when the
+	 * projection is initiated and dropped by
+	 * {@link invalidateProviderHandoffProjectionState} when the child leaves
+	 * the provider, so a deferred settlement can never pass the
+	 * {@link isProviderHandoffProjectionStillRelevant} fence for a task that
+	 * was removed, completed, abandoned, or deleted.
+	 */
+	private providerHandoffProjectionTargets?: Map<string, ProviderHandoffProjectionTargetRegistration>
+	/** Source of immutable projection tokens; incremented synchronously per registration. */
+	private nextProviderHandoffProjectionToken = 0
+
+	/**
+	 * Children delegated with an explicit profile `clear` intent. While such a
+	 * child is current and still carries no sticky profile, publication must
+	 * show `undefined` instead of unconditionally falling back to the "default"
+	 * profile identity — the absence is an explicit state, not a legacy unset.
+	 * In-memory only; bounded by no-profile delegations in this session.
+	 */
+	private explicitProfileClearChildIds = new Set<string>()
+
+	/**
+	 * Completion hook for the most recent background handoff projection.
+	 * Deterministic test/observability access: awaiting this promise observes
+	 * the projection outcome without polling or sleeps.
+	 */
+	private providerHandoffProjectionCompletion?: Promise<ProviderHandoffProjectionOutcome>
+
+	/**
+	 * Protocol bookkeeping for the delegation in flight, advanced at semantic
+	 * landmarks by `delegateParentAndOpenChild`. Purely observational: the
+	 * shared reducer never persists anything, never throws into the delegation
+	 * flow, and cannot change rollback behavior. Tests read it to verify that
+	 * ClineProvider walks the protocol in legal order.
+	 */
+	private providerHandoffProtocol?: ProviderHandoffTransaction
+
+	/**
+	 * The transition owner currently executing under each parent's delegation
+	 * lock. The opaque token lets nested same-parent work (restoration/eviction
+	 * reached while the lock is already held) prove its reentrancy and run the
+	 * unlocked interruption core instead of deadlocking on its own lock.
+	 * External callers hold no token and always acquire normally.
+	 */
+	private delegationTransitionOwners = new Map<string, symbol>()
+
+	private runDelegationTransition<T>(parentTaskId: string, fn: (owner: symbol) => Promise<T>): Promise<T> {
+		this.delegationTransitionLocks ??= new Map()
+		this.delegationTransitionOwners ??= new Map()
+		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, async () => {
+			const owner = Symbol(`delegation-transition:${parentTaskId}`)
+			this.delegationTransitionOwners.set(parentTaskId, owner)
+			try {
+				return await fn(owner)
+			} finally {
+				if (this.delegationTransitionOwners.get(parentTaskId) === owner) {
+					this.delegationTransitionOwners.delete(parentTaskId)
+				}
+			}
+		})
+	}
+
+	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal, generation: number) => Promise<T>): Promise<T> {
+		// Disposal fence: no new profile work is admitted after the provider
+		// began shutting down.
+		if (this._disposed) {
+			return Promise.reject(new Error("Provider profile mutation rejected: provider is disposed"))
+		}
 		const controller = new AbortController()
-		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
-		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
-			controller.abort()
-			this.log("Provider profile mutation timed out; aborting in-flight mutation")
+		// Reservation (enqueue order) — log identity only. The supersession
+		// generation is bound later, at admission, so a newer reservation that
+		// never starts cannot fence an admitted older mutation.
+		const reservation = ++this.providerProfileMutationReservation
+		// Registered so provider disposal can abort this operation whether it
+		// is still queued or already started; unregistered when it settles.
+		this.profileMutationAbortControllers.add(controller)
+		// Admission versus execution: `started` flips synchronously when the
+		// queue admits this operation (the previous tail settled and fn began).
+		// A timeout before admission is a cancellation — the signal aborts and
+		// the generic admission fence below rejects WITHOUT calling fn, so the
+		// abandoned callback performs zero writes no matter which caller
+		// enqueued it. Once fn has started, the queue tail REMAINS OWNED until
+		// the underlying operation settles: storage writes are not
+		// cancellable, so releasing the queue would let a newer write
+		// interleave with (or physically serialize behind) the still-running
+		// older one.
+		let started = false
+		// Bound when the queue admits the operation; `undefined` while it is
+		// still queued (cancelled-before-admission operations never bind one).
+		let admittedGeneration: number | undefined
+		const runAdmitted = (): Promise<T> => {
+			// Generic admission fence, checked centrally for every caller: if
+			// this callback was aborted while still queued (caller timeout or
+			// provider disposal), it is never invoked at all.
+			if (controller.signal.aborted) {
+				return Promise.reject(new Error("Provider profile mutation cancelled before admission"))
+			}
+			started = true
+			// The generation is bound HERE, at admission: an operation that is
+			// cancelled before admission never consumes a generation, so the
+			// supersession fence only moves when a mutation actually starts.
+			admittedGeneration = ++this.providerProfileMutationGeneration
+			return fn(controller.signal, admittedGeneration)
+		}
+		const run = this.providerProfileMutationQueue.then(runAdmitted, runAdmitted)
+		const previousTail = this.providerProfileMutationQueue
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		let fireTimeoutSignal!: () => void
+		// Non-rejecting timeout signal: the queue tail must observe the timeout
+		// even though the caller-facing promise below sees a rejection.
+		const timedOutSignal = new Promise<void>((resolve) => {
+			fireTimeoutSignal = resolve
+		})
+		const timedOut = new Promise<never>((_, reject) => {
+			timeoutId = setTimeout(() => {
+				// Abort first: every fn must check its signal before each write,
+				// so a timed-out-before-start operation performs no writes and
+				// its late completion cannot overwrite newer state.
+				controller.abort()
+				this.log(
+					`Provider profile mutation ${reservation} timed out; the caller is released and later admitted mutations supersede it` +
+						(started ? "; the queue stays owned until the started write settles" : ""),
+				)
+				reject(new Error("Provider profile mutation timed out"))
+				fireTimeoutSignal()
+			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+		})
+		// The caller-facing race consumes the timeout rejection, but a late fire
+		// after the caller already settled (or detached) must never surface as
+		// an unhandled rejection.
+		timedOut.catch(() => {})
+
+		const callerResult = Promise.race([run, timedOut]).finally(() => {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
 		})
 
 		void run.then(
 			() => {
-				if (controller.signal.aborted) {
-					this.log("Provider profile mutation completed after cancellation")
+				this.profileMutationAbortControllers.delete(controller)
+				// Post-dispose completions are inert: no marker supersession or
+				// settled-generation bookkeeping once disposal began.
+				if (this._disposed) {
+					return
 				}
+				if (controller.signal.aborted) {
+					this.log(`Provider profile mutation ${reservation} completed after cancellation`)
+					return
+				}
+				// Admission-generation fence: a successful ADMITTED mutation
+				// supersedes any stale handoff projection marker recorded by an
+				// older admitted generation. A mutation cancelled before
+				// admission never settles here with a generation, so it can
+				// never supersede anything.
+				if (admittedGeneration === undefined) {
+					return
+				}
+				this.providerProfileMutationSettledGeneration = admittedGeneration
+				this.supersedeStaleProviderHandoffProjection(admittedGeneration)
 			},
 			(error) => {
+				this.profileMutationAbortControllers.delete(controller)
 				if (controller.signal.aborted) {
 					this.log(
-						`Provider profile mutation errored after cancellation: ${
+						`Provider profile mutation ${reservation} errored after cancellation: ${
 							error instanceof Error ? error.message : String(error)
 						}`,
 					)
@@ -275,29 +495,294 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Queue-tail ownership with an admission fence: the tail advances when
+		// the operation settles, or when the timeout fires BEFORE fn started
+		// (admission timeout — cancel-before-start, zero writes). If fn already
+		// started when the timeout fires, the tail remains owned by the
+		// in-flight underlying write: non-cancellable storage means later
+		// profile writes stay serialized behind it instead of overtaking it.
+		// An admission abort advances the tail to the PREVIOUS tail, so later
+		// operations still wait for every earlier started write. The caller
+		// timeout is a liveness guarantee for callers, not for the queue.
+		const settled = run.then(
 			() => undefined,
 			() => undefined,
 		)
+		this.providerProfileMutationQueue = Promise.race([
+			settled,
+			timedOutSignal.then(() => (started ? settled : previousTail)),
+		])
 		return callerResult
 	}
 
-	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
-		let timeoutId: ReturnType<typeof setTimeout> | undefined
-		const timeout = new Promise<never>((_, reject) => {
-			timeoutId = setTimeout(() => {
-				onTimeout()
-				reject(new Error("Provider profile mutation timed out"))
-			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
-		})
+	/**
+	 * Bounded disposal of the profile-mutation queue (provider shutdown):
+	 *
+	 * - every queued-but-not-started callback is cancelled at admission (its
+	 *   controller is aborted; the central admission fence ensures it never
+	 *   runs and performs zero writes);
+	 * - started non-cancellable writes are awaited only until
+	 *   {@link PROFILE_MUTATION_DISPOSAL_DRAIN_TIMEOUT_MS}, then the queue is
+	 *   detached with handled promises — disposal is never unbounded;
+	 * - post-dispose completions update no markers and emit no events.
+	 */
+	private async disposeProviderProfileMutationQueue(): Promise<void> {
+		// Self-contained disposal fence: enqueues after this point are
+		// rejected and post-dispose completions become inert. (The provider's
+		// dispose() sets this flag earlier as well; setting it here keeps the
+		// queue-disposal contract true on its own.)
+		this._disposed = true
+		for (const controller of this.profileMutationAbortControllers) {
+			controller.abort()
+		}
+		this.profileMutationAbortControllers.clear()
 
-		return Promise.race([operation, timeout]).finally(() => {
-			if (timeoutId) {
-				clearTimeout(timeoutId)
-			}
+		const drained = this.providerProfileMutationQueue.then(
+			() => undefined,
+			() => undefined,
+		)
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		let detached = false
+		const deadline = new Promise<void>((resolve) => {
+			timeoutId = setTimeout(() => {
+				detached = true
+				resolve()
+			}, ClineProvider.PROFILE_MUTATION_DISPOSAL_DRAIN_TIMEOUT_MS)
 		})
+		await Promise.race([
+			drained.then(() => {
+				if (timeoutId) {
+					clearTimeout(timeoutId)
+				}
+			}),
+			deadline,
+		])
+		if (detached) {
+			this.log(
+				`Provider disposal detached a still-running profile mutation after ${ClineProvider.PROFILE_MUTATION_DISPOSAL_DRAIN_TIMEOUT_MS}ms; its late completion is inert`,
+			)
+		}
+	}
+
+	/**
+	 * True when `generation` is still the newest ADMITTED profile mutation.
+	 * Background projection results may update stale markers or emit events
+	 * only while their admission generation is current; a superseded
+	 * projection's completion is inert. Because generations are bound at
+	 * admission, merely enqueuing a newer operation never makes an admitted
+	 * in-flight projection non-current.
+	 */
+	private isCurrentProfileMutationGeneration(generation: number): boolean {
+		return generation === this.providerProfileMutationGeneration
+	}
+
+	/**
+	 * Allocate the immutable projection identity for a new background handoff
+	 * projection and register it as the projection target for `childTaskId`.
+	 * Synchronous by contract: the token exists before the bounded queue can
+	 * admit or abandon the operation. A later registration for the same task
+	 * ID atomically replaces the previous one — the replaced token never
+	 * matches again.
+	 */
+	private registerProviderHandoffProjectionTarget(childTaskId: string): number {
+		const token = (this.nextProviderHandoffProjectionToken ?? 0) + 1
+		this.nextProviderHandoffProjectionToken = token
+		this.providerHandoffProjectionTargets ??= new Map()
+		this.providerHandoffProjectionTargets.set(childTaskId, { token })
+		return token
+	}
+
+	/**
+	 * Bind the admitted mutation generation to the registration owning exactly
+	 * `token`. A no-op when the registration was replaced or removed: a stale
+	 * projection can never re-target or overwrite a newer registration.
+	 */
+	private admitProviderHandoffProjectionTarget(childTaskId: string, token: number, generation: number): void {
+		const registered = this.providerHandoffProjectionTargets?.get(childTaskId)
+		if (registered?.token !== token) {
+			return
+		}
+		registered.admittedGeneration = generation
+	}
+
+	/**
+	 * Central relevance fence for every background handoff projection
+	 * completion/failure path, checked before any stale-marker, explicit-clear,
+	 * or event update. A settlement presenting `(childTaskId, token,
+	 * admittedGeneration)` is relevant only while:
+	 *
+	 * 1. the provider is not disposed (post-disposal completions are inert);
+	 * 2. the child's registered projection target still carries EXACTLY this
+	 *    immutable token — a removed registration, or one replaced by a newer
+	 *    projection for a reused task ID, never matches; and
+	 * 3. after admission, the registered target still carries exactly this
+	 *    admitted generation and no newer mutation was admitted. There is no
+	 *    generation wildcard: an unadmitted settlement (`admittedGeneration ===
+	 *    undefined`) is gated by exact token identity alone.
+	 *
+	 * A child that is removed, completed, abandoned, or deleted drops its
+	 * registration via {@link invalidateProviderHandoffProjectionState} before
+	 * its abort is awaited, so a deferred settlement that arrives afterwards is
+	 * inert: it must never recreate stale/clear publication state for a task
+	 * that is no longer the delegating child.
+	 */
+	private isProviderHandoffProjectionStillRelevant(
+		childTaskId: string,
+		token: number,
+		admittedGeneration?: number,
+	): boolean {
+		if (this._disposed) {
+			return false
+		}
+		const registered = this.providerHandoffProjectionTargets?.get(childTaskId)
+		if (!registered || registered.token !== token) {
+			return false
+		}
+		if (admittedGeneration === undefined) {
+			return true
+		}
+		return (
+			registered.admittedGeneration === admittedGeneration &&
+			this.isCurrentProfileMutationGeneration(admittedGeneration)
+		)
+	}
+
+	/**
+	 * Admission-generation fence for the stale handoff projection marker: any
+	 * later successful ADMITTED mode/profile mutation supersedes a marker whose
+	 * projection never ran (no admitted generation) or ran under an older
+	 * generation, so publication can never overlay an outdated child snapshot
+	 * after newer profile state was actually committed.
+	 */
+	private supersedeStaleProviderHandoffProjection(admittedGeneration: number): void {
+		const marker = this.staleProviderHandoffProjection
+		if (marker && (marker.generation === undefined || marker.generation < admittedGeneration)) {
+			this.staleProviderHandoffProjection = undefined
+		}
+	}
+
+	/**
+	 * True when `existing` is strictly newer than the marker about to be
+	 * recorded and must be kept. An existing marker with an admitted generation
+	 * outranks a never-admitted replacement (zero writes); among admitted
+	 * generations the higher one wins.
+	 */
+	private isStaleMarkerNewerThan(
+		existing: { generation: number | undefined },
+		admittedGeneration: number | undefined,
+	): boolean {
+		if (admittedGeneration === undefined) {
+			return existing.generation !== undefined
+		}
+		return existing.generation !== undefined && existing.generation > admittedGeneration
+	}
+
+	/** Record a stale handoff projection marker; never overwrites a newer generation's marker. */
+	private markStaleProviderHandoffProjection(
+		childTaskId: string,
+		prepared: Readonly<PreparedProviderHandoffContext>,
+		admittedGeneration: number | undefined,
+	): void {
+		const existing = this.staleProviderHandoffProjection
+		if (existing && this.isStaleMarkerNewerThan(existing, admittedGeneration)) {
+			return
+		}
+		this.staleProviderHandoffProjection = {
+			childTaskId,
+			requestedMode: prepared.requestedMode,
+			apiConfigName: prepared.profile.name,
+			profileIntent: prepared.profile.intent,
+			apiConfiguration: structuredClone(prepared.apiConfiguration),
+			generation: admittedGeneration,
+		}
+		// An explicit no-profile handoff stays explicit even when its legacy
+		// projection could not complete: publication must show undefined for
+		// this child, never a defaulted profile identity.
+		if (prepared.profile.intent.kind === "clear") {
+			this.explicitProfileClearChildIds.add(childTaskId)
+		}
+	}
+
+	/** Clear this generation's (or an older, or never-admitted) stale marker; a newer marker stays authoritative. */
+	private clearStaleProviderHandoffProjection(admittedGeneration: number): void {
+		const marker = this.staleProviderHandoffProjection
+		if (marker && (marker.generation === undefined || marker.generation <= admittedGeneration)) {
+			this.staleProviderHandoffProjection = undefined
+		}
+	}
+
+	/**
+	 * True when an explicit profile `clear` is in force for the current task:
+	 * either the current child was delegated with a no-profile intent and still
+	 * carries no sticky profile, or a stale failed projection carrying a clear
+	 * intent still fences publication for the current child. In both cases
+	 * `getState`/`getStateToPostToWebview` must publish `undefined` instead of
+	 * unconditionally falling back to the "default" identity; ordinary legacy
+	 * behavior (no explicit clear) is unchanged.
+	 */
+	private async isExplicitProfileClearInForce(currentTaskId: string | undefined): Promise<boolean> {
+		if (!currentTaskId) return false
+		if (this.explicitProfileClearChildIds.has(currentTaskId)) {
+			const currentTask = this.getCurrentTask()
+			if (currentTask?.taskId === currentTaskId && currentTask.taskApiConfigName !== undefined) {
+				// A later explicit profile choice on the child ends the clear.
+				this.explicitProfileClearChildIds.delete(currentTaskId)
+				return false
+			}
+			return true
+		}
+		// A stale clear-intent marker fences publication until a successful
+		// ADMITTED mutation supersedes it: the supersession fence clears the
+		// marker in place on every successful settlement, so its mere presence
+		// here means no admitted mutation has superseded it.
+		const marker = this.staleProviderHandoffProjection
+		if (marker?.childTaskId === currentTaskId && marker.profileIntent.kind === "clear") {
+			return true
+		}
+		// Durable reconstruction (provider reload): the in-memory sets above
+		// are empty after a reload, but an explicit clear durably removed the
+		// profile-store identity and the resumed child still carries no sticky
+		// profile. Reconstruct the clear from that durable state instead of
+		// falling back to the "default" identity. Only the still-current task
+		// is affected, and the read is best-effort: a failed read keeps the
+		// ordinary default fallback. Fresh installs carry the seeded "default"
+		// identity, so the legacy fallback there is unchanged.
+		const currentTask = this.getCurrentTask()
+		if (currentTask?.taskId !== currentTaskId || currentTask.taskApiConfigName !== undefined) {
+			return false
+		}
+		const durableIdentity = await this.providerSettingsManager
+			.getCurrentProfileName()
+			.catch(() => "unreadable" as const)
+		return durableIdentity === undefined
+	}
+
+	/**
+	 * The ONE idempotent terminal invalidation helper for a child task's
+	 * in-memory handoff publication state. Every terminal path — stack
+	 * removal/eviction, deletion (normal and `deleteTaskFromState` fallback),
+	 * delegated completion, ordinary completion (only once the durable history
+	 * update has established status `completed`), abandonment, and provider
+	 * disposal — must call this exactly at the terminal commit boundary,
+	 * synchronously before any await or state post. It drops, for this child only:
+	 *
+	 * 1. the explicit profile `clear` bookkeeping entry,
+	 * 2. the background projection-target registration (the immutable token is
+	 *    gone, so any deferred settlement — including one already admitted and
+	 *    in flight — fails the {@link isProviderHandoffProjectionStillRelevant}
+	 *    fence and can never resurrect stale/clear state), and
+	 * 3. a stale handoff projection marker recorded for this child.
+	 *
+	 * The call is safe to repeat and to call for unknown task IDs: every step
+	 * is a bounded, side-effect-free removal.
+	 */
+	private invalidateProviderHandoffProjectionState(childTaskId: string): void {
+		this.explicitProfileClearChildIds.delete(childTaskId)
+		this.providerHandoffProjectionTargets?.delete(childTaskId)
+		const marker = this.staleProviderHandoffProjection
+		if (marker?.childTaskId === childTaskId) {
+			this.staleProviderHandoffProjection = undefined
+		}
 	}
 
 	private readonly pendingEditOperations: PendingEditOperationStore
@@ -395,15 +880,30 @@ export class ClineProvider
 				// saveClineMessages() omits the status field for top-level tasks, which causes
 				// the store's merge to preserve a stale "interrupted" status after completion.
 				// interrupted → completed is a valid VALID_TRANSITIONS path.
+				let completedDurably = false
 				try {
 					const existing = this.taskHistoryStore.get(taskId)
 					if (existing && existing.status !== "completed") {
 						await this.updateTaskHistory({ ...existing, status: "completed" })
 					}
+					// Terminal commit boundary: only a durable completed record for
+					// this exact task drops its in-memory handoff publication state.
+					// A rejected write or a missing record keeps the projection
+					// registration (and any marker/explicit-clear state) alive, so an
+					// in-flight deferred settlement stays relevant.
+					completedDurably = this.taskHistoryStore.get(taskId)?.status === "completed"
 				} catch (err) {
 					this.log(
 						`[onTaskCompleted] Failed to write completed status for ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
 					)
+				}
+				if (completedDurably) {
+					// Synchronously before the completion/publication events: a
+					// TaskCompleted listener can publish state derived from the
+					// projection bookkeeping, and any deferred settlement that
+					// settles after this point must fail the relevance fence
+					// instead of resurrecting stale or explicit-clear state.
+					this.invalidateProviderHandoffProjectionState(taskId)
 				}
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
 			}
@@ -612,6 +1112,9 @@ export class ClineProvider
 		// Remove the focused Cline instance from the stack.
 		let task = this.taskRegistry.current
 		if (task) {
+			// Terminal invalidation, synchronously before the abort is awaited:
+			// a removed task can never be the publication target again.
+			this.invalidateProviderHandoffProjectionState(task.taskId)
 			task = this.taskRegistry.remove(task.taskId)
 		}
 
@@ -650,7 +1153,7 @@ export class ClineProvider
 	 * part of a delegation transition (i.e. everywhere except delegateParentAndOpenChild,
 	 * createTask with a parentTask, and reopenParentFromDelegation).
 	 */
-	public async evictCurrentTask(): Promise<void> {
+	public async evictCurrentTask(transitionOwner?: symbol): Promise<void> {
 		const current = this.getCurrentTask()
 		const storedHistory = current ? this.taskHistoryStore.get(current.taskId) : undefined
 		await this.removeClineFromStack()
@@ -658,6 +1161,7 @@ export class ClineProvider
 			await this.markDelegatedChildInterrupted({
 				childTaskId: storedHistory.id,
 				parentTaskId: storedHistory.parentTaskId,
+				transitionOwner,
 			})
 		}
 	}
@@ -674,7 +1178,44 @@ export class ClineProvider
 	 * Must be called AFTER removeClineFromStack() so the live Task's final saveClineMessages()
 	 * does not reattach the child's parentTaskId/rootTaskId over the interrupted status.
 	 */
+	/**
+	 * Locked wrapper for the interruption transition. When the caller already
+	 * owns this parent's transition lock (an opaque owner token acquired from
+	 * inside `runDelegationTransition` — restoration/eviction nesting), the
+	 * unlocked core runs directly; the lock is never re-acquired for the same
+	 * parent. Any other caller — including a different parent's transition —
+	 * acquires the lock normally, so ordinary external eviction serialization
+	 * is preserved.
+	 */
 	private async markDelegatedChildInterrupted({
+		childTaskId,
+		parentTaskId,
+		transitionOwner,
+	}: {
+		childTaskId: string
+		parentTaskId: string
+		transitionOwner?: symbol
+	}): Promise<void> {
+		try {
+			if (
+				transitionOwner !== undefined &&
+				this.delegationTransitionOwners.get(parentTaskId) === transitionOwner
+			) {
+				await this.markDelegatedChildInterruptedUnlocked({ childTaskId, parentTaskId })
+				return
+			}
+			await this.runDelegationTransition(parentTaskId, () =>
+				this.markDelegatedChildInterruptedUnlocked({ childTaskId, parentTaskId }),
+			)
+		} catch (err) {
+			this.log(
+				`[markDelegatedChildInterrupted] Failed for child ${childTaskId}: ${err instanceof Error ? err.message : String(err)}`,
+			)
+		}
+	}
+
+	/** Unlocked interruption core; requires the parent transition lock (or its reentrant owner). */
+	private async markDelegatedChildInterruptedUnlocked({
 		childTaskId,
 		parentTaskId,
 	}: {
@@ -688,7 +1229,7 @@ export class ClineProvider
 		}
 
 		try {
-			await this.runDelegationTransition(parentTaskId, async () => {
+			{
 				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
 
 				if (parentHistory?.status !== "delegated" || parentHistory?.awaitingChildId !== childTaskId) {
@@ -722,7 +1263,7 @@ export class ClineProvider
 				this.log(
 					`[markDelegatedChildInterrupted] Marked child ${childTaskId} interrupted; parent ${parentTaskId} stays delegated`,
 				)
-			})
+			}
 		} catch (err) {
 			this.log(
 				`[markDelegatedChildInterrupted] Failed for child ${childTaskId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -836,6 +1377,17 @@ export class ClineProvider
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
+
+		// Bounded disposal of queued/started profile mutations and background
+		// projections: queued callbacks are cancelled at admission (they never
+		// run), started writes are awaited only to a bounded deadline, and
+		// post-dispose completions update no markers and emit no events.
+		await this.disposeProviderProfileMutationQueue()
+		// Session-scoped explicit-clear markers, projection-target
+		// registrations, and stale markers do not survive the provider.
+		this.explicitProfileClearChildIds.clear()
+		this.providerHandoffProjectionTargets?.clear()
+		this.staleProviderHandoffProjection = undefined
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
@@ -1209,7 +1761,7 @@ export class ClineProvider
 
 	public createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
-		options?: { startTask?: boolean },
+		options?: { startTask?: boolean; transitionOwner?: symbol },
 	): Promise<Task> {
 		// History navigation can arrive concurrently (for example, two rapid
 		// showTaskWithId messages). Serialize the full eviction/installation
@@ -1230,7 +1782,7 @@ export class ClineProvider
 
 	private async createTaskWithHistoryItemUnlocked(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
-		options?: { startTask?: boolean },
+		options?: { startTask?: boolean; transitionOwner?: symbol },
 	): Promise<Task> {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
@@ -1243,7 +1795,11 @@ export class ClineProvider
 		const isRehydratingCurrentTask = currentTask && currentTask.taskId === historyItem.id
 
 		if (!isRehydratingCurrentTask) {
-			await this.evictCurrentTask()
+			// `transitionOwner` proves the caller already owns the evicted
+			// child's parent delegation transition (restoration under a held
+			// lock); same-parent interruption then runs its unlocked core
+			// instead of re-acquiring the lock it already holds.
+			await this.evictCurrentTask(options?.transitionOwner)
 		}
 
 		// If the history item has a saved mode, restore it and its associated API configuration.
@@ -1764,83 +2320,95 @@ export class ClineProvider
 			}
 		}
 
-		await this.updateGlobalState("mode", newMode)
+		const previousMode = options.pendingHandoff ? this.getGlobalState("mode") : undefined
 
-		this.emit(RooCodeEventName.ModeChanged, newMode)
+		try {
+			await this.updateGlobalState("mode", newMode)
 
-		// If workspace lock is on, keep the current API config — don't load mode-specific config
-		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
-		if (lockApiConfigAcrossModes) {
-			await publishProviderHandoffState(targetTask !== null, options.pendingHandoff, () =>
-				this.postStateToWebview(),
-			)
-			return
-		}
+			this.emit(RooCodeEventName.ModeChanged, newMode)
 
-		if (signal?.aborted) return
+			// If workspace lock is on, keep the current API config — don't load mode-specific config
+			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+			if (lockApiConfigAcrossModes) {
+				await publishProviderHandoffState(targetTask !== null, options.pendingHandoff, () =>
+					this.postStateToWebview(),
+				)
+				return
+			}
 
-		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
-		const listApiConfig = await this.providerSettingsManager.listConfig()
+			if (signal?.aborted) return
 
-		if (signal?.aborted) return
+			// Load the saved API config for the new mode if it exists.
+			const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+			const listApiConfig = await this.providerSettingsManager.listConfig()
 
-		// Update listApiConfigMeta first to ensure UI has latest data.
-		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+			if (signal?.aborted) return
 
-		// If this mode has a saved config, use it.
-		if (savedConfigId) {
-			const profile = listApiConfig.find(({ id }) => id === savedConfigId)
+			// Update listApiConfigMeta first to ensure UI has latest data.
+			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 
-			if (profile?.name) {
-				// Check if the profile has actual API configuration (not just an id).
-				// In CLI mode, the ProviderSettingsManager may return empty default profiles
-				// that only contain 'id' and 'name' fields. Activating such a profile would
-				// overwrite the CLI's working API configuration with empty settings.
-				// Skip activation if the profile has no apiProvider set - this indicates
-				// an unconfigured/empty profile.
-				const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
-				const hasActualSettings = !!fullProfile.apiProvider
+			// If this mode has a saved config, use it.
+			if (savedConfigId) {
+				const profile = listApiConfig.find(({ id }) => id === savedConfigId)
 
-				if (hasActualSettings) {
-					const profileName = options.pendingHandoff
-						? decideProviderHandoffProfile({
-								locked: false,
-								savedProfile: { name: profile.name, id: profile.id },
-							}).profile.name
-						: profile.name
-					const activationOptions = options.pendingHandoff
-						? getProviderHandoffActivationOptions(options.pendingHandoff)
-						: targetTask === null
-							? { skipCurrentTaskRebuild: true }
-							: undefined
-					await this.activateProviderProfileUnlocked({ name: profileName }, activationOptions, signal)
+				if (profile?.name) {
+					// Check if the profile has actual API configuration (not just an id).
+					// In CLI mode, the ProviderSettingsManager may return empty default profiles
+					// that only contain 'id' and 'name' fields. Activating such a profile would
+					// overwrite the CLI's working API configuration with empty settings.
+					// Skip activation if the profile has no apiProvider set - this indicates
+					// an unconfigured/empty profile.
+					const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
+					const hasActualSettings = !!fullProfile.apiProvider
+
+					if (hasActualSettings) {
+						const profileName = options.pendingHandoff
+							? decideProviderHandoffProfile({
+									locked: false,
+									savedProfile: { name: profile.name, id: profile.id },
+								}).profile.name
+							: profile.name
+						const activationOptions = options.pendingHandoff
+							? getProviderHandoffActivationOptions(options.pendingHandoff)
+							: targetTask === null
+								? { skipCurrentTaskRebuild: true }
+								: undefined
+						await this.activateProviderProfileUnlocked({ name: profileName }, activationOptions, signal)
+					} else {
+						// The task will continue with the current/default configuration.
+					}
 				} else {
 					// The task will continue with the current/default configuration.
 				}
 			} else {
-				// The task will continue with the current/default configuration.
-			}
-		} else {
-			// If no saved config for this mode, save current config as default.
-			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
+				// If no saved config for this mode, save current config as default.
+				const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
-			const config = listApiConfig.find((candidate) => candidate.name === currentApiConfigNameAfter)
-			const configId = options.pendingHandoff
-				? decideProviderHandoffProfile({
-						locked: false,
-						currentProfile: currentApiConfigNameAfter
-							? { name: currentApiConfigNameAfter, id: config?.id }
-							: undefined,
-					}).persistModeProfileId
-				: config?.id
+				const config = listApiConfig.find((candidate) => candidate.name === currentApiConfigNameAfter)
+				const configId = options.pendingHandoff
+					? decideProviderHandoffProfile({
+							locked: false,
+							currentProfile: currentApiConfigNameAfter
+								? { name: currentApiConfigNameAfter, id: config?.id }
+								: undefined,
+						}).persistModeProfileId
+					: config?.id
 
-			if (configId) {
-				await this.providerSettingsManager.setModeConfig(newMode, configId)
+				if (configId) {
+					await this.providerSettingsManager.setModeConfig(newMode, configId)
+				}
 			}
+
+			await publishProviderHandoffState(targetTask !== null, options.pendingHandoff, () =>
+				this.postStateToWebview(),
+			)
+		} catch (error) {
+			if (options.pendingHandoff) {
+				await this.updateGlobalState("mode", previousMode)
+				if (previousMode !== undefined) this.emit(RooCodeEventName.ModeChanged, previousMode)
+			}
+			throw error
 		}
-
-		await publishProviderHandoffState(targetTask !== null, options.pendingHandoff, () => this.postStateToWebview())
 	}
 
 	// Provider Profile Management
@@ -2392,6 +2960,12 @@ export class ClineProvider
 
 			// Delete all tasks from state in one batch
 			await this.taskHistoryStore.deleteMany(allIdsToDelete)
+			// Terminal invalidation for every deleted id, immediately after the
+			// durable delete: a stale child id can never fence publication
+			// after deletion.
+			for (const taskId of allIdsToDelete) {
+				this.invalidateProviderHandoffProjectionState(taskId)
+			}
 			this.recentTasksCache = undefined
 
 			// Delete associated shadow repositories or branches and task directories
@@ -2433,6 +3007,15 @@ export class ClineProvider
 	}
 
 	async deleteTaskFromState(id: string) {
+		// Terminal invalidation FIRST — synchronously, before any await or
+		// state post. This is the fallback delete path ("Task not found" in
+		// deleteTaskWithId): the durable delete below may reject and the post
+		// may never run, so the projection-target registration, explicit-clear
+		// bookkeeping, and stale marker must already be gone here. A deferred
+		// projection settlement that arrives during or after the delete then
+		// fails the exact-token relevance fence and can never resurrect stale
+		// or explicit-clear state for the deleted task.
+		this.invalidateProviderHandoffProjectionState(id)
 		await this.taskHistoryStore.delete(id)
 		this.recentTasksCache = undefined
 
@@ -2763,7 +3346,7 @@ export class ClineProvider
 			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
 		}
 
-		return {
+		const state: ExtensionState = {
 			version: this.context.extension?.packageJSON?.version ?? "",
 			apiConfiguration,
 			customInstructions,
@@ -2814,7 +3397,9 @@ export class ClineProvider
 			terminalZdotdir: terminalZdotdir ?? false,
 			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
-			currentApiConfigName: currentApiConfigName ?? "default",
+			currentApiConfigName:
+				currentApiConfigName ??
+				((await this.isExplicitProfileClearInForce(currentTask?.taskId)) ? undefined : "default"),
 			listApiConfigMeta: listApiConfigMeta ?? [],
 			pinnedApiConfigs: pinnedApiConfigs ?? {},
 			mode: mode ?? defaultModeSlug,
@@ -2920,6 +3505,35 @@ export class ClineProvider
 			arch: process.arch,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
 		}
+
+		// A failed post-commit handoff projection leaves global state stale for
+		// the committed child. While that child is current, derive its execution
+		// fields from the child's authoritative task-local context so partial
+		// global writes cannot misreport its mode/profile/configuration.
+		const staleHandoffProjection = this.staleProviderHandoffProjection
+		if (staleHandoffProjection) {
+			// Supersession fence: any successful ADMITTED mode/profile mutation
+			// has already cleared an outdated marker in place, so a marker still
+			// present here is authoritative for this child.
+			if (currentTask?.taskId === staleHandoffProjection.childTaskId) {
+				state.mode = staleHandoffProjection.requestedMode
+				// The explicit intent decides the published identity: `set`
+				// names it, `clear` publishes the explicit absence (undefined,
+				// never the "default" fallback), `preserve` leaves the global
+				// identity untouched.
+				if (staleHandoffProjection.profileIntent.kind === "set") {
+					state.currentApiConfigName = staleHandoffProjection.profileIntent.name
+				} else if (staleHandoffProjection.profileIntent.kind === "clear") {
+					state.currentApiConfigName = undefined
+				}
+				state.apiConfiguration = structuredClone(staleHandoffProjection.apiConfiguration)
+			} else {
+				// The stale child is no longer current; the marker is obsolete.
+				this.staleProviderHandoffProjection = undefined
+			}
+		}
+
+		return state
 	}
 
 	/**
@@ -3051,7 +3665,11 @@ export class ClineProvider
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
-			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
+			// Preserve an explicit no-profile handoff for the current child:
+			// publish the absence instead of the legacy "default" fallback.
+			currentApiConfigName:
+				stateValues.currentApiConfigName ??
+				((await this.isExplicitProfileClearInForce(this.getCurrentTask()?.taskId)) ? undefined : "default"),
 			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
 			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
 			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),
@@ -3444,7 +4062,7 @@ export class ClineProvider
 		text?: string,
 		images?: string[],
 		parentTask?: Task,
-		options: CreateTaskOptions = {},
+		options: CreateTaskOptions & { handoffExecutionContext?: TaskHandoffExecutionContext } = {},
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
@@ -3503,16 +4121,32 @@ export class ClineProvider
 			})
 		}
 
-		if (!ProfileValidator.isProfileAllowed(apiConfiguration, organizationAllowList)) {
+		// Handoff delegation passes an explicit, already-prepared execution
+		// context; it must be validated as all-or-none and used as-is instead
+		// of the global state values. Ordinary (non-handoff) initialization is
+		// unchanged: apiConfiguration comes from provider state as before.
+		const handoffExecutionContext = options.handoffExecutionContext
+		if (handoffExecutionContext !== undefined && !isCompleteTaskHandoffExecutionContext(handoffExecutionContext)) {
+			throw new Error(
+				"[createTask] handoffExecutionContext must be complete: mode, apiConfiguration, and apiConfigName are required together",
+			)
+		}
+		const resolvedApiConfiguration = handoffExecutionContext?.apiConfiguration ?? apiConfiguration
+
+		if (!ProfileValidator.isProfileAllowed(resolvedApiConfiguration, organizationAllowList)) {
 			throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
 		}
 
 		const task = new Task({
 			provider: this,
-			apiConfiguration,
+			apiConfiguration: resolvedApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
-			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			// One config source: every profile-derived constructor input —
+			// including the mistake limit the API handler guard enforces — must
+			// come from the SAME resolved configuration the child's API handler
+			// is built from, not from the pre-handoff global state.
+			consecutiveMistakeLimit: resolvedApiConfiguration.consecutiveMistakeLimit,
 			task: text,
 			images,
 			experiments,
@@ -3840,15 +4474,468 @@ export class ClineProvider
 	}
 
 	/**
+	 * Read-only provider handoff preparation.
+	 *
+	 * Captures everything the child will execute with — requested mode, profile
+	 * decision (source/name/stable id), and a deep-cloned full API
+	 * configuration including provider secret fields — while the delegating
+	 * parent is still the current task. Read-only and deliberately off the
+	 * provider profile mutation queue; performs zero writes to global state,
+	 * the profile store, or any task. If this rejects, the caller aborts
+	 * delegation before the parent is removed, leaving the parent current and
+	 * every store unchanged.
+	 */
+	private async prepareProviderHandoffContext(requestedMode: Mode): Promise<PreparedProviderHandoffContext> {
+		// Read-only preparation deliberately does NOT run on the provider
+		// profile mutation queue: a hung or timed-out underlying mutation must
+		// never block delegation preparation (queue liveness). Every read here
+		// is either a single-lock durable snapshot (ProviderSettingsManager
+		// locks its own store) or a synchronous ContextProxy read, and no write
+		// happens, so ordering against queued mutations is not required for
+		// safety: the prepared context is a point-in-time snapshot and later
+		// successful mutations supersede it through the generation fence.
+		const locked = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+		const snapshot = await this.providerSettingsManager.snapshotForHandoff(requestedMode)
+
+		const currentEntry = snapshot.currentApiConfigName
+			? snapshot.entries.find((entry) => entry.name === snapshot.currentApiConfigName)
+			: undefined
+		const currentProfileRef =
+			snapshot.currentApiConfigName !== undefined
+				? { name: snapshot.currentApiConfigName, id: currentEntry?.id }
+				: undefined
+
+		// A saved mapping whose profile has no real provider settings is
+		// treated as unsaved: the child continues with the current
+		// configuration instead of activating an unconfigured profile.
+		const savedProfile = snapshot.savedProfile?.apiProvider ? snapshot.savedProfile : undefined
+		const hadSavedMapping = snapshot.modeApiConfigId !== undefined
+
+		const decision = decideProviderHandoffProfile({
+			locked,
+			currentProfile: currentProfileRef,
+			savedProfile: savedProfile ? { name: savedProfile.name, id: savedProfile.id } : undefined,
+		})
+
+		let apiConfiguration: ProviderSettings
+		if (savedProfile) {
+			const { name: _savedProfileName, id: _savedProfileId, ...profileSettings } = savedProfile
+			apiConfiguration = structuredClone(profileSettings)
+		} else {
+			apiConfiguration = structuredClone(this.contextProxy.getProviderSettings())
+		}
+
+		return createPreparedProviderHandoffContext({
+			requestedMode,
+			profile: { source: decision.source, name: decision.profile?.name, id: decision.profile?.id },
+			apiConfiguration,
+			// Persist the mode mapping post-commit for the saved profile
+			// (parity with the previous activation flow) and for a genuinely
+			// unsaved mode. A saved-but-unusable mapping is left untouched.
+			persistModeProfileId:
+				savedProfile?.id ??
+				(hadSavedMapping
+					? undefined
+					: decision.source === "unsaved-current"
+						? decision.persistModeProfileId
+						: undefined),
+		})
+	}
+
+	/**
+	 * Best-effort restoration of the parent when child creation fails after the
+	 * parent was removed from the stack. Never masks the original error.
+	 */
+	private async restoreParentAfterFailedChildCreation(
+		parentTaskId: string,
+		transitionOwner?: symbol,
+	): Promise<boolean> {
+		try {
+			const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+			await this.createTaskWithHistoryItem(parentHistory, { transitionOwner })
+			return true
+		} catch (error) {
+			this.log(
+				`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} after child creation failure: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+			return false
+		}
+	}
+
+	/**
+	 * Authoritative reconciliation after a rejected delegation commit.
+	 *
+	 * At the atomic write boundary only parent history is guaranteed durable;
+	 * the child's history record may legitimately be absent. The parent record
+	 * is therefore re-read strictly from disk with {@link TaskHistoryStore.readFresh},
+	 * which — unlike the `invalidate`/`get` path — distinguishes a definitively
+	 * missing record from one that exists but cannot be read or parsed.
+	 * Callers run this while still holding the per-parent delegation transition
+	 * lock and pass the commit-owned parent fields captured before the update
+	 * attempt (the preimage).
+	 *
+	 * - `committed` (observation `exact`): the parent record is durably
+	 *   delegated to this attempted child. The child record is optional: a
+	 *   missing child history is expected; only a present record that
+	 *   contradicts the lineage degrades the observation. Nothing may be
+	 *   rolled back.
+	 * - `incoherent` (observations `other-child` / `missing` / `unreadable`):
+	 *   the parent shows a delegation to a different child, is absent, or is
+	 *   unreadable — durability is unknowable, so no destructive rollback may
+	 *   run.
+	 * - `uncommitted` (observation `unchanged`): the parent record exactly
+	 *   matches the safe nondelegated preimage on status, awaitingChildId,
+	 *   childIds, and pendingAction ownership — nothing persisted, so the
+	 *   rollback is safe. Any preimage mismatch degrades instead.
+	 */
+	private async reconcileDelegationCommitFailure(
+		parentTaskId: string,
+		childTaskId: string,
+		preimage: {
+			status: HistoryItem["status"]
+			awaitingChildId: HistoryItem["awaitingChildId"]
+			childIds: HistoryItem["childIds"]
+			pendingAction: HistoryItem["pendingAction"]
+		},
+	): Promise<{
+		durability: "committed" | "uncommitted" | "incoherent"
+		observation: ProviderHandoffCommitObservation
+		errors: unknown[]
+	}> {
+		let parentRead: StrictTaskReadResult
+		try {
+			parentRead = await this.taskHistoryStore.readFresh(parentTaskId)
+		} catch (error) {
+			// A re-read failure must never trigger a destructive rollback.
+			return { durability: "incoherent", observation: "unreadable", errors: [error] }
+		}
+
+		if (parentRead.kind === "error") {
+			return { durability: "incoherent", observation: "unreadable", errors: [parentRead.error] }
+		}
+
+		if (parentRead.kind === "missing") {
+			return { durability: "incoherent", observation: "missing", errors: [] }
+		}
+
+		const parent = parentRead.item
+
+		// Exact delegated-to-attempted-child: committed regardless of whether
+		// the child's own history exists yet.
+		if (parent.status === "delegated" && parent.awaitingChildId === childTaskId) {
+			try {
+				const childRead = await this.taskHistoryStore.readFresh(childTaskId)
+				// Only a present child record that contradicts the lineage
+				// makes the observation incoherent; a missing or unreadable
+				// child history cannot contradict the authoritative parent.
+				if (childRead.kind === "found" && childRead.item.parentTaskId !== parentTaskId) {
+					return { durability: "incoherent", observation: "contradictory-child", errors: [] }
+				}
+			} catch (error) {
+				// A contradicting child record cannot be established from a
+				// failed read; the parent record alone stays authoritative.
+				void error
+			}
+			return { durability: "committed", observation: "exact", errors: [] }
+		}
+
+		// Compare the commit-owned fields against the preimage captured before
+		// the update attempt. An exact match — nondelegated or still showing
+		// the pre-attempt delegation a re-delegation severed — proves this
+		// attempt persisted nothing, so the rollback is safe.
+		const unchanged =
+			parent.status === preimage.status &&
+			parent.awaitingChildId === preimage.awaitingChildId &&
+			JSON.stringify(parent.childIds ?? []) === JSON.stringify(preimage.childIds ?? []) &&
+			parent.pendingAction?.actionId === preimage.pendingAction?.actionId
+		if (unchanged) {
+			return { durability: "uncommitted", observation: "unchanged", errors: [] }
+		}
+
+		// A delegation to a different child that the preimage did not show must
+		// never be rolled back over.
+		if (parent.status === "delegated") {
+			return { durability: "incoherent", observation: "other-child", errors: [] }
+		}
+
+		// The record drifted from the preimage in any other way: another writer
+		// moved it and durability is unknowable.
+		return { durability: "incoherent", observation: "drifted", errors: [] }
+	}
+
+	/**
+	 * Roll back a failed delegation after the parent was removed: close the
+	 * paused child if it is still on top of the stack, delete the child, and
+	 * restore the parent. Returns the errors of failed rollback steps so the
+	 * caller can preserve the original failure while surfacing incomplete
+	 * cleanup.
+	 */
+	private async rollbackFailedDelegation(
+		parentTaskId: string,
+		childTaskId: string,
+		transitionOwner?: symbol,
+	): Promise<{ cleanupErrors: unknown[]; restorationErrors: unknown[] }> {
+		const cleanupErrors: unknown[] = []
+		const restorationErrors: unknown[] = []
+
+		try {
+			// Only pop the stack if the child we just created is still on top.
+			// A concurrent delegation could have pushed another child since we created ours.
+			if (this.getCurrentTask()?.taskId === childTaskId) {
+				await this.removeClineFromStack()
+			}
+		} catch (error) {
+			cleanupErrors.push(error)
+			this.log(
+				`[delegateParentAndOpenChild] Failed to close paused child ${childTaskId} during rollback: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+
+		try {
+			await this.deleteTaskWithId(childTaskId, false)
+		} catch (error) {
+			cleanupErrors.push(error)
+			this.log(
+				`[delegateParentAndOpenChild] Failed to delete paused child ${childTaskId} during rollback: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+
+		try {
+			const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+			await this.createTaskWithHistoryItem(parentHistory, { transitionOwner })
+		} catch (error) {
+			restorationErrors.push(error)
+			this.log(
+				`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+
+		return { cleanupErrors, restorationErrors }
+	}
+
+	/**
+	 * Named post-commit projection writes. Each operation reports its own
+	 * outcome so boundary classification never depends on result ordering.
+	 * Every write checks the abort fence before starting: after the bounded
+	 * queue timeout no further write begins, so an abandoned operation cannot
+	 * interleave writes with a later generation.
+	 */
+	private async runProviderHandoffProjectionWrites(
+		prepared: Readonly<PreparedProviderHandoffContext>,
+		signal: AbortSignal,
+	): Promise<NamedProviderHandoffProjectionResult[]> {
+		const namedStep = async <T>(
+			operation: ProviderHandoffProjectionOperation,
+			write: () => Promise<T>,
+		): Promise<{ result: NamedProviderHandoffProjectionResult; value?: T }> => {
+			if (signal.aborted) {
+				return { result: { operation, ok: false, error: new Error(`aborted before ${operation}`) } }
+			}
+			try {
+				return { result: { operation, ok: true }, value: await write() }
+			} catch (error) {
+				return { result: { operation, ok: false, error } }
+			}
+		}
+
+		const intent = prepared.profile.intent
+
+		// `preserve` performs no profile-identity write at all: the durable
+		// profile store and the legacy global identity are left untouched.
+		// `set` writes the prepared identity; `clear` writes the absence —
+		// undefined, never a skipped write.
+		const [mode, meta, providerSettings, profileStore] = await Promise.all([
+			namedStep("global-mode", () => this.updateGlobalState("mode", prepared.requestedMode)),
+			namedStep("profile-meta-read", () => this.providerSettingsManager.listConfig()),
+			namedStep("provider-settings", () =>
+				this.contextProxy.setProviderSettings(structuredClone(prepared.apiConfiguration)),
+			),
+			intent.kind === "preserve"
+				? Promise.resolve({ result: { operation: "profile-store" as const, ok: true } })
+				: namedStep("profile-store", () =>
+						this.providerSettingsManager.projectHandoffState({
+							intent,
+							mode: prepared.requestedMode,
+							modeConfigId: prepared.persistModeProfileId,
+						}),
+					),
+		])
+
+		const results: NamedProviderHandoffProjectionResult[] = [
+			mode.result,
+			meta.result,
+			providerSettings.result,
+			profileStore.result,
+		]
+
+		// Dependent writes run only when the read that feeds them succeeded.
+		const listConfig = meta.result.ok ? meta.value : undefined
+		if (listConfig !== undefined) {
+			results.push(
+				(await namedStep("global-config-meta", () => this.updateGlobalState("listApiConfigMeta", listConfig)))
+					.result,
+			)
+		}
+		if (intent.kind === "set") {
+			results.push(
+				(
+					await namedStep("global-profile-name", () =>
+						this.updateGlobalState("currentApiConfigName", intent.name),
+					)
+				).result,
+			)
+		} else if (intent.kind === "clear") {
+			// Explicit clear: write undefined so legacy global state stops
+			// claiming a profile identity the child does not have.
+			results.push(
+				(
+					await namedStep("global-profile-name", () =>
+						this.updateGlobalState("currentApiConfigName", undefined),
+					)
+				).result,
+			)
+		}
+
+		return results
+	}
+
+	/**
+	 * Best-effort post-commit projection of the prepared handoff context onto
+	 * legacy global state and the durable profile store. Runs strictly AFTER
+	 * the durable delegation commit, as fire-and-forget background work: it can
+	 * never undo the commit, never blocks the per-parent delegation lock, and
+	 * never delays the child start. The queue batch is bounded for the caller —
+	 * an admission timeout abandons it before any write; once a write has
+	 * started the queue stays owned until the non-cancellable storage write
+	 * settles. A failed/abandoned projection stamps the generation-fenced stale
+	 * marker, superseded by any later successful ADMITTED mode/profile mutation.
+	 * Every settlement is additionally gated by
+	 * {@link isProviderHandoffProjectionStillRelevant} on the projection's
+	 * immutable token identity: once the prepared child leaves the provider
+	 * (removed, completed, abandoned, or deleted) — or its task ID is reused by
+	 * a newer projection — or the provider disposes, completion is inert and
+	 * never recreates stale or explicit-clear state.
+	 */
+	private async projectPreparedProviderHandoffState(
+		prepared: Readonly<PreparedProviderHandoffContext>,
+		childTaskId: string,
+	): Promise<ProviderHandoffProjectionOutcome> {
+		// Allocate the immutable projection identity and register the target
+		// synchronously, before the bounded queue can admit or abandon the
+		// operation: a child that leaves the provider drops this registration
+		// (via invalidateProviderHandoffProjectionState), and a newer
+		// registration for a reused task ID replaces this token, so a deferred
+		// settlement can never resurrect stale/clear state for it.
+		const projectionToken = this.registerProviderHandoffProjectionTarget(childTaskId)
+		// Bound at admission; stays undefined when the bounded queue abandons
+		// the operation before it runs (zero writes — the marker it stamps, if
+		// any, carries no admitted generation and is superseded by any later
+		// successful admitted mutation).
+		let admittedGeneration: number | undefined
+		try {
+			return await this.enqueueProviderProfileMutation(async (signal, generation) => {
+				admittedGeneration = generation
+				// Bind the admitted generation to this projection's exact token
+				// for the relevance fence below. A no-op if the registration was
+				// already replaced or removed.
+				this.admitProviderHandoffProjectionTarget(childTaskId, projectionToken, generation)
+				// Cancel-before-start: the queue admitted the operation after
+				// its own timeout fired. Perform zero writes.
+				if (signal.aborted) {
+					return { ok: false, boundary: "queue" }
+				}
+				const results = await this.runProviderHandoffProjectionWrites(prepared, signal)
+				// The bounded queue may already have abandoned this operation; a
+				// late completion stays inert (its outcome is discarded by the
+				// caller and must not clear the marker or emit events).
+				if (signal.aborted) {
+					return { ok: false, boundary: "queue" }
+				}
+				const outcome = classifyProviderHandoffProjectionResults(results)
+				// Central relevance fence: marker updates, explicit-clear state,
+				// and events apply only while the provider is live, the prepared
+				// child is still the registered target for this exact token, and
+				// — after admission — the registration still carries exactly this
+				// admitted generation with no newer mutation admitted. A
+				// superseded or orphaned settlement is inert.
+				if (!this.isProviderHandoffProjectionStillRelevant(childTaskId, projectionToken, generation)) {
+					return outcome.ok ? { ok: true } : outcome
+				}
+				if (!outcome.ok) {
+					this.markStaleProviderHandoffProjection(childTaskId, prepared, generation)
+					// Log a stable boundary/category only: provider-originated
+					// error text is never interpolated (even redacted), so
+					// arbitrary remote strings cannot reach the log. The raw
+					// error stays on the named result for in-memory callers and
+					// is never persisted or logged here.
+					const failure = results.find((result) => !result.ok)
+					const failureCategory = failure?.error instanceof Error ? failure.error.name : typeof failure?.error
+					this.log(
+						`[delegateParentAndOpenChild] Post-commit handoff projection failed for child ${childTaskId} ` +
+							`at ${outcome.failedOperation} (${failureCategory}); continuing with child-local values`,
+					)
+					return outcome
+				}
+				this.clearStaleProviderHandoffProjection(generation)
+				// Preserve the external mode-change signal the previous
+				// pre-removal switch emitted, now strictly after the durable
+				// commit. Never emitted by an operation the queue abandoned,
+				// whose generation was already superseded, that completed after
+				// the provider began disposing, or whose child already left.
+				try {
+					this.emit(RooCodeEventName.ModeChanged, prepared.requestedMode)
+				} catch {
+					// non-fatal
+				}
+				return { ok: true }
+			})
+		} catch {
+			// The queued projection was abandoned (bounded timeout or provider
+			// disposal) before its writes completed. The durable delegation and
+			// the child's authoritative task-local context are unaffected; the
+			// stale marker makes publication derive child values until a later
+			// successful admitted mutation supersedes it. The abandonment is
+			// logged as a stable boundary only, without error detail.
+			// Bookkeeping stays behind the exact-token relevance fence: a child
+			// that already left the provider, a task ID reused by a newer
+			// projection, or a disposed provider is never re-marked.
+			if (!this.isProviderHandoffProjectionStillRelevant(childTaskId, projectionToken, admittedGeneration)) {
+				return { ok: false, boundary: "queue" }
+			}
+			this.markStaleProviderHandoffProjection(childTaskId, prepared, admittedGeneration)
+			this.log(
+				`[delegateParentAndOpenChild] Post-commit handoff projection abandoned for child ${childTaskId}; ` +
+					`continuing with child-local values`,
+			)
+			return { ok: false, boundary: "queue" }
+		}
+	}
+
+	/**
 	 * Delegate parent task and open child task.
 	 *
 	 * - Enforce single-open invariant
-	 * - Persist parent delegation metadata
+	 * - Read-only prepare the child's execution context while the parent is
+	 *   still current (no global/profile/event/publication writes)
+	 * - Persist parent delegation metadata atomically
 	 * - Emit TaskDelegated (task-level; API forwards to provider/bridge)
-	 * - Create child as sole active and switch mode to child's mode
-	 * - Fail closed if the mode-switch handoff rejects: the parent is never
-	 *   removed from the stack, so it stays the current, active task and no
-	 *   child is created or scheduled
+	 * - Create the paused child from the explicit prepared context, make that
+	 *   context authoritative on the child, then project legacy global state
+	 * - Fail closed if preparation rejects: the parent is never removed from
+	 *   the stack, so it stays the current, active task and no child is
+	 *   created or scheduled. If child creation or the atomic commit fails,
+	 *   the child is cleaned up and the parent is restored.
+	 * - Advance the shared provider-handoff protocol at each semantic
+	 *   landmark. The reducer is observational bookkeeping only: it never
+	 *   persists, never throws into this flow, and never drives rollback.
 	 */
 	public async delegateParentAndOpenChild(params: {
 		parentTaskId: string
@@ -3857,6 +4944,30 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
+		const { parentTaskId } = params
+		// Full per-parent transition serialization: validation, read-only
+		// preparation, parent removal, child creation, commit, reconciliation,
+		// rollback, activation, projection, and child start all run inside the
+		// same runDelegationTransition lock used by completion and abandonment.
+		// Two same-parent delegations (or a completion/abandonment racing a
+		// delegation) can therefore never interleave; later callers observe the
+		// committed/delegated state when the lock releases. The wrapper delegates
+		// to the unlocked implementation to avoid recursive lock acquisition.
+		return this.runDelegationTransition(parentTaskId, (owner) =>
+			this.delegateParentAndOpenChildUnlocked(params, owner),
+		)
+	}
+
+	private async delegateParentAndOpenChildUnlocked(
+		params: {
+			parentTaskId: string
+			message: string
+			initialTodos: TodoItem[]
+			mode: string
+			pendingActionId?: string
+		},
+		transitionOwner: symbol,
+	): Promise<Task> {
 		const { parentTaskId, message, initialTodos, mode, pendingActionId } = params
 
 		// Metadata-driven delegation is always enabled
@@ -3913,21 +5024,30 @@ export class ClineProvider
 			)
 		}
 
-		// 3) Switch provider mode to child's requested mode BEFORE disposing the parent.
-		//    This is a null-target, non-publishing handoff (see
-		//    PRODUCTION_PROVIDER_HANDOFF_POLICY): it applies only global mode/profile
-		//    state and never mutates or publishes the current task, so running it while
-		//    the parent is still focused is safe. Performing it first makes delegation
-		//    fail closed: if the mode switch rejects, we abort before the parent is
-		//    removed from the stack, so the parent remains the current, active task and
-		//    no child is created or scheduled.
-		//    The mode switch must also happen before createTask() because the Task
-		//    constructor initializes its mode from provider.getState() during
-		//    initializeTaskMode().
+		// 3) Read-only handoff preparation while the parent is still the current
+		//    task. This replaces the old mutating pre-removal mode switch: no
+		//    global/profile/event/publication write happens before the durable
+		//    delegation commit. If preparation rejects, delegation aborts with the
+		//    parent still current and every store untouched (fail closed). The
+		//    explicit prepared context also removes the ordering dependency on
+		//    createTask(): the child no longer infers its mode from
+		//    provider.getState() during initializeTaskMode().
 		const handoff = createProviderHandoffPlan(mode)
-		await this.handleModeSwitch(handoff.requestedMode, handoff.policy.targetTask, {
-			pendingHandoff: handoff.policy,
-		})
+		// Protocol bookkeeping only: the shared reducer records semantic
+		// landmarks, rejects none of the steps below in a correct run, and can
+		// neither persist anything nor alter rollback behavior.
+		const handoffProtocol = createProviderHandoffTransaction()
+		this.providerHandoffProtocol = handoffProtocol
+		let prepared: PreparedProviderHandoffContext
+		try {
+			prepared = await this.prepareProviderHandoffContext(handoff.requestedMode)
+		} catch (error) {
+			// Fail-closed abort landmark: the parent was never removed and no
+			// store was touched, so the protocol terminal is a clean abort.
+			handoffProtocol.advance({ type: "prepare-failed" })
+			throw error
+		}
+		handoffProtocol.advance({ type: "prepare" })
 
 		// 4) Enforce single-open invariant by closing/disposing the parent first
 		//    This ensures we never have >1 tasks open at any time during delegation.
@@ -3942,6 +5062,7 @@ export class ClineProvider
 			)
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
 		}
+		handoffProtocol.advance({ type: "remove-parent" })
 
 		// 5) Create child as sole active (parent reference preserved for lineage)
 		// Pass initialStatus: "active" to ensure the child task's historyItem is created
@@ -3954,11 +5075,31 @@ export class ClineProvider
 		// Without this, the child's fire-and-forget startTask() races with step 5,
 		// and the last writer to globalState overwrites the other's changes—
 		// causing the parent's delegation fields to be lost.
-		const child = await this.createTask(message, undefined, parent as any, {
-			initialTodos,
-			initialStatus: "active",
-			startTask: false,
-		})
+		let child: Task
+		try {
+			child = await this.createTask(message, undefined, parent, {
+				initialTodos,
+				initialStatus: "active",
+				startTask: false,
+				// All-or-none explicit handoff-only execution context: the child
+				// must not asynchronously infer its mode/profile from mutable
+				// global state. Completeness is runtime-validated by createTask
+				// and the Task constructor.
+				handoffExecutionContext: {
+					mode: prepared.requestedMode,
+					apiConfigName: prepared.profile.name,
+					apiConfiguration: structuredClone(prepared.apiConfiguration),
+				},
+			})
+		} catch (error) {
+			// Child creation failed after the parent was removed: restore the
+			// parent, leave the child absent, and rethrow the original error.
+			const restored = await this.restoreParentAfterFailedChildCreation(parentTaskId, transitionOwner)
+			handoffProtocol.advance({ type: "create-child-failed" })
+			handoffProtocol.advance({ type: "rollback-restore", ok: restored })
+			throw error
+		}
+		handoffProtocol.advance({ type: "create-child" })
 
 		// 6) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a
@@ -3973,6 +5114,17 @@ export class ClineProvider
 		//    synchronously under the store lock) so a concurrent abandon or completion cannot
 		//    slip between the status snapshot and the write. An active child must never be
 		//    silently detached.
+		// Commit-owned parent fields captured before the update attempt. After
+		// a rejected commit, the strict fresh re-read compares against this
+		// preimage: an exact match proves the write never persisted; any
+		// mismatch means another writer moved the record.
+		const preCommitParent = this.taskHistoryStore.get(parentTaskId)
+		const commitPreimage = {
+			status: preCommitParent?.status,
+			awaitingChildId: preCommitParent?.awaitingChildId,
+			childIds: preCommitParent?.childIds,
+			pendingAction: preCommitParent?.pendingAction,
+		}
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
@@ -3990,58 +5142,146 @@ export class ClineProvider
 						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
 				}
 			})
-			this.recentTasksCache = undefined
-			if (this.isViewLaunched) {
-				const updatedItem = this.taskHistoryStore.get(parentTaskId)
-				if (updatedItem) {
-					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
-				}
-			}
+			handoffProtocol.advance({ type: "commit-delegation" })
 		} catch (err) {
+			handoffProtocol.advance({ type: "commit-failed" })
 			this.log(
 				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${
 					(err as Error)?.message ?? String(err)
 				}`,
 			)
-			try {
-				// Only pop the stack if the child we just created is still on top.
-				// A concurrent delegation could have pushed another child since we created ours.
-				if (this.getCurrentTask()?.taskId === child.taskId) {
-					await this.removeClineFromStack()
+			// Authoritative reconciliation while still under the per-parent
+			// transition serialization: strictly re-read the parent record from
+			// disk (child history is optional at this boundary) and resolve the
+			// commit's ambiguous durability before any destructive action.
+			const reconciliation = await this.reconcileDelegationCommitFailure(
+				parentTaskId,
+				child.taskId,
+				commitPreimage,
+			)
+			if (reconciliation.durability === "committed") {
+				// The rejected write actually persisted. The delegation is
+				// durable: do NOT delete the child or restore the parent over
+				// committed lineage — treat the handoff as committed and
+				// continue with context activation below.
+				handoffProtocol.advance({
+					type: "observe-commit-durability",
+					durability: "committed",
+					observation: reconciliation.observation,
+				})
+				this.log(
+					`[delegateParentAndOpenChild] Commit for ${parentTaskId} -> ${child.taskId} rejected after persisting; ` +
+						`keeping the durable delegation and continuing`,
+				)
+			} else if (reconciliation.durability === "uncommitted") {
+				handoffProtocol.advance({
+					type: "observe-commit-durability",
+					durability: "uncommitted",
+					observation: reconciliation.observation,
+				})
+				const rollback = await this.rollbackFailedDelegation(parentTaskId, child.taskId, transitionOwner)
+				handoffProtocol.advance({ type: "rollback-cleanup", ok: rollback.cleanupErrors.length === 0 })
+				handoffProtocol.advance({ type: "rollback-restore", ok: rollback.restorationErrors.length === 0 })
+				if (rollback.cleanupErrors.length + rollback.restorationErrors.length > 0) {
+					// Preserve the original failure while surfacing incomplete
+					// cleanup; the original error is first in the aggregate.
+					throw new AggregateError(
+						[err, ...rollback.cleanupErrors, ...rollback.restorationErrors],
+						`[delegateParentAndOpenChild] Delegation rollback incomplete for parent ${parentTaskId}; original error: ${
+							(err as Error)?.message ?? String(err)
+						}`,
+					)
 				}
-			} catch (cleanupError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to close paused child ${child.taskId} during rollback: ${
-						(cleanupError as Error)?.message ?? String(cleanupError)
-					}`,
+				throw err
+			} else {
+				// Incoherent records or failed re-read: never roll back
+				// destructively over potentially committed lineage. Keep the
+				// child paused, keep the parent record untouched, and surface
+				// the ambiguity with the original error retained.
+				handoffProtocol.advance({
+					type: "observe-commit-durability",
+					durability: "incoherent",
+					observation: reconciliation.observation,
+				})
+				throw new AggregateError(
+					[err, ...reconciliation.errors],
+					`[delegateParentAndOpenChild] Delegation commit durability could not be determined for parent ${parentTaskId} -> child ${child.taskId}; ` +
+						`the child is left paused and the parent record untouched`,
 				)
 			}
-			try {
-				await this.deleteTaskWithId(child.taskId, false)
-			} catch (cleanupError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to delete paused child ${child.taskId} during rollback: ${
-						(cleanupError as Error)?.message ?? String(cleanupError)
-					}`,
-				)
-			}
-			try {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
-				await this.createTaskWithHistoryItem(parentHistory)
-			} catch (rollbackError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
-						(rollbackError as Error)?.message ?? String(rollbackError)
-					}`,
-				)
-			}
-			throw err
 		}
 
-		// 7) Start the child task now that parent metadata is safely persisted.
-		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
+		//    Post-commit webview publication is best-effort: a publication error
+		//    must never roll back the durable delegation or prevent the child
+		//    from starting.
+		this.recentTasksCache = undefined
+		if (this.isViewLaunched) {
+			try {
+				const updatedItem = this.taskHistoryStore.get(parentTaskId)
+				if (updatedItem) {
+					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+				}
+			} catch (error) {
+				this.log(
+					`[delegateParentAndOpenChild] Failed to publish delegation update for ${parentTaskId}: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+		}
 
-		// 8) Emit TaskDelegated (provider-level)
+		// 7) Synchronously make the prepared context authoritative on the child.
+		//    The child is still paused; from here on its task-local mode, sticky
+		//    profile, and apiConfiguration are authoritative no matter what the
+		//    legacy global projection does.
+		child.adoptHandoffExecutionContext({
+			mode: prepared.requestedMode,
+			apiConfigName: prepared.profile.name,
+			apiConfiguration: structuredClone(prepared.apiConfiguration),
+		})
+		handoffProtocol.advance({ type: "activate-context" })
+
+		// An explicit no-profile handoff keeps its explicit-clear publication
+		// state for this child regardless of how the background projection ends.
+		if (prepared.profile.intent.kind === "clear") {
+			this.explicitProfileClearChildIds.add(child.taskId)
+		}
+
+		// 8) Start the child task immediately: the durable delegation is
+		//    committed and the child's execution context is authoritative, so
+		//    the child must never await the legacy projection.
+		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
+		handoffProtocol.advance({ type: "start-child" })
+
+		// 9) Best-effort legacy projection of the prepared context onto global
+		//    state and the durable profile store — fire-and-forget background
+		//    work OUTSIDE the per-parent delegation lock and OUTSIDE the
+		//    child-start critical path. The promise is handled (never a floating
+		//    rejection): it logs, updates generation-fenced bookkeeping, and
+		//    records the protocol landmark when still relevant. Tests await the
+		//    exposed completion hook deterministically instead of sleeping.
+		const projectionCompletion = this.projectPreparedProviderHandoffState(prepared, child.taskId)
+			.then((outcome) => {
+				handoffProtocol.advance({
+					type: "project-legacy",
+					boundary: outcome.boundary ?? "context-proxy",
+					ok: outcome.ok,
+				})
+				return outcome
+			})
+			.catch(() => {
+				// Stable boundary only: provider-originated error text is never
+				// interpolated into the log.
+				this.log(
+					`[delegateParentAndOpenChild] Background handoff projection rejected for child ${child.taskId}; ` +
+						`continuing with child-local values`,
+				)
+				return { ok: false, boundary: "queue" as const }
+			})
+		this.providerHandoffProjectionCompletion = projectionCompletion
+		void projectionCompletion
+
+		// 10) Emit TaskDelegated (provider-level)
 		try {
 			this.emit(RooCodeEventName.TaskDelegated, parentTaskId, child.taskId)
 		} catch {
@@ -4061,7 +5301,7 @@ export class ClineProvider
 		pendingActionId?: string
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
-		return this.runDelegationTransition(parentTaskId, async () => {
+		return this.runDelegationTransition(parentTaskId, async (transitionOwner) => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
@@ -4278,6 +5518,18 @@ export class ClineProvider
 			)
 			this.recentTasksCache = undefined
 
+			// Terminal invalidation at the EXACT durable commit boundary — the
+			// child is completed as of the atomic pair write above and can never
+			// be the publication target again. It runs synchronously before any
+			// further await, so a parent reconstruction/resume failure below
+			// cannot retain the child's projection-target registration: a
+			// deferred projection settlement arriving afterwards fails the
+			// exact-token relevance fence instead of resurrecting stale or
+			// explicit-clear state for the completed child. (Nothing is cleared
+			// before this point: on an aborted pre-commit path the child is
+			// still active and its in-flight projection remains meaningful.)
+			this.invalidateProviderHandoffProjectionState(childTaskId)
+
 			// Notify the webview of both updated items so its in-memory history stays current.
 			if (this.isViewLaunched) {
 				const updatedChild = this.taskHistoryStore.get(childTaskId)
@@ -4299,7 +5551,15 @@ export class ClineProvider
 
 			// 7) Reopen the parent from history as the sole active task (restores saved mode)
 			//    IMPORTANT: startTask=false to suppress resume-from-history ask scheduling
-			const parentInstance = await this.createTaskWithHistoryItem(updatedHistory, { startTask: false })
+			//    The transition owner proves this restoration already holds the
+			//    parent's transition lock, so a same-parent interruption triggered
+			//    by the eviction inside runs its unlocked core instead of
+			//    deadlocking on the lock we hold. Other parents still acquire
+			//    their own locks normally.
+			const parentInstance = await this.createTaskWithHistoryItem(updatedHistory, {
+				startTask: false,
+				transitionOwner,
+			})
 
 			// 8) Inject restored histories into the in-memory instance before resuming
 			if (parentInstance) {
@@ -4326,6 +5586,8 @@ export class ClineProvider
 			}
 
 			this.cancelledDelegationChildIds.delete(childTaskId)
+			// The child's publication markers were already invalidated at the
+			// durable commit boundary above.
 			return true
 		})
 	}
@@ -4406,6 +5668,12 @@ export class ClineProvider
 			// was cleared. AttemptCompletionTool re-reads parent status from the persisted store,
 			// not the live task's readonly parentTaskId field, so this is the authoritative gate.
 			this.cancelledDelegationChildIds.add(childTaskId)
+
+			// Terminal invalidation at the durable sever boundary: the link is
+			// severed and the child left the provider, so its projection-target
+			// registration and explicit-clear publication markers are dropped
+			// synchronously before the state post below.
+			this.invalidateProviderHandoffProjectionState(childTaskId)
 
 			if (this.isViewLaunched) {
 				const updatedChild = this.taskHistoryStore.get(childTaskId)
