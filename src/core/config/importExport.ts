@@ -36,6 +36,7 @@ type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
 		postStateToWebview: () => Promise<void>
+		broadcastResetToAllInstances?(): Promise<void>
 	}
 }
 
@@ -392,7 +393,21 @@ export const importSettingsWithFeedback = async (
 
 	if (result.success) {
 		provider.settingsImportedAt = Date.now()
+
+		// Broadcast invalidation to all other live ClineProvider instances first, so the
+		// initiating provider's post below reflects the cleared view state rather than the
+		// stale pre-import per-view mode/profile.
+		try {
+			if (provider.broadcastResetToAllInstances) {
+				await provider.broadcastResetToAllInstances()
+			}
+		} catch (error) {
+			// Log but do not fail the import if broadcast fails — the import itself succeeded.
+			console.warn(`Failed to broadcast reset after settings import: ${error}`)
+		}
+
 		await provider.postStateToWebview()
+
 		provider.settingsImportedAt = undefined
 		const warnings = "warnings" in result ? result.warnings : undefined
 
