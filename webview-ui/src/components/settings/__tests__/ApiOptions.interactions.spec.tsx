@@ -233,13 +233,20 @@ describe("ApiOptions interactions", () => {
 				configuration: { litellmBaseUrl: "http://litellm:4000", litellmApiKey: "litellm-key" },
 				expectedMessage: {
 					type: "requestRouterModels",
-					values: { litellmApiKey: "litellm-key", litellmBaseUrl: "http://litellm:4000" },
+					values: {
+						provider: providerIdentifiers.litellm,
+						litellmApiKey: "litellm-key",
+						litellmBaseUrl: "http://litellm:4000",
+					},
 				},
 			},
 			{
 				provider: providerIdentifiers.poe,
 				configuration: { poeApiKey: "poe-key", poeBaseUrl: "https://api.poe.example/v1" },
-				expectedMessage: { type: "requestRouterModels" },
+				expectedMessage: {
+					type: "requestRouterModels",
+					values: { provider: providerIdentifiers.poe },
+				},
 			},
 		])("requests models for $provider", ({ provider, configuration, expectedMessage }) => {
 			vi.useFakeTimers()

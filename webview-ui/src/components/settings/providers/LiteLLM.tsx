@@ -115,7 +115,7 @@ export const LiteLLM = ({
 
 		vscode.postMessage({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { litellmApiKey: key, litellmBaseUrl: url },
+			values: { provider: providerIdentifiers.litellm, litellmApiKey: key, litellmBaseUrl: url },
 		})
 	}, [apiConfiguration, setRefreshStatus, setRefreshError, t])
 
