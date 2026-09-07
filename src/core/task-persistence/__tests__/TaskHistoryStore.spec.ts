@@ -7,8 +7,10 @@ import * as os from "os"
 import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
+import { delegateTaskToChild } from "../taskLifecycle"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { withAdvisoryFileLock } from "../../../utils/advisoryFileLock"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
@@ -16,13 +18,21 @@ vi.mock("../../../utils/storage", () => ({
 	}),
 }))
 
-// Mock safeWriteJson to use plain fs writes in tests (avoids proper-lockfile issues)
-vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
-		await fs.mkdir(path.dirname(filePath), { recursive: true })
-		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
-	}),
-}))
+// Mock safeWriteJson to use plain fs writes in tests (avoids proper-lockfile
+// issues for writes), while the advisory-lock primitives stay REAL: readFresh
+// must coordinate with the actual proper-lockfile lock under test.
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../utils/advisoryFileLock")>()
+	return {
+		safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
+			await fs.mkdir(path.dirname(filePath), { recursive: true })
+			await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
+		}),
+		withAdvisoryFileLock: actual.withAdvisoryFileLock,
+		ADVISORY_READ_LOCK_RETRIES: actual.ADVISORY_READ_LOCK_RETRIES,
+		LOCK_STALE_MS: actual.LOCK_STALE_MS,
+	}
+})
 
 function makeHistoryItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
 	return {
@@ -849,6 +859,161 @@ describe("TaskHistoryStore", () => {
 			// Neither record modified
 			expect(store.get("child-store-guard")?.status).toBe("delegated")
 			expect(store.get("parent-store-guard")?.status).toBe("active")
+		})
+	})
+
+	describe("delegation commit reconciliation (real store)", () => {
+		it("surfaces a reject-after-write as a durable parent delegation with optional child history", async () => {
+			// Write-through callback that throws AFTER the task file write lands —
+			// the production-realistic ambiguous-commit shape.
+			const writeThroughError = new Error("globalState write-through failed")
+			const failingStore = new TaskHistoryStore(tmpDir, {
+				onWrite: async () => {
+					throw writeThroughError
+				},
+			})
+			try {
+				// Seed the parent record directly on disk so the failing
+				// write-through only fires on the commit under test.
+				const parent = makeHistoryItem({ id: "reject-parent", status: "active", childIds: [] })
+				const tasksDir = path.join(tmpDir, "tasks")
+				await fs.mkdir(path.join(tasksDir, "reject-parent"), { recursive: true })
+				await fs.writeFile(
+					path.join(tasksDir, "reject-parent", GlobalFileNames.historyItem),
+					JSON.stringify(parent, null, "\t"),
+					"utf8",
+				)
+				await failingStore.initialize()
+
+				// No child history has been written at all: at the atomic commit
+				// boundary only parent history is guaranteed durable.
+				await expect(
+					failingStore.atomicReadAndUpdate("reject-parent", (current) =>
+						delegateTaskToChild(current, "reject-child"),
+					),
+				).rejects.toThrow(writeThroughError)
+
+				// The strict fresh read observes what actually persisted: the
+				// parent record is durably delegated to the attempted child even
+				// though the write was reported as a failure.
+				const parentRead = await failingStore.readFresh("reject-parent")
+				expect(parentRead).toEqual({
+					kind: "found",
+					item: expect.objectContaining({
+						id: "reject-parent",
+						status: "delegated",
+						awaitingChildId: "reject-child",
+					}),
+				})
+				// The child record is absent — expected, not incoherent.
+				expect(await failingStore.readFresh("reject-child")).toEqual({ kind: "missing" })
+			} finally {
+				failingStore.dispose()
+			}
+		})
+
+		it("distinguishes a definitively missing record from an unreadable one", async () => {
+			await store.initialize()
+
+			// Never written: definitively absent.
+			expect(await store.readFresh("never-written")).toEqual({ kind: "missing" })
+
+			// Corrupt JSON on disk: exists but unreadable — durability unknowable.
+			const tasksDir = path.join(tmpDir, "tasks")
+			await fs.mkdir(path.join(tasksDir, "corrupt-task"), { recursive: true })
+			await fs.writeFile(path.join(tasksDir, "corrupt-task", GlobalFileNames.historyItem), "not-json{{{", "utf8")
+
+			const corrupt = await store.readFresh("corrupt-task")
+			expect(corrupt.kind).toBe("error")
+			if (corrupt.kind === "error") {
+				expect(corrupt.reason).toBe("parse")
+			}
+		})
+
+		it("never caches a record whose id does not match the requested task", async () => {
+			await store.initialize()
+			const tasksDir = path.join(tmpDir, "tasks")
+			await fs.mkdir(path.join(tasksDir, "task-mismatch"), { recursive: true })
+			await fs.writeFile(
+				path.join(tasksDir, "task-mismatch", GlobalFileNames.historyItem),
+				JSON.stringify(makeHistoryItem({ id: "task-other" })),
+				"utf8",
+			)
+
+			const result = await store.readFresh("task-mismatch")
+			expect(result).toMatchObject({ kind: "error", reason: "incompatible" })
+			// The foreign record is never cached under the requested key.
+			expect(store.get("task-mismatch")).toBeUndefined()
+		})
+
+		it("treats a record without a usable id as incompatible", async () => {
+			await store.initialize()
+			const tasksDir = path.join(tmpDir, "tasks")
+			await fs.mkdir(path.join(tasksDir, "task-noid"), { recursive: true })
+			await fs.writeFile(
+				path.join(tasksDir, "task-noid", GlobalFileNames.historyItem),
+				JSON.stringify({ task: "no id here" }),
+				"utf8",
+			)
+
+			const result = await store.readFresh("task-noid")
+			expect(result).toMatchObject({ kind: "error", reason: "incompatible" })
+			expect(store.get("task-noid")).toBeUndefined()
+		})
+
+		it("waits for a gated advisory-lock writer and sees the final durable record, never the rename gap", async () => {
+			await store.initialize()
+			const item = makeHistoryItem({ id: "task-lock" })
+			await store.upsert(item)
+
+			// A second store instance (another host in-process) reads while a
+			// writer holds the same advisory proper-lockfile lock.
+			const second = new TaskHistoryStore(tmpDir)
+			await second.initialize()
+			try {
+				const filePath = path.join(tmpDir, "tasks", "task-lock", GlobalFileNames.historyItem)
+				const finalItem = { ...item, status: "delegated" as const, awaitingChildId: "child-9" }
+
+				let writerLockHeld!: () => void
+				const lockHeld = new Promise<void>((resolve) => {
+					writerLockHeld = resolve
+				})
+				let releaseWriter!: () => void
+				const releaseGate = new Promise<void>((resolve) => {
+					releaseWriter = resolve
+				})
+
+				// The writer holds the advisory lock and simulates
+				// safeWriteJson's backup/commit rename window: the target file is
+				// MOVED AWAY while the lock is held, and the final record is
+				// written before the lock is released.
+				const writer = withAdvisoryFileLock(filePath, async () => {
+					writerLockHeld()
+					await fs.rename(filePath, `${filePath}.gap`)
+					await releaseGate
+					await fs.writeFile(filePath, JSON.stringify(finalItem), "utf8")
+				})
+				await lockHeld
+
+				// The reader starts while the file is inside the rename gap
+				// behind the held lock. A non-lock-aware read would see ENOENT
+				// here and misreport a definitively-missing record.
+				const readPromise = second.readFresh("task-lock")
+				const raced = await Promise.race([
+					readPromise.then(() => "settled" as const),
+					new Promise((resolve) => setTimeout(() => resolve("pending" as const), 50)),
+				])
+				expect(raced).toBe("pending")
+
+				releaseWriter()
+				await writer
+				// The read waits out the write and observes the final durable
+				// record — never the gap, never the stale pre-write state.
+				await expect(readPromise).resolves.toEqual({ kind: "found", item: finalItem })
+				expect(second.get("task-lock")).toMatchObject({ status: "delegated", awaitingChildId: "child-9" })
+			} finally {
+				second.dispose()
+			}
 		})
 	})
 })

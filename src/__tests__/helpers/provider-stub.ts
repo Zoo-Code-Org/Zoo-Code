@@ -4,21 +4,27 @@ import { type Task } from "../../core/task/Task"
 
 type ProviderStubFields = {
 	delegationTransitionLocks?: Map<string, Promise<void>>
+	delegationTransitionOwners?: Map<string, symbol>
 	cancelledDelegationChildIds?: Set<string>
+	explicitProfileClearChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
 	taskHistoryStore?: { get: (id: string) => unknown }
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
 	tasks?: Task[]
 	runDelegationTransition?: unknown
+	markDelegatedChildInterruptedUnlocked?: unknown
 	removeClineFromStack?: unknown
 	evictCurrentTask?: unknown
+	invalidateProviderHandoffProjectionState?: unknown
 }
 
 type PrivateProviderMethods = {
 	runDelegationTransition: (this: unknown, ...args: unknown[]) => unknown
+	markDelegatedChildInterruptedUnlocked: (this: unknown, ...args: unknown[]) => unknown
 	removeClineFromStack: (this: unknown, ...args: unknown[]) => unknown
 	evictCurrentTask: (this: unknown, ...args: unknown[]) => unknown
+	invalidateProviderHandoffProjectionState: (this: unknown, ...args: unknown[]) => unknown
 }
 
 /**
@@ -35,7 +41,9 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	const s = stub as T & ProviderStubFields
 	const proto = ClineProvider.prototype as unknown as PrivateProviderMethods
 	s.delegationTransitionLocks ??= new Map()
+	s.delegationTransitionOwners ??= new Map()
 	s.cancelledDelegationChildIds ??= new Set()
+	s.explicitProfileClearChildIds ??= new Set()
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
 
@@ -49,7 +57,11 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	delete s.clineStack
 
 	s.runDelegationTransition ??= proto.runDelegationTransition.bind(s)
+	s.markDelegatedChildInterruptedUnlocked ??= proto.markDelegatedChildInterruptedUnlocked.bind(s)
 	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
 	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)
+	s.invalidateProviderHandoffProjectionState ??= (
+		ClineProvider.prototype as unknown as PrivateProviderMethods
+	).invalidateProviderHandoffProjectionState.bind(s)
 	return s as unknown as ClineProvider
 }

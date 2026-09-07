@@ -336,8 +336,11 @@ describe("importExport", () => {
 			;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
 
 			// Invalid content (missing required fields).
+			// A missing apiConfigs record is invalid; a missing
+			// currentApiConfigName is legal (the identity is optional and an
+			// explicit clear removes it).
 			const mockInvalidContent = JSON.stringify({
-				providerProfiles: { apiConfigs: {} },
+				providerProfiles: {},
 				globalSettings: {},
 			})
 
@@ -349,7 +352,7 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(result).toEqual({ success: false, error: "[providerProfiles.currentApiConfigName]: Required" })
+			expect(result).toEqual({ success: false, error: "[providerProfiles.apiConfigs]: Required" })
 			expect(fs.readFile).toHaveBeenCalledWith("/mock/path/settings.json", "utf-8")
 			expect(mockProviderSettingsManager.import).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValues).not.toHaveBeenCalled()
@@ -408,6 +411,112 @@ describe("importExport", () => {
 				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
 				{ name: "default", id: "default-id", apiProvider: providerIdentifiers.anthropic },
 			])
+		})
+
+		it("preserves an explicit clear from a sentinel-marked export instead of defaulting to the first profile", async () => {
+			// A cleared export written by exportSettings: no identity key plus
+			// the explicit `currentApiConfigCleared` sentinel.
+			const clearedFileContent = JSON.stringify({
+				providerProfiles: {
+					currentApiConfigCleared: true,
+					apiConfigs: {
+						test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+					},
+				},
+			})
+			;(fs.readFile as Mock).mockResolvedValue(clearedFileContent)
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+			])
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result.success).toBe(true)
+			// The intentional clear survives the import: no fallback to the
+			// first profile, and the durable store receives the cleared identity.
+			expect(mockProviderSettingsManager.import).toHaveBeenCalledWith(
+				expect.objectContaining({ currentApiConfigName: undefined }),
+			)
+			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", undefined)
+			// An intentional clear is not a warning-worthy fallback.
+			expect(result).toMatchObject({ warnings: undefined })
+		})
+
+		it("keeps the first-profile fallback for a legacy export that merely lacks the identity", async () => {
+			// Legacy export without the sentinel: absence is ambiguous and the
+			// historical fallback behavior is preserved.
+			const legacyFileContent = JSON.stringify({
+				providerProfiles: {
+					apiConfigs: {
+						test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+					},
+				},
+			})
+			;(fs.readFile as Mock).mockResolvedValue(legacyFileContent)
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+			])
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result.success).toBe(true)
+			expect(mockProviderSettingsManager.import).toHaveBeenCalledWith(
+				expect.objectContaining({ currentApiConfigName: "test" }),
+			)
+			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "test")
+			expect(result).toMatchObject({
+				warnings: [`Profile "undefined" was not available; defaulting to "test".`],
+			})
+		})
+
+		it("falls back predictably when a named identity is not among the imported profiles", async () => {
+			const ghostFileContent = JSON.stringify({
+				providerProfiles: {
+					currentApiConfigName: "ghost",
+					apiConfigs: {
+						test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+					},
+				},
+			})
+			;(fs.readFile as Mock).mockResolvedValue(ghostFileContent)
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+			])
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result.success).toBe(true)
+			expect(mockProviderSettingsManager.import).toHaveBeenCalledWith(
+				expect.objectContaining({ currentApiConfigName: "test" }),
+			)
+			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "test")
+			expect(result).toMatchObject({
+				warnings: [`Profile "ghost" was not available; defaulting to "test".`],
+			})
 		})
 
 		it("should return success: false when file content is not valid JSON", async () => {
@@ -1506,6 +1615,46 @@ describe("importExport", () => {
 			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 				providerProfiles: mockProviderProfiles,
 				globalSettings: mockGlobalSettings,
+			})
+		})
+
+		it("marks a cleared export with the explicit-clear sentinel and writes identified exports unchanged", async () => {
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({ fsPath: "/mock/path/export.json" })
+
+			// Cleared durable state: the export carries the sentinel so an
+			// importing client can distinguish the clear from a legacy export.
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: undefined,
+				apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+			})
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+
+			await exportSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+			})
+
+			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/export.json", {
+				providerProfiles: expect.objectContaining({ currentApiConfigCleared: true }),
+				globalSettings: { mode: "code" },
+			})
+
+			// An export that still carries an identity is written unchanged.
+			;(safeWriteJson as Mock).mockClear()
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "test",
+				apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+			})
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({ fsPath: "/mock/path/export2.json" })
+
+			await exportSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+			})
+
+			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/export2.json", {
+				providerProfiles: expect.not.objectContaining({ currentApiConfigCleared: true }),
+				globalSettings: { mode: "code" },
 			})
 		})
 

@@ -299,8 +299,80 @@ describe("History resume delegation - parent metadata transitions", () => {
 				status: "active",
 				completedByChildId: "child-1",
 			}),
-			{ startTask: false },
+			{ startTask: false, transitionOwner: expect.anything() },
 		)
+	})
+
+	it("reopenParentFromDelegation invalidates the child's projection state at the durable commit boundary so a later reconstruction failure cannot retain it", async () => {
+		const parentHistoryItem = {
+			id: "parent-1",
+			status: "delegated",
+			awaitingChildId: "child-1",
+			ts: Date.now(),
+			task: "Parent task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const childHistoryItem = {
+			id: "child-1",
+			status: "active",
+			pendingAction: {
+				kind: "finish_subtask",
+				actionId: "finish-action",
+				approvalText: JSON.stringify({ tool: "finishTask" }),
+				parentTaskId: "parent-1",
+				result: "Done",
+			},
+		}
+		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-1" })),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			// Parent reconstruction fails after the child is already durably
+			// completed: the terminal invalidation must still have happened.
+			createTaskWithHistoryItem: vi.fn().mockRejectedValue(new Error("parent reconstruction failed")),
+			taskHistoryStore,
+			isViewLaunched: false,
+			emit: vi.fn(),
+			log: vi.fn(),
+		})
+		const providerState = provider as unknown as {
+			providerHandoffProjectionTargets?: Map<string, { token: number; admittedGeneration?: number }>
+			explicitProfileClearChildIds: Set<string>
+			staleProviderHandoffProjection?: { childTaskId: string }
+		}
+		providerState.providerHandoffProjectionTargets = new Map([["child-1", { token: 7, admittedGeneration: 3 }]])
+		providerState.explicitProfileClearChildIds.add("child-1")
+		providerState.staleProviderHandoffProjection = { childTaskId: "child-1" }
+
+		await expect(
+			ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-1",
+				childTaskId: "child-1",
+				completionResultSummary: "Done",
+				pendingActionId: "finish-action",
+			}),
+		).rejects.toThrow("parent reconstruction failed")
+
+		// The durable commit happened (child completed), so the child's
+		// projection-target registration, explicit-clear bookkeeping, and
+		// stale marker are gone even though the parent reopen failed.
+		expect(taskHistoryStore.atomicUpdatePair).toHaveBeenCalledTimes(1)
+		expect(providerState.providerHandoffProjectionTargets?.has("child-1")).toBe(false)
+		expect(providerState.explicitProfileClearChildIds.has("child-1")).toBe(false)
+		expect(providerState.staleProviderHandoffProjection).toBeUndefined()
+		// A deferred projection settlement presenting the old identity is
+		// inert: exact token/generation no longer matches any registration.
+		expect(
+			(
+				ClineProvider.prototype as unknown as {
+					isProviderHandoffProjectionStillRelevant: (this: unknown, ...args: unknown[]) => boolean
+				}
+			).isProviderHandoffProjectionStillRelevant.call(provider, "child-1", 7, 3),
+		).toBe(false)
 	})
 
 	it("reopenParentFromDelegation injects subtask_result into both UI and API histories", async () => {
@@ -947,7 +1019,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				status: "active",
 				completedByChildId: "child-rpd02",
 			}),
-			{ startTask: false },
+			{ startTask: false, transitionOwner: expect.anything() },
 		)
 		expect(parentInstance.resumeAfterDelegation).toHaveBeenCalledTimes(1)
 	})

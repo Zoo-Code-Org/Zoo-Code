@@ -1776,6 +1776,7 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			activateProfile: vi.fn().mockResolvedValue(profile),
@@ -1797,6 +1798,7 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
+			getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
@@ -1826,6 +1828,7 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
@@ -1853,6 +1856,7 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
@@ -2023,6 +2027,7 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
+			getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([
@@ -2373,6 +2378,7 @@ describe("ClineProvider", () => {
 			}
 
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				activateProfile: vi.fn().mockResolvedValue(profile),
@@ -2397,6 +2403,7 @@ describe("ClineProvider", () => {
 
 		test("saves current config when switching to mode without config", async () => {
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -2459,6 +2466,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -2523,6 +2531,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
@@ -2587,6 +2596,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -2618,6 +2628,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -2662,6 +2673,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager to throw error
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
@@ -2764,6 +2776,7 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
 				listConfig: vi
 					.fn()
@@ -2797,6 +2810,7 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -2842,6 +2856,7 @@ describe("ClineProvider", () => {
 				throw new Error("API handler error")
 			})
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -2885,6 +2900,7 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -5010,6 +5026,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -5041,6 +5058,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const saveConfig = vi.fn().mockResolvedValue(undefined)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi.fn().mockResolvedValue([
 						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -5082,6 +5100,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -5100,6 +5119,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi.fn(),
 				}
 
@@ -5115,6 +5135,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -5136,6 +5157,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -5156,6 +5178,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					getCurrentProfileName: vi.fn().mockResolvedValue("default"),
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
