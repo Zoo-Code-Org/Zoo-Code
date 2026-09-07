@@ -3,11 +3,12 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type HistoryItem } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
 import { Task, TaskOptions } from "../../task/Task"
+import { PRODUCTION_PROVIDER_HANDOFF_POLICY } from "../../task-persistence/providerHandoff"
 import { ClineProvider } from "../ClineProvider"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -101,6 +102,20 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 })
 
 vi.mock("../../task/Task", () => ({
+	isCompleteTaskHandoffExecutionContext: (execution: unknown) => {
+		const candidate = execution as
+			| { mode?: unknown; apiConfigName?: unknown; apiConfiguration?: unknown }
+			| undefined
+		return (
+			candidate !== undefined &&
+			typeof candidate === "object" &&
+			typeof candidate.mode === "string" &&
+			candidate.mode.length > 0 &&
+			typeof candidate.apiConfigName === "string" &&
+			candidate.apiConfigName.length > 0 &&
+			candidate.apiConfiguration !== undefined
+		)
+	},
 	Task: vi.fn().mockImplementation(function (options) {
 		const mockTask = {
 			api: undefined,
@@ -113,8 +128,17 @@ vi.mock("../../task/Task", () => ({
 			taskId: options?.historyItem?.id || "test-task-id",
 			emit: vi.fn(),
 			setTaskApiConfigName: vi.fn(),
-			updateApiConfiguration: vi.fn().mockImplementation(function (this: any, newConfig: any) {
+			updateApiConfiguration: vi.fn().mockImplementation(function (
+				this: { apiConfiguration?: unknown },
+				newConfig: unknown,
+			) {
 				this.apiConfiguration = newConfig
+			}),
+			adoptHandoffExecutionContext: vi.fn().mockImplementation(function (
+				this: { apiConfiguration?: unknown },
+				execution: { mode: string; apiConfigName?: string; apiConfiguration: unknown },
+			) {
+				this.apiConfiguration = execution.apiConfiguration
 			}),
 		}
 		// Define apiConfiguration as a property so tests can read it
@@ -235,6 +259,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			// Durable identity present by default: the explicit-clear
+			// reconstruction fallback must not engage in these tests.
+			getCurrentProfileName: vi.fn().mockResolvedValue("test-config"),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -257,6 +284,20 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}),
+			snapshotForHandoff: vi.fn().mockResolvedValue({
+				currentApiConfigName: "test-config",
+				entries: [
+					{
+						name: "test-config",
+						id: "test-id",
+						apiProvider: providerIdentifiers.openrouter,
+						modelId: "openai/gpt-4",
+					},
+				],
+				modeApiConfigId: undefined,
+				savedProfile: undefined,
+			}),
+			projectHandoffState: vi.fn().mockResolvedValue(undefined),
 		}
 
 		// Get the buildApiHandler mock
@@ -481,7 +522,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("timed-out mutations abort before writing state and release the caller", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -526,7 +567,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				// Aborted first activation wrote nothing; only second profile is set.
 				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
-				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+				// The timeout released the caller while the started write stayed
+				// owned by the queue; the log records the fenced release.
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"timed out; the caller is released and later admitted mutations supersede it",
+					),
+				)
 			} finally {
 				vi.useRealTimers()
 			}
@@ -612,6 +659,167 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
 		})
 
+		test("pending child preparation applies its profile without posting an empty task state", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
+
+			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
+			expect(setValueSpy).toHaveBeenCalledWith(
+				"listApiConfigMeta",
+				expect.arrayContaining([expect.objectContaining({ name: "ask-profile", id: "ask-id" })]),
+			)
+			expect(setValueSpy.mock.calls.filter(([key]) => key === "listApiConfigMeta")).toHaveLength(2)
+			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4.1-mini" }),
+			)
+			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation restores the previous mode when profile lookup rejects", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("mode", "code")
+			const lookupError = new Error("profile lookup failed")
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockRejectedValue(lookupError)
+			const emitSpy = vi.spyOn(provider, "emit")
+			vi.mocked(mockContext.globalState.update).mockClear()
+
+			await expect(
+				provider.handleModeSwitch("ask" as Mode, null, {
+					pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+				}),
+			).rejects.toThrow(lookupError)
+
+			const modeWrites = vi.mocked(mockContext.globalState.update).mock.calls.filter(([key]) => key === "mode")
+			expect(modeWrites).toEqual([
+				["mode", "ask"],
+				["mode", "code"],
+			])
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
+			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "code")
+		})
+
+		test("pending child preparation tolerates a current profile missing from configuration metadata", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("currentApiConfigName", "missing-config")
+
+			await expect(
+				provider.handleModeSwitch("ask" as Mode, null, {
+					pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+				}),
+			).resolves.toBeUndefined()
+
+			expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation keeps the current profile when the mode has no saved profile", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("currentApiConfigName", "test-config")
+			provider["providerSettingsManager"].listConfig = vi.fn().mockResolvedValue([
+				{ name: "other-config", id: "other-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.openrouter },
+			])
+			const activateProfileSpy = vi.spyOn(provider["providerSettingsManager"], "activateProfile")
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			expect(provider["providerSettingsManager"].setModeConfig).toHaveBeenCalledWith("ask", "test-id")
+			expect(activateProfileSpy).not.toHaveBeenCalled()
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation leaves an unsaved mode unassigned without a current profile", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("currentApiConfigName", undefined)
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
+
+			expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation preserves the locked profile without posting state", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			vi.mocked(mockContext.workspaceState.get).mockReturnValue(true)
+			const getModeConfigIdSpy = vi.spyOn(provider["providerSettingsManager"], "getModeConfigId")
+			const activateProfileSpy = vi.spyOn(provider["providerSettingsManager"], "activateProfile")
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
+			expect(activateProfileSpy).not.toHaveBeenCalled()
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			await provider.handleModeSwitch("architect" as Mode, null)
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			await provider.handleModeSwitch("architect" as Mode, unrelatedTask)
+			expect(postStateSpy).toHaveBeenCalledOnce()
+		})
+
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
 			const mockTask = new Task({
 				...defaultTaskOptions,
@@ -653,6 +861,19 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect((mockTask as any).apiConfiguration.openRouterModelId).toBe("openai/gpt-4")
 			expect((mockTask as any).apiConfiguration.modelTemperature).toBe(0.9)
 			expect((mockTask as any).apiConfiguration.rateLimitSeconds).toBe(7)
+		})
+
+		test("suppresses only explicitly suppressed profile state posts", async () => {
+			const mockTask = new Task(defaultTaskOptions)
+			await provider.addClineToStack(mockTask)
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.activateProviderProfile({ name: "test-config" }, { suppressStatePost: true })
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			await provider.activateProviderProfile({ name: "test-config" })
+			expect(postStateSpy).toHaveBeenCalledOnce()
 		})
 
 		test("calls updateApiConfiguration when provider changes and syncs task.apiConfiguration", async () => {
@@ -734,6 +955,441 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 	})
 
+	describe("delegateParentAndOpenChild - nested root handoff", () => {
+		test("real mode-switch handoff publishes no state and leaves the exposed root task untouched", async () => {
+			// Nested registry topology: root at the bottom, parent focused on top.
+			const rootTask = new Task(defaultTaskOptions)
+			Object.defineProperty(rootTask, "taskId", { value: "root-task-id" })
+			rootTask["_taskMode"] = "code" as Mode
+			rootTask["_taskApiConfigName"] = "test-config"
+
+			const parentTask = new Task(defaultTaskOptions)
+			Object.defineProperty(parentTask, "taskId", { value: "parent-task-id" })
+			parentTask["_taskMode"] = "code" as Mode
+			Object.defineProperty(parentTask, "flushPendingToolResultsToHistory", {
+				value: vi.fn().mockResolvedValue(true),
+			})
+
+			await provider.addClineToStack(rootTask)
+			await provider.addClineToStack(parentTask)
+			expect(provider.getCurrentTask()).toBe(parentTask)
+
+			// External system only: the store executes the delegation updater and
+			// returns the parent and root histories.
+			const parentHistory: HistoryItem = {
+				id: "parent-task-id",
+				number: 2,
+				ts: 2,
+				task: "Parent",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "active",
+				mode: "code",
+				childIds: [],
+			}
+			const rootHistory: HistoryItem = {
+				id: "root-task-id",
+				number: 1,
+				ts: 1,
+				task: "Root",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "active",
+				mode: "code",
+				childIds: ["parent-task-id"],
+			}
+			const atomicUpdateSpy = vi
+				.spyOn(provider.taskHistoryStore, "atomicReadAndUpdate")
+				.mockImplementation(async (_taskId: string, updater: (current: HistoryItem) => HistoryItem) => [
+					updater(parentHistory),
+					rootHistory,
+				])
+
+			// createTask double: an inert child whose insertion reproduces the real
+			// stack transition through the real addClineToStack.
+			const child = new Task({ ...defaultTaskOptions })
+			Object.defineProperty(child, "taskId", { value: "child-task-id" })
+			child["_taskMode"] = "code" as Mode
+			Object.defineProperty(child, "run", { value: vi.fn().mockResolvedValue(undefined) })
+			const createTaskSpy = vi.spyOn(provider, "createTask").mockImplementation(async () => {
+				await provider.addClineToStack(child)
+				return child
+			})
+
+			// Snapshot the newly exposed root task before delegation.
+			const rootTaskModeBefore = rootTask["_taskMode"]
+			const rootApiConfigurationBefore = rootTask.apiConfiguration
+			const rootStickyProfileBefore = rootTask["_taskApiConfigName"]
+			const rootClineMessagesBefore = rootTask.clineMessages
+			const rootApiHistoryBefore = rootTask.apiConversationHistory
+
+			// Spy without replacing the implementation: the handoff must not
+			// publish any state.
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview")
+
+			const childResult = await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			// Drain the fire-and-forget scheduler so the inert child start settles.
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			expect(childResult).toBe(child)
+			expect(createTaskSpy).toHaveBeenCalledWith("Do child work", undefined, parentTask, {
+				initialTodos: [],
+				initialStatus: "active",
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "test-config",
+					apiConfiguration: expect.anything(),
+				},
+			})
+			expect(atomicUpdateSpy).toHaveBeenCalledTimes(1)
+
+			// The prepared context became authoritative on the paused child after
+			// the durable commit.
+			expect(child.adoptHandoffExecutionContext).toHaveBeenCalledWith({
+				mode: "ask",
+				apiConfigName: "test-config",
+				apiConfiguration: expect.anything(),
+			})
+
+			// The mode/profile projection is a post-commit legacy write: it happens
+			// only after the atomic delegation commit, and no state is published at
+			// any point during the delegation.
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			const globalUpdateMock = vi.mocked(mockContext.globalState.update)
+			const modeWriteIndex = globalUpdateMock.mock.calls.findIndex(([key]) => key === "mode")
+			expect(modeWriteIndex).toBeGreaterThanOrEqual(0)
+			expect(globalUpdateMock.mock.invocationCallOrder[modeWriteIndex]).toBeGreaterThan(
+				atomicUpdateSpy.mock.invocationCallOrder[0],
+			)
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			// The stack transitioned parent -> child through the real addClineToStack,
+			// exposing the root beneath.
+			expect(provider.getCurrentTaskStack()).toEqual(["root-task-id", "child-task-id"])
+			expect(provider.getCurrentTask()).toBe(child)
+
+			// The exposed root task kept its identity and values: no mode, profile,
+			// API configuration, or history mutation.
+			expect(rootTask["_taskMode"]).toBe(rootTaskModeBefore)
+			expect(rootTask.apiConfiguration).toBe(rootApiConfigurationBefore)
+			expect(rootTask.apiConfiguration).toEqual(rootApiConfigurationBefore)
+			expect(rootTask["_taskApiConfigName"]).toBe(rootStickyProfileBefore)
+			expect(rootTask.clineMessages).toBe(rootClineMessagesBefore)
+			expect(rootTask.apiConversationHistory).toBe(rootApiHistoryBefore)
+			expect(rootTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(rootTask.setTaskApiConfigName).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("delegateParentAndOpenChild - provider handoff transaction", () => {
+		/** Sole-parent topology for transaction-level assertions. */
+		async function setupSoleParentDelegation() {
+			const parentTask = new Task(defaultTaskOptions)
+			Object.defineProperty(parentTask, "taskId", { value: "parent-task-id" })
+			parentTask["_taskMode"] = "code" as Mode
+			Object.defineProperty(parentTask, "flushPendingToolResultsToHistory", {
+				value: vi.fn().mockResolvedValue(true),
+			})
+			await provider.addClineToStack(parentTask)
+			await provider.contextProxy.setValue("mode", "code")
+
+			const child = new Task({ ...defaultTaskOptions })
+			Object.defineProperty(child, "taskId", { value: "child-task-id" })
+			child["_taskMode"] = "code" as Mode
+			Object.defineProperty(child, "run", { value: vi.fn().mockResolvedValue(undefined) })
+
+			const parentHistory: HistoryItem = {
+				id: "parent-task-id",
+				number: 1,
+				ts: 1,
+				task: "Parent",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "active",
+				mode: "code",
+				childIds: [],
+			}
+			const atomicUpdateSpy = vi
+				.spyOn(provider.taskHistoryStore, "atomicReadAndUpdate")
+				.mockImplementation(async (_taskId: string, updater: (current: HistoryItem) => HistoryItem) => [
+					updater(parentHistory),
+				])
+			const createTaskSpy = vi.spyOn(provider, "createTask").mockImplementation(async () => {
+				await provider.addClineToStack(child)
+				return child
+			})
+
+			return { parentTask, child, atomicUpdateSpy, createTaskSpy }
+		}
+
+		test("preparation failure keeps the parent current with every store unchanged and publishes nothing", async () => {
+			const { parentTask, atomicUpdateSpy, createTaskSpy } = await setupSoleParentDelegation()
+
+			const preparationError = new Error("profile snapshot failed")
+			provider["providerSettingsManager"].snapshotForHandoff = vi.fn().mockRejectedValue(preparationError)
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview")
+			const emitSpy = vi.spyOn(provider, "emit")
+			vi.mocked(mockContext.globalState.update).mockClear()
+			vi.mocked(mockContext.secrets.store).mockClear()
+
+			await expect(
+				provider.delegateParentAndOpenChild({
+					parentTaskId: "parent-task-id",
+					message: "Do child work",
+					initialTodos: [],
+					mode: "ask",
+				}),
+			).rejects.toThrow(preparationError)
+
+			// Fail closed: the parent was never removed.
+			expect(provider.getCurrentTask()).toBe(parentTask)
+			expect(createTaskSpy).not.toHaveBeenCalled()
+			expect(atomicUpdateSpy).not.toHaveBeenCalled()
+
+			// No store was touched and nothing was published.
+			expect(mockContext.globalState.update).not.toHaveBeenCalled()
+			expect(mockContext.secrets.store).not.toHaveBeenCalled()
+			expect(provider["providerSettingsManager"].projectHandoffState).not.toHaveBeenCalled()
+			expect(postStateSpy).not.toHaveBeenCalled()
+			expect(emitSpy).not.toHaveBeenCalledWith(
+				RooCodeEventName.TaskDelegated,
+				"parent-task-id",
+				expect.anything(),
+			)
+		})
+
+		test("a saved profile passes the full configuration with its sentinel secret to the child", async () => {
+			const { child, atomicUpdateSpy, createTaskSpy } = await setupSoleParentDelegation()
+
+			provider["providerSettingsManager"].snapshotForHandoff = vi.fn().mockResolvedValue({
+				currentApiConfigName: "test-config",
+				entries: [{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }],
+				modeApiConfigId: "ask-id",
+				savedProfile: {
+					name: "ask-profile",
+					id: "ask-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+					openRouterApiKey: "sk-handoff-sentinel-987654",
+				},
+			})
+			vi.mocked(mockContext.globalState.update).mockClear()
+
+			await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			const creationOptions = createTaskSpy.mock.calls[0]?.[3]
+			if (!creationOptions) {
+				throw new Error("expected createTask to have been called")
+			}
+			expect(creationOptions).toMatchObject({
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "ask-profile",
+				},
+			})
+			// The full saved profile data — including the provider secret field —
+			// reaches the child's construction configuration.
+			expect(creationOptions.handoffExecutionContext?.apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "sk-handoff-sentinel-987654",
+			})
+
+			// The prepared context is authoritative on the child after the commit.
+			expect(child.adoptHandoffExecutionContext).toHaveBeenCalledWith(
+				expect.objectContaining({
+					mode: "ask",
+					apiConfigName: "ask-profile",
+					apiConfiguration: expect.objectContaining({ openRouterApiKey: "sk-handoff-sentinel-987654" }),
+				}),
+			)
+
+			// Post-commit legacy projections only: current profile and durable mode
+			// mapping are written after the atomic commit, never before it.
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
+			expect(provider["providerSettingsManager"].projectHandoffState).toHaveBeenCalledWith({
+				intent: { kind: "set", name: "ask-profile" },
+				mode: "ask",
+				modeConfigId: "ask-id",
+			})
+			const globalUpdateMock = vi.mocked(mockContext.globalState.update)
+			const modeWriteIndex = globalUpdateMock.mock.calls.findIndex(([key]) => key === "mode")
+			expect(modeWriteIndex).toBeGreaterThanOrEqual(0)
+			expect(globalUpdateMock.mock.invocationCallOrder[modeWriteIndex]).toBeGreaterThan(
+				atomicUpdateSpy.mock.invocationCallOrder[0],
+			)
+		})
+
+		test("the locked profile keeps the current configuration and persists no mode mapping", async () => {
+			const { createTaskSpy } = await setupSoleParentDelegation()
+
+			vi.mocked(mockContext.workspaceState.get).mockReturnValue(true)
+			vi.mocked(mockContext.globalState.update).mockClear()
+
+			await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			const creationOptions = createTaskSpy.mock.calls[0]?.[3]
+			if (!creationOptions) {
+				throw new Error("expected createTask to have been called")
+			}
+			expect(creationOptions).toMatchObject({
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "test-config",
+				},
+			})
+			// Locked: the child continues with the current context configuration.
+			expect(creationOptions.handoffExecutionContext?.apiConfiguration).toEqual(
+				provider.contextProxy.getProviderSettings(),
+			)
+
+			// A locked handoff carries an explicit preserve intent: no profile
+			// write at all — and with the pin engaged there is no mode mapping
+			// to persist either, so the durable store is never touched.
+			expect(provider["providerSettingsManager"].projectHandoffState).not.toHaveBeenCalled()
+			expect(provider["providerSettingsManager"].snapshotForHandoff).toHaveBeenCalledWith("ask")
+		})
+
+		test("a ContextProxy projection failure keeps the committed child current and publication derives child values", async () => {
+			const { child } = await setupSoleParentDelegation()
+
+			const projectionError = new Error("context write failed")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(projectionError)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			// The projection failed at the ContextProxy boundary...
+			expect(setValueSpy).toHaveBeenCalled()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Post-commit handoff projection failed"))
+
+			// ...but the committed child remains current, started, and authoritative.
+			expect(provider.getCurrentTask()).toBe(child)
+			expect(child.run).toHaveBeenCalledTimes(1)
+			const staleMarker = provider["staleProviderHandoffProjection"]
+			expect(staleMarker).toMatchObject({ childTaskId: "child-task-id", requestedMode: "ask" })
+
+			// Publication derives the child's execution fields from the prepared
+			// context instead of the stale partial global state.
+			const state = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+			expect(state.mode).toBe("ask")
+			expect(state.currentApiConfigName).toBe("test-config")
+			expect(state.apiConfiguration).toEqual(staleMarker?.apiConfiguration)
+		})
+
+		test("a later successful same-child mode mutation supersedes the stale projection marker", async () => {
+			const { child } = await setupSoleParentDelegation()
+
+			const projectionError = new Error("context write failed")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(projectionError)
+
+			await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			// The failed projection left a stale marker and publication overlays it.
+			expect(provider["staleProviderHandoffProjection"]).toMatchObject({ childTaskId: "child-task-id" })
+			const stateBefore = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+			expect(stateBefore.mode).toBe("ask")
+
+			// The user switches the child's mode: the mutation runs on the same
+			// bounded queue and succeeds, so it supersedes the older marker.
+			await provider["enqueueProviderProfileMutation"].call(provider, async () => {
+				await provider.contextProxy.setValue("mode", "code")
+			})
+
+			expect(provider["staleProviderHandoffProjection"]).toBeUndefined()
+			// Publication returns the new values, never the stale snapshot.
+			const stateAfter = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+			expect(stateAfter.mode).toBe("code")
+			expect(stateAfter.currentApiConfigName).toBe("test-config")
+			expect(setValueSpy).toHaveBeenCalledWith("mode", "code")
+			expect(child.run).toHaveBeenCalledTimes(1)
+		})
+
+		test("a profile-store projection failure is logged redacted and never undoes the delegation", async () => {
+			const { child } = await setupSoleParentDelegation()
+
+			const sentinel = "sk-handoff-sentinel-246810"
+			provider["providerSettingsManager"].snapshotForHandoff = vi.fn().mockResolvedValue({
+				currentApiConfigName: "test-config",
+				entries: [{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }],
+				modeApiConfigId: "ask-id",
+				savedProfile: {
+					name: "ask-profile",
+					id: "ask-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: sentinel,
+				},
+			})
+			const projectionError = new Error(`durable store rejected ${sentinel}`)
+			provider["providerSettingsManager"].projectHandoffState = vi.fn().mockRejectedValue(projectionError)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.delegateParentAndOpenChild({
+				parentTaskId: "parent-task-id",
+				message: "Do child work",
+				initialTodos: [],
+				mode: "ask",
+			})
+			await Promise.resolve()
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			// Delegation stays committed; the child started with the exact snapshot.
+			expect(provider.getCurrentTask()).toBe(child)
+			expect(child.run).toHaveBeenCalledTimes(1)
+			expect(child.adoptHandoffExecutionContext).toHaveBeenCalledWith(
+				expect.objectContaining({ apiConfiguration: expect.objectContaining({ openRouterApiKey: sentinel }) }),
+			)
+
+			// The failure is logged redacted: no secret value appears in any log.
+			const logged = logSpy.mock.calls.map((call) => call.join(" ")).join("\n")
+			expect(logged).toContain("Post-commit handoff projection failed")
+			expect(logged).not.toContain(sentinel)
+
+			// Publication reports the child's saved profile despite the stale global projection.
+			const state = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+			expect(state.mode).toBe("ask")
+			expect(state.currentApiConfigName).toBe("ask-profile")
+		})
+	})
+
 	describe("profile switching sequence", () => {
 		test("A -> B -> A updates task.apiConfiguration each time", async () => {
 			const mockTask = new Task({
@@ -801,6 +1457,49 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		test("returns undefined when no model ID is present", () => {
 			expect(getModelId({ apiProvider: providerIdentifiers.anthropic })).toBeUndefined()
 			expect(getModelId({})).toBeUndefined()
+		})
+	})
+
+	describe("createTask - one configuration source", () => {
+		test("derives the mistake limit from the resolved handoff configuration, not global state", async () => {
+			// The pre-handoff global configuration carries a different limit than
+			// the prepared handoff profile.
+			await provider.contextProxy.setValue("consecutiveMistakeLimit", 7)
+			vi.mocked(Task).mockClear()
+
+			await provider.createTask("Child work", undefined, undefined, {
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "code",
+					apiConfigName: "handoff-profile",
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+						consecutiveMistakeLimit: 3,
+					},
+				},
+			})
+
+			// The API handler is built from the resolved handoff configuration;
+			// every profile-derived constructor input must come from the SAME
+			// source, so the child is constructed with the handoff profile's
+			// limit — never the stale global one.
+			const constructorOptions = vi.mocked(Task).mock.calls.at(-1)?.[0]
+			expect(constructorOptions?.apiConfiguration).toMatchObject({ consecutiveMistakeLimit: 3 })
+			expect(constructorOptions?.consecutiveMistakeLimit).toBe(3)
+		})
+
+		test("ordinary (non-handoff) tasks still derive the limit from global state", async () => {
+			await provider.contextProxy.setValue("consecutiveMistakeLimit", 7)
+			vi.mocked(Task).mockClear()
+
+			await provider.createTask("Ordinary work", undefined, undefined, { startTask: false })
+
+			// Control: without a handoff context the global configuration is the
+			// source of truth, unchanged from previous behavior.
+			const constructorOptions = vi.mocked(Task).mock.calls.at(-1)?.[0]
+			expect(constructorOptions?.apiConfiguration).toMatchObject({ consecutiveMistakeLimit: 7 })
+			expect(constructorOptions?.consecutiveMistakeLimit).toBe(7)
 		})
 	})
 })

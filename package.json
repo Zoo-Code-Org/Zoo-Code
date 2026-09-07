@@ -13,7 +13,7 @@
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
-		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check",
+		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-provider-handoff.ts && tsx scripts/check-task-store-concurrency.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
 		"parser-scope:model-check": "node scripts/run-native-tool-call-parser-scoping.mjs",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",

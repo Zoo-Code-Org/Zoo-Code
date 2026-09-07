@@ -645,6 +645,81 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("handoff execution context", () => {
+		it("adopts a complete explicit execution context synchronously at construction", async () => {
+			const handoffConfig: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			}
+			const task = new Task({
+				provider: mockProvider,
+				// Production passes the prepared snapshot as both the handler
+				// configuration and the handoff execution context.
+				apiConfiguration: handoffConfig,
+				task: "test task",
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "handoff-profile",
+					apiConfiguration: handoffConfig,
+				},
+			})
+
+			// Mode and sticky profile are authoritative immediately: no
+			// asynchronous inference from mutable global provider state.
+			await expect(task.getTaskMode()).resolves.toBe("ask")
+			await expect(task.getTaskApiConfigName()).resolves.toBe("handoff-profile")
+			// The handler configuration is the prepared snapshot, not global state.
+			expect(task.apiConfiguration).toEqual(handoffConfig)
+		})
+
+		it("rejects an incomplete handoff execution context at runtime", () => {
+			expect(
+				() =>
+					new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+						// Missing apiConfiguration: a partially explicit context must
+						// fail loudly instead of silently falling back to global state.
+						handoffExecutionContext: { mode: "ask", apiConfigName: undefined } as never,
+					}),
+			).toThrow("handoffExecutionContext must be complete")
+
+			expect(
+				() =>
+					new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+						// Empty mode with a configuration is equally incomplete.
+						handoffExecutionContext: {
+							mode: "",
+							apiConfigName: undefined,
+							apiConfiguration: mockApiConfig,
+						},
+					}),
+			).toThrow("handoffExecutionContext must be complete")
+		})
+
+		it("keeps ordinary initialization unchanged without a handoff context", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.apiConfiguration).toEqual(mockApiConfig)
+			// Without an explicit context the mode and profile still initialize
+			// asynchronously from provider state (the proxy defaults).
+			await expect(task.getTaskMode()).resolves.toBe("architect")
+			await expect(task.getTaskApiConfigName()).resolves.toBe("default")
+		})
+	})
+
 	describe("constructor", () => {
 		it("should always have diff strategy defined", async () => {
 			const cline = new Task({

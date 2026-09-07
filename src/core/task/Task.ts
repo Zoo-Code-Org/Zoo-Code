@@ -5,6 +5,8 @@ import crypto from "crypto"
 import { v7 as uuidv7 } from "uuid"
 import EventEmitter from "events"
 
+import deepEqual from "fast-deep-equal"
+
 import { AskIgnoredError } from "./AskIgnoredError"
 import { RateLimitClock, createRateLimitClock } from "./RateLimitClock"
 
@@ -172,6 +174,44 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
+/**
+ * All-or-none explicit execution context for provider delegation handoff.
+ * Internal to the extension runtime (deliberately not part of the public
+ * `CreateTaskOptions` package API): either every field is provided, or the
+ * context is omitted entirely — a partially explicit context would let the
+ * task silently fall back to inferring mode/profile from mutable global
+ * provider state, which is exactly what delegation must avoid.
+ */
+export interface TaskHandoffExecutionContext {
+	/** The requested mode the child must adopt synchronously at construction. */
+	readonly mode: string
+	/** Sticky profile name; undefined when the handoff keeps no named profile. */
+	readonly apiConfigName: string | undefined
+	/** Full API configuration (including provider secret fields) the child executes with. */
+	readonly apiConfiguration: ProviderSettings
+}
+
+/**
+ * Runtime completeness validation for {@link TaskHandoffExecutionContext}.
+ * The type system enforces all-or-none at compile time for internal callers;
+ * this guard also enforces it at runtime so a malformed (e.g. deserialized)
+ * options object cannot half-initialize a task.
+ */
+export function isCompleteTaskHandoffExecutionContext(value: unknown): value is TaskHandoffExecutionContext {
+	if (value === null || typeof value !== "object") {
+		return false
+	}
+	const candidate = value as Partial<TaskHandoffExecutionContext>
+	return (
+		typeof candidate.mode === "string" &&
+		candidate.mode.length > 0 &&
+		(candidate.apiConfigName === undefined || typeof candidate.apiConfigName === "string") &&
+		candidate.apiConfiguration !== undefined &&
+		typeof candidate.apiConfiguration === "object" &&
+		candidate.apiConfiguration !== null
+	)
+}
+
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
 	apiConfiguration: ProviderSettings
@@ -193,6 +233,12 @@ export interface TaskOptions extends CreateTaskOptions {
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 	rateLimitClock?: RateLimitClock
 	diffFuzzyThreshold?: number
+	/**
+	 * Handoff-only explicit execution context (provider delegation). Internal;
+	 * all-or-none — validated at runtime by
+	 * {@link isCompleteTaskHandoffExecutionContext}.
+	 */
+	handoffExecutionContext?: TaskHandoffExecutionContext
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -513,8 +559,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		initialStatus,
 		rateLimitClock,
 		diffFuzzyThreshold,
+		handoffExecutionContext,
 	}: TaskOptions) {
 		super()
+
+		// All-or-none runtime validation of the handoff execution context: a
+		// partially explicit context must fail loudly instead of silently
+		// falling back to global-state inference mid-handoff.
+		if (handoffExecutionContext !== undefined && !isCompleteTaskHandoffExecutionContext(handoffExecutionContext)) {
+			throw new Error(
+				"[Task] handoffExecutionContext must be complete: mode, apiConfiguration, and apiConfigName are required together",
+			)
+		}
 
 		if (startTask && !task && !images && !historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
@@ -587,6 +643,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
 			TelemetryService.instance.captureTaskRestarted(this.taskId)
+		} else if (handoffExecutionContext !== undefined) {
+			// Handoff-only explicit execution context: adopt synchronously and never
+			// asynchronously infer mode/profile from mutable global provider state.
+			// Completeness was validated at the top of the constructor.
+			this._taskMode = handoffExecutionContext.mode
+			this._taskApiConfigName = handoffExecutionContext.apiConfigName
+			this.taskModeReady = Promise.resolve()
+			this.taskApiConfigReady = Promise.resolve()
+			TelemetryService.instance.captureTaskCreated(this.taskId)
 		} else {
 			// For new tasks, don't set the mode/apiConfigName yet - wait for async initialization.
 			this._taskMode = undefined
@@ -894,6 +959,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	public setTaskApiConfigName(apiConfigName: string | undefined): void {
 		this._taskApiConfigName = apiConfigName
+	}
+
+	/**
+	 * Synchronously adopt an explicit provider-handoff execution context.
+	 *
+	 * Used only by provider delegation: after the durable delegation commit, the
+	 * prepared handoff snapshot becomes authoritative for this task's mode,
+	 * sticky profile, and API configuration. The task must not re-infer these
+	 * from mutable global provider state.
+	 *
+	 * @internal
+	 */
+	public adoptHandoffExecutionContext(execution: {
+		mode: string
+		apiConfigName: string | undefined
+		apiConfiguration: ProviderSettings
+	}): void {
+		this._taskMode = execution.mode
+		this._taskApiConfigName = execution.apiConfigName
+		this.taskModeReady = Promise.resolve()
+		this.taskApiConfigReady = Promise.resolve()
+
+		// The construction-time configuration is usually a clone of the same
+		// prepared snapshot; rebuild the handler only if it drifted by value.
+		if (!deepEqual(this.apiConfiguration, execution.apiConfiguration)) {
+			this.updateApiConfiguration(execution.apiConfiguration)
+		}
 	}
 
 	public setPendingTaskAction(pendingAction: PendingTaskAction): void {

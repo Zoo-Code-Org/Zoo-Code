@@ -1510,4 +1510,262 @@ describe("ProviderSettingsManager", () => {
 			expect(result.activeProfileId).toBe("local-id")
 		})
 	})
+
+	describe("snapshotForHandoff", () => {
+		/** Complete migrations so the constructor's initialize() never writes defaults. */
+		const fullyMigrated = {
+			rateLimitSecondsMigrated: true,
+			openAiHeadersMigrated: true,
+			consecutiveMistakeLimitMigrated: true,
+			todoListEnabledMigrated: true,
+			claudeCodeLegacySettingsMigrated: true,
+			routerProviderMigrated: true,
+		}
+
+		it("performs one locked load, zero secret stores, and preserves the full saved profile", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "current-profile",
+					apiConfigs: {
+						"current-profile": { id: "current-id", apiProvider: providerIdentifiers.openai },
+						"ask-profile": {
+							id: "ask-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterModelId: "openai/gpt-4",
+							openRouterApiKey: "sk-sentinel-123456",
+						},
+					},
+					modeApiConfigs: { ask: "ask-id" },
+					migrations: fullyMigrated,
+				}),
+			)
+
+			mockSecrets.get.mockClear()
+			const snapshot = await providerSettingsManager.snapshotForHandoff("ask")
+
+			// One lock acquisition performs exactly one store load.
+			expect(mockSecrets.get).toHaveBeenCalledTimes(1)
+			// Read-only: no secret store write happened during the snapshot.
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+
+			expect(snapshot.currentApiConfigName).toBe("current-profile")
+			expect(snapshot.modeApiConfigId).toBe("ask-id")
+			expect(snapshot.entries.map(({ name, id, apiProvider }) => ({ name, id, apiProvider }))).toEqual([
+				{ name: "current-profile", id: "current-id", apiProvider: providerIdentifiers.openai },
+				{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter },
+			])
+			// The saved profile includes the full data with the sentinel provider secret.
+			expect(snapshot.savedProfile).toMatchObject({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "sk-sentinel-123456",
+			})
+
+			// The snapshot must not alias the durable store data.
+			if (!snapshot.savedProfile) {
+				throw new Error("expected a saved profile snapshot")
+			}
+			snapshot.savedProfile.openRouterApiKey = "mutated"
+			mockSecrets.get.mockClear()
+			const reread = await providerSettingsManager.snapshotForHandoff("ask")
+			expect(reread.savedProfile?.openRouterApiKey).toBe("sk-sentinel-123456")
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("returns no saved profile when the mode has no saved mapping", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "current-profile",
+					apiConfigs: { "current-profile": { id: "current-id", apiProvider: providerIdentifiers.openai } },
+					modeApiConfigs: {},
+					migrations: fullyMigrated,
+				}),
+			)
+
+			const snapshot = await providerSettingsManager.snapshotForHandoff("architect")
+
+			expect(snapshot.modeApiConfigId).toBeUndefined()
+			expect(snapshot.savedProfile).toBeUndefined()
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("propagates load failures without mutating the store", async () => {
+			mockSecrets.get.mockResolvedValue("not-json{{{")
+
+			await expect(providerSettingsManager.snapshotForHandoff("ask")).rejects.toThrow(
+				"Failed to snapshot provider profiles for handoff",
+			)
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+			expect(mockSecrets.delete).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("projectHandoffState", () => {
+		it("persists the current profile name and mode mapping in one locked store write", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "old-current",
+					apiConfigs: {
+						"old-current": { id: "old-id", apiProvider: providerIdentifiers.openai },
+						"child-profile": { id: "child-id", apiProvider: providerIdentifiers.openrouter },
+					},
+					modeApiConfigs: { code: "old-id" },
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+					},
+				}),
+			)
+			mockSecrets.get.mockClear()
+
+			await providerSettingsManager.projectHandoffState({
+				intent: { kind: "set", name: "child-profile" },
+				mode: "ask",
+				modeConfigId: "child-id",
+			})
+
+			// One locked load + one locked store write.
+			expect(mockSecrets.get).toHaveBeenCalledTimes(1)
+			expect(mockSecrets.store).toHaveBeenCalledTimes(1)
+
+			const stored = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			expect(stored.currentApiConfigName).toBe("child-profile")
+			expect(stored.modeApiConfigs.ask).toBe("child-id")
+			expect(stored.modeApiConfigs.code).toBe("old-id")
+		})
+
+		it("skips the store write when the projection is already durable", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "child-profile",
+					apiConfigs: { "child-profile": { id: "child-id", apiProvider: providerIdentifiers.openrouter } },
+					modeApiConfigs: { ask: "child-id" },
+				}),
+			)
+			mockSecrets.store.mockClear()
+
+			await providerSettingsManager.projectHandoffState({
+				intent: { kind: "set", name: "child-profile" },
+				mode: "ask",
+				modeConfigId: "child-id",
+			})
+
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("propagates failures without a partial write", async () => {
+			mockSecrets.get.mockResolvedValue(null)
+			mockSecrets.store.mockRejectedValue(new Error("disk full"))
+
+			await expect(
+				providerSettingsManager.projectHandoffState({ intent: { kind: "set", name: "child-profile" } }),
+			).rejects.toThrow("Failed to project provider handoff state")
+		})
+
+		it("clear writes the explicit absence of a current profile identity and survives reload", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "old-current",
+					apiConfigs: { "old-current": { id: "old-id", apiProvider: providerIdentifiers.openai } },
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+					},
+				}),
+			)
+			mockSecrets.get.mockClear()
+			mockSecrets.store.mockClear()
+
+			await providerSettingsManager.projectHandoffState({ intent: { kind: "clear" } })
+
+			expect(mockSecrets.store).toHaveBeenCalledTimes(1)
+			const stored = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			// The identity is durably removed, not skipped.
+			expect(stored.currentApiConfigName).toBeUndefined()
+
+			// Reload: the cleared store parses back with no current identity.
+			mockSecrets.get.mockResolvedValue(mockSecrets.store.mock.calls[0][1])
+			const reloaded = await providerSettingsManager.snapshotForHandoff("code")
+			expect(reloaded.currentApiConfigName).toBeUndefined()
+		})
+
+		it("preserve performs no store write at all", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "pinned-profile",
+					apiConfigs: { "pinned-profile": { id: "pinned-id", apiProvider: providerIdentifiers.openai } },
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+					},
+				}),
+			)
+			mockSecrets.get.mockClear()
+			mockSecrets.store.mockClear()
+
+			await providerSettingsManager.projectHandoffState({
+				intent: { kind: "preserve" },
+				mode: "ask",
+				modeConfigId: "pinned-id",
+			})
+
+			// Preserve touches neither the identity nor anything else: zero
+			// store loads and zero writes even when a mode mapping is offered.
+			expect(mockSecrets.get).not.toHaveBeenCalled()
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("getCurrentProfileName", () => {
+		it("returns the durable identity and undefined after an explicit clear", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "current-profile",
+					apiConfigs: { "current-profile": { id: "current-id" } },
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+					},
+				}),
+			)
+			await expect(providerSettingsManager.getCurrentProfileName()).resolves.toBe("current-profile")
+
+			// An explicit handoff clear durably removed the identity: reload
+			// the projected store content and reconstruct the clear as
+			// undefined.
+			await providerSettingsManager.projectHandoffState({ intent: { kind: "clear" } })
+			const stored = mockSecrets.store.mock.calls.at(-1)?.[1] as string
+			mockSecrets.get.mockResolvedValue(stored)
+			await expect(providerSettingsManager.getCurrentProfileName()).resolves.toBeUndefined()
+		})
+
+		it("seeds the default identity for a fresh install, keeping the legacy fallback", async () => {
+			mockSecrets.get.mockResolvedValue(null)
+			// A fresh install's store carries the seeded "default" identity, so
+			// the publication fallback for ordinary (non-cleared) state is
+			// unchanged.
+			await expect(providerSettingsManager.getCurrentProfileName()).resolves.toBe("default")
+		})
+	})
 })

@@ -3,10 +3,12 @@
 import * as vscode from "vscode"
 import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
 import { RooCodeEventName } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
+import { createPreparedProviderHandoffContext } from "../../task-persistence/providerHandoff"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -845,6 +847,136 @@ describe("ClineProvider Task History Synchronization", () => {
 			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
 
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
+		})
+
+		/**
+		 * Register the real taskCreationCallback listeners on a fake task. The
+		 * callback is typed for the real Task class; the fake task double only
+		 * implements the event surface the callback touches.
+		 */
+		function registerFakeTask(fakeTask: ReturnType<typeof makeFakeTask>) {
+			const registerTaskEventListeners = provider["taskCreationCallback"] as (task: object) => void
+			registerTaskEventListeners(fakeTask)
+		}
+
+		/** Prepared clear-intent handoff whose deferred projection writes fail at the profile-meta read. */
+		function makeClearIntentPreparedHandoff() {
+			return createPreparedProviderHandoffContext({
+				requestedMode: "code",
+				profile: { source: "unsaved-current", name: undefined, id: undefined },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+			})
+		}
+
+		it("invalidates handoff projection state immediately after durable completion and before the TaskCompleted event; a late failed settlement cannot resurrect it", async () => {
+			const taskId = "task-cb-handoff-1"
+			await provider.updateTaskHistory(createHistoryItem({ id: taskId, task: "T" }), { broadcast: false })
+
+			// A deferred handoff projection is admitted and in flight on a gated
+			// profile-store write; its profile-meta read fails, so an UNFENCED
+			// settlement would stamp a stale marker and an explicit clear.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockRejectedValue(new Error("listConfig failed"))
+			let releaseProjection!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseProjection = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "projectHandoffState").mockReturnValue(writeGate)
+			const projection = provider["projectPreparedProviderHandoffState"](makeClearIntentPreparedHandoff(), taskId)
+
+			// Let the bounded queue admit the projection: it binds its token and
+			// admitted generation, then hangs on the gated write.
+			for (let i = 0; i < 25; i++) {
+				await Promise.resolve()
+			}
+			const registration = provider["providerHandoffProjectionTargets"]?.get(taskId)
+			expect(registration).toMatchObject({ token: expect.any(Number), admittedGeneration: expect.any(Number) })
+
+			// Observe ordering: the completed write lands before the completion
+			// event, and the projection registration is already dropped when the
+			// event fires.
+			const order: string[] = []
+			const updateTaskHistoryOriginal = provider.updateTaskHistory.bind(provider)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(async (item, options) => {
+				const history = await updateTaskHistoryOriginal(item, options)
+				order.push("persisted-completed")
+				return history
+			})
+			// A real TaskCompleted listener observes provider state at
+			// event-delivery time, which is what publication consumers see.
+			const emitSpy = vi.spyOn(provider, "emit")
+			let registrationAtTaskCompletedEvent: unknown = "not-emitted"
+			provider.on(RooCodeEventName.TaskCompleted, () => {
+				registrationAtTaskCompletedEvent = provider["providerHandoffProjectionTargets"]?.get(taskId)
+				order.push("emit-TaskCompleted")
+			})
+
+			const fakeTask = makeFakeTask(taskId)
+			registerFakeTask(fakeTask)
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, taskId, {}, {})
+
+			expect(provider.taskHistoryStore.get(taskId)?.status).toBe("completed")
+			expect(order).toEqual(["persisted-completed", "emit-TaskCompleted"])
+			expect(registrationAtTaskCompletedEvent).toBeUndefined()
+			expect(provider["providerHandoffProjectionTargets"]?.has(taskId)).toBe(false)
+
+			// The deferred projection then fails. Its settlement is fenced by
+			// the dropped registration: no stale marker, no explicit-clear
+			// state, no publication event, and no failure log can resurrect.
+			const logSpy = vi.spyOn(provider, "log")
+			releaseProjection()
+			const outcome = await projection
+			expect(outcome.ok).toBe(false)
+			expect(provider["staleProviderHandoffProjection"]).toBeUndefined()
+			expect(provider["explicitProfileClearChildIds"].has(taskId)).toBe(false)
+			expect(provider["providerHandoffProjectionTargets"]?.has(taskId)).toBe(false)
+			expect(emitSpy).not.toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "code")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Post-commit handoff projection"))
+		})
+
+		it("keeps the deferred settlement relevant when the completed write is not durable", async () => {
+			const taskId = "task-cb-handoff-2"
+			await provider.updateTaskHistory(createHistoryItem({ id: taskId, task: "T" }), { broadcast: false })
+
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockRejectedValue(new Error("listConfig failed"))
+			let releaseProjection!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseProjection = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "projectHandoffState").mockReturnValue(writeGate)
+			const projection = provider["projectPreparedProviderHandoffState"](makeClearIntentPreparedHandoff(), taskId)
+			for (let i = 0; i < 25; i++) {
+				await Promise.resolve()
+			}
+			const registration = provider["providerHandoffProjectionTargets"]?.get(taskId)
+			expect(registration).toMatchObject({ token: expect.any(Number), admittedGeneration: expect.any(Number) })
+
+			// Persistence rejects: no durable completed record is established,
+			// so the projection registration must survive the completion event.
+			const logSpy = vi.spyOn(provider, "log")
+			vi.spyOn(provider, "updateTaskHistory").mockRejectedValueOnce(new Error("disk full"))
+			const fakeTask = makeFakeTask(taskId)
+			registerFakeTask(fakeTask)
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, taskId, {}, {})
+
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
+			expect(provider["providerHandoffProjectionTargets"]?.get(taskId)).toMatchObject({
+				token: registration?.token,
+				admittedGeneration: registration?.admittedGeneration,
+			})
+
+			// The deferred projection then fails — and because completion was
+			// not durable, the settlement is still relevant: marker, explicit
+			// clear, and failure log all land. This control proves the
+			// invalidation in the previous test is what fences them.
+			releaseProjection()
+			const outcome = await projection
+			expect(outcome.ok).toBe(false)
+			expect(provider["staleProviderHandoffProjection"]).toMatchObject({
+				childTaskId: taskId,
+				profileIntent: { kind: "clear" },
+			})
+			expect(provider["explicitProfileClearChildIds"].has(taskId)).toBe(true)
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Post-commit handoff projection failed"))
 		})
 	})
 })

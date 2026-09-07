@@ -7,7 +7,12 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import {
+	LOCK_STALE_MS,
+	safeWriteJson,
+	withAdvisoryFileLock,
+	ADVISORY_READ_LOCK_RETRIES,
+} from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -65,6 +70,16 @@ interface DelegationRepairIntent {
  * dropped. Within a single extension host process, an in-process write
  * lock serializes mutations.
  */
+/**
+ * Discriminated result of a strict fresh read. `missing` means the durable
+ * record is definitively absent; `error` means it exists but is unreadable,
+ * unparseable, or incompatible — durability is unknowable, not absent.
+ */
+export type StrictTaskReadResult =
+	| { readonly kind: "found"; readonly item: HistoryItem }
+	| { readonly kind: "missing" }
+	| { readonly kind: "error"; readonly reason: "read" | "parse" | "incompatible"; readonly error: unknown }
+
 /**
  * Options for TaskHistoryStore constructor.
  */
@@ -750,6 +765,95 @@ export class TaskHistoryStore {
 	}
 
 	// ────────────────────────────── Cache invalidation ──────────────────────────────
+
+	/**
+	 * Fresh, lock-held read of a task's durable record that distinguishes the
+	 * three outcomes callers must tell apart at the delegation reconciliation
+	 * boundary:
+	 *
+	 * - `found`: the record exists and parsed; the cache is refreshed from it.
+	 * - `missing`: the task file does not exist (definitively absent).
+	 * - `error`: the record exists but could not be read or parsed, or is
+	 *   incompatible (no usable `id`).
+	 *
+	 * Unlike `invalidate` — which collapses every read/parse failure into a
+	 * cache delete — this result lets the caller treat "definitively absent"
+	 * differently from "unknowable", which is the difference between a safe
+	 * rollback and a non-destructive degraded abort.
+	 */
+	async readFresh(taskId: string): Promise<StrictTaskReadResult> {
+		return this.withLock(async () => {
+			const filePath = await this.getTaskFilePath(taskId)
+
+			// Lock order: the store's in-process write lock is already held;
+			// the advisory per-file lock below is the same `proper-lockfile`
+			// lock `safeWriteJson` acquires for this exact path (writers take
+			// the two locks in the same order, so this can wait out an
+			// in-flight write without deadlocking). Holding it means this read
+			// can never observe safeWriteJson's backup/commit rename gap or a
+			// stale pre-commit file from another host.
+			try {
+				return await withAdvisoryFileLock(filePath, () => this.readFreshUnderAdvisoryLock(taskId, filePath), {
+					retries: ADVISORY_READ_LOCK_RETRIES,
+				})
+			} catch (error) {
+				// The advisory lock itself could not be acquired or was
+				// compromised: durability is unknowable — never "missing", and
+				// the cache is left untouched.
+				return { kind: "error", reason: "read", error }
+			}
+		})
+	}
+
+	/**
+	 * The file read behind {@link readFresh}'s advisory lock. Only reachable
+	 * while the per-task file cannot be mid-write by another host.
+	 */
+	private async readFreshUnderAdvisoryLock(taskId: string, filePath: string): Promise<StrictTaskReadResult> {
+		let raw: string
+		try {
+			raw = await fs.readFile(filePath, "utf8")
+		} catch (error) {
+			if (this.isFileNotFoundError(error)) {
+				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
+				return { kind: "missing" }
+			}
+			return { kind: "error", reason: "read", error }
+		}
+
+		let parsed: unknown
+		try {
+			parsed = JSON.parse(raw)
+		} catch (error) {
+			return { kind: "error", reason: "parse", error }
+		}
+
+		if (typeof parsed !== "object" || parsed === null || typeof (parsed as HistoryItem).id !== "string") {
+			return {
+				kind: "error",
+				reason: "incompatible",
+				error: new Error(`[TaskHistoryStore] readFresh: task ${taskId} record has no usable id`),
+			}
+		}
+
+		const item = parsed as HistoryItem
+
+		// Identity-strict: a record whose own id does not match the requested
+		// task id is incompatible with that key. It must never be cached under
+		// the requested key.
+		if (item.id !== taskId) {
+			return {
+				kind: "error",
+				reason: "incompatible",
+				error: new Error(`[TaskHistoryStore] readFresh: task ${taskId} record has mismatched id ${item.id}`),
+			}
+		}
+
+		this.cache.set(taskId, item)
+		this.taskFileMtimes.delete(taskId)
+		return { kind: "found", item }
+	}
 
 	/**
 	 * Invalidate a single task's cache entry (re-read from disk on next access).
