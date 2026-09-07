@@ -753,12 +753,15 @@ describe("openClineInNewTab", () => {
 	it("posts didBecomeVisible only for visible state changes and clears the tracked tab on dispose", async () => {
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
-		expect(getPanel()).toBeDefined()
-
+		// Retain the panel returned during creation and pin the tracked tab
+		// against it with identity (not a weak defined check), so a wrong or
+		// duplicated tracked panel fails before the dispose assertions.
 		const panel = (vscode.window.createWebviewPanel as Mock).mock.results[0].value as {
 			onDidChangeViewState: Mock
 			onDidDispose: Mock
 		}
+		expect(getPanel()).toBe(panel)
+
 		const stateHandler = panel.onDidChangeViewState.mock.calls[0][0] as (event: {
 			webviewPanel: { visible: boolean; webview: { postMessage: (message: unknown) => void } }
 		}) => void
