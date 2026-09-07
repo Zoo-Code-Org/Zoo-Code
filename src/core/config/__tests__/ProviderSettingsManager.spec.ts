@@ -1603,6 +1603,15 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("projectHandoffState", () => {
+		const fullyMigrated = {
+			rateLimitSecondsMigrated: true,
+			openAiHeadersMigrated: true,
+			consecutiveMistakeLimitMigrated: true,
+			todoListEnabledMigrated: true,
+			claudeCodeLegacySettingsMigrated: true,
+			routerProviderMigrated: true,
+		}
+
 		it("persists the current profile name and mode mapping in one locked store write", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -1646,6 +1655,7 @@ describe("ProviderSettingsManager", () => {
 					currentApiConfigName: "child-profile",
 					apiConfigs: { "child-profile": { id: "child-id", apiProvider: providerIdentifiers.openrouter } },
 					modeApiConfigs: { ask: "child-id" },
+					migrations: fullyMigrated,
 				}),
 			)
 			mockSecrets.store.mockClear()
