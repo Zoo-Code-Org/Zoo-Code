@@ -111,9 +111,9 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsReasoningEffort: ["low", "high", "max"],
 		reasoningEffort: "max",
 		preserveReasoning: true,
-		inputPrice: 0.075,
-		outputPrice: 0.25,
-		cacheReadsPrice: 0.015,
+		inputPrice: 0.15,
+		outputPrice: 0.5,
+		cacheReadsPrice: 0.03,
 		description:
 			"GLM-5.3 Flash is Zhipu's fast multimodal coding and agent model with a 1M context window and configurable reasoning effort. Available via the Opencode Go plan.",
 	},
@@ -506,9 +506,9 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsReasoningEffort: ["disable", "low", "high"],
 		reasoningEffort: "high",
 		preserveReasoning: true,
-		inputPrice: 0.0175,
-		outputPrice: 0.0725,
-		cacheReadsPrice: 0.004375,
+		inputPrice: 0.14,
+		outputPrice: 0.58,
+		cacheReadsPrice: 0.035,
 		description:
 			"Hunyuan 3 is Tencent's reasoning and coding model with a 256k context window. Available via the Opencode Go plan.",
 	},
@@ -522,11 +522,29 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsReasoningEffort: ["disable", "low", "high"],
 		reasoningEffort: "high",
 		preserveReasoning: true,
-		inputPrice: 0.0175,
-		outputPrice: 0.0725,
-		cacheReadsPrice: 0.004375,
+		inputPrice: 0.14,
+		outputPrice: 0.58,
+		cacheReadsPrice: 0.035,
 		description:
 			"Hunyuan 3 Preview is Tencent's preview reasoning and coding model with a 256k context window. Available via the Opencode Go plan.",
+	},
+
+	// --- Omen ---
+	"omen-alpha": {
+		maxTokens: 128_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		supportsTemperature: true,
+		inputPrice: 0.2,
+		outputPrice: 0.66,
+		cacheReadsPrice: 0.04,
+		description:
+			"Omen Alpha is a multimodal reasoning model for coding workflows. Available via the Opencode Go plan.",
 	},
 
 	// --- OpenAI Responses ---

@@ -189,6 +189,7 @@ describe("Opencode Go Fetchers", () => {
 				"grok-4.6",
 				"muse-spark-1.3-contributor",
 				"muse-spark-1.2-contributor",
+				"omen-alpha",
 			]
 			expect(Object.keys(opencodeGoModels).sort()).toEqual([...modelIds].sort())
 

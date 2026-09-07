@@ -33,6 +33,7 @@ describe("opencode-go registry", () => {
 		"mimo-v2.5-pro",
 		"deepseek-v4-pro",
 		"deepseek-v4-flash",
+		"omen-alpha",
 	]
 	const responsesFormatModels = [
 		"gpt-5.6-luna",
@@ -205,9 +206,9 @@ describe("opencode-go registry", () => {
 					supportsPromptCache: true,
 					supportsMaxTokens: true,
 					supportsReasoningEffort: ["low", "high", "max"],
-					inputPrice: 0.075,
-					outputPrice: 0.25,
-					cacheReadsPrice: 0.015,
+					inputPrice: 0.15,
+					outputPrice: 0.5,
+					cacheReadsPrice: 0.03,
 				},
 			},
 			{
@@ -325,11 +326,28 @@ describe("opencode-go registry", () => {
 					contextWindow: 256_000,
 					supportsImages: false,
 					supportsReasoningEffort: ["disable", "low", "high"],
-					inputPrice: 0.0175,
-					outputPrice: 0.0725,
-					cacheReadsPrice: 0.004375,
+					inputPrice: 0.14,
+					outputPrice: 0.58,
+					cacheReadsPrice: 0.035,
 				},
 			})),
+			{
+				id: "omen-alpha",
+				expected: {
+					maxTokens: 128_000,
+					contextWindow: 500_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					supportsReasoningEffort: ["low", "high"],
+					reasoningEffort: "high",
+					preserveReasoning: true,
+					supportsTemperature: true,
+					inputPrice: 0.2,
+					outputPrice: 0.66,
+					cacheReadsPrice: 0.04,
+				},
+			},
 			{
 				id: "grok-4.5",
 				expected: {
