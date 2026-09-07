@@ -330,6 +330,19 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 		}
 	}
 
+	return createClineTabPanel({ context, outputChannel })
+}
+
+/**
+ * Create a fresh "Zoo Code" tab panel and provider.
+ *
+ * Unlike `openClineInNewTab`, this never reuses the tracked tab: callers that
+ * must not evict the task an existing tab is already serving (such as
+ * `API.startNewTask({ newTab: true })`) get a new surface here so concurrent
+ * tab tasks stay independent. The UI "Open in editor" button keeps the
+ * single-tab reuse behavior.
+ */
+export const createClineTabPanel = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).

@@ -8,8 +8,8 @@ import { RooCodeEventName, type ModeConfig, type RooCodeSettings } from "@roo-co
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 
-const { openClineInNewTabMock } = vi.hoisted(() => ({
-	openClineInNewTabMock: vi.fn(),
+const { createClineTabPanelMock } = vi.hoisted(() => ({
+	createClineTabPanelMock: vi.fn(),
 }))
 
 vi.mock("vscode", () => ({
@@ -23,7 +23,7 @@ vi.mock("@roo-code/ipc", () => ({
 }))
 
 vi.mock("../../activate/registerCommands", () => ({
-	openClineInNewTab: openClineInNewTabMock,
+	createClineTabPanel: createClineTabPanelMock,
 }))
 
 vi.mock("../../integrations/terminal/Terminal", () => ({
@@ -108,14 +108,14 @@ describe("API task controls", () => {
 	describe("startNewTask", () => {
 		it("reverts and closes existing editors before opening a new tab unless preserveOpenTabs is true", async () => {
 			const newTabProvider = createProvider("new-tab-task")
-			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
 
 			const taskId = await api.startNewTask({ configuration, text: "new task", newTab: true })
 
 			expect(taskId).toBe("new-tab-task")
 			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(1, "workbench.action.files.revert")
 			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(2, "workbench.action.closeAllEditors")
-			expect(openClineInNewTabMock).toHaveBeenCalledWith({
+			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
 			})
@@ -131,7 +131,7 @@ describe("API task controls", () => {
 
 		it("opens a new tab without revert or close commands when preserveOpenTabs is true", async () => {
 			const newTabProvider = createProvider("preserved-tab-task")
-			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
 
 			const taskId = await api.startNewTask({
 				configuration,
@@ -142,7 +142,7 @@ describe("API task controls", () => {
 
 			expect(taskId).toBe("preserved-tab-task")
 			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
-			expect(openClineInNewTabMock).toHaveBeenCalledWith({
+			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
 			})

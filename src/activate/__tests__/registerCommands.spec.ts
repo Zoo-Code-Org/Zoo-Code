@@ -6,7 +6,14 @@ import { ContextProxy } from "../../core/config/ContextProxy"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
-import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import {
+	createClineTabPanel,
+	getPanel,
+	getVisibleProviderOrLog,
+	openClineInNewTab,
+	registerCommands,
+	setPanel,
+} from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -925,5 +932,57 @@ describe("openClineInNewTab", () => {
 			type: "action",
 			action: "historyButtonClicked",
 		})
+	})
+})
+
+describe("createClineTabPanel", () => {
+	let mockOutputChannel: vscode.OutputChannel
+	let mockContext: vscode.ExtensionContext
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+
+		mockOutputChannel = {
+			appendLine: vi.fn(),
+			append: vi.fn(),
+			clear: vi.fn(),
+			hide: vi.fn(),
+			name: "mock",
+			replace: vi.fn(),
+			show: vi.fn(),
+			dispose: vi.fn(),
+		}
+
+		mockContext = {
+			subscriptions: [],
+			extensionUri: { path: "/mock/ext" },
+		} as unknown as vscode.ExtensionContext
+
+		const mockPanel = {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		}
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(mockPanel)
+
+		// Reset module-level panel state.
+		setPanel(undefined, "sidebar")
+		setPanel(undefined, "tab")
+	})
+
+	it("always creates a fresh panel even when a tab is already tracked", async () => {
+		const mockTrackedPanel = {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			reveal: vi.fn().mockResolvedValue(undefined),
+		} as unknown as vscode.WebviewPanel
+		setPanel(mockTrackedPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue({ postMessageToWebview: vi.fn() })
+
+		await createClineTabPanel({ context: mockContext, outputChannel: mockOutputChannel })
+
+		expect(mockTrackedPanel.reveal).not.toHaveBeenCalled()
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 })
