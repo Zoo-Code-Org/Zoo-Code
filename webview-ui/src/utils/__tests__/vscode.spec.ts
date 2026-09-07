@@ -213,4 +213,101 @@ describe("VSCodeAPIWrapper", () => {
 		expect(wrapper.getViewStateId()).toBe("replaced-string-view")
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "replaced-string-view" })
 	})
+
+	it("keeps one generated id when a write fails while stale persisted state stays readable", () => {
+		const randomUUID = vi.fn().mockReturnValueOnce("gen-one").mockReturnValueOnce("gen-two")
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID },
+		})
+		// Storage still serves a stale persisted state (e.g. pre-identity webview state
+		// without a viewStateId) while setItem throws: without the write-failure flag,
+		// every getViewStateId call would re-read the stale JSON and generate a fresh id.
+		const storage: MockStorage = {
+			getItem: vi.fn(() => JSON.stringify({ mode: "architect" })),
+			setItem: vi.fn(() => {
+				throw new Error("write denied")
+			}),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+		}
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		const first = wrapper.getViewStateId()
+		const second = wrapper.getViewStateId()
+
+		expect(first).toBe("gen-one")
+		expect(second).toBe("gen-one") // no flap: the in-memory state stays authoritative
+		expect(wrapper.getState()).toEqual({ mode: "architect", viewStateId: "gen-one" })
+		expect(randomUUID).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps the in-memory viewStateId when setItem is unavailable while reads still work", () => {
+		const randomUUID = vi.fn().mockReturnValueOnce("no-setitem-view").mockReturnValueOnce("flapped-view")
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID },
+		})
+		const backing: Record<string, string> = { vscodeState: JSON.stringify({ mode: "architect" }) }
+		const storage = {
+			getItem: vi.fn((key: string) => backing[key] ?? null),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+		}
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("no-setitem-view")
+		// The persisted JSON never gained the id: the in-memory state stays authoritative
+		// instead of re-reading the stale JSON on every call.
+		expect(wrapper.getViewStateId()).toBe("no-setitem-view")
+		expect(wrapper.getState()).toEqual({ mode: "architect", viewStateId: "no-setitem-view" })
+		expect(randomUUID).toHaveBeenCalledTimes(1)
+	})
+
+	it("treats persisted storage as authoritative again once a write recovers", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "recovered-view") },
+		})
+		const backing: Record<string, string> = { vscodeState: JSON.stringify({ mode: "architect" }) }
+		let writesFail = true
+		const storage: MockStorage = {
+			getItem: vi.fn((key: string) => backing[key] ?? null),
+			setItem: vi.fn((key: string, value: string) => {
+				if (writesFail) {
+					throw new Error("write denied")
+				}
+				backing[key] = value
+			}),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+		}
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// The first generation cannot be persisted: the in-memory state is authoritative.
+		expect(wrapper.getViewStateId()).toBe("recovered-view")
+		expect(wrapper.getState()).toEqual({ mode: "architect", viewStateId: "recovered-view" })
+
+		// A later write succeeds: the flag clears and the persisted JSON is
+		// authoritative again for reads.
+		writesFail = false
+		wrapper.setState({ mode: "code", viewStateId: "recovered-view" })
+		expect(backing.vscodeState).toBe(JSON.stringify({ mode: "code", viewStateId: "recovered-view" }))
+		// An external writer refreshes the persisted record: a recovered wrapper must see
+		// it (flag cleared); a still-flagged wrapper would keep the in-memory copy.
+		backing.vscodeState = JSON.stringify({ mode: "code", viewStateId: "recovered-view", external: true })
+		expect(wrapper.getState()).toEqual({ mode: "code", viewStateId: "recovered-view", external: true })
+	})
 })

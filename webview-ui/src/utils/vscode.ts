@@ -14,6 +14,10 @@ import { WebviewMessage } from "@roo/WebviewMessage"
 export class VSCodeAPIWrapper {
 	private readonly vsCodeApi: WebviewApi<unknown> | undefined
 	private fallbackState: unknown | undefined
+	// Once a persistent-storage write fails (setItem throws or is unavailable),
+	// the persisted JSON is stale: the in-memory fallbackState is authoritative
+	// for getState() until a write succeeds again.
+	private storageWriteFailed: boolean = false
 
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
@@ -86,6 +90,12 @@ export class VSCodeAPIWrapper {
 			return this.vsCodeApi.getState()
 		}
 
+		if (this.storageWriteFailed) {
+			// A previous write could not be persisted: reading localStorage would
+			// return stale JSON, so the in-memory fallback is authoritative.
+			return this.fallbackState
+		}
+
 		try {
 			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both return this.fallbackState from this catch
 			if (typeof localStorage?.getItem === "function") {
@@ -118,13 +128,17 @@ export class VSCodeAPIWrapper {
 		this.fallbackState = newState
 
 		try {
-			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both return newState from this catch
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both mark the write failed and return newState
 			if (typeof localStorage?.setItem === "function") {
 				localStorage.setItem("vscodeState", JSON.stringify(newState))
+				this.storageWriteFailed = false
+			} else {
+				this.storageWriteFailed = true
 			}
 		} catch {
 			// Storage can be unavailable in restricted webview/browser contexts.
 			// The in-memory fallback above keeps a stable viewStateId for this session.
+			this.storageWriteFailed = true
 		}
 
 		return newState

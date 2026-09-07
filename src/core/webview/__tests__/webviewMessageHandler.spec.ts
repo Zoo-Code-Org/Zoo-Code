@@ -375,6 +375,19 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", undefined)
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
+
+	it("logs and continues launch when view-state registration fails", async () => {
+		double.setViewStateId = vi.fn().mockRejectedValue(new Error("storage down"))
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		// The failed registration is logged ...
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("view-state registration failed"))
+		// ... launch handling still posts the initial state ...
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+		// ... and marks the view as launched.
+		expect(mockClineProvider.isViewLaunched).toBe(true)
+	})
 })
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {

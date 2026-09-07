@@ -580,7 +580,18 @@ export const webviewMessageHandler = async (
 			}
 			break
 		case "webviewDidLaunch": {
-			await provider.setViewStateId(message.viewStateId)
+			// A failed view-state registration must not abort launch handling: the
+			// initial state, theme and API-configuration sync below still run, and the
+			// provider restores its previous viewStateId on failure (setViewStateId) so
+			// a later launch retries registration and loadViewState instead of
+			// treating the failed id as already handled.
+			try {
+				await provider.setViewStateId(message.viewStateId)
+			} catch (error) {
+				provider.log(
+					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
