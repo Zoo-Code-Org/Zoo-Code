@@ -29,7 +29,7 @@ reviews:
         enabled: false
         drafts: false
         auto_incremental_review: true
-        auto_pause_after_reviewed_commits: 5
+        auto_pause_after_reviewed_commits: 0
         labels:
             - "coderabbit-review-active"
 
@@ -63,6 +63,8 @@ reviews:
               cancellation, retry, and compatibility paths. Verify promises and errors are handled,
               existing helpers are reused, and new code introduces no `any`, unjustified double
               assertions, floating promises, duplicated helpers, or increased lint suppressions.
+              When a refactor adds early-return guards that redirect a subset of inputs to a new
+              code path, confirm the old branches for those inputs are removed or unreachable.
 
         - path: "{**/*.{test,spec}.{ts,tsx,js,jsx},**/__tests__/**}"
           instructions: >-
@@ -78,6 +80,11 @@ reviews:
               Flag tests that assert in-flight behavior only after the call completes — these cannot
               prove the behavior fires during execution. Check that describe block names match the
               actual subjects of the tests they contain.
+              For tests that assert only mock call counts, confirm a corresponding return-value
+              assertion exists; a regression that silently returns stale fallback data can satisfy
+              a call-count check. For code with fallback behavior, verify both the cold-start case
+              (no prior state) and the warm case (prior state exists) are covered, as they exercise
+              different branches.
 
         - path: "apps/vscode-e2e/**"
           instructions: >-
@@ -117,6 +124,9 @@ reviews:
               Check persistence and lifecycle invariants: awaited atomic writes, rollback or explicit
               partial-failure behavior, cross-window state consistency, stale listeners/watchers,
               cancellation, idempotency, and safe restart/resume without lost or duplicated state.
+              For async functions that read shared mutable state before an `await` and write it back
+              after, verify the captured reference is still valid when the write executes; a concurrent
+              mutation during the await can cause a stale snapshot to overwrite a newer state.
 
         - path: ".github/**"
           instructions: >-
