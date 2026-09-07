@@ -878,6 +878,18 @@ describe("ClineProvider Task History Synchronization", () => {
 			})
 		}
 
+		async function waitForProjectionAdmission(taskId: string) {
+			for (let attempt = 0; attempt < 25; attempt++) {
+				const registration = provider["providerHandoffProjectionTargets"]?.get(taskId)
+				if (registration?.admittedGeneration !== undefined) {
+					return registration
+				}
+				await Promise.resolve()
+			}
+
+			throw new Error(`Projection for task ${taskId} was not admitted`)
+		}
+
 		it("invalidates handoff projection state immediately after durable completion and before the TaskCompleted event; a late failed settlement cannot resurrect it", async () => {
 			const taskId = "task-cb-handoff-1"
 			await provider.updateTaskHistory(createHistoryItem({ id: taskId, task: "T" }), { broadcast: false })
@@ -895,10 +907,7 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			// Let the bounded queue admit the projection: it binds its token and
 			// admitted generation, then hangs on the gated write.
-			for (let i = 0; i < 25; i++) {
-				await Promise.resolve()
-			}
-			const registration = provider["providerHandoffProjectionTargets"]?.get(taskId)
+			const registration = await waitForProjectionAdmission(taskId)
 			expect(registration).toMatchObject({ token: expect.any(Number), admittedGeneration: expect.any(Number) })
 
 			// Observe ordering: the completed write lands before the completion
@@ -954,10 +963,7 @@ describe("ClineProvider Task History Synchronization", () => {
 			})
 			vi.spyOn(provider.providerSettingsManager, "projectHandoffState").mockReturnValue(writeGate)
 			const projection = provider["projectPreparedProviderHandoffState"](makeClearIntentPreparedHandoff(), taskId)
-			for (let i = 0; i < 25; i++) {
-				await Promise.resolve()
-			}
-			const registration = provider["providerHandoffProjectionTargets"]?.get(taskId)
+			const registration = await waitForProjectionAdmission(taskId)
 			expect(registration).toMatchObject({ token: expect.any(Number), admittedGeneration: expect.any(Number) })
 
 			// Persistence rejects: no durable completed record is established,
