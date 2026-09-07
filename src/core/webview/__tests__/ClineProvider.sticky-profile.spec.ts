@@ -1015,4 +1015,59 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			)
 		})
 	})
+
+	describe("deleteProviderProfile", () => {
+		it("removes the stored profile so a dangling mode mapping can no longer re-activate it", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Seed the stored profile settings: the default profile plus a child
+			// profile (mirroring the cross-profile subtasks e2e scenario), with the
+			// "ask" mode mapped to the child profile.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.providerSettingsManager.setModeConfig("ask", childId)
+
+			// The UI-facing list mirrors the store, as maintained by upsert/activate.
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// The deleted profile's settings are gone from the manager store.
+			const remaining = await provider.providerSettingsManager.listConfig()
+			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
+			await expect(
+				provider.providerSettingsManager.getProfile({ name: "subtask-child-profile" }),
+			).rejects.toThrow()
+
+			// The mode mapping still points at the deleted id, but it no longer
+			// resolves to a stored profile, so handleModeSwitch falls through to the
+			// current configuration instead of re-activating the deleted profile.
+			const savedConfigId = await provider.providerSettingsManager.getModeConfigId("ask")
+			expect(savedConfigId).toBe(childId)
+			expect(remaining.find(({ id }) => id === savedConfigId)).toBeUndefined()
+
+			// The context was repointed at the surviving profile.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+	})
 })
