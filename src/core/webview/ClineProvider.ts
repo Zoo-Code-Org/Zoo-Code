@@ -2323,6 +2323,10 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
+		// Remove the profile from the settings store (context.secrets) so it cannot be
+		// resurrected by a later listApiConfigMeta sync.
+		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
 		// Write only the profile list back: replaying the full settings snapshot
