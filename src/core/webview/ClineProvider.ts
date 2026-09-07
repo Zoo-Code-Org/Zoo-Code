@@ -3666,6 +3666,23 @@ export class ClineProvider
 		this.viewLocalState = {}
 	}
 
+	/**
+	 * Broadcast a reset/import invalidation to all live ClineProvider instances, clearing
+	 * both in-memory view-local caches and durable per-view selections so stale view state
+	 * cannot mask imported/reset shared state after reload.
+	 */
+	async broadcastResetToAllInstances(): Promise<void> {
+		const allInstances = ClineProvider.getAllInstances()
+		for (const instance of allInstances) {
+			instance._clearViewLocalState()
+			await instance.contextProxy.setValue("viewStates", undefined)
+
+			if (instance !== this) {
+				await instance.postStateToWebview()
+			}
+		}
+	}
+
 	// dev
 
 	async resetState() {
@@ -3703,6 +3720,10 @@ export class ClineProvider
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
+
+		// Clear durable and in-memory per-view state across live instances so parallel tabs don't keep stale state.
+		await this.broadcastResetToAllInstances()
+
 		await this.postStateToWebview()
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 	}

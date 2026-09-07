@@ -1353,4 +1353,120 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 	})
+
+	describe("multi-instance isolation", () => {
+		it("should maintain independent state across three instances", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider3 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await provider1.saveViewState("mode", "code")
+			await provider1.saveViewState("currentApiConfigName", "profile-1")
+			await provider2.saveViewState("mode", "architect")
+			await provider2.saveViewState("currentApiConfigName", "profile-2")
+			await provider3.saveViewState("mode", "debugger")
+			await provider3.saveViewState("currentApiConfigName", "profile-3")
+
+			const state1 = await provider1.getState()
+			const state2 = await provider2.getState()
+			const state3 = await provider3.getState()
+
+			expect(state1.mode).toBe("code")
+			expect(state1.currentApiConfigName).toBe("profile-1")
+			expect(state2.mode).toBe("architect")
+			expect(state2.currentApiConfigName).toBe("profile-2")
+			expect(state3.mode).toBe("debugger")
+			expect(state3.currentApiConfigName).toBe("profile-3")
+
+			await provider1.dispose()
+			await provider2.dispose()
+			await provider3.dispose()
+		})
+
+		it("should handle mode switch in one instance without affecting others", async () => {
+			const postMessage1 = vi.fn()
+			const postMessage2 = vi.fn()
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await provider1.resolveWebviewView(createMockWebviewView(postMessage1))
+			await provider2.resolveWebviewView(createMockWebviewView(postMessage2))
+			await provider1.saveViewState("mode", "code")
+			await provider2.saveViewState("mode", "debugger")
+
+			await provider1.handleModeSwitch("architect")
+
+			const state1 = await provider1.getState()
+			const state2 = await provider2.getState()
+
+			expect(state1.mode).toBe("architect")
+			expect(state2.mode).toBe("debugger")
+			expect(provider2["viewLocalState"].mode).toBe("debugger")
+
+			await provider1.dispose()
+			await provider2.dispose()
+		})
+	})
+
+	describe("_clearViewLocalState", () => {
+		it("should clear all view-local state values", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "my-profile")
+			await provider.saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// Call _clearViewLocalState
+			provider["_clearViewLocalState"]()
+
+			// All values should be cleared
+			expect(provider["viewLocalState"]).toEqual({})
+
+			await provider.dispose()
+		})
+
+		it("should cause getState to fall back to contextProxy values after clear", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider.saveViewState("mode", "architect")
+
+			let state = await provider.getState()
+			expect(state.mode).toBe("architect")
+
+			// Clear viewLocalState
+			provider["_clearViewLocalState"]()
+
+			// getState should now fall back to contextProxy (global) state
+			state = await provider.getState()
+			expect(state.mode).toBe("code") // Default from mock context
+
+			await provider.dispose()
+		})
+
+		it("should be safe to call on empty viewLocalState", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			// Should not throw even if viewLocalState is already empty
+			expect(provider["_clearViewLocalState"]()).toBeUndefined()
+			expect(provider["viewLocalState"]).toEqual({})
+
+			await provider.dispose()
+		})
+	})
 })

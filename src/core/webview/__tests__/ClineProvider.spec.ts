@@ -1527,8 +1527,41 @@ describe("ClineProvider", () => {
 			await provider.saveViewState("mode", "architect")
 			await provider.resetState()
 			expect(provider["viewLocalState"]).toEqual({})
-			expect(mockContext.globalState.get("viewStates")).toEqual({})
+			// F4 cross-instance broadcast clears the entire durable viewStates map, so the
+			// key is removed (undefined) rather than left as an empty object.
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
 			await provider.dispose()
+		})
+
+		it("should clear a sibling's view-local state and post sibling state during a cross-instance resetState", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const post1 = vi.spyOn(provider1, "postStateToWebview").mockResolvedValue(undefined)
+			const post2 = vi.spyOn(provider2, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
+			provider1.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
+			// The modal answer is a string label; the last-typed vscode overload expects a MessageItem.
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				t("common:answers.yes") as unknown as vscode.MessageItem,
+			)
+
+			await provider2.saveViewState("mode", "architect")
+			await provider1.resetState()
+
+			// The sibling's in-memory view-local cache must be cleared by the broadcast.
+			expect(provider2["viewLocalState"]).toEqual({})
+			// The sibling receives exactly one posted state (from the broadcast); the caller
+			// receives exactly one (its final reset post), never a double post from the broadcast.
+			expect(post2).toHaveBeenCalledTimes(1)
+			expect(post1).toHaveBeenCalledTimes(1)
+
+			await provider1.dispose()
+			await provider2.dispose()
 		})
 	})
 

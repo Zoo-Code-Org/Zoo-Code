@@ -956,6 +956,164 @@ describe("importExport", () => {
 				expect(mockProvider.settingsImportedAt).toBeUndefined()
 			})
 
+			it("should call broadcastResetToAllInstances after successful import when available", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: providerIdentifiers.openai,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+				])
+
+				const mockProvider = {
+					settingsImportedAt: 0,
+					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+					broadcastResetToAllInstances: vi.fn().mockResolvedValue(undefined),
+				}
+
+				await importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider: mockProvider,
+					},
+					filePath,
+				)
+
+				expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+				expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(1)
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+					expect.stringContaining("settings_imported"),
+				)
+			})
+
+			it("should skip broadcastResetToAllInstances when callback is missing", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: providerIdentifiers.openai,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+				])
+
+				const mockProvider = {
+					settingsImportedAt: 0,
+					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+				}
+				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+				await importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider: mockProvider,
+					},
+					filePath,
+				)
+
+				expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+					expect.stringContaining("settings_imported"),
+				)
+				// A missing callback must not reach the broadcast guard's failure path.
+				expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+					expect.stringContaining("Failed to broadcast reset after settings import"),
+				)
+				consoleWarnSpy.mockRestore()
+			})
+
+			it("should keep successful import result when broadcastResetToAllInstances throws", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: providerIdentifiers.openai,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+				])
+
+				const broadcastError = new Error("broadcast failed")
+				const mockProvider = {
+					settingsImportedAt: 0,
+					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+					broadcastResetToAllInstances: vi.fn().mockRejectedValue(broadcastError),
+				}
+				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+				await importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider: mockProvider,
+					},
+					filePath,
+				)
+
+				expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+				expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(1)
+				expect(consoleWarnSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Failed to broadcast reset after settings import"),
+				)
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+					expect.stringContaining("settings_imported"),
+				)
+
+				consoleWarnSpy.mockRestore()
+			})
+
 			it("should handle multiple profiles with mixed valid and invalid providers", async () => {
 				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
 
