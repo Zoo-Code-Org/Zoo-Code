@@ -1,16 +1,39 @@
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
+import { Writable } from "stream"
 
 const lockMock = vi.hoisted(() => vi.fn())
+const renameMock = vi.hoisted(() => vi.fn())
+const createWriteStreamMock = vi.hoisted(() => vi.fn())
+const actuals = vi.hoisted(() => ({
+	rename: undefined as (typeof import("fs/promises"))["rename"] | undefined,
+	createWriteStream: undefined as (typeof import("fs"))["createWriteStream"] | undefined,
+}))
 
 vi.mock("proper-lockfile", () => ({ lock: lockMock }))
+vi.mock("fs/promises", async () => {
+	const fsActual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+	actuals.rename = fsActual.rename
+	renameMock.mockImplementation(fsActual.rename)
+	return { ...fsActual, rename: renameMock }
+})
+vi.mock("fs", async () => {
+	const fsActual = await vi.importActual<typeof import("fs")>("fs")
+	actuals.createWriteStream = fsActual.createWriteStream
+	createWriteStreamMock.mockImplementation(fsActual.createWriteStream)
+	return { ...fsActual, createWriteStream: createWriteStreamMock }
+})
 
 import { LOCK_STALE_MS, lockJsonFile, safeWriteJson } from "../safeWriteJson"
 
 describe("lockJsonFile", () => {
 	beforeEach(() => {
 		lockMock.mockReset()
+		renameMock.mockReset()
+		renameMock.mockImplementation(actuals.rename!)
+		createWriteStreamMock.mockReset()
+		createWriteStreamMock.mockImplementation(actuals.createWriteStream!)
 	})
 
 	it("acquires the lock with bounded retries and compromise handling", async () => {
@@ -55,7 +78,9 @@ describe("lockJsonFile", () => {
 		try {
 			const release = await lockJsonFile(filePath)
 
+			expect(release.getCompromiseError?.()).toBeUndefined()
 			expect(() => onCompromised?.(compromised)).not.toThrow()
+			expect(release.getCompromiseError?.()).toBe(compromised)
 			onCompromised?.(new Error("later compromise"))
 			await expect(release()).rejects.toBe(compromised)
 			expect(underlyingRelease).toHaveBeenCalledOnce()
@@ -145,6 +170,90 @@ describe("lockJsonFile", () => {
 
 		try {
 			await expect(safeWriteJson(filePath, { completed: true })).rejects.toBe(compromised)
+		} finally {
+			consoleError.mockRestore()
+			await fs.rm(tempDir, { recursive: true, force: true })
+		}
+	})
+
+	it("aborts before renaming when the lock is compromised during a blocked stream write", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
+		const filePath = path.join(tempDir, "history_item.json")
+		const initial = { completed: false }
+		const compromised = new Error("lock ownership lost")
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		let onCompromised: ((error: Error) => void) | undefined
+		let unblockWrite: (() => void) | undefined
+		let notifyBlocked: (() => void) | undefined
+		const blocked = new Promise<void>((resolve) => {
+			notifyBlocked = resolve
+		})
+		let shouldBlock = true
+		const blockedStream = new Writable({
+			write(_chunk, _encoding, callback) {
+				if (shouldBlock) {
+					shouldBlock = false
+					unblockWrite = callback
+					notifyBlocked?.()
+					return
+				}
+				callback()
+			},
+		})
+
+		lockMock.mockImplementationOnce(async (_target: string, options: { onCompromised: (error: Error) => void }) => {
+			onCompromised = options.onCompromised
+			return async () => {}
+		})
+		createWriteStreamMock.mockReturnValueOnce(blockedStream)
+
+		try {
+			await fs.writeFile(filePath, JSON.stringify(initial))
+			const write = safeWriteJson(filePath, { completed: true })
+			await blocked
+
+			onCompromised?.(compromised)
+			unblockWrite?.()
+
+			await expect(write).rejects.toBe(compromised)
+			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual(initial)
+			expect(renameMock).not.toHaveBeenCalled()
+			expect(await fs.readdir(tempDir)).toEqual(["history_item.json"])
+		} finally {
+			consoleError.mockRestore()
+			await fs.rm(tempDir, { recursive: true, force: true })
+		}
+	})
+
+	it("does not restore a backup over another owner's target after compromise", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
+		const filePath = path.join(tempDir, "history_item.json")
+		const initial = { owner: "original" }
+		const replacement = { owner: "other" }
+		const compromised = new Error("lock ownership lost")
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		const underlyingRelease = vi.fn(async () => {})
+		let onCompromised: ((error: Error) => void) | undefined
+
+		lockMock.mockImplementationOnce(async (_target: string, options: { onCompromised: (error: Error) => void }) => {
+			onCompromised = options.onCompromised
+			return underlyingRelease
+		})
+
+		try {
+			await fs.writeFile(filePath, JSON.stringify(initial))
+			renameMock.mockImplementationOnce(async (source, destination) => {
+				await actuals.rename!(source, destination)
+				onCompromised?.(compromised)
+				await fs.writeFile(filePath, JSON.stringify(replacement))
+			})
+
+			await expect(safeWriteJson(filePath, { owner: "writer" })).rejects.toBe(compromised)
+
+			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual(replacement)
+			expect(renameMock).toHaveBeenCalledOnce()
+			expect(underlyingRelease).toHaveBeenCalledOnce()
+			expect(await fs.readdir(tempDir)).toEqual(["history_item.json"])
 		} finally {
 			consoleError.mockRestore()
 			await fs.rm(tempDir, { recursive: true, force: true })

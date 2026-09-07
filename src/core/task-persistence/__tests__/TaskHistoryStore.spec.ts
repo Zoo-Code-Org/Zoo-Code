@@ -594,7 +594,9 @@ describe("TaskHistoryStore", () => {
 			).rejects.toBe(callbackError)
 			expect(release).toHaveBeenCalledTimes(1)
 		})
+	})
 
+	describe("atomicReadAndUpdate()", () => {
 		it("treats an explicit active status as a no-op for a legacy record", async () => {
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "legacy-active", status: undefined }))

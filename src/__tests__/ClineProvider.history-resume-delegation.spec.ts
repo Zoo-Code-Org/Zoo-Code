@@ -91,11 +91,24 @@ function makeTaskHistoryStoreStub(
 			},
 		) => {
 			const first = itemMap.get(firstId) as HistoryItem
+			const second = itemMap.get(secondId) as HistoryItem
+			const updatedFirst = firstUpdater(structuredClone(first))
+			const updatedSecond = secondUpdater(structuredClone(second))
+			if (updatedFirst.id !== firstId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicUpdatePair: first updater changed id from ${firstId} to ${updatedFirst.id}`,
+				)
+			}
+			if (updatedSecond.id !== secondId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicUpdatePair: second updater changed id from ${secondId} to ${updatedSecond.id}`,
+				)
+			}
 			options?.firstDiskGuard?.(first)
-			itemMap.set(firstId, firstUpdater(first))
-			itemMap.set(secondId, secondUpdater(itemMap.get(secondId) as HistoryItem))
+			itemMap.set(firstId, updatedFirst)
+			itemMap.set(secondId, updatedSecond)
 			await options?.whileFirstFileLocked?.()
-			return []
+			return [...itemMap.values()]
 		},
 	)
 	const withTaskFileLock = vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback())
@@ -437,6 +450,8 @@ describe("History resume delegation - parent metadata transitions", () => {
 			}),
 			{ startTask: false },
 		)
+		expect(taskHistoryStore.get("parent-1")).toEqual(updatedParent)
+		expect(taskHistoryStore.get("child-1")).toEqual(updatedChild)
 	})
 
 	it("preserves an unrelated child pending action when completion has no action owner", async () => {

@@ -4,11 +4,17 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
+import { lockJsonFile } from "../../../utils/safeWriteJson"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn(async (defaultPath: string) => defaultPath),
 }))
+
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../utils/safeWriteJson")>()
+	return { ...actual, lockJsonFile: vi.fn(actual.lockJsonFile) }
+})
 
 const makeHistoryItem = (id: string, overrides: Partial<HistoryItem>): HistoryItem => ({
 	id,
@@ -245,6 +251,10 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 		const handoffDidStart = new Promise<void>((resolve) => {
 			handoffStarted = resolve
 		})
+		let hostBParentLockAttempted!: () => void
+		const hostBReachedParentLock = new Promise<void>((resolve) => {
+			hostBParentLockAttempted = resolve
+		})
 		const order: string[] = []
 
 		try {
@@ -287,6 +297,16 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			)
 
 			await handoffDidStart
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const lockJsonFileMock = vi.mocked(lockJsonFile)
+			const realLockJsonFile = lockJsonFileMock.getMockImplementation()
+			if (!realLockJsonFile) throw new TypeError("lockJsonFile mock has no real implementation")
+			lockJsonFileMock.mockClear()
+			lockJsonFileMock.mockImplementationOnce((filePath) => {
+				const acquisition = realLockJsonFile(filePath)
+				if (filePath === parentFile) hostBParentLockAttempted()
+				return acquisition
+			})
 			let redelegationSettled = false
 			const redelegation = hostB
 				.atomicReadAndUpdate("parent", (parent) => ({
@@ -301,7 +321,9 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 					order.push("redelegation-end")
 				})
 
-			await Promise.resolve()
+			await hostBReachedParentLock
+			expect(lockJsonFileMock).toHaveBeenCalledTimes(1)
+			expect(lockJsonFileMock).toHaveBeenCalledWith(parentFile)
 			expect(redelegationSettled).toBe(false)
 
 			releaseHandoff()
