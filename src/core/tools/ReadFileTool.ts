@@ -447,16 +447,17 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			const completeMessage = JSON.stringify({ tool: "readFile", batchFiles } satisfies ClineSayTool)
 			const { response, text, images } = await task.ask("tool", completeMessage, false)
+			const hasFeedback = Boolean(text || images?.length)
 
 			if (response === "yesButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
+				if (hasFeedback) await task.say("user_feedback", text, images)
 				filesToApprove.forEach((fr) => {
 					updateFileResult(fr.path, { status: "approved", feedbackText: text, feedbackImages: images })
 				})
 			} else if (response === "noButtonClicked" || response === "messageResponse") {
 				// A queued conversational message resolves the ask as messageResponse;
 				// it is feedback, not the JSON payload used by per-file permissions.
-				if (text) await task.say("user_feedback", text, images)
+				if (hasFeedback) await task.say("user_feedback", text, images)
 				task.didRejectTool = true
 				filesToApprove.forEach((fr) => {
 					updateFileResult(fr.path, {
@@ -518,9 +519,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			} satisfies ClineSayTool)
 
 			const { response, text, images } = await task.ask("tool", completeMessage, false)
+			const hasFeedback = Boolean(text || images?.length)
 
 			if (response !== "yesButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
+				if (hasFeedback) await task.say("user_feedback", text, images)
 				task.didRejectTool = true
 				updateFileResult(relPath, {
 					status: "denied",
@@ -529,7 +531,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					feedbackImages: images,
 				})
 			} else {
-				if (text) await task.say("user_feedback", text, images)
+				if (hasFeedback) await task.say("user_feedback", text, images)
 				updateFileResult(relPath, { status: "approved", feedbackText: text, feedbackImages: images })
 			}
 		}
@@ -582,17 +584,25 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		let statusMessage = ""
 		let feedbackImages: string[] = []
 
-		const deniedWithFeedback = fileResults.find((r) => r.status === "denied" && r.feedbackText)
+		const deniedWithFeedback = fileResults.find(
+			(r) => r.status === "denied" && (r.feedbackText || r.feedbackImages?.length),
+		)
 
-		if (deniedWithFeedback?.feedbackText) {
-			statusMessage = formatResponse.toolDeniedWithFeedback(deniedWithFeedback.feedbackText)
+		if (deniedWithFeedback) {
+			statusMessage = deniedWithFeedback.feedbackText
+				? formatResponse.toolDeniedWithFeedback(deniedWithFeedback.feedbackText)
+				: formatResponse.toolDenied()
 			feedbackImages = deniedWithFeedback.feedbackImages || []
 		} else if (task.didRejectTool) {
 			statusMessage = formatResponse.toolDenied()
 		} else {
-			const approvedWithFeedback = fileResults.find((r) => r.status === "approved" && r.feedbackText)
-			if (approvedWithFeedback?.feedbackText) {
-				statusMessage = formatResponse.toolApprovedWithFeedback(approvedWithFeedback.feedbackText)
+			const approvedWithFeedback = fileResults.find(
+				(r) => r.status === "approved" && (r.feedbackText || r.feedbackImages?.length),
+			)
+			if (approvedWithFeedback) {
+				statusMessage = approvedWithFeedback.feedbackText
+					? formatResponse.toolApprovedWithFeedback(approvedWithFeedback.feedbackText)
+					: ""
 				feedbackImages = approvedWithFeedback.feedbackImages || []
 			}
 		}

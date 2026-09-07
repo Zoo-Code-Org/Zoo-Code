@@ -270,7 +270,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "say" && message.partial === false) {
+			if (message.type === "say" && message.partial !== true) {
 				says[taskId] = says[taskId] || []
 				says[taskId].push(message)
 			}

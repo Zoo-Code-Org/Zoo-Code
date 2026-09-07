@@ -191,7 +191,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_QUEUED_INPUT_PARENT_MARKER),
+			userMessage: SUBTASK_QUEUED_INPUT_PARENT_MARKER,
 			sequenceIndex: 0,
 		},
 		response: {

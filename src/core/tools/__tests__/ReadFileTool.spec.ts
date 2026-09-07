@@ -698,13 +698,41 @@ describe("ReadFileTool", () => {
 				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
 				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
 			]
+			const updates = new Map<string, Record<string, unknown>>()
 
-			await readFileTool["requestApproval"](task, fileResults, () => {})
+			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
+				updates.set(filePath, update)
+			})
 
 			expect(parseSpy).not.toHaveBeenCalled()
 			expect(task.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
 			expect(task.didRejectTool).toBe(true)
+			expect(updates.get("one.ts")).toMatchObject({ status: "denied" })
+			expect(updates.get("two.ts")).toMatchObject({ status: "denied" })
 			parseSpy.mockRestore()
+		})
+
+		it("preserves image-only feedback when denying batch reads", async () => {
+			const task = Object.create(Task.prototype) as Task
+			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
+			Object.assign(task, createMockTask({ supportsImages: true }))
+			const queuedImages = ["data:image/png;base64,queued"]
+			task.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: undefined, images: queuedImages })
+			const callbacks = createMockCallbacks()
+			const fileResults = [
+				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
+				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
+			]
+
+			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
+				Object.assign(fileResults.find(({ path }) => path === filePath)!, update)
+			})
+			readFileTool["buildAndPushResult"](task, fileResults, callbacks.pushToolResult)
+
+			expect(task.say).toHaveBeenCalledWith("user_feedback", undefined, queuedImages)
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+				expect.arrayContaining([expect.objectContaining({ type: "image" })]),
+			)
 		})
 
 		it("applies individual decisions for a batch read", async () => {
