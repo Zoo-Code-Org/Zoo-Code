@@ -181,7 +181,7 @@ export async function getOpenRouterModelEndpoints(
 }
 
 /**
- * Moonshot K3 model ids hosted on OpenRouter.
+ * Apply the Moonshot K3 profile to an OpenRouter model record.
  *
  * OpenRouter reports `max_completion_tokens: null` for these models, so the
  * generic 0.2 context-window fallback would fabricate an inflated max_tokens
@@ -190,30 +190,30 @@ export async function getOpenRouterModelEndpoints(
  * (issue #1316 expects requests to carry an explicit `temperature: 1.0`), so
  * its wire-safe capability flags and temperature default are profiled here
  * instead of being derived from the catalogue.
- */
-export const OPENROUTER_MOONSHOT_K3_MODELS = new Set<string>(["moonshotai/kimi-k3", "moonshotai/kimi-latest"])
-
-const MOONSHOT_K3_OPENROUTER_PROFILE: Partial<ModelInfo> = {
-	maxTokens: 32_768,
-	supportsReasoningEffort: ["low", "high", "max"],
-	reasoningEffort: "high",
-	supportsTemperature: true,
-	defaultTemperature: 1.0, // K3 is fixed at 1.0 upstream; send it explicitly (issue #1316)
-}
-
-/**
- * Apply the Moonshot K3 profile to an OpenRouter model record.
  *
  * Exported so OpenRouterHandler can re-apply the profile at consumption time:
  * parsed records are persisted in the model cache, and records cached before
  * this profile existed still carry the fabricated max_tokens value and a
  * boolean supportsReasoningEffort with no default effort.
+ *
+ * The model ids and profile values live in the function body on purpose:
+ * module-scope literals become "static" mutants, and the Stryker/Vitest
+ * runner combination used by the mutation-diff gate never activates them,
+ * so they would report as surviving mutants (see .github/workflows/mutation-testing.yml).
  */
 export const applyOpenRouterMoonshotK3Profile = (modelId: string, modelInfo: ModelInfo): ModelInfo => {
-	if (!OPENROUTER_MOONSHOT_K3_MODELS.has(modelId)) {
+	const moonshotK3Models = new Set<string>(["moonshotai/kimi-k3", "moonshotai/kimi-latest"])
+	if (!moonshotK3Models.has(modelId)) {
 		return modelInfo
 	}
-	return { ...modelInfo, ...MOONSHOT_K3_OPENROUTER_PROFILE }
+	const moonshotK3Profile: Partial<ModelInfo> = {
+		maxTokens: 32_768,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "high",
+		supportsTemperature: true,
+		defaultTemperature: 1.0, // K3 is fixed at 1.0 upstream; send it explicitly (issue #1316)
+	}
+	return { ...modelInfo, ...moonshotK3Profile }
 }
 
 /**
