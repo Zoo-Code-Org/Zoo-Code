@@ -63,6 +63,7 @@ export async function withAdvisoryFileLock<T>(
 	// always ensured this up front; idempotent for readers).
 	await fs.mkdir(path.dirname(absoluteFilePath), { recursive: true })
 
+	let compromisedError: Error | undefined
 	let releaseLock: () => Promise<void>
 	try {
 		releaseLock = await lockfile.lock(absoluteFilePath, {
@@ -72,7 +73,7 @@ export async function withAdvisoryFileLock<T>(
 			retries: options?.retries ?? ADVISORY_LOCK_DEFAULT_RETRIES,
 			onCompromised: (err) => {
 				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
-				throw err
+				compromisedError = err
 			},
 		})
 	} catch (lockError) {
@@ -81,8 +82,11 @@ export async function withAdvisoryFileLock<T>(
 		throw lockError
 	}
 
+	let outcome: { ok: true; value: T } | { ok: false; error: unknown }
 	try {
-		return await fn()
+		outcome = { ok: true, value: await fn() }
+	} catch (error) {
+		outcome = { ok: false, error }
 	} finally {
 		try {
 			await releaseLock()
@@ -92,4 +96,13 @@ export async function withAdvisoryFileLock<T>(
 			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 		}
 	}
+
+	if (!outcome.ok) {
+		throw outcome.error
+	}
+	if (compromisedError) {
+		throw compromisedError
+	}
+
+	return outcome.value
 }
