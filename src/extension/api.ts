@@ -14,6 +14,7 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type CreateTaskOptions,
+	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
@@ -251,6 +252,42 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	/** Checks persisted turn ordering without exposing conversation contents to tests. */
+	public async hasTaskApiConversationHistorySequence(
+		taskId: string,
+		sequence: TaskApiConversationHistorySequence,
+	): Promise<boolean> {
+		let apiConversationHistory: Awaited<ReturnType<ClineProvider["getTaskWithId"]>>["apiConversationHistory"]
+		try {
+			const task = await this.sidebarProvider.getTaskWithId(taskId)
+			apiConversationHistory = task.apiConversationHistory
+		} catch {
+			return false
+		}
+
+		const userTurnIndex = apiConversationHistory.findIndex(
+			(message) =>
+				message.role === "user" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "text" && block.text.includes(sequence.userText)),
+		)
+		if (userTurnIndex < 0) return false
+
+		return apiConversationHistory
+			.slice(userTurnIndex + 1)
+			.some(
+				(message) =>
+					message.role === "assistant" &&
+					Array.isArray(message.content) &&
+					message.content.some(
+						(block) =>
+							block.type === "tool_use" &&
+							block.name === sequence.assistantToolName &&
+							JSON.stringify(block.input).includes(sequence.assistantToolInputText),
+					),
+			)
+	}
+
 	public getCurrentTaskStack() {
 		return this.sidebarProvider.getCurrentTaskStack()
 	}
@@ -338,22 +375,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	private registerListeners(provider: ClineProvider) {
+		provider.on(RooCodeEventName.TaskCompleted, async (taskId, tokenUsage, toolUsage) => {
+			const historyItem = provider.taskHistoryStore.get(taskId)
+			this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage, {
+				isSubtask: !!historyItem?.parentTaskId,
+			})
+
+			await this.fileLog(
+				`[${new Date().toISOString()}] taskCompleted -> ${taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
+			)
+		})
+
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
 				this.emit(RooCodeEventName.TaskStarted, task.taskId)
 				await this.fileLog(`[${new Date().toISOString()}] taskStarted -> ${task.taskId}\n`)
-			})
-
-			task.on(RooCodeEventName.TaskCompleted, async (_, tokenUsage, toolUsage) => {
-				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
-					isSubtask: !!task.parentTaskId,
-				})
-
-				await this.fileLog(
-					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
-				)
 			})
 
 			task.on(RooCodeEventName.TaskAborted, () => {

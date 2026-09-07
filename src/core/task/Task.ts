@@ -195,6 +195,13 @@ export interface TaskOptions extends CreateTaskOptions {
 	diffFuzzyThreshold?: number
 }
 
+type AssistantMessagePersistenceResult = boolean
+type AssistantMessagePersistenceCancellation = {
+	cancelled: boolean
+	promise: Promise<void>
+	resolve: () => void
+}
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -406,9 +413,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * appear BEFORE the assistant message with tool_uses, causing API errors.
 	 *
 	 * Reset to `false` at the start of each API request.
-	 * Set to `true` after the assistant message is saved in `recursivelyMakeClineRequests`.
+	 * Set to `true` only after the assistant message is durably saved.
 	 */
 	assistantMessageSavedToHistory = false
+	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
+	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
+	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
+	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
@@ -515,6 +526,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		diffFuzzyThreshold,
 	}: TaskOptions) {
 		super()
+		this.resetAssistantMessagePersistence()
 
 		if (startTask && !task && !images && !historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
@@ -925,6 +937,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return false
 	}
 
+	/**
+	 * Clears the pending action metadata after its durable result is saved.
+	 * Reconciles in-memory state with the task history store to avoid clearing a newer action.
+	 */
 	private async clearPendingActionAfterDurableResult(actionId: string): Promise<void> {
 		if (this.pendingAction?.actionId !== actionId) {
 			return
@@ -984,7 +1000,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return ensureMessageIdentifiers(messages)
 	}
 
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string) {
+	/**
+	 * Appends an API turn and records whether an assistant turn reached persistent storage.
+	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
+	 */
+	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1016,12 +1036,69 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 			}
 		}
+		if (message.role === "assistant") {
+			this.assistantMessageSavedToHistory = saved
+			this.resolveAssistantMessagePersistence(saved)
+		}
+	}
+
+	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
+	private resetAssistantMessagePersistence(): void {
+		this.cancelAssistantMessagePersistence()
+		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
+			this.resolveAssistantMessagePersistence = resolve
+		})
+		let resolveCancellation!: () => void
+		const cancellation: AssistantMessagePersistenceCancellation = {
+			cancelled: false,
+			promise: new Promise<void>((resolve) => {
+				resolveCancellation = resolve
+			}),
+			resolve: () => {
+				cancellation.cancelled = true
+				resolveCancellation()
+			},
+		}
+		this.assistantMessagePersistenceCancellation = cancellation
+		this.completionPersistenceReadyPromise = undefined
+	}
+
+	/** Settles persistence waiters when the task or current stream generation ends. */
+	private cancelAssistantMessagePersistence(): void {
+		this.assistantMessagePersistenceCancellation?.resolve()
+	}
+
+	/**
+	 * Waits until the current assistant turn is visible to a fresh extension host.
+	 * A public completion event must not be emitted before this boundary succeeds.
+	 */
+	public waitForCurrentAssistantMessagePersistence(): Promise<boolean> {
+		const currentCancellation = this.assistantMessagePersistenceCancellation!
+		if (!this.completionPersistenceReadyPromise) {
+			const currentPersistence = this.assistantMessagePersistencePromise
+			this.completionPersistenceReadyPromise = (async () => {
+				const result = await Promise.race([currentPersistence, currentCancellation.promise])
+				if (result) return
+
+				const retrySaved = await this.retrySaveApiConversationHistoryWithCancellation(currentCancellation)
+				if (!retrySaved) {
+					if (!currentCancellation.cancelled) {
+						throw new Error("Failed to persist API conversation history before task completion")
+					}
+					return
+				}
+				this.assistantMessageSavedToHistory = true
+			})()
+		}
+
+		return this.completionPersistenceReadyPromise.then(() => !currentCancellation.cancelled)
 	}
 
 	// NOTE: We intentionally do NOT mutate stored messages to merge consecutive user turns.
 	// For API requests, consecutive same-role messages are merged via mergeConsecutiveApiMessages()
 	// so rewind/edit behavior can still reference original message boundaries.
 
+	/** Replaces the entire API conversation history and persists the new state. */
 	async overwriteApiConversationHistory(newHistory: ApiMessage[], persist = true) {
 		this.hydrateApiConversationHistory(newHistory)
 		if (persist) {
@@ -1049,6 +1126,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (this.userMessageContent.length === 0) {
 			return true
 		}
+		if (this.abort) {
+			return false
+		}
 
 		// CRITICAL: Wait for the assistant message to be saved to API history first.
 		// Without this, tool_result blocks would appear BEFORE tool_use blocks in the
@@ -1062,17 +1142,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		//
 		// The assistantMessageSavedToHistory flag is:
 		// - Reset to false at the start of each API request
-		// - Set to true after the assistant message is saved in recursivelyMakeClineRequests
+		// - Set to true after the initial write or a bounded persistence retry succeeds
 		if (!this.assistantMessageSavedToHistory) {
-			await pWaitFor(() => this.assistantMessageSavedToHistory || this.abort, {
-				interval: 50,
-				timeout: 30_000, // 30 second timeout as safety net
-			}).catch(() => {
-				// If timeout or abort, log and proceed anyway to avoid hanging
+			try {
+				if (!(await this.waitForCurrentAssistantMessagePersistence())) {
+					return false
+				}
+			} catch (error) {
 				console.warn(
-					`[Task#${this.taskId}] flushPendingToolResultsToHistory: timed out waiting for assistant message to be saved`,
+					`[Task#${this.taskId}] flushPendingToolResultsToHistory: failed to persist assistant message`,
+					error,
 				)
-			})
+				return false
+			}
 		}
 
 		// If task was aborted while waiting, don't flush
@@ -1108,6 +1190,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return saved
 	}
 
+	/** Persists the current API conversation history to disk, returning false on I/O errors. */
 	private async saveApiConversationHistory(merge = true): Promise<boolean> {
 		try {
 			await saveApiMessages({
@@ -1129,15 +1212,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Used by delegation flow when flushPendingToolResultsToHistory reports failure.
 	 */
 	public async retrySaveApiConversationHistory(): Promise<boolean> {
+		return this.retrySaveApiConversationHistoryWithCancellation()
+	}
+
+	/** Retries API-history persistence while allowing the active assistant generation to cancel backoff. */
+	private async retrySaveApiConversationHistoryWithCancellation(
+		cancellation?: AssistantMessagePersistenceCancellation,
+	): Promise<AssistantMessagePersistenceResult> {
 		const delays = [100, 500, 1500]
 
 		for (let attempt = 0; attempt < delays.length; attempt++) {
-			await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]))
+			if (cancellation) {
+				await new Promise<void>((resolve) => {
+					const timer = setTimeout(resolve, delays[attempt])
+					void cancellation.promise.then(() => {
+						clearTimeout(timer)
+						resolve()
+					})
+				})
+			} else {
+				await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]))
+			}
+
+			// Check cancellation before each save attempt
+			if (cancellation?.cancelled) return false
+
 			console.warn(
 				`[Task#${this.taskId}] retrySaveApiConversationHistory: retry attempt ${attempt + 1}/${delays.length}`,
 			)
 
 			const success = await this.saveApiConversationHistory()
+			if (cancellation?.cancelled) return false
 
 			if (success) {
 				return true
@@ -1187,6 +1292,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * Replaces the entire Cline message history, restores todo state, and persists.
+	 * Also resets cloud sync tracking to avoid re-syncing previously synced messages.
+	 */
 	public async overwriteClineMessages(newMessages: ClineMessage[], persist = true) {
 		this.hydrateClineMessages(newMessages)
 		if (persist) {
@@ -1212,6 +1321,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.apiConversationHistory = ensureMessageIdentifiers(messages)
 	}
 
+	/**
+	 * Updates a Cline message in the webview and emits an event.
+	 * Non-partial messages are synced to cloud telemetry if not already synced.
+	 */
 	private async updateClineMessage(message: ClineMessage) {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
@@ -1231,6 +1344,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/** Persists Cline messages and updates task metadata in the history store. Returns false on failure. */
 	private async saveClineMessages(merge = true): Promise<boolean> {
 		try {
 			await saveTaskMessages({
@@ -2508,6 +2622,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.abort = true
+		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
 	}
@@ -2571,6 +2686,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		this.cancelAssistantMessagePersistence()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -3049,6 +3165,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
 				// (e.g., if a tool fails, then user sends a message saying "just complete anyway")
@@ -3821,7 +3938,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						{ role: "assistant", content: assistantContent },
 						reasoningMessage || undefined,
 					)
-					this.assistantMessageSavedToHistory = true
 
 					this.messageCounts.assistant++
 				}

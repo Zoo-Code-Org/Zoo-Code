@@ -24,6 +24,7 @@ import {
 	parseVitestTestFiles,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
+	shouldUseVitestRelated,
 	packageForPath,
 	runManifest,
 	selectFromGit,
@@ -199,6 +200,53 @@ describe("parseVitestTestFiles", () => {
 		)
 	})
 })
+
+describe("preferDirectTestFiles", () => {
+	it("uses matching focused specs and falls back to all related tests", () => {
+		const related = [
+			"webview-ui/src/__tests__/App.spec.tsx",
+			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
+			"webview-ui/src/components/chat/__tests__/ChatView.spec.tsx",
+		]
+		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/path-mentions.ts"]), [
+			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
+		])
+		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
+	})
+
+	it("matches direct tests case-insensitively with dot and hyphen suffixes", () => {
+		const related = [
+			"core/task/__tests__/Task.persistence.spec.ts",
+			"core/tools/__tests__/attemptCompletionTool.spec.ts",
+			"extension/__tests__/api-task-conversation-history-length.spec.ts",
+			"core/task/__tests__/unrelated.spec.ts",
+		]
+
+		assert.deepEqual(
+			preferDirectTestFiles(related, [
+				"core/task/Task.ts",
+				"core/tools/AttemptCompletionTool.ts",
+				"extension/api.ts",
+			]),
+			related.slice(0, 3),
+		)
+	})
+
+	it("keeps all related tests when any changed source lacks a direct test", () => {
+		const related = ["src/__tests__/indirect-a.spec.ts", "src/__tests__/B.spec.ts"]
+
+		assert.deepEqual(preferDirectTestFiles(related, ["src/A.ts", "src/B.ts"]), related)
+	})
+})
+
+describe("shouldUseVitestRelated", () => {
+	it("does not re-filter an explicit discovered test list", () => {
+		assert.equal(shouldUseVitestRelated({ testFiles: ["focused.spec.ts"] }), false)
+		assert.equal(shouldUseVitestRelated({ testFiles: [], vitestRelated: true }), true)
+		assert.equal(shouldUseVitestRelated({ vitestRelated: false }), false)
+	})
+})
+
 
 describe("related-test discovery", () => {
 	it("keeps Stryker's temp directory relative to each run root", () => {

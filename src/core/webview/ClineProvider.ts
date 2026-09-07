@@ -4298,6 +4298,11 @@ export class ClineProvider
 		})
 	}
 
+	/** Emits completion after delegated child disposal through the provider-owned event channel. */
+	public emitDelegatedTaskCompleted(taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage): void {
+		this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
+	}
+
 	/**
 	 * Explicitly sever a delegated parent-child link, e.g. when the user gives up on
 	 * an "interrupted" subtask instead of resuming it. Unlike removeClineFromStack()'s

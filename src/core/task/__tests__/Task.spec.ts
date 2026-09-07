@@ -41,6 +41,7 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+	resetAssistantMessagePersistence: () => void
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -2289,6 +2290,7 @@ describe("Cline", () => {
 
 			// Spy on emit method
 			const emitSpy = vi.spyOn(task, "emit")
+			const persistenceWait = task.waitForCurrentAssistantMessagePersistence()
 
 			// Mock the dispose method to avoid actual cleanup
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
@@ -2302,6 +2304,7 @@ describe("Cline", () => {
 
 			// Verify TaskAborted event was emitted
 			expect(emitSpy).toHaveBeenCalledWith("taskAborted")
+			await expect(persistenceWait).resolves.toBe(false)
 		})
 
 		it("should be equivalent to clicking Cancel button functionality", async () => {
@@ -3455,6 +3458,7 @@ describe("Cline", () => {
 				mode: undefined,
 			})
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+			const resetPersistenceSpy = vi.spyOn(getTaskTestAccess(task), "resetAssistantMessagePersistence")
 			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
 				throw new Error("stop after model metadata fetch")
 			})
@@ -3486,6 +3490,7 @@ describe("Cline", () => {
 
 			expect(result).toBe(true)
 			expect(safeSpy).toHaveBeenCalled()
+			expect(resetPersistenceSpy).toHaveBeenCalledTimes(1)
 			expect(ensureModelFetched).toHaveBeenCalled()
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})

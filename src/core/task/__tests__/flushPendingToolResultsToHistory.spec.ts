@@ -251,6 +251,7 @@ describe("flushPendingToolResultsToHistory", () => {
 			task: "test task",
 			startTask: false,
 		})
+		task.assistantMessageSavedToHistory = true
 
 		// Set up pending tool result in userMessageContent
 		task.userMessageContent = [
@@ -281,6 +282,7 @@ describe("flushPendingToolResultsToHistory", () => {
 			task: "test task",
 			startTask: false,
 		})
+		task.assistantMessageSavedToHistory = true
 
 		// Set up pending tool result
 		task.userMessageContent = [
@@ -304,6 +306,7 @@ describe("flushPendingToolResultsToHistory", () => {
 			task: "test task",
 			startTask: false,
 		})
+		task.assistantMessageSavedToHistory = true
 
 		// Set up multiple pending tool results
 		task.userMessageContent = [
@@ -336,6 +339,7 @@ describe("flushPendingToolResultsToHistory", () => {
 			task: "test task",
 			startTask: false,
 		})
+		task.assistantMessageSavedToHistory = true
 
 		const beforeTs = Date.now()
 
@@ -356,7 +360,7 @@ describe("flushPendingToolResultsToHistory", () => {
 		expect((task.apiConversationHistory[0] as any).ts).toBeLessThanOrEqual(afterTs)
 	})
 
-	it("should skip waiting for assistantMessageSavedToHistory when flag is already true", async () => {
+	it("should skip the persistence barrier when the assistant message is already saved", async () => {
 		const task = new Task({
 			provider: mockProvider,
 			apiConfiguration: mockApiConfig,
@@ -376,20 +380,18 @@ describe("flushPendingToolResultsToHistory", () => {
 			},
 		]
 
-		// Clear mock call history
-		mockPWaitFor.mockClear()
+		const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
 
 		await task.flushPendingToolResultsToHistory()
 
-		// Should not have called pWaitFor since flag was already true
-		expect(mockPWaitFor).not.toHaveBeenCalled()
+		expect(waitForPersistence).not.toHaveBeenCalled()
 
 		// Should still save the message
 		expect(task.apiConversationHistory.length).toBe(1)
 		expect((task.apiConversationHistory[0].content as any[])[0].tool_use_id).toBe("tool-skip-wait")
 	})
 
-	it("should wait for assistantMessageSavedToHistory when flag is false", async () => {
+	it("should await the persistence barrier when the assistant message is not saved", async () => {
 		const task = new Task({
 			provider: mockProvider,
 			apiConfiguration: mockApiConfig,
@@ -409,13 +411,11 @@ describe("flushPendingToolResultsToHistory", () => {
 			},
 		]
 
-		// Clear mock call history
-		mockPWaitFor.mockClear()
+		const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence").mockResolvedValue(true)
 
 		await task.flushPendingToolResultsToHistory()
 
-		// Should have called pWaitFor since flag was false
-		expect(mockPWaitFor).toHaveBeenCalled()
+		expect(waitForPersistence).toHaveBeenCalledTimes(1)
 
 		// Should still save the message (mock resolves immediately)
 		expect(task.apiConversationHistory.length).toBe(1)
@@ -441,13 +441,14 @@ describe("flushPendingToolResultsToHistory", () => {
 			},
 		]
 
-		// Set abort flag - this will cause the condition in pWaitFor to return true
-		// AND will cause early return after the wait
+		const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
+
 		task.abort = true
 
 		await task.flushPendingToolResultsToHistory()
 
 		// Should not have saved anything since task was aborted
 		expect(task.apiConversationHistory.length).toBe(0)
+		expect(waitForPersistence).not.toHaveBeenCalled()
 	})
 })
