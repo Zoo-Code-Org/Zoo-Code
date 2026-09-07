@@ -1055,7 +1055,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
 			await expect(
 				provider.providerSettingsManager.getProfile({ name: "subtask-child-profile" }),
-			).rejects.toThrow()
+			).rejects.toThrow(/subtask-child-profile.*not found/)
 
 			// The mode mapping still points at the deleted id, but it no longer
 			// resolves to a stored profile, so handleModeSwitch falls through to the
@@ -1068,6 +1068,73 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			const values = provider.contextProxy.getValues()
 			expect(values.currentApiConfigName).toBe("default")
 			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+
+		it("treats an already-gone secret as success so the stale list entry is still pruned", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Only the default profile exists in the store: the ghost profile's secret
+			// was already gone (e.g. pruned by an earlier run) but its list entry
+			// survived.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "ghost-profile",
+			})
+
+			// The manager's "not found" rejection must not surface to the caller ...
+			await expect(
+				provider.deleteProviderProfile({
+					name: "ghost-profile",
+					id: "ghost-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).resolves.not.toThrow()
+
+			// ... it prunes the stale list entry and repoints the selection.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+
+		it("still refuses to delete the last stored profile when a stale list entry remains", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			// A ghost list entry survives next to the only real profile, so the
+			// provider-level "last profile" guard does not fire: the refusal must come
+			// from the settings store itself.
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "default",
+			})
+
+			await expect(
+				provider.deleteProviderProfile({
+					name: "default",
+					id: defaultId,
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).rejects.toThrow("Cannot delete the last remaining configuration")
+
+			// Nothing was repointed or pruned.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "ghost-profile"])
 		})
 	})
 })

@@ -2271,8 +2271,22 @@ export class ClineProvider
 		}
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
-		// resurrected by a later listApiConfigMeta sync.
-		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+		// resurrected by a later listApiConfigMeta sync. A "not found" rejection means
+		// the secret was already gone (e.g. pruned by an earlier run): treat it as an
+		// idempotent success so the stale list entry below is still pruned, while any
+		// other failure (e.g. refusing to delete the last remaining configuration)
+		// propagates.
+		try {
+			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			if (!message.includes("not found")) {
+				throw error
+			}
+			this.log(
+				`deleteProviderProfile: settings for '${profileToDelete.name}' were not found; pruning the stale list entry only`,
+			)
+		}
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
