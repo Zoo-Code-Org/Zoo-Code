@@ -235,6 +235,78 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(true)
 	})
 
+	it("accepts attempt_completion after a persisted tool_result user message in the same generation", async () => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				{ role: "user", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "read-1", name: "read_file", input: { path: "f.ts" } }],
+				},
+				// tool_result is role:"user" — must not terminate the generation search
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "file contents" }] },
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+					],
+				},
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(true)
+	})
+
+	it("rejects attempt_completion that follows a later genuine user text turn", async () => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				{ role: "user", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "read-1", name: "read_file", input: { path: "f.ts" } }],
+				},
+				// A genuine user text turn ends the generation — completion below is in the next generation
+				{ role: "user", content: [{ type: "text", text: "follow-up question" }] },
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+					],
+				},
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(false)
+	})
+
+	it("treats a user turn with mixed text and tool_result content as a genuine boundary", async () => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				{ role: "user", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "read-1", name: "read_file", input: { path: "f.ts" } }],
+				},
+				// Mixed content: has both a tool_result and a text block — counts as a genuine user turn
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "read-1", content: "file contents" },
+						{ type: "text", text: "what do you think?" },
+					],
+				},
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+					],
+				},
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(false)
+	})
+
 	it("rejects an assistant completion that does not follow the expected user turn", async () => {
 		mockGetTaskWithId.mockResolvedValue({
 			apiConversationHistory: [
