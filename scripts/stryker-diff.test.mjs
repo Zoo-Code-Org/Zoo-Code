@@ -22,6 +22,7 @@ import {
 	parseChangedLines,
 	parseNameStatus,
 	parseVitestTestFiles,
+	preferDirectTestFiles,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
 	shouldUseVitestRelated,
@@ -244,6 +245,7 @@ describe("shouldUseVitestRelated", () => {
 		assert.equal(shouldUseVitestRelated({ testFiles: ["focused.spec.ts"] }), false)
 		assert.equal(shouldUseVitestRelated({ testFiles: [], vitestRelated: true }), true)
 		assert.equal(shouldUseVitestRelated({ vitestRelated: false }), false)
+		assert.equal(shouldUseVitestRelated({ testFiles: [] }), true)
 	})
 })
 

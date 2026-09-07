@@ -273,19 +273,25 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		)
 		if (userTurnIndex < 0) return false
 
-		return apiConversationHistory
-			.slice(userTurnIndex + 1)
-			.some(
-				(message) =>
-					message.role === "assistant" &&
-					Array.isArray(message.content) &&
-					message.content.some(
-						(block) =>
-							block.type === "tool_use" &&
-							block.name === sequence.assistantToolName &&
-							JSON.stringify(block.input).includes(sequence.assistantToolInputText),
-					),
-			)
+		// Search all assistant turns that belong to the same generation: between
+		// this user turn and the next user turn (or end of history). A match in a
+		// later generation would be a false positive.
+		const nextUserIndex = apiConversationHistory.findIndex((m, i) => i > userTurnIndex && m.role === "user")
+		const generationSlice = apiConversationHistory.slice(
+			userTurnIndex + 1,
+			nextUserIndex < 0 ? undefined : nextUserIndex,
+		)
+		return generationSlice.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some(
+					(block) =>
+						block.type === "tool_use" &&
+						block.name === sequence.assistantToolName &&
+						JSON.stringify(block.input).includes(sequence.assistantToolInputText),
+				),
+		)
 	}
 
 	public getCurrentTaskStack() {

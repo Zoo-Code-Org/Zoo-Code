@@ -301,7 +301,7 @@ export function preferDirectTestFiles(testFiles, sourceFiles) {
 		const normalizedTestName = testName.toLowerCase()
 		return (
 			(normalizedTestName.startsWith(`${sourceName}.`) || normalizedTestName.startsWith(`${sourceName}-`)) &&
-			/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName)
+			/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(normalizedTestName)
 		)
 	}
 	if (sourceNames.some((sourceName) => !testFiles.some((testFile) => isDirectMatch(testFile, sourceName)))) {

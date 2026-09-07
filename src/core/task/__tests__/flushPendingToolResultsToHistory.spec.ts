@@ -411,13 +411,26 @@ describe("flushPendingToolResultsToHistory", () => {
 			},
 		]
 
-		const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence").mockResolvedValue(true)
+		let resolveWait!: (result: boolean) => void
+		const waitDeferred = new Promise<boolean>((res) => {
+			resolveWait = res
+		})
+		const waitForPersistence = vi
+			.spyOn(task, "waitForCurrentAssistantMessagePersistence")
+			.mockReturnValue(waitDeferred)
 
-		await task.flushPendingToolResultsToHistory()
+		const flushPromise = task.flushPendingToolResultsToHistory()
+
+		// Yield so the async function reaches the persistence await and suspends.
+		await Promise.resolve()
+		// History save must not start before persistence resolves.
+		expect(task.apiConversationHistory.length).toBe(0)
+
+		resolveWait(true)
+		await flushPromise
 
 		expect(waitForPersistence).toHaveBeenCalledTimes(1)
-
-		// Should still save the message (mock resolves immediately)
+		// Should still save the message once persistence settled.
 		expect(task.apiConversationHistory.length).toBe(1)
 	})
 

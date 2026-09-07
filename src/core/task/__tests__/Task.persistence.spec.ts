@@ -669,9 +669,10 @@ describe("Task persistence", () => {
 
 		it("emits TaskCompleted after a failed assistant save succeeds on retry", async () => {
 			vi.useFakeTimers()
+			const retryDeferred = createDeferred<void>()
 			mockSaveApiMessages
 				.mockRejectedValueOnce(new Error("initial write failed"))
-				.mockResolvedValueOnce(undefined)
+				.mockReturnValueOnce(retryDeferred.promise)
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -721,19 +722,24 @@ describe("Task persistence", () => {
 				)
 				expect(completionListener).not.toHaveBeenCalled()
 
-				await vi.runAllTimersAsync()
+				// Advance past the 100 ms retry delay so the retry save starts.
+				await vi.advanceTimersByTimeAsync(150)
+				await vi.waitFor(() => expect(mockSaveApiMessages).toHaveBeenCalledTimes(2))
+				// Completion must not fire while the retry save is still in-flight.
+				expect(completionListener).not.toHaveBeenCalled()
+
+				// Settle the retry save; completion should follow.
+				retryDeferred.resolve(undefined)
 				await handlingCompletion
 
-				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
 				expect(callbacks.handleError).not.toHaveBeenCalled()
 				expect(completionListener).toHaveBeenCalledTimes(1)
 				expect(task.assistantMessageSavedToHistory).toBe(true)
-				// Assert ordering: retry save completes before TaskCompleted is emitted
 				expect(vi.mocked(mockSaveApiMessages).mock.invocationCallOrder[1]).toBeLessThan(
 					vi.mocked(completionListener).mock.invocationCallOrder[0],
 				)
 			} finally {
-				mockSaveApiMessages.mockResolvedValue(undefined)
+				retryDeferred.resolve(undefined)
 				vi.useRealTimers()
 			}
 		})
