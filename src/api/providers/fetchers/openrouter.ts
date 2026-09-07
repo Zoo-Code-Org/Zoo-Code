@@ -200,9 +200,14 @@ export async function getOpenRouterModelEndpoints(
  * module-scope literals become "static" mutants, and the Stryker/Vitest
  * runner combination used by the mutation-diff gate never activates them,
  * so they would report as surviving mutants (see .github/workflows/mutation-testing.yml).
+ *
+ * `~moonshotai/kimi-latest` is OpenRouter's rolling Kimi alias: the catalogue
+ * identifier keeps its `~` prefix, and that exact string is what reaches this
+ * function as `modelId`. Issue #1316 covers the alias in addition to the exact
+ * `moonshotai/kimi-k3` id.
  */
 export const applyOpenRouterMoonshotK3Profile = (modelId: string, modelInfo: ModelInfo): ModelInfo => {
-	const moonshotK3Models = new Set<string>(["moonshotai/kimi-k3", "moonshotai/kimi-latest"])
+	const moonshotK3Models = new Set<string>(["moonshotai/kimi-k3", "~moonshotai/kimi-latest"])
 	if (!moonshotK3Models.has(modelId)) {
 		return modelInfo
 	}

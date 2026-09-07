@@ -514,7 +514,7 @@ describe("OpenRouter API", () => {
 			expect(result.defaultTemperature).toBe(1)
 		})
 
-		it("applies the Moonshot K3 profile for moonshotai/kimi-latest", () => {
+		it("applies the Moonshot K3 profile for ~moonshotai/kimi-latest", () => {
 			const mockModel = {
 				name: "Kimi Latest",
 				description: "Test model",
@@ -527,7 +527,7 @@ describe("OpenRouter API", () => {
 			}
 
 			const result = parseOpenRouterModel({
-				id: "moonshotai/kimi-latest",
+				id: "~moonshotai/kimi-latest",
 				model: mockModel,
 				inputModality: ["text", "image"],
 				outputModality: ["text"],
@@ -688,7 +688,7 @@ describe("OpenRouter API", () => {
 			expect(stale.supportsReasoningEffort).toBe(true)
 		})
 
-		it("applies the profile to moonshotai/kimi-latest", () => {
+		it("applies the profile to ~moonshotai/kimi-latest", () => {
 			const stale: ModelInfo = {
 				maxTokens: 209716,
 				contextWindow: 1000000,
@@ -696,7 +696,7 @@ describe("OpenRouter API", () => {
 				supportsReasoningEffort: true,
 			}
 
-			const result = applyOpenRouterMoonshotK3Profile("moonshotai/kimi-latest", stale)
+			const result = applyOpenRouterMoonshotK3Profile("~moonshotai/kimi-latest", stale)
 
 			expect(result.maxTokens).toBe(32768)
 			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
