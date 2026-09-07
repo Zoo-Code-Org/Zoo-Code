@@ -25,19 +25,30 @@ vi.mock("@src/utils/vscode", () => ({
 }))
 
 const TestComponent = () => {
-	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
-		useExtensionState()
+	const {
+		allowedCommands,
+		setAllowedCommands,
+		soundEnabled,
+		showRooIgnoredFiles,
+		setShowRooIgnoredFiles,
+		viewStateLoaded,
+		setViewStateLoaded,
+	} = useExtensionState()
 
 	return (
 		<div>
 			<div data-testid="allowed-commands">{JSON.stringify(allowedCommands)}</div>
 			<div data-testid="sound-enabled">{JSON.stringify(soundEnabled)}</div>
 			<div data-testid="show-rooignored-files">{JSON.stringify(showRooIgnoredFiles)}</div>
+			<div data-testid="view-state-loaded">{JSON.stringify(viewStateLoaded)}</div>
 			<button data-testid="update-button" onClick={() => setAllowedCommands(["npm install", "git status"])}>
 				Update Commands
 			</button>
 			<button data-testid="toggle-rooignore-button" onClick={() => setShowRooIgnoredFiles(!showRooIgnoredFiles)}>
 				Update Commands
+			</button>
+			<button data-testid="set-view-state-loaded-button" onClick={() => setViewStateLoaded(true)}>
+				Set View State Loaded
 			</button>
 		</div>
 	)
@@ -221,6 +232,55 @@ describe("ExtensionStateContext", () => {
 		)
 
 		expect(JSON.parse(screen.getByTestId("rules").textContent!)).toEqual([])
+	})
+
+	it("initializes with viewStateLoaded set to false", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("view-state-loaded").textContent!)).toBe(false)
+	})
+
+	it("marks viewStateLoaded true after receiving initial state", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: {
+							apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+							mode: "ask",
+							currentApiConfigName: "view-local-profile",
+						},
+					},
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("view-state-loaded").textContent!)).toBe(true)
+	})
+
+	it("updates viewStateLoaded through setViewStateLoaded", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			screen.getByTestId("set-view-state-loaded-button").click()
+		})
+
+		expect(JSON.parse(screen.getByTestId("view-state-loaded").textContent!)).toBe(true)
 	})
 
 	it("updates rules from incoming rules message", () => {
