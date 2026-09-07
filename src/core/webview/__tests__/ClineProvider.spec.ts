@@ -1452,6 +1452,105 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should reapply fields mutated while the load is in flight and keep persisted values for untouched fields", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const logSpy = vi.spyOn(provider, "log")
+			let resolveProfile: (value: {
+				name: string
+				apiProvider: string
+				openRouterModelId: string
+			}) => void = () => {}
+			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
+			provider.providerSettingsManager = {
+				getProfile: vi
+					.fn()
+					.mockImplementation(
+						() =>
+							new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
+								(resolve) => (resolveProfile = resolve),
+							),
+					),
+			}
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// Selections made while the profile lookup is in flight must survive the load.
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-y",
+			})
+
+			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			await load
+
+			// Dirty fields win over the loaded state; the untouched field keeps the persisted value.
+			expect(provider["viewLocalState"]).toEqual({
+				mode: "architect",
+				currentApiConfigName: "cfg-a",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-y" },
+			})
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded state for viewId"))
+			await provider.dispose()
+		})
+
+		it("should keep the persisted mode authoritative when the pre-load buffer is untouched", async () => {
+			const writer = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await writer["setViewStateId"]("shared-view")
+			await writer.saveViewState("mode", "code")
+			await writer.saveViewState("currentApiConfigName", "my-profile")
+
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			// @ts-ignore - Replace providerSettingsManager with a test double for the profile lookup.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "my-profile",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "model-x",
+				}),
+			}
+			// A pre-load buffer write that was never persisted must not be merged over the load.
+			provider["viewLocalState"] = { mode: "architect" }
+			await provider.contextProxy.setValue(
+				"viewStates",
+				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
+			)
+			await provider["setViewStateId"]("shared-view")
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			await writer.dispose()
+			await provider.dispose()
+		})
+
+		it("should not resurrect a field cleared mid-load from the pre-load buffer", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			let resolveProfile: (value: { name: string }) => void = () => {}
+			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
+			provider.providerSettingsManager = {
+				getProfile: vi
+					.fn()
+					.mockImplementation(() => new Promise<{ name: string }>((resolve) => (resolveProfile = resolve))),
+			}
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			provider["viewLocalState"] = { ...provider["viewLocalState"], mode: "architect" }
+			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// The user clears the mode while the load is in flight.
+			await provider.saveViewState("mode", undefined)
+			resolveProfile({ name: "cfg-a" })
+			await load
+
+			// The cleared field must stay absent rather than keeping the persisted or
+			// pre-load value; the untouched field keeps the persisted value.
+			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-a")
+			await provider.dispose()
+		})
+
 		it("should persist known modes, ignore unknown modes and pass through non-string modes", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const logSpy = vi.spyOn(provider, "log")

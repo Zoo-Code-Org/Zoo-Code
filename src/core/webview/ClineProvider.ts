@@ -701,6 +701,8 @@ export class ClineProvider
 	/**
 	 * Loads non-secret persisted selections from the registered viewStates map.
 	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
+	 * Fields mutated while the async profile lookup is in flight are reapplied on top of the
+	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
 	 */
 	private async loadViewState(): Promise<void> {
 		// Capture the id this load is for: a newer id registered while an async
@@ -709,6 +711,11 @@ export class ClineProvider
 		try {
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
+
+			// Snapshot the in-memory buffer before the async profile lookup. The
+			// mutation paths update viewLocalState in place, so a shallow copy is
+			// what makes fields mutated during the load window observable below.
+			const preLoadBuffer = { ...this.viewLocalState }
 
 			if (persisted?.mode) {
 				loadedState.mode = persisted.mode as Mode
@@ -734,7 +741,32 @@ export class ClineProvider
 				return
 			}
 
-			this.viewLocalState = loadedState
+			// Reapply only the fields mutated while the load was in flight: untouched
+			// fields keep the persisted values authoritative, and the pre-load buffer is
+			// never merged wholesale so stale temporary-id state or a cleared field cannot
+			// override the stable persisted state.
+			const postLoadBuffer = this.viewLocalState
+			const mergedState: Partial<ExtensionState> = { ...loadedState }
+
+			if (postLoadBuffer.mode !== preLoadBuffer.mode && postLoadBuffer.mode !== undefined) {
+				mergedState.mode = postLoadBuffer.mode
+			}
+
+			if (
+				postLoadBuffer.currentApiConfigName !== preLoadBuffer.currentApiConfigName &&
+				postLoadBuffer.currentApiConfigName !== undefined
+			) {
+				mergedState.currentApiConfigName = postLoadBuffer.currentApiConfigName
+			}
+
+			if (
+				postLoadBuffer.apiConfiguration !== preLoadBuffer.apiConfiguration &&
+				postLoadBuffer.apiConfiguration !== undefined
+			) {
+				mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
+			}
+
+			this.viewLocalState = mergedState
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
 		} catch (error) {
 			this.log(
