@@ -259,14 +259,15 @@ export class ClineProvider
 		afterUnlockError?: (error: unknown) => Promise<void>,
 	): Promise<T> {
 		return this.runDelegationTransition(parentTaskId, async () => {
+			let result: T
 			try {
-				const result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
-				await afterUnlock?.(result)
-				return result
+				result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
 			} catch (error) {
 				await afterUnlockError?.(error)
 				throw error
 			}
+			await afterUnlock?.(result)
+			return result
 		})
 	}
 

@@ -58,6 +58,15 @@ import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { readApiMessages, saveApiMessages, saveTaskMessages } from "../core/task-persistence"
 import { makeProviderStub } from "./helpers/provider-stub"
 
+type LockedDelegationAccess = {
+	runLockedDelegationTransition: <T>(
+		parentTaskId: string,
+		transition: () => Promise<T>,
+		afterUnlock?: (result: T) => Promise<void>,
+		afterUnlockError?: (error: unknown) => Promise<void>,
+	) => Promise<T>
+}
+
 /**
  * Create a minimal taskHistoryStore stub whose atomicUpdatePair calls both updaters
  * with the provided items and resolves, simulating the happy-path atomic write.
@@ -155,6 +164,71 @@ describe("History resume delegation - parent metadata transitions", () => {
 		vi.mocked(readApiMessages).mockResolvedValue([])
 		vi.mocked(saveTaskMessages).mockImplementation(async ({ messages }) => messages)
 		vi.mocked(saveApiMessages).mockImplementation(async ({ messages }) => messages)
+	})
+
+	it("runs post-lock callbacks only for their matching transition outcome", async () => {
+		let lockHeld = false
+		const provider = makeProviderStub({
+			taskHistoryStore: {
+				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => {
+					lockHeld = true
+					try {
+						return await callback()
+					} finally {
+						lockHeld = false
+					}
+				}),
+			},
+		}) as unknown as LockedDelegationAccess
+		const afterUnlock = vi.fn(async (result: string) => {
+			expect(lockHeld).toBe(false)
+			expect(result).toBe("completed")
+		})
+		const afterUnlockError = vi.fn(async (error: unknown) => {
+			expect(lockHeld).toBe(false)
+			expect(error).toBeInstanceOf(Error)
+		})
+
+		await expect(
+			provider.runLockedDelegationTransition(
+				"parent-success",
+				async () => "completed",
+				afterUnlock,
+				afterUnlockError,
+			),
+		).resolves.toBe("completed")
+		expect(afterUnlock).toHaveBeenCalledOnce()
+		expect(afterUnlockError).not.toHaveBeenCalled()
+
+		const transitionError = new Error("locked transition failed")
+		await expect(
+			provider.runLockedDelegationTransition(
+				"parent-failure",
+				async () => {
+					throw transitionError
+				},
+				afterUnlock,
+				afterUnlockError,
+			),
+		).rejects.toBe(transitionError)
+		expect(afterUnlockError).toHaveBeenCalledOnce()
+
+		const resumeError = new Error("resume failed")
+		await expect(
+			provider.runLockedDelegationTransition(
+				"parent-resume-failure",
+				async () => "completed",
+				async () => {
+					throw resumeError
+				},
+				afterUnlockError,
+			),
+		).rejects.toBe(resumeError)
+		expect(afterUnlockError).toHaveBeenCalledOnce()
+
+		await expect(
+			provider.runLockedDelegationTransition("parent-no-callbacks", async () => "completed"),
+		).resolves.toBe("completed")
 	})
 
 	it("rejects a stale restored completion action before changing parent or child state", async () => {
@@ -1875,8 +1949,12 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(taskHistoryStore.get("child-api-save-failure")).toMatchObject({ status: "active" })
 		expect(removeClineFromStack).not.toHaveBeenCalled()
 		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
-		expect(saveTaskMessages).toHaveBeenLastCalledWith(expect.objectContaining({ messages: originalUiMessages }))
-		expect(saveApiMessages).toHaveBeenLastCalledWith(expect.objectContaining({ messages: originalApiMessages }))
+		expect(saveTaskMessages).toHaveBeenLastCalledWith(
+			expect.objectContaining({ messages: originalUiMessages, merge: false }),
+		)
+		expect(saveApiMessages).toHaveBeenLastCalledWith(
+			expect.objectContaining({ messages: originalApiMessages, merge: false }),
+		)
 	})
 
 	it("surfaces all restoration failures without committing completion metadata", async () => {
@@ -2227,6 +2305,44 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(readTaskMessages).not.toHaveBeenCalled()
 		expect(readApiMessages).not.toHaveBeenCalled()
 		expect(atomicUpdatePair).not.toHaveBeenCalled()
+	})
+
+	it("aborts before reading histories when the refreshed parent is terminal", async () => {
+		const parent = {
+			id: "parent-refreshed-completed",
+			status: "completed",
+			awaitingChildId: "child-original",
+			ts: 1,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const log = vi.fn()
+		const atomicUpdatePair = vi.fn()
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parent }),
+			taskHistoryStore: {
+				get: vi.fn((id: string) => (id === parent.id ? parent : undefined)),
+				atomicUpdatePair,
+				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback()),
+			},
+			log,
+		})
+
+		await expect(
+			ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: parent.id,
+				childTaskId: "child-original",
+				completionResultSummary: "stale result",
+			}),
+		).resolves.toBe(false)
+
+		expect(readTaskMessages).not.toHaveBeenCalled()
+		expect(readApiMessages).not.toHaveBeenCalled()
+		expect(atomicUpdatePair).not.toHaveBeenCalled()
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("status=completed, awaitingChildId=child-original"))
 	})
 
 	it("reopenParentFromDelegation aborts when another host re-delegates after the initial guard", async () => {
