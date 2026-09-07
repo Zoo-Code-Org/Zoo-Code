@@ -65,13 +65,10 @@ for (let mask = 0; mask < 1 << advertisedGrantTypes.length; mask++) {
 	checkedCases++
 }
 
-// Repository policy: retain both implemented grants when RFC 8414's optional
-// grant_types_supported metadata is omitted.
+// RFC 8414 defaults omitted grant_types_supported to authorization_code and
+// implicit. Zoo Code implements only authorization_code from that default.
 // https://www.rfc-editor.org/rfc/rfc8414.html#section-2
-// Normative SHOULD: MCP clients that use refresh tokens should include
-// refresh_token in their grant_types client metadata.
-// https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization#refresh-tokens
-assert.deepEqual(selectMcpOAuthGrantTypes(), [...MCP_OAUTH_GRANT_TYPES])
+assert.deepEqual(selectMcpOAuthGrantTypes(), [AUTHORIZATION_CODE_GRANT_TYPE])
 assert.deepEqual(
 	selectMcpOAuthGrantTypes([REFRESH_TOKEN_GRANT_TYPE, AUTHORIZATION_CODE_GRANT_TYPE, REFRESH_TOKEN_GRANT_TYPE]),
 	[...MCP_OAUTH_GRANT_TYPES],

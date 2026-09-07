@@ -190,10 +190,26 @@ describe("McpOAuthClientProvider", () => {
 
 			expect(metadata.client_name).toBe("Roo Code")
 			expect(metadata.redirect_uris).toEqual(["http://localhost:0/callback"])
-			expect(metadata.grant_types).toContain("authorization_code")
+			expect(metadata.grant_types).toEqual(["authorization_code", "refresh_token"])
 			expect(metadata.response_types).toContain("code")
 			expect(metadata.token_endpoint_auth_method).toBe("none")
 			expect(metadata).toMatchObject({ application_type: "native" })
+			await provider.close()
+		})
+
+		it("should default to authorization code when server grant metadata is omitted", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code"])
 			await provider.close()
 		})
 

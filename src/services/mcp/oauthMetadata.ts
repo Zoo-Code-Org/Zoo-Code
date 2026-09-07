@@ -10,11 +10,13 @@ export interface McpOAuthClientMetadata extends OAuthClientMetadata {
 	application_type: "native"
 }
 
+/** Selects the grants Zoo Code implements from authorization-server metadata. */
 export function selectMcpOAuthGrantTypes(supportedGrantTypes?: readonly string[]): McpOAuthGrantType[] {
-	const supported = new Set(supportedGrantTypes ?? MCP_OAUTH_GRANT_TYPES)
+	const supported = new Set(supportedGrantTypes ?? [AUTHORIZATION_CODE_GRANT_TYPE])
 	return MCP_OAUTH_GRANT_TYPES.filter((grantType) => supported.has(grantType))
 }
 
+/** Builds dynamic-registration metadata for Zoo Code's native authorization-code client. */
 export function buildMcpOAuthClientMetadata(options: {
 	clientName: string
 	redirectUrl: string
