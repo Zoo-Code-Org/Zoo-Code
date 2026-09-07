@@ -106,9 +106,15 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 			reopenedHistoryItem.task.includes("RESTART_PERSISTENCE_SMOKE"),
 			"Reopened task should retain its persisted history title",
 		)
-		assert.ok(
-			(await api.getTaskApiConversationHistoryLength(taskId)) >= conversationLength,
-			"Reopened task should retain its persisted API conversation history",
+		const reopenedCompletion = await api.hasTaskApiConversationHistorySequence(taskId, {
+			userText: "RESTART_PERSISTENCE_SMOKE",
+			assistantToolName: "attempt_completion",
+			assistantToolInputText: MARKER,
+		})
+		assert.strictEqual(
+			reopenedCompletion,
+			true,
+			"Reopened-host history should restore the marked user turn followed by its assistant completion",
 		)
 
 		await writePhaseResult(getResultsDir(), {
