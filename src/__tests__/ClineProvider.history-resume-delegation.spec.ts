@@ -229,6 +229,11 @@ describe("History resume delegation - parent metadata transitions", () => {
 		await expect(
 			provider.runLockedDelegationTransition("parent-no-callbacks", async () => "completed"),
 		).resolves.toBe("completed")
+		await expect(
+			provider.runLockedDelegationTransition("parent-failure-no-callbacks", async () => {
+				throw transitionError
+			}),
+		).rejects.toBe(transitionError)
 	})
 
 	it("rejects a stale restored completion action before changing parent or child state", async () => {
