@@ -73,11 +73,18 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 }
 
 async function runVerify(api: RooCodeAPI): Promise<void> {
+	const taskMessages: Array<{ type: string; ask?: string }> = []
+	const messageHandler = ({ taskId, message }: { taskId: string; message: (typeof taskMessages)[number] }) => {
+		if (taskId === verifiedTaskId) taskMessages.push(message)
+	}
+	let verifiedTaskId: string | undefined
 	try {
 		const createResult = await readPhaseResult(getResultsDir(), "create")
 		assert.strictEqual(createResult.status, "passed")
 		const taskId = createResult.values?.taskId
 		assert.ok(taskId, "Create phase should record a task ID")
+		verifiedTaskId = taskId
+		api.on(RooCodeEventName.Message, messageHandler)
 
 		await waitFor(() => api.isReady())
 		assert.strictEqual(await api.isTaskInHistory(taskId), true, "Task should be present after restart")
@@ -86,6 +93,20 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
 		const conversationLength = await api.getTaskApiConversationHistoryLength(taskId)
 		assert.ok(conversationLength > 0, "API conversation history should be available after restart")
+
+		await api.resumeTask(taskId)
+		await waitFor(() => taskMessages.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task"))
+		assert.strictEqual(await api.isTaskInHistory(taskId), true, "Reopened task should remain in history")
+		const reopenedHistoryItem = await api.getTaskHistoryItem(taskId)
+		assert.ok(reopenedHistoryItem, "Reopened task should retain its history item")
+		assert.ok(
+			reopenedHistoryItem.task.includes("RESTART_PERSISTENCE_SMOKE"),
+			"Reopened task should retain its persisted history title",
+		)
+		assert.ok(
+			(await api.getTaskApiConversationHistoryLength(taskId)) >= conversationLength,
+			"Reopened task should retain its persisted API conversation history",
+		)
 
 		await writePhaseResult(getResultsDir(), {
 			version: PHASE_RESULT_VERSION,
@@ -102,6 +123,8 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 			error: serializePhaseError(error),
 		})
 		throw error
+	} finally {
+		api.off(RooCodeEventName.Message, messageHandler)
 	}
 }
 

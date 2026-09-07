@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 import {
 	MAX_CHANGED_LINES,
@@ -22,7 +22,7 @@ import {
 	parseChangedLines,
 	parseNameStatus,
 	parseVitestTestFiles,
-	preferDirectTestFiles,
+	resolveStrykerTempDir,
 	resolveVitestBinary,
 	packageForPath,
 	runManifest,
@@ -180,37 +180,32 @@ describe("packageForPath", () => {
 })
 
 describe("parseVitestTestFiles", () => {
-	it("normalizes and deduplicates Vitest related-test results", () => {
+	it("normalizes and deduplicates all Vitest related-test results without filename filtering", () => {
 		assert.deepEqual(
 			parseVitestTestFiles(
 				{
 					testResults: [
 						{ name: "/repo/webview-ui/src/utils/__tests__/value.test.ts" },
 						{ name: "/repo/webview-ui/src/utils/__tests__/value.test.ts" },
+						{ name: "/repo/webview-ui/src/components/__tests__/consumer-named.spec.tsx" },
 					],
 				},
 				"/repo",
 			),
-			["webview-ui/src/utils/__tests__/value.test.ts"],
+			[
+				"webview-ui/src/utils/__tests__/value.test.ts",
+				"webview-ui/src/components/__tests__/consumer-named.spec.tsx",
+			],
 		)
 	})
 })
 
-describe("preferDirectTestFiles", () => {
-	it("uses matching focused specs and falls back to all related tests", () => {
-		const related = [
-			"webview-ui/src/__tests__/App.spec.tsx",
-			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
-			"webview-ui/src/components/chat/__tests__/ChatView.spec.tsx",
-		]
-		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/path-mentions.ts"]), [
-			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
-		])
-		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
-	})
-})
-
 describe("related-test discovery", () => {
+	it("keeps Stryker's temp directory relative to each run root", () => {
+		assert.equal(resolveStrykerTempDir("/repo", "/repo"), ".stryker-tmp")
+		assert.equal(resolveStrykerTempDir("/repo", "/repo/src"), path.join("..", ".stryker-tmp"))
+	})
+
 	it("resolves Vitest from each package before falling back to the repository", () => {
 		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-vitest-"))
 		const extension = PACKAGE_CONFIGS.find(({ id }) => id === "extension")
@@ -255,6 +250,26 @@ describe("related-test discovery", () => {
 			)
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("Stryker configuration", () => {
+	it("uses the default or configured temp directory", async () => {
+		const originalTempDir = process.env.STRYKER_TEMP_DIR
+		const configUrl = pathToFileURL(path.join(repositoryRoot, "stryker.config.mjs"))
+
+		try {
+			delete process.env.STRYKER_TEMP_DIR
+			const defaultConfig = (await import(`${configUrl.href}?temp-dir=default`)).default
+			assert.equal(defaultConfig.tempDirName, ".stryker-tmp")
+
+			process.env.STRYKER_TEMP_DIR = path.join("..", ".stryker-tmp")
+			const configuredConfig = (await import(`${configUrl.href}?temp-dir=configured`)).default
+			assert.equal(configuredConfig.tempDirName, path.join("..", ".stryker-tmp"))
+		} finally {
+			if (originalTempDir === undefined) delete process.env.STRYKER_TEMP_DIR
+			else process.env.STRYKER_TEMP_DIR = originalTempDir
 		}
 	})
 })

@@ -277,6 +277,9 @@ const mockApiOptions = ({ apiConfiguration, setApiConfigurationField }: any) => 
 				{provider}
 			</button>
 		))}
+		<button data-testid="set-reasoning-default" onClick={() => setApiConfigurationField("reasoningEffort", "high")}>
+			Set reasoning default
+		</button>
 	</div>
 )
 
@@ -489,6 +492,23 @@ describe("SettingsView - Change Detection Fix", () => {
 
 		// onDone should be called
 		expect(onDone).toHaveBeenCalled()
+	}, 10000)
+
+	it("persists a normalized reasoning default through Save", async () => {
+		;(useExtensionState as any).mockReturnValue(createExtensionState())
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		fireEvent.click(screen.getByTestId("set-reasoning-default"))
+		expect(screen.getByTestId("save-button")).toBeEnabled()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(mockPostMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: expect.objectContaining({ reasoningEffort: "high" }),
+		})
 	}, 10000)
 
 	// These tests are passing for the basic case but failing due to vi.doMock limitations
