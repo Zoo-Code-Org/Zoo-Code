@@ -3,8 +3,9 @@ import * as vscode from "vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ClineProvider } from "../../core/webview/ClineProvider"
+import { MdmService } from "../../services/mdm/MdmService"
 
-import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -641,6 +642,113 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 
+	it("falls back to an undefined MdmService when MdmService.getInstance throws", async () => {
+		;(MdmService.getInstance as Mock).mockImplementation(() => {
+			throw new Error("MDM service not initialized")
+		})
+
+		const provider = await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		// The creation must survive the MDM lookup failure: the provider is
+		// constructed with an undefined MDM service and the tab panel is
+		// still created.
+		const ctor = ClineProvider as unknown as Mock
+		expect(ctor.mock.instances[0]).toBeDefined()
+		expect(ctor).toHaveBeenCalledWith(mockContext, mockOutputChannel, "editor", undefined, undefined)
+		expect(provider).toBe(ctor.mock.instances[0])
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("opens a new group to the right and targets ViewColumn.Two when no editors are visible", async () => {
+		;(vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = []
+
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.newGroupRight")
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.lockEditorGroup")
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+			"zoo-code.TabPanelProvider",
+			"Zoo Code",
+			vscode.ViewColumn.Two,
+			{
+				enableScripts: true,
+				retainContextWhenHidden: true,
+				localResourceRoots: [mockContext.extensionUri],
+			},
+		)
+
+		// The panel icon points at the extension's asset files.
+		const panel = (vscode.window.createWebviewPanel as Mock).mock.results[0].value as {
+			iconPath?: { light: { path: string }; dark: { path: string } }
+		}
+		expect(panel.iconPath).toEqual({
+			light: { path: "assets/icons/panel_light.png" },
+			dark: { path: "assets/icons/panel_dark.png" },
+		})
+	})
+
+	it("treats editors without a viewColumn as column 0 when computing the target column", async () => {
+		// openClineInNewTab only reads viewColumn from each editor, so the
+		// fixture keeps that single field.
+		const editorWithoutColumn = { viewColumn: undefined } as unknown as vscode.TextEditor
+		;(vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = [
+			editorWithoutColumn,
+		]
+
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		// lastCol falls back to 0, so the panel lands on column 1 instead of
+		// opening a new editor group.
+		expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.newGroupRight")
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+			"zoo-code.TabPanelProvider",
+			"Zoo Code",
+			1,
+			expect.objectContaining({ enableScripts: true }),
+		)
+	})
+
+	it("constructs the tab provider with the 'editor' context and the live MdmService instance", async () => {
+		const mockMdm = { name: "mock-mdm" }
+		// MdmService has a private constructor, so pin a sentinel stand-in.
+		;(MdmService.getInstance as Mock).mockReturnValue(mockMdm as unknown as MdmService)
+
+		const provider = await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		const ctor = ClineProvider as unknown as Mock
+		expect(ctor).toHaveBeenCalledTimes(1)
+		expect(ctor).toHaveBeenCalledWith(mockContext, mockOutputChannel, "editor", undefined, mockMdm)
+		expect(provider).toBe(ctor.mock.instances[0])
+	})
+
+	it("posts didBecomeVisible only for visible state changes and clears the tracked tab on dispose", async () => {
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		expect(getPanel()).toBeDefined()
+
+		const panel = (vscode.window.createWebviewPanel as Mock).mock.results[0].value as {
+			onDidChangeViewState: Mock
+			onDidDispose: Mock
+		}
+		const stateHandler = panel.onDidChangeViewState.mock.calls[0][0] as (event: {
+			webviewPanel: { visible: boolean; webview: { postMessage: (message: unknown) => void } }
+		}) => void
+		const visibleEvent = { webviewPanel: { visible: true, webview: { postMessage: vi.fn() } } }
+		stateHandler(visibleEvent)
+		expect(visibleEvent.webviewPanel.webview.postMessage).toHaveBeenCalledWith({
+			type: "action",
+			action: "didBecomeVisible",
+		})
+
+		const hiddenEvent = { webviewPanel: { visible: false, webview: { postMessage: vi.fn() } } }
+		stateHandler(hiddenEvent)
+		expect(hiddenEvent.webviewPanel.webview.postMessage).not.toHaveBeenCalled()
+
+		const disposeHandler = panel.onDidDispose.mock.calls[0][0] as () => void
+		disposeHandler()
+		expect(getPanel()).toBeUndefined()
+	})
+
 	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {
 		const [first, second] = await Promise.all([
 			openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel }),
@@ -648,9 +756,15 @@ describe("openClineInNewTab", () => {
 		])
 
 		// Overlapping "Open in editor" calls must share the in-flight
-		// creation: exactly one tab panel is created and both callers
-		// receive the same provider.
-		expect(first).toBe(second)
+		// creation: exactly one tab panel is created and both callers receive
+		// the same constructed provider. Pinning both results against the
+		// mocked constructor (not just against each other) keeps the test
+		// failing if the shared result is undefined.
+		const ctor = ClineProvider as unknown as Mock
+		const constructed = ctor.mock.instances[0]
+		expect(constructed).toBeDefined()
+		expect(first).toBe(constructed)
+		expect(second).toBe(constructed)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 })
