@@ -689,13 +689,24 @@ export class ClineProvider
 			return
 		}
 
+		const previousViewStateId = this.viewStateId
+
 		this.viewStateId = normalizedViewStateId
 
-		// Re-key any durable entry written under the temporary pre-launch id before
-		// loading, so the load sees the view's own pre-registration selections.
-		await this.rekeyPersistedViewStateEntry(this.viewStateId)
+		try {
+			// Re-key any durable entry written under the temporary pre-launch id before
+			// loading, so the load sees the view's own pre-registration selections.
+			await this.rekeyPersistedViewStateEntry(this.viewStateId)
 
-		await this.loadViewState()
+			await this.loadViewState()
+		} catch (error) {
+			// A persistence failure must not leave the provider holding an id that was
+			// never registered: restore the previous id so a later launch retries the
+			// registration and the load instead of the guard above early-returning for
+			// the failed id.
+			this.viewStateId = previousViewStateId
+			throw error
+		}
 	}
 
 	/**

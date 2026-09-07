@@ -1256,6 +1256,33 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", contextProxy)
+			// Seed a pre-launch entry under the temporary id so the re-key has real work to do.
+			mockContext.globalState.update("viewStates", { [provider.viewId]: { mode: "architect", updatedAt: 1 } })
+
+			const setValueSpy = vi.spyOn(contextProxy, "setValue").mockRejectedValue(new Error("storage down"))
+
+			await expect(provider["setViewStateId"]("stable-sidebar-view")).rejects.toThrow("storage down")
+
+			// The failed id must not stick: the provider keeps its previous (temporary)
+			// id so a later launch retries registration and the load instead of the
+			// guard early-returning for an id that was never persisted.
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+
+			// A later retry succeeds once the storage write works again, and the
+			// pre-launch entry lands under the registered id.
+			setValueSpy.mockRestore()
+			await provider["setViewStateId"]("stable-sidebar-view")
+			expect(provider["viewStateId"]).toBe("stable-sidebar-view")
+			expect(mockContext.globalState.get("viewStates")).toEqual({
+				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
+			})
+
+			await provider.dispose()
+		})
 	})
 
 	describe("view state persistence edge cases", () => {
