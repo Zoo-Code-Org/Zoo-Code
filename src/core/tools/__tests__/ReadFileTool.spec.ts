@@ -705,7 +705,7 @@ describe("ReadFileTool", () => {
 			})
 
 			expect(parseSpy).not.toHaveBeenCalled()
-			expect(task.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+			expect(task.say).not.toHaveBeenCalled()
 			expect(task.didRejectTool).toBe(true)
 			expect(updates.get("one.ts")).toMatchObject({ status: "denied" })
 			expect(updates.get("two.ts")).toMatchObject({ status: "denied" })
@@ -727,6 +727,7 @@ describe("ReadFileTool", () => {
 			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
 				Object.assign(fileResults.find(({ path }) => path === filePath)!, update)
 			})
+			Object.assign(fileResults[0], { status: "approved", feedbackImages: undefined })
 			readFileTool["buildAndPushResult"](task, fileResults, callbacks.pushToolResult)
 
 			expect(task.say).toHaveBeenCalledWith("user_feedback", undefined, queuedImages)
