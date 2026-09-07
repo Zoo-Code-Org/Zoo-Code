@@ -257,11 +257,17 @@ describe("registerCommands handlers", () => {
 		"$command targets the tab instance for the tracked tab panel",
 		({ command, actions, telemetry }) => {
 			const mockTabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
-			setPanel({} as vscode.WebviewPanel, "tab")
+			// Retain the tracked tab panel and pin the instance lookup
+			// against its identity: a handler that resolved the sidebar view
+			// or any other view must fail instead of passing on the stubbed
+			// provider result alone.
+			const tabPanel = {} as vscode.WebviewPanel
+			setPanel(tabPanel, "tab")
 			;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockTabProvider)
 
 			handlers[command]()
 
+			expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
 			for (const action of actions) {
 				expect(mockTabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action })
 			}
@@ -539,11 +545,15 @@ describe("registerCommands handlers", () => {
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 		}
-		setPanel({} as vscode.WebviewPanel, "tab")
+		// Same identity pin as the other InTab cases: the eviction must run
+		// against the provider resolved from the exact tracked tab panel.
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockTabProvider)
 
 		await handlers["zoo-code.plusButtonClickedInTab"]()
 
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
 		expect(TelemetryService.instance.captureTitleButtonClicked).toHaveBeenCalledWith("plus")
 		expect(mockTabProvider.evictCurrentTask).toHaveBeenCalledTimes(1)
 		expect(mockTabProvider.refreshWorkspace).toHaveBeenCalledTimes(1)
