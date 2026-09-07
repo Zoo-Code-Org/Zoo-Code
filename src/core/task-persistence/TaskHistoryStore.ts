@@ -922,9 +922,7 @@ export class TaskHistoryStore {
 						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
 					}
 					if (!deepEqual(existing, expectedWritten)) {
-						throw new Error(
-							`[TaskHistoryStore] atomicUpdatePair: cannot compensate ${taskId} after a concurrent update`,
-						)
+						throw new Error(`cannot compensate ${taskId} after concurrent update`)
 					}
 					return preImage
 				},
