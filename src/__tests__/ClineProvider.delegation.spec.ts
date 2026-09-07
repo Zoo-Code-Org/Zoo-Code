@@ -25,6 +25,7 @@ const parentHistoryItem: HistoryItem = {
 function makeStoreStub(
 	overrides: Partial<{
 		atomicReadAndUpdate: ReturnType<typeof vi.fn>
+		upsert: ReturnType<typeof vi.fn>
 		get: ReturnType<typeof vi.fn>
 		readFresh: ReturnType<typeof vi.fn>
 		invalidate: ReturnType<typeof vi.fn>
@@ -35,6 +36,9 @@ function makeStoreStub(
 			updater(parentHistoryItem)
 			return []
 		}),
+		// The child WAL write and its best-effort post-commit marker strip
+		// both resolve successfully by default; individual tests override.
+		upsert: vi.fn(async (item: HistoryItem) => [item]),
 		// A persisted parent record with no delegation, read strictly from its
 		// durable task file: the commit-rejection reconciliation reads this as
 		// an exact nondelegated preimage — definitively uncommitted. The child
@@ -90,6 +94,9 @@ const makeChildTask = (taskId: string) => {
 	const run = vi.fn().mockResolvedValue(undefined)
 	return {
 		taskId,
+		rootTaskId: undefined,
+		taskNumber: 2,
+		workspacePath: "/test/workspace",
 		start: vi.fn(),
 		run,
 		adoptHandoffExecutionContext: vi.fn(),
@@ -209,6 +216,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		let current: HistoryItem = { ...parentHistoryItem, status: "active", pendingAction }
 		const taskHistoryStore = {
 			get: vi.fn(() => current),
+			upsert: vi.fn(async (item: HistoryItem) => [item]),
 			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
 				current = updater(current)
 				return [current]
@@ -439,10 +447,13 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			},
 		})
 
-		// Delegation metadata written via atomicReadAndUpdate with correct taskId
-		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		// Delegation metadata written via atomicReadAndUpdate with correct
+		// taskId. Two calls total: the parent delegation commit first, then
+		// the best-effort child pending-handoff marker strip.
+		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(2)
 		const [calledTaskId, updater] = taskHistoryStore.atomicReadAndUpdate.mock.calls[0]
 		expect(calledTaskId).toBe("parent-1")
+		expect(taskHistoryStore.atomicReadAndUpdate.mock.calls[1]?.[0]).toBe("child-1")
 
 		// The updater must produce the correct delegation fields
 		const delegated = updater(parentHistoryItem)
@@ -466,6 +477,145 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		// Provider-level event
 		expect(providerEmit).toHaveBeenCalledWith(RooCodeEventName.TaskDelegated, "parent-1", "child-1")
+	})
+
+	it("persists the child write-ahead record before the delegation commit", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const providerEmit = vi.fn()
+		const taskHistoryStore = makeStoreStub()
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: providerEmit,
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(makePreparedHandoff()),
+			projectPreparedProviderHandoffState: vi.fn().mockResolvedValue({ ok: true }),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+		})
+
+		// The child WAL write happened strictly before the parent commit.
+		const store = taskHistoryStore as unknown as {
+			upsert: ReturnType<typeof vi.fn>
+			atomicReadAndUpdate: ReturnType<typeof vi.fn>
+		}
+		expect(store.upsert).toHaveBeenCalledTimes(1)
+		expect(store.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+			store.atomicReadAndUpdate.mock.invocationCallOrder[0],
+		)
+		const walRecord = store.upsert.mock.calls[0]?.[0] as HistoryItem
+		// Secret-free write-ahead intent: mode + explicit profile intent only.
+		expect(walRecord).toMatchObject({
+			id: "child-1",
+			parentTaskId: "parent-1",
+			status: "active",
+			mode: "code",
+			apiConfigName: "profile-1",
+			pendingHandoff: { kind: "set", version: 1, mode: "code", profileName: "profile-1" },
+		})
+		expect(JSON.stringify(walRecord)).not.toContain("apiKey")
+	})
+
+	it("fails closed when the child write-ahead write rejects: no commit, parent restored", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const walError = new Error("disk full")
+		const taskHistoryStore = makeStoreStub({
+			upsert: vi.fn().mockRejectedValue(walError),
+		})
+		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const getTaskWithId = vi.fn().mockResolvedValue({ historyItem: { ...parentHistoryItem, status: "active" } })
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(makePreparedHandoff()),
+			projectPreparedProviderHandoffState: vi.fn().mockResolvedValue({ ok: true }),
+			deleteTaskWithId,
+			createTaskWithHistoryItem,
+			getTaskWithId,
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		// Fail closed: the original WAL error surfaces and the delegation commit
+		// never runs.
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow("disk full")
+
+		const store = taskHistoryStore as unknown as { atomicReadAndUpdate: ReturnType<typeof vi.fn> }
+		expect(store.atomicReadAndUpdate).not.toHaveBeenCalled()
+		expect(child.adoptHandoffExecutionContext).not.toHaveBeenCalled()
+		expect(child.run).not.toHaveBeenCalled()
+		// Rollback: child deleted, parent restored.
+		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).toHaveBeenCalled()
+	})
+
+	it("starts the child when the post-commit marker strip fails (restart replay covers it)", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const providerEmit = vi.fn()
+		const taskHistoryStore = makeStoreStub({
+			atomicReadAndUpdate: vi.fn(async (taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
+				if (taskId === "child-1") {
+					// The best-effort marker strip failed.
+					throw new Error("strip rejected")
+				}
+				updater(parentHistoryItem)
+				return []
+			}),
+		})
+		const log = vi.fn()
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: providerEmit,
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(makePreparedHandoff()),
+			projectPreparedProviderHandoffState: vi.fn().mockResolvedValue({ ok: true }),
+			log,
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		const result = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+		})
+
+		// The marker failure is non-fatal: the durable delegation and the
+		// authoritative child context carry the handoff.
+		expect(result).toBe(child)
+		expect(child.run).toHaveBeenCalledTimes(1)
+		expect(providerEmit).toHaveBeenCalledWith(RooCodeEventName.TaskDelegated, "parent-1", "child-1")
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("restart replay"))
 	})
 
 	it("posts taskHistoryItemUpdated to the webview when isViewLaunched is true", async () => {
@@ -581,8 +731,15 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		// prepare → createTask → atomicReadAndUpdate → child.run: read-only
 		// preparation completes before the parent leaves the stack, and the
-		// scheduler admits the child only after metadata is persisted
-		expect(callOrder).toEqual(["prepareProviderHandoffContext", "createTask", "atomicReadAndUpdate", "child.run"])
+		// scheduler admits the child only after metadata is persisted. The
+		// child WAL write and its marker strip both count as atomic store ops.
+		expect(callOrder).toEqual([
+			"prepareProviderHandoffContext",
+			"createTask",
+			"atomicReadAndUpdate",
+			"atomicReadAndUpdate",
+			"child.run",
+		])
 	})
 
 	it("implicitly severs interrupted awaited child and re-delegates when parent is already delegated", async () => {
@@ -1139,8 +1296,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			.providerHandoffProjectionCompletion
 
 		expect(result).toBe(child)
-		// Delegation was committed and announced; the child started.
-		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		// Delegation was committed and announced; the child started. Both
+		// store updates ran: the parent commit and the child marker strip.
+		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(2)
 		expect(providerEmit).toHaveBeenCalledWith(RooCodeEventName.TaskDelegated, "parent-1", "child-1")
 		expect(child.run).toHaveBeenCalledTimes(1)
 		// The failure was logged redacted — never with the sentinel secret value.
@@ -1920,7 +2078,12 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		const records = new Map<string, HistoryItem>([["parent-1", { ...parentHistoryItem }]])
 		const taskHistoryStore = makeStoreStub({
-			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
+			atomicReadAndUpdate: vi.fn(async (taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
+				if (taskId === "child-1") {
+					// The best-effort child pending-handoff marker strip.
+					order.push("finalize-child-wal")
+					return []
+				}
 				await commitGate
 				records.set("parent-1", updater(structuredClone(records.get("parent-1")!)))
 				order.push("committed")
@@ -1981,9 +2144,11 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		releaseCommit()
 		await delegation
 		expect(await completion).toBe(false)
-		// The completion's store read happened only after the delegation committed.
+		// The completion's store read happened only after the delegation
+		// committed and its marker strip finalized inside the delegation.
 		expect(order[0]).toBe("committed")
-		expect(order[1]).toBe("read:parent-1")
+		expect(order[1]).toBe("finalize-child-wal")
+		expect(order[2]).toBe("read:parent-1")
 	})
 
 	it("starts the child after a timed-out projection and ignores the late completion", async () => {

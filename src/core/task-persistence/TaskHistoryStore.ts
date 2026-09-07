@@ -13,8 +13,9 @@ import {
 	withAdvisoryFileLock,
 	ADVISORY_READ_LOCK_RETRIES,
 } from "../../utils/safeWriteJson"
-import { getStorageBasePath } from "../../utils/storage"
+import { getStorageBasePath, getTaskDirectoryPath } from "../../utils/storage"
 import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import { isValidPendingHandoff } from "./providerHandoff"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -442,6 +443,11 @@ export class TaskHistoryStore {
 		let repairsInThisPass: number
 		do {
 			repairsInThisPass = 0
+			// Replay the child-side delegation write-ahead records BEFORE the
+			// delegated-parent pass, using its own snapshot: the pass below must
+			// see the finalized or removed post-sweep cache, not a stale copy.
+			await this.reconcilePendingHandoffRecords(new Map(Array.from(this.cache.values()).map((i) => [i.id, i])))
+
 			// Rebuild the lookup map each pass so repairs from the previous pass
 			// are visible when evaluating chained delegations.
 			const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
@@ -514,6 +520,102 @@ export class TaskHistoryStore {
 				// child.status === "interrupted" or "delegated" → leave as-is this pass
 			}
 		} while (repairsInThisPass > 0)
+	}
+
+	/**
+	 * Replay the child-side delegation write-ahead records (`pendingHandoff`).
+	 *
+	 * The delegating provider writes the child's history record with this
+	 * marker BEFORE the parent's delegation record is committed, so a crash
+	 * between the two writes leaves a recoverable trail:
+	 *
+	 * - committed: the parent record durably points at this child
+	 *   (`status === "delegated"` and `awaitingChildId === child.id`). The
+	 *   marker is stale bookkeeping; strip it (idempotent finalization
+	 *   replay). The normal delegated-parent pass below then handles the
+	 *   child's status as usual.
+	 * - orphan: the parent never durably committed this delegation. If — and
+	 *   only if — every guard predicate holds (valid marker version, lineage
+	 *   to a present parent record, pre-start child status, no delegation
+	 *   bookkeeping of its own, and no matching parent delegation), the
+	 *   pre-start child record and its task directory are removed.
+	 *
+	 * Guards are deliberately conservative: a false negative only leaves a
+	 * stale record on disk, while a false positive would delete user data.
+	 * Ambiguous records are left untouched. Must run under the store lock.
+	 */
+	private async reconcilePendingHandoffRecords(byId: ReadonlyMap<string, HistoryItem>): Promise<void> {
+		for (const [, item] of byId) {
+			const pending = item.pendingHandoff
+			if (!pending) continue
+
+			// Guard 1: only markers this build understands are actionable.
+			if (!isValidPendingHandoff(pending)) continue
+
+			// Guard 2: lineage — a write-ahead record always references its
+			// delegating parent, and that record must be present.
+			const parentId = item.parentTaskId
+			if (!parentId || !this.isSafeTaskId(parentId)) continue
+			const parent = byId.get(parentId)
+			if (!parent) continue
+
+			if (parent.status === "delegated" && parent.awaitingChildId === item.id) {
+				// Committed: the parent delegation is durable. Strip the stale
+				// marker; the child's own mode/apiConfigName fields remain.
+				try {
+					await this.upsertCore({ ...item, pendingHandoff: undefined }, { skipTransitionCheck: true })
+					console.warn(`[TaskHistoryStore] Finalized pending handoff marker for committed child ${item.id}`)
+				} catch (error) {
+					console.error(
+						`[TaskHistoryStore] Failed to finalize pending handoff marker for child ${item.id}:`,
+						error,
+					)
+				}
+				continue
+			}
+
+			// Guard 3: pre-start only. A child that ran (messages, completion,
+			// its own delegation, or a terminal status) is never deleted here.
+			if ((item.status ?? "active") !== "active") continue
+			if (
+				item.awaitingChildId !== undefined ||
+				item.delegatedToId !== undefined ||
+				item.completedByChildId !== undefined ||
+				item.completionResultSummary !== undefined
+			) {
+				continue
+			}
+
+			// Guard 4: the parent record exists and does NOT delegate to this
+			// child (checked above) — a pre-commit orphan.
+			if (!this.isSafeTaskId(item.id)) continue
+			try {
+				this.cache.delete(item.id)
+				this.taskFileMtimes.delete(item.id)
+				try {
+					await fs.unlink(await this.getTaskFilePath(item.id))
+				} catch {
+					// Record file may already be gone.
+				}
+				try {
+					const taskDir = await getTaskDirectoryPath(this.globalStoragePath, item.id)
+					await fs.rm(taskDir, { recursive: true, force: true })
+				} catch (error) {
+					console.warn(
+						`[TaskHistoryStore] Failed to remove orphaned handoff task directory ${item.id}:`,
+						error,
+					)
+				}
+				if (this.onWrite) {
+					await this.onWrite(this.getAll())
+				}
+				console.warn(
+					`[TaskHistoryStore] Removed pre-commit orphaned handoff child ${item.id} (parent ${parentId} never delegated to it)`,
+				)
+			} catch (error) {
+				console.error(`[TaskHistoryStore] Failed to remove orphaned handoff child ${item.id}:`, error)
+			}
+		}
 	}
 
 	private getPersistedActiveIds(): ReadonlySet<string> {

@@ -1016,3 +1016,153 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		).rejects.toThrow("Invalid task status transition: delegated → completed")
 	})
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pendingHandoff write-ahead records — restart replay
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TaskHistoryStore pendingHandoff reconciliation", () => {
+	let tmpDir: string
+	let store: TaskHistoryStore
+	const disposables = new Set<TaskHistoryStore>()
+
+	function registerStore(nextStore: TaskHistoryStore): TaskHistoryStore {
+		disposables.add(nextStore)
+		return nextStore
+	}
+
+	async function seedItems(items: HistoryItem[]): Promise<void> {
+		const tasksDir = path.join(tmpDir, "tasks")
+		for (const item of items) {
+			const taskDir = path.join(tasksDir, item.id)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
+		}
+	}
+
+	async function taskFileExists(taskId: string): Promise<boolean> {
+		try {
+			await fs.access(path.join(tmpDir, "tasks", taskId, "history_item.json"))
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pending-handoff-reconcile-"))
+		store = registerStore(new TaskHistoryStore(tmpDir))
+	})
+
+	afterEach(async () => {
+		for (const disposable of disposables) disposable.dispose()
+		disposables.clear()
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	})
+
+	it("removes a guarded pre-commit orphan: child WAL record whose parent never delegated", async () => {
+		const child = makeItem({
+			id: "wal-orphan",
+			parentTaskId: "wal-parent",
+			status: "active",
+			mode: "ask",
+			apiConfigName: "profile-1",
+			pendingHandoff: { kind: "set", version: 1, mode: "ask", profileName: "profile-1" },
+		})
+		const parent = makeItem({ id: "wal-parent", status: "active" })
+		await seedItems([parent, child])
+
+		await store.initialize()
+
+		// The orphan and its task directory are gone; the parent is untouched.
+		expect(store.get("wal-orphan")).toBeUndefined()
+		expect(await taskFileExists("wal-orphan")).toBe(false)
+		expect(store.get("wal-parent")?.status).toBe("active")
+	})
+
+	it("strips the marker from a committed child and recovers the delegation for resume", async () => {
+		const child = makeItem({
+			id: "wal-child",
+			parentTaskId: "wal-parent",
+			status: "active",
+			mode: "ask",
+			apiConfigName: "profile-1",
+			pendingHandoff: { kind: "set", version: 1, mode: "ask", profileName: "profile-1" },
+		})
+		const parent = makeItem({ id: "wal-parent", status: "delegated", awaitingChildId: "wal-child" })
+		await seedItems([parent, child])
+
+		await store.initialize()
+
+		// The persisted handoff identity survives restart: the child record
+		// keeps mode/apiConfigName while the marker is replayed away, and the
+		// existing active-child repair marks it interrupted for re-delegation
+		// or resume.
+		const recoveredChild = store.get("wal-child")
+		expect(recoveredChild?.pendingHandoff).toBeUndefined()
+		expect(recoveredChild?.mode).toBe("ask")
+		expect(recoveredChild?.apiConfigName).toBe("profile-1")
+		expect(recoveredChild?.status).toBe("interrupted")
+		expect(store.get("wal-parent")?.status).toBe("active")
+	})
+
+	it("leaves ambiguous WAL records untouched (fail-safe guards)", async () => {
+		const unknownVersion = makeItem({
+			id: "wal-guard-version",
+			parentTaskId: "wal-guard-parent",
+			status: "active",
+			// A future/unknown version must fail safe; the double cast models a
+			// marker written by a newer build found on disk.
+			pendingHandoff: { kind: "clear", version: 99 as unknown as 1, mode: "ask" },
+		})
+		const interruptedChild = makeItem({
+			id: "wal-guard-interrupted",
+			parentTaskId: "wal-guard-parent",
+			status: "interrupted",
+			pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+		})
+		const noParent = makeItem({
+			id: "wal-guard-orphan-root",
+			status: "active",
+			pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+		})
+		const missingParentChild = makeItem({
+			id: "wal-guard-missing-parent",
+			parentTaskId: "wal-guard-gone",
+			status: "active",
+			pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+		})
+		const supersededChild = makeItem({
+			id: "wal-guard-superseded",
+			parentTaskId: "wal-guard-parent",
+			status: "active",
+			completionResultSummary: "partial work",
+			pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+		})
+		// NOTE: "wal-guard-gone" is deliberately NOT seeded so the
+		// "wal-guard-missing-parent" child has a missing parent record, which
+		// the sweep must treat conservatively.
+		await seedItems([
+			makeItem({ id: "wal-guard-parent", status: "active" }),
+			unknownVersion,
+			interruptedChild,
+			noParent,
+			missingParentChild,
+			supersededChild,
+		])
+
+		await store.initialize()
+
+		// Every ambiguous record survives; nothing was deleted.
+		for (const id of [
+			"wal-guard-version",
+			"wal-guard-interrupted",
+			"wal-guard-orphan-root",
+			"wal-guard-missing-parent",
+			"wal-guard-superseded",
+		]) {
+			expect(store.get(id), id).toBeDefined()
+			expect(await taskFileExists(id), id).toBe(true)
+		}
+	})
+})

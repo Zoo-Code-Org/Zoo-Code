@@ -5,9 +5,11 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import {
 	applyProviderHandoffEvent,
 	createPreparedProviderHandoffContext,
+	createPendingHandoffMarker,
 	createProviderHandoffPlan,
 	createProviderHandoffTransaction,
 	classifyProviderHandoffProjectionResults,
+	isValidPendingHandoff,
 	decideProviderHandoffProfile,
 	getProviderHandoffActivationOptions,
 	initialProviderHandoffState,
@@ -64,6 +66,61 @@ describe("provider handoff contract", () => {
 			apiConfiguration: { apiProvider: providerIdentifiers.openai },
 		})
 		expect(prepared.profile.intent).toEqual({ kind: "preserve" })
+	})
+
+	it("builds a secret-free write-ahead marker mirroring the prepared intent", () => {
+		const base = { apiConfiguration: { apiProvider: providerIdentifiers.openai } }
+		expect(
+			createPendingHandoffMarker({
+				prepared: createPreparedProviderHandoffContext({
+					requestedMode: "code",
+					profile: { source: "saved", name: "saved-profile", id: "saved-id" },
+					...base,
+				}),
+			}),
+		).toEqual({ kind: "set", version: 1, mode: "code", profileName: "saved-profile" })
+		expect(
+			createPendingHandoffMarker({
+				prepared: createPreparedProviderHandoffContext({
+					requestedMode: "architect",
+					profile: { source: "locked-current", name: "pinned", id: "pinned-id" },
+					...base,
+				}),
+			}),
+		).toEqual({ kind: "preserve", version: 1, mode: "architect", profileName: "pinned" })
+		expect(
+			createPendingHandoffMarker({
+				prepared: createPreparedProviderHandoffContext({
+					requestedMode: "code",
+					profile: { source: "unsaved-current", name: undefined, id: undefined },
+					...base,
+				}),
+			}),
+		).toEqual({ kind: "clear", version: 1, mode: "code" })
+		// The marker never carries configuration or secret-shaped fields.
+		const marker = createPendingHandoffMarker({
+			prepared: createPreparedProviderHandoffContext({
+				requestedMode: "code",
+				profile: { source: "saved", name: "p", id: "p-id" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openai, openAiApiKey: "sk-secret" },
+			}),
+		})
+		expect(JSON.stringify(marker)).not.toContain("sk-secret")
+		expect(JSON.stringify(marker)).not.toContain("apiKey")
+	})
+
+	it("validates parsed write-ahead markers and rejects unknown shapes and versions", () => {
+		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code", profileName: "p" })).toBe(true)
+		expect(isValidPendingHandoff({ kind: "preserve", version: 1, mode: "code" })).toBe(true)
+		expect(isValidPendingHandoff({ kind: "preserve", version: 1, mode: "code", profileName: "p" })).toBe(true)
+		expect(isValidPendingHandoff({ kind: "clear", version: 1, mode: "code" })).toBe(true)
+		// Unknown version: fail safe, leave untouched.
+		expect(isValidPendingHandoff({ kind: "clear", version: 2, mode: "code" })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code" })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "unknown", version: 1, mode: "code" })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "clear", version: 1 })).toBe(false)
+		expect(isValidPendingHandoff(null)).toBe(false)
+		expect(isValidPendingHandoff("clear")).toBe(false)
 	})
 
 	it("selects the current profile while workspace profile locking is enabled", () => {
@@ -271,12 +328,39 @@ describe("provider handoff transaction protocol", () => {
 		{ type: "prepare", generation: GENERATION },
 		{ type: "remove-parent" },
 		{ type: "create-child", generation: GENERATION },
+		{ type: "wal-child" },
 		{ type: "commit-delegation" },
 		{ type: "activate-context", generation: GENERATION },
 		{ type: "project-legacy", boundary: "profile-store", ok: true },
 		{ type: "start-child" },
 		{ type: "publish" },
 	]
+
+	it("fails closed when the child write-ahead write fails, restoring cleanly", () => {
+		const initial = initialProviderHandoffState()
+		const prepared = applyProviderHandoffEvent(initial, { type: "prepare", generation: GENERATION })
+		if (!prepared.ok) throw new Error("unreachable")
+		const removed = applyProviderHandoffEvent(prepared.state, { type: "remove-parent" })
+		if (!removed.ok) throw new Error("unreachable")
+		const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
+		if (!created.ok) throw new Error("unreachable")
+		const failed = applyProviderHandoffEvent(created.state, { type: "wal-child-failed" })
+		if (!failed.ok) throw new Error("unreachable")
+		expect(failed.state).toMatchObject({
+			phase: "aborting",
+			failure: { boundary: "child-wal" },
+			childWal: "none",
+		})
+		const cleaned = applyProviderHandoffEvent(failed.state, { type: "rollback-cleanup", ok: true })
+		if (!cleaned.ok) throw new Error("unreachable")
+		const restored = applyProviderHandoffEvent(cleaned.state, { type: "rollback-restore", ok: true })
+		expect(restored.ok && restored.state.phase).toBe("aborted")
+		// No commit may be attempted from the pre-WAL state.
+		expect(applyProviderHandoffEvent(created.state, { type: "commit-delegation" })).toMatchObject({
+			ok: false,
+			reason: "wal-required",
+		})
+	})
 
 	it("walks the legal happy path from initial to settled with one prepared generation", () => {
 		const { states, rejections } = drive(initialProviderHandoffState(), happyPath)
@@ -288,6 +372,7 @@ describe("provider handoff transaction protocol", () => {
 			"prepared",
 			"parent-removed",
 			"child-created",
+			"child-wal-durable",
 			"delegation-committed",
 			"context-active",
 			"context-active",
@@ -338,6 +423,15 @@ describe("provider handoff transaction protocol", () => {
 		expect(created.ok).toBe(true)
 		if (!created.ok) throw new Error("unreachable")
 
+		// commit before the child write-ahead record is durable
+		expect(applyProviderHandoffEvent(created.state, { type: "commit-delegation" })).toMatchObject({
+			ok: false,
+			reason: "wal-required",
+		})
+		const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+		expect(wal.ok).toBe(true)
+		if (!wal.ok) throw new Error("unreachable")
+
 		// context authority before commit
 		expect(
 			applyProviderHandoffEvent(created.state, { type: "activate-context", generation: GENERATION }),
@@ -345,7 +439,7 @@ describe("provider handoff transaction protocol", () => {
 			ok: false,
 			reason: "commit-required",
 		})
-		const committed = applyProviderHandoffEvent(created.state, { type: "commit-delegation" })
+		const committed = applyProviderHandoffEvent(wal.state, { type: "commit-delegation" })
 		expect(committed.ok).toBe(true)
 		if (!committed.ok) throw new Error("unreachable")
 
@@ -395,7 +489,9 @@ describe("provider handoff transaction protocol", () => {
 		})
 		const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
 		if (!created.ok) throw new Error("unreachable")
-		const committed = applyProviderHandoffEvent(created.state, { type: "commit-delegation" })
+		const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+		if (!wal.ok) throw new Error("unreachable")
+		const committed = applyProviderHandoffEvent(wal.state, { type: "commit-delegation" })
 		if (!committed.ok) throw new Error("unreachable")
 		expect(
 			applyProviderHandoffEvent(committed.state, { type: "activate-context", generation: "other-generation" }),
@@ -472,7 +568,9 @@ describe("provider handoff transaction protocol", () => {
 		if (!removed.ok) throw new Error("unreachable")
 		const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
 		if (!created.ok) throw new Error("unreachable")
-		const failed = applyProviderHandoffEvent(created.state, { type: "commit-failed" })
+		const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+		if (!wal.ok) throw new Error("unreachable")
+		const failed = applyProviderHandoffEvent(wal.state, { type: "commit-failed" })
 		if (!failed.ok) throw new Error("unreachable")
 
 		// Production reconciles the durability before any destructive step.
@@ -494,7 +592,9 @@ describe("provider handoff transaction protocol", () => {
 		if (!removed.ok) throw new Error("unreachable")
 		const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
 		if (!created.ok) throw new Error("unreachable")
-		const failed = applyProviderHandoffEvent(created.state, { type: "commit-failed" })
+		const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+		if (!wal.ok) throw new Error("unreachable")
+		const failed = applyProviderHandoffEvent(wal.state, { type: "commit-failed" })
 		if (!failed.ok) throw new Error("unreachable")
 		expect(failed.state).toMatchObject({
 			phase: "aborting",
@@ -573,7 +673,9 @@ describe("provider handoff transaction protocol", () => {
 		if (!removed.ok) throw new Error("unreachable")
 		const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
 		if (!created.ok) throw new Error("unreachable")
-		const failed = applyProviderHandoffEvent(created.state, { type: "commit-failed" })
+		const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+		if (!wal.ok) throw new Error("unreachable")
+		const failed = applyProviderHandoffEvent(wal.state, { type: "commit-failed" })
 		if (!failed.ok) throw new Error("unreachable")
 		const resolved = applyProviderHandoffEvent(failed.state, {
 			type: "observe-commit-durability",
@@ -593,7 +695,7 @@ describe("provider handoff transaction protocol", () => {
 
 	it("permits a projection failure after the commit without invalidating child authority", () => {
 		const initial = initialProviderHandoffState()
-		const activated = drive(initial, happyPath.slice(0, 5)).states[5]!
+		const activated = drive(initial, happyPath.slice(0, 6)).states[6]!
 		expect(activated.phase).toBe("context-active")
 		expect(activated.contextAuthority).toBe("child")
 
@@ -626,7 +728,7 @@ describe("provider handoff transaction protocol", () => {
 
 	it("starts the child without awaiting the legacy projection, which may settle afterwards", () => {
 		const initial = initialProviderHandoffState()
-		const activated = drive(initial, happyPath.slice(0, 5)).states[5]!
+		const activated = drive(initial, happyPath.slice(0, 6)).states[6]!
 
 		// Start with the projection still original: the child never waits for
 		// background legacy projection work.
@@ -673,7 +775,9 @@ describe("provider handoff transaction protocol", () => {
 		if (!removed.ok) throw new Error("unreachable")
 		const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
 		if (!created.ok) throw new Error("unreachable")
-		const failed = applyProviderHandoffEvent(created.state, { type: "commit-failed" })
+		const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+		if (!wal.ok) throw new Error("unreachable")
+		const failed = applyProviderHandoffEvent(wal.state, { type: "commit-failed" })
 		if (!failed.ok) throw new Error("unreachable")
 
 		const observed = applyProviderHandoffEvent(failed.state, {
@@ -698,7 +802,9 @@ describe("provider handoff transaction protocol", () => {
 			if (!removed.ok) throw new Error("unreachable")
 			const created = applyProviderHandoffEvent(removed.state, { type: "create-child", generation: GENERATION })
 			if (!created.ok) throw new Error("unreachable")
-			const failed = applyProviderHandoffEvent(created.state, { type: "commit-failed" })
+			const wal = applyProviderHandoffEvent(created.state, { type: "wal-child" })
+			if (!wal.ok) throw new Error("unreachable")
+			const failed = applyProviderHandoffEvent(wal.state, { type: "commit-failed" })
 			if (!failed.ok) throw new Error("unreachable")
 			return failed.state
 		}
@@ -735,9 +841,9 @@ describe("provider handoff transaction protocol", () => {
 
 	it("carries no secrets or configuration in protocol state", () => {
 		const { states } = drive(initialProviderHandoffState(), [
-			...happyPath.slice(0, 5),
+			...happyPath.slice(0, 6),
 			{ type: "project-legacy", boundary: "profile-store", ok: false },
-			...happyPath.slice(6),
+			...happyPath.slice(7),
 		])
 		const expectedKeys = [
 			"phase",
@@ -746,6 +852,7 @@ describe("provider handoff transaction protocol", () => {
 			"delegation",
 			"generation",
 			"contextAuthority",
+			"childWal",
 			"projection",
 			"projectionFailure",
 			"publication",
@@ -765,6 +872,7 @@ describe("provider handoff transaction protocol", () => {
 			"prepared",
 			"parent-removed",
 			"child-created",
+			"child-wal-durable",
 			"delegation-committed",
 			"context-active",
 			"child-running",
@@ -789,9 +897,14 @@ describe("provider handoff transaction protocol", () => {
 			// failure and projection boundaries, durability observations
 			"preparation",
 			"child-creation",
+			"child-wal",
 			"delegation-commit",
 			"child-cleanup",
 			"parent-restoration",
+			// write-ahead marker durability
+			"durable",
+			"finalized",
+			"finalize-failed",
 			"profile-store",
 			"context-proxy",
 			"queue",
@@ -837,6 +950,25 @@ describe("provider handoff transaction wrapper", () => {
 			phase: "child-created",
 			generation: transaction.generation,
 		})
+		// The commit is illegal until the child write-ahead record is durable.
+		expect(transaction.advance({ type: "commit-delegation" })).toMatchObject({
+			ok: false,
+			reason: "wal-required",
+		})
+		expect(transaction.advance({ type: "wal-child" }).ok).toBe(true)
+		expect(transaction.snapshot()).toMatchObject({ phase: "child-wal-durable", childWal: "durable" })
+		expect(transaction.advance({ type: "wal-child" })).toMatchObject({ ok: false, reason: "unexpected-event" })
+		expect(transaction.advance({ type: "commit-delegation" }).ok).toBe(true)
+		expect(transaction.advance({ type: "activate-context" }).ok).toBe(true)
+		// The marker strip is best-effort: both outcomes keep the child start legal.
+		expect(transaction.advance({ type: "finalize-child-wal", ok: false }).ok).toBe(true)
+		expect(transaction.snapshot()).toMatchObject({ phase: "context-active", childWal: "finalize-failed" })
+		expect(transaction.advance({ type: "finalize-child-wal", ok: true })).toMatchObject({
+			ok: false,
+			reason: "unexpected-event",
+		})
+		expect(transaction.advance({ type: "start-child" }).ok).toBe(true)
+		expect(transaction.snapshot()).toMatchObject({ phase: "child-running", childWal: "finalize-failed" })
 	})
 
 	it("generates distinct opaque generations per transaction", () => {

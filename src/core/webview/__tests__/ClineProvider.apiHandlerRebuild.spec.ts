@@ -256,6 +256,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
+		// The child WAL record write is stubbed: fs/promises is fully mocked in
+		// this file, so the real store cannot perform disk I/O.
+		vi.spyOn(provider.taskHistoryStore, "upsert").mockResolvedValue([])
+
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
@@ -1050,7 +1054,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					apiConfiguration: expect.anything(),
 				},
 			})
-			expect(atomicUpdateSpy).toHaveBeenCalledTimes(1)
+			// Two atomic store updates: the parent delegation commit, then the
+			// best-effort child pending-handoff marker strip.
+			expect(atomicUpdateSpy).toHaveBeenCalledTimes(2)
 
 			// The prepared context became authoritative on the paused child after
 			// the durable commit.

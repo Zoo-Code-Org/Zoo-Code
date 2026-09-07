@@ -29,8 +29,8 @@ type CurrentTaskId = TaskId | undefined
 const { requestedMode } = createProviderHandoffPlan("child-mode")
 const currentProfile: ProviderProfileRef = { name: "root-profile", id: "root-profile-id" }
 const savedProfile: ProviderProfileRef = { name: "child-profile", id: "child-profile-id" }
-const MAX_STATES = 600
-const MAX_DEPTH = 16
+const MAX_STATES = 1200
+const MAX_DEPTH = 20
 
 function handoffGeneration(path: ProfilePath): string {
 	return `handoff-generation-${path}`
@@ -62,12 +62,26 @@ interface Environment {
 	 */
 	projectionWriteStarted: boolean
 	/**
-	 * The child's durable history record is optional at the commit boundary.
-	 * The model never creates one, so an observed-committed reconciliation is
-	 * always "exact parent delegation without child history", matching
-	 * production's TaskHistoryStore readFresh observation.
+	 * The child's post-start history record is optional at the commit
+	 * boundary; an observed-committed reconciliation is always "exact parent
+	 * delegation without child history", matching production's TaskHistoryStore
+	 * readFresh observation. The child's PRE-start write-ahead record
+	 * (`childWalRecord`) is mandatory before the commit and is modeled
+	 * separately below.
 	 */
 	childHistoryPresent: boolean
+	/**
+	 * Set once the child's pending-handoff write-ahead record has been made
+	 * durable. Every persisted delegation commit must be preceded by this.
+	 */
+	childWalRecordEverWritten: boolean
+	/**
+	 * The live write-ahead record's secret-free content while it has not yet
+	 * been finalized (or cleaned up after a rollback). Cleared by a successful
+	 * finalize or a successful rollback cleanup; a failed finalize leaves it
+	 * for restart reconciliation, mirroring production.
+	 */
+	childWalRecord?: { kind: "set" | "preserve" | "clear"; mode: string }
 	/** Set only by the legacy witness driver: a pre-commit mutating projection. */
 	preCommitProjectionMutation: boolean
 	/** Set only by the legacy witness driver: a pending-state publication. */
@@ -118,6 +132,7 @@ function initialEnvironment(topology: Topology, profilePath: ProfilePath): Envir
 		commitCount: 0,
 		projectionWriteStarted: false,
 		childHistoryPresent: false,
+		childWalRecordEverWritten: false,
 		preCommitProjectionMutation: false,
 		pendingPublication: false,
 	}
@@ -148,6 +163,16 @@ function expectedModeProfileId(env: Environment): string | undefined {
 	return env.profilePath === "saved" ? savedProfile.id : env.profilePath === "unsaved" ? currentProfile.id : undefined
 }
 
+/**
+ * The write-ahead marker's profile-intent kind, resolved like production
+ * `createPendingHandoffMarker`: a named profile projects as `set`, a
+ * workspace-locked identity is `preserve`. (The model's fixture profiles are
+ * always named, so `clear` is exercised by the reducer/production tests.)
+ */
+function walRecordKind(env: Environment): "set" | "preserve" | "clear" {
+	return env.profilePath === "locked" ? "preserve" : "set"
+}
+
 // ---------------------------------------------------------------------------
 // Nondeterministic protocol events per phase
 // ---------------------------------------------------------------------------
@@ -174,6 +199,14 @@ function candidateEvents(ms: ModelState): Candidate[] {
 				{ name: "create-child-failed", event: { type: "create-child-failed" } },
 			]
 		case "child-created":
+			// Write-ahead durability: the child's pending-handoff record is
+			// made durable (or the WAL write fails, aborting cleanly) before
+			// any delegation commit becomes legal.
+			return [
+				{ name: "wal-child", event: { type: "wal-child" } },
+				{ name: "wal-child-failed", event: { type: "wal-child-failed" } },
+			]
+		case "child-wal-durable":
 			return [
 				{ name: "commit-delegation", event: { type: "commit-delegation" } },
 				{ name: "commit-failed", event: { type: "commit-failed" } },
@@ -181,12 +214,22 @@ function candidateEvents(ms: ModelState): Candidate[] {
 		case "delegation-committed":
 			return [{ name: "activate-context", event: { type: "activate-context", generation } }]
 		case "context-active": {
-			// The child starts immediately after context activation and must
-			// never await the legacy projection; the projection itself is
-			// fire-and-forget background work that may settle before OR after
-			// the child started. Both orders (and a projection that never
-			// completes before publication) are protocol states.
-			const candidates: Candidate[] = [{ name: "start-child", event: { type: "start-child" } }]
+			// Production finalizes the child's write-ahead marker (best-effort,
+			// both outcomes modeled) before the child starts, then starts the
+			// child immediately: the child must never await the legacy
+			// projection; the projection itself is fire-and-forget background
+			// work that may settle before OR after the child started. Both
+			// orders (and a projection that never completes before
+			// publication) are protocol states.
+			const candidates: Candidate[] = []
+			if (p.childWal === "durable") {
+				candidates.push(
+					{ name: "finalize-child-wal:ok", event: { type: "finalize-child-wal", ok: true } },
+					{ name: "finalize-child-wal:fail", event: { type: "finalize-child-wal", ok: false } },
+				)
+			} else {
+				candidates.push({ name: "start-child", event: { type: "start-child" } })
+			}
 			if (p.projection === "original") {
 				candidates.push(
 					{
@@ -291,8 +334,15 @@ function applyEnvironment(ms: ModelState, candidate: Candidate): ModelState {
 		case "prepare-failed":
 		case "create-child-failed":
 		case "activate-context":
-		case "rollback-cleanup":
+		case "wal-child-failed":
 			// Read-only steps and protocol-only bookkeeping: no observable change.
+			break
+		case "rollback-cleanup":
+			// A successful child cleanup also removes the child's write-ahead
+			// record (a failed cleanup leaves it for restart reconciliation).
+			if (candidate.event.ok) {
+				delete env.childWalRecord
+			}
 			break
 		case "remove-parent":
 			env.currentTaskId = env.topology === "exposed-root" ? "root" : undefined
@@ -303,6 +353,19 @@ function applyEnvironment(ms: ModelState, candidate: Candidate): ModelState {
 				mode: requestedMode,
 				profile: expectedProfile(env),
 				generation: candidate.event.generation,
+			}
+			break
+		case "wal-child":
+			// The child's pending-handoff record becomes durable; its
+			// secret-free content mirrors the prepared context exactly.
+			env.childWalRecordEverWritten = true
+			env.childWalRecord = { kind: walRecordKind(env), mode: requestedMode }
+			break
+		case "finalize-child-wal":
+			// A successful strip removes the marker; a failed strip leaves it
+			// on disk for restart reconciliation, mirroring production.
+			if (candidate.event.ok) {
+				delete env.childWalRecord
 			}
 			break
 		case "commit-delegation":
@@ -362,6 +425,17 @@ function violations(ms: ModelState): string[] {
 	// No unrelated-root mutation (both topologies; the sole parent has no root).
 	if (!sameJson(e.rootTask, initial.rootTask) || !sameJson(e.rootHistory, initial.rootHistory)) {
 		found.push("mutated the unrelated exposed root task")
+	}
+	// Every persisted delegation commit must be preceded by a durable child
+	// write-ahead record (the restart-recoverable handoff intent).
+	if (e.commitCount > 0 && !e.childWalRecordEverWritten) {
+		found.push("committed a delegation without a durable child write-ahead record")
+	}
+	// The write-ahead record's content mirrors the prepared context exactly.
+	if (e.childWalRecord) {
+		if (e.childWalRecord.mode !== requestedMode || e.childWalRecord.kind !== walRecordKind(e)) {
+			found.push("the child write-ahead record diverged from the prepared context")
+		}
 	}
 	// No global/profile projection mutation before the delegation is committed.
 	if (p.delegation === "none") {
@@ -456,6 +530,9 @@ function violations(ms: ModelState): string[] {
 		) {
 			found.push("clean abort left child, delegation, publication, or projection residue")
 		}
+		if (e.childWalRecord) {
+			found.push("clean abort left the child write-ahead record behind")
+		}
 		if (!sameJson(e.parentHistory, initial.parentHistory)) {
 			found.push("clean abort did not restore the original parent record")
 		}
@@ -522,6 +599,12 @@ function violations(ms: ModelState): string[] {
 		if (p.projection === "original" && e.projectionWriteStarted) {
 			found.push("a started projection write vanished without settling")
 		}
+		// Production always attempts the best-effort marker strip between
+		// activation and child start, so a settled state has either finalized
+		// the marker or left it for restart reconciliation.
+		if (p.childWal !== "finalized" && p.childWal !== "finalize-failed") {
+			found.push("settled without finalizing the child write-ahead marker")
+		}
 		// A started-but-stale projection never overwrites a newer generation's
 		// publication: stale publication derives from the child's prepared
 		// context regardless of the projection write outcome.
@@ -562,6 +645,21 @@ function landmarksOf(ms: ModelState): string[] {
 		marks.push("abort:degraded")
 		if (p.rollbackFailures.includes("child-cleanup")) marks.push("rollback:cleanup-failure")
 		if (p.rollbackFailures.includes("parent-restoration")) marks.push("rollback:restoration-failure")
+	}
+	if (p.phase === "child-wal-durable") {
+		// The write-ahead record was made durable before any commit.
+		marks.push("wal:durable-before-commit")
+	}
+	if (p.phase === "aborted" && p.failure?.boundary === "child-wal") {
+		marks.push("abort:child-wal-failure")
+	}
+	if (p.phase === "settled" && p.childWal === "finalized") {
+		marks.push("settlement:wal-finalized")
+	}
+	if (p.phase === "settled" && p.childWal === "finalize-failed") {
+		// The marker survives for restart reconciliation without blocking
+		// settlement or child start.
+		marks.push("settlement:wal-restart-replay")
 	}
 	if (p.failure?.boundary === "delegation-commit" && p.failure.commitDurability === "uncommitted") {
 		marks.push("commit-ambiguity:observed-uncommitted")
@@ -613,6 +711,10 @@ const REQUIRED_LANDMARKS = [
 	"start:projection-unresolved",
 	"projection:preserve-pinned-identity",
 	"settlement:projection-still-original",
+	"wal:durable-before-commit",
+	"abort:child-wal-failure",
+	"settlement:wal-finalized",
+	"settlement:wal-restart-replay",
 ] as const
 
 /** Probes attempted on every state to prove illegal orderings are rejected. */
@@ -625,8 +727,11 @@ function probeEvents(profilePath: ProfilePath): Array<{ name: string; event: Pro
 		{ name: "create-child", event: { type: "create-child", generation } },
 		{ name: "create-child:mismatch", event: { type: "create-child", generation: FOREIGN_GENERATION } },
 		{ name: "create-child-failed", event: { type: "create-child-failed" } },
+		{ name: "wal-child", event: { type: "wal-child" } },
+		{ name: "wal-child-failed", event: { type: "wal-child-failed" } },
 		{ name: "commit-delegation", event: { type: "commit-delegation" } },
 		{ name: "commit-failed", event: { type: "commit-failed" } },
+		{ name: "finalize-child-wal", event: { type: "finalize-child-wal", ok: true } },
 		{
 			name: "observe-commit-durability",
 			event: { type: "observe-commit-durability", durability: "uncommitted" },
@@ -645,6 +750,13 @@ const REQUIRED_REJECTIONS = [
 	"initial:remove-parent", // remove before prepare
 	"prepared:create-child", // create before remove
 	"parent-removed:commit-delegation", // commit before child
+	"parent-removed:wal-child", // write-ahead record before child creation
+	"child-created:commit-delegation", // commit before the child write-ahead record is durable
+	"child-created:commit-failed", // commit before the child write-ahead record is durable
+	"child-wal-durable:wal-child", // the write-ahead record is written at most once
+	"delegation-committed:wal-child", // write-ahead record after the commit
+	"delegation-committed:commit-failed", // exactly one lifecycle commit attempt
+	"delegation-committed:finalize-child-wal", // marker strip requires context activation
 	"child-created:activate-context", // context authority before commit
 	"child-created:start-child", // start before durable commit + activation
 	"child-created:publish", // publish before durable commit + activation
@@ -670,6 +782,10 @@ const REQUIRED_APPLIED_ACTIONS = [
 	"remove-parent",
 	"create-child",
 	"create-child-failed",
+	"wal-child",
+	"wal-child-failed",
+	"finalize-child-wal:ok",
+	"finalize-child-wal:fail",
 	"commit-delegation",
 	"commit-failed",
 	"observe-commit-durability:uncommitted",

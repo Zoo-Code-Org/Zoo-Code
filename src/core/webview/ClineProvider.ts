@@ -122,6 +122,7 @@ import {
 	createPreparedProviderHandoffContext,
 	classifyProviderHandoffProjectionResults,
 	createProviderHandoffPlan,
+	createPendingHandoffMarker,
 	createProviderHandoffTransaction,
 	decideProviderHandoffProfile,
 	delegateTaskToChild,
@@ -5101,6 +5102,59 @@ export class ClineProvider
 		}
 		handoffProtocol.advance({ type: "create-child" })
 
+		// 5.5) Durable child write-ahead record (WAL before commit). The
+		//      child's history record carries a secret-free pending-handoff
+		//      marker (requested mode + explicit profile intent) so a crash
+		//      between this write and the parent commit can always classify
+		//      the child as a recoverable pre-commit orphan, and a crash
+		//      after the parent commit still preserves the child's handoff
+		//      identity. The full API configuration is deliberately NOT
+		//      persisted: restart re-resolves it from the durable profile
+		//      store by name, matching normal resumed-task behavior. The
+		//      commit below is protocol-illegal until this record is durable.
+		try {
+			await this.taskHistoryStore.upsert({
+				id: child.taskId,
+				rootTaskId: child.rootTaskId,
+				parentTaskId: parentTaskId,
+				number: child.taskNumber,
+				ts: Date.now(),
+				task: message,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				size: 0,
+				workspace: child.workspacePath,
+				mode: prepared.requestedMode,
+				...(prepared.profile.name ? { apiConfigName: prepared.profile.name } : {}),
+				status: "active",
+				pendingHandoff: createPendingHandoffMarker({ prepared }),
+			})
+			handoffProtocol.advance({ type: "wal-child" })
+		} catch (walError) {
+			// Fail closed: without the durable child record the delegation
+			// commit must not run. Clean up the paused child, restore the
+			// parent, and surface the original failure.
+			handoffProtocol.advance({ type: "wal-child-failed" })
+			this.log(
+				`[delegateParentAndOpenChild] Failed to persist child handoff record for ${child.taskId}: ${
+					(walError as Error)?.message ?? String(walError)
+				}`,
+			)
+			const rollback = await this.rollbackFailedDelegation(parentTaskId, child.taskId, transitionOwner)
+			handoffProtocol.advance({ type: "rollback-cleanup", ok: rollback.cleanupErrors.length === 0 })
+			handoffProtocol.advance({ type: "rollback-restore", ok: rollback.restorationErrors.length === 0 })
+			if (rollback.cleanupErrors.length + rollback.restorationErrors.length > 0) {
+				throw new AggregateError(
+					[walError, ...rollback.cleanupErrors, ...rollback.restorationErrors],
+					`[delegateParentAndOpenChild] Child handoff WAL rollback incomplete for parent ${parentTaskId}; original error: ${
+						(walError as Error)?.message ?? String(walError)
+					}`,
+				)
+			}
+			throw walError
+		}
+
 		// 6) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a
 		//    single lock acquisition — no concurrent writer can slip between the read and
@@ -5245,6 +5299,25 @@ export class ClineProvider
 		// state for this child regardless of how the background projection ends.
 		if (prepared.profile.intent.kind === "clear") {
 			this.explicitProfileClearChildIds.add(child.taskId)
+		}
+
+		// 7.5) Best-effort finalization: the delegation is durable and the
+		//      child's in-memory context is authoritative, so the write-ahead
+		//      marker is no longer needed. A failed strip is non-fatal —
+		//      restart reconciliation replays it for committed children.
+		try {
+			await this.taskHistoryStore.atomicReadAndUpdate(child.taskId, (historyItem) => ({
+				...historyItem,
+				pendingHandoff: undefined,
+			}))
+			handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
+		} catch (finalizeError) {
+			handoffProtocol.advance({ type: "finalize-child-wal", ok: false })
+			this.log(
+				`[delegateParentAndOpenChild] Pending handoff marker for child ${child.taskId} left for restart replay: ${
+					(finalizeError as Error)?.message ?? String(finalizeError)
+				}`,
+			)
 		}
 
 		// 8) Start the child task immediately: the durable delegation is

@@ -1,4 +1,4 @@
-import { isSecretStateKey, type ProviderSettings } from "@roo-code/types"
+import { isSecretStateKey, type PendingHandoff, type ProviderSettings } from "@roo-code/types"
 
 export interface ProviderProfileRef {
 	name: string
@@ -148,6 +148,55 @@ export function createPreparedProviderHandoffContext(params: {
 	return context
 }
 
+/** Current durable write-ahead marker schema version. */
+export const PENDING_HANDOFF_VERSION = 1
+
+/**
+ * Derive the secret-free durable child write-ahead marker from a prepared
+ * handoff context. This is what the child's history record carries BEFORE the
+ * parent delegation is durably committed, so a crash between the two writes
+ * can always classify the child as a recoverable pre-commit orphan. It carries
+ * the execution identity (mode + explicit profile intent) only — never the API
+ * configuration, and never any provider secret.
+ */
+export function createPendingHandoffMarker(params: { prepared: PreparedProviderHandoffContext }): PendingHandoff {
+	const { prepared } = params
+	const base = { version: PENDING_HANDOFF_VERSION, mode: prepared.requestedMode } as const
+	switch (prepared.profile.intent.kind) {
+		case "set":
+			return { kind: "set", ...base, profileName: prepared.profile.intent.name }
+		case "preserve":
+			return prepared.profile.name
+				? { kind: "preserve", ...base, profileName: prepared.profile.name }
+				: { kind: "preserve", ...base }
+		case "clear":
+			return { kind: "clear", ...base }
+	}
+}
+
+/**
+ * Runtime validation for a parsed `pendingHandoff` marker. Used by restart
+ * reconciliation so an unknown-version or malformed marker is left untouched
+ * (fail safe: conservative false negatives, never destructive false
+ * positives).
+ */
+export function isValidPendingHandoff(value: unknown): value is PendingHandoff {
+	if (!value || typeof value !== "object") return false
+	const candidate = value as Record<string, unknown>
+	if (candidate.version !== PENDING_HANDOFF_VERSION) return false
+	if (typeof candidate.mode !== "string") return false
+	switch (candidate.kind) {
+		case "set":
+			return typeof candidate.profileName === "string" && candidate.profileName.length > 0
+		case "preserve":
+			return candidate.profileName === undefined || typeof candidate.profileName === "string"
+		case "clear":
+			return true
+		default:
+			return false
+	}
+}
+
 /**
  * Best-effort secret redaction for error messages logged around handoff
  * state. Removes values of provider secret fields so projection failures can
@@ -202,6 +251,7 @@ export type ProviderHandoffPhase =
 	| "prepared"
 	| "parent-removed"
 	| "child-created"
+	| "child-wal-durable"
 	| "delegation-committed"
 	| "context-active"
 	| "child-running"
@@ -214,6 +264,7 @@ export type ProviderHandoffPhase =
 export type ProviderHandoffFailureBoundary =
 	| "preparation"
 	| "child-creation"
+	| "child-wal"
 	| "delegation-commit"
 	| "child-cleanup"
 	| "parent-restoration"
@@ -341,6 +392,14 @@ export interface ProviderHandoffState {
 	readonly generation: string | undefined
 	/** Owner of the child execution context: the parent until the commit, the child after. */
 	readonly contextAuthority: ProviderHandoffContextAuthority
+	/**
+	 * Durability of the child-side write-ahead handoff record. The
+	 * delegation commit is legal only once the child's pending-handoff
+	 * record is durable ("durable"); "finalized"/"finalize-failed" record
+	 * the best-effort post-commit marker strip (restart replay covers a
+	 * failure).
+	 */
+	readonly childWal: "none" | "durable" | "finalized" | "finalize-failed"
 	readonly projection: ProviderHandoffProjectionState
 	readonly projectionFailure: ProviderHandoffProjectionBoundary | undefined
 	readonly publication: ProviderHandoffPublicationState
@@ -358,8 +417,17 @@ export type ProviderHandoffEvent =
 	| { type: "remove-parent" }
 	| { type: "create-child"; generation: string }
 	| { type: "create-child-failed" }
+	/** The child's durable write-ahead handoff record persisted (WAL before commit). */
+	| { type: "wal-child" }
+	/** The child WAL write failed: fail closed, clean up the child, restore the parent. */
+	| { type: "wal-child-failed" }
 	| { type: "commit-delegation" }
 	| { type: "commit-failed" }
+	/**
+	 * Best-effort post-commit strip of the child's pending-handoff marker. A
+	 * failure is non-fatal: restart reconciliation replays the strip.
+	 */
+	| { type: "finalize-child-wal"; ok: boolean }
 	| {
 			type: "observe-commit-durability"
 			durability: "uncommitted" | "committed" | "incoherent"
@@ -386,6 +454,7 @@ export type ProviderHandoffRejection =
 	| "preparation-required"
 	| "parent-not-removed"
 	| "child-required"
+	| "wal-required"
 	| "commit-required"
 	| "context-activation-required"
 	| "child-not-running"
@@ -412,6 +481,7 @@ export function initialProviderHandoffState(): ProviderHandoffState {
 		delegation: "none",
 		generation: undefined,
 		contextAuthority: "parent",
+		childWal: "none",
 		projection: "original",
 		projectionFailure: undefined,
 		publication: "none",
@@ -468,13 +538,23 @@ export function applyProviderHandoffEvent(
 		case "create-child-failed":
 			if (state.phase !== "parent-removed") return reject(state, "unexpected-event")
 			return accept({ ...state, phase: "aborting", failure: { boundary: "child-creation" } })
+		case "wal-child":
+			// Write-ahead durability: the child's pending-handoff record must be
+			// on disk before the delegation commit becomes legal.
+			if (state.phase !== "child-created") return reject(state, "unexpected-event")
+			return accept({ ...state, phase: "child-wal-durable", childWal: "durable" })
+		case "wal-child-failed":
+			if (state.phase !== "child-created") return reject(state, "unexpected-event")
+			return accept({ ...state, phase: "aborting", failure: { boundary: "child-wal" } })
 		case "commit-delegation":
 			if (state.commitAttempts > 0) return reject(state, "commit-already-attempted")
-			if (state.phase !== "child-created") return reject(state, "child-required")
+			if (state.phase === "child-created") return reject(state, "wal-required")
+			if (state.phase !== "child-wal-durable") return reject(state, "child-required")
 			return accept({ ...state, phase: "delegation-committed", delegation: "committed", commitAttempts: 1 })
 		case "commit-failed":
 			if (state.commitAttempts > 0) return reject(state, "commit-already-attempted")
-			if (state.phase !== "child-created") return reject(state, "child-required")
+			if (state.phase === "child-created") return reject(state, "wal-required")
+			if (state.phase !== "child-wal-durable") return reject(state, "child-required")
 			return accept({
 				...state,
 				phase: "aborting",
@@ -530,6 +610,14 @@ export function applyProviderHandoffEvent(
 			}
 			if (event.generation !== state.generation) return reject(state, "generation-mismatch")
 			return accept({ ...state, phase: "context-active", contextAuthority: "child" })
+		case "finalize-child-wal":
+			// Best-effort marker strip between activation and child start. A
+			// failure stays visible ("finalize-failed") and is replayed by the
+			// restart reconciliation; it never blocks the child from starting.
+			if (state.phase !== "context-active" || state.childWal !== "durable") {
+				return reject(state, "unexpected-event")
+			}
+			return accept({ ...state, childWal: event.ok ? "finalized" : "finalize-failed" })
 		case "project-legacy":
 			// Legacy projection is background work: it may settle while the
 			// protocol is still in context-active OR after the child already
