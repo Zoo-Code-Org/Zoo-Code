@@ -846,5 +846,15 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
 		})
+
+		it("emits delegated completion through the provider after the child is disposed", () => {
+			const listener = vi.fn()
+			provider.on(RooCodeEventName.TaskCompleted, listener)
+
+			provider.emitDelegatedTaskCompleted("child-task", {} as never, {})
+
+			expect(listener).toHaveBeenCalledTimes(1)
+			expect(listener).toHaveBeenCalledWith("child-task", {}, {})
+		})
 	})
 })

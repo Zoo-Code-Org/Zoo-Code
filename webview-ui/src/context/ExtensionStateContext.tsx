@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import React, { createContext, useCallback, useEffect, useState } from "react"
 
 import {
@@ -204,6 +205,8 @@ const createInitialExtensionState = (): ExtensionState => ({
 	shouldShowAnnouncement: false,
 	allowedCommands: [],
 	deniedCommands: [],
+	allowedReadFiles: [],
+	allowedWriteFiles: [],
 	soundEnabled: false,
 	soundVolume: 0.5,
 	ttsEnabled: false,
@@ -257,7 +260,7 @@ const createInitialExtensionState = (): ExtensionState => ({
 	codebaseIndexConfig: {
 		codebaseIndexEnabled: true,
 		codebaseIndexQdrantUrl: "http://localhost:6333",
-		codebaseIndexEmbedderProvider: "openai",
+		codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 		codebaseIndexEmbedderBaseUrl: "",
 		codebaseIndexEmbedderModelId: "",
 		codebaseIndexSearchMaxResults: undefined,

@@ -1,10 +1,11 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ThinkingBudget.spec.tsx
 
 import React from "react"
 
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
-import type { ModelInfo } from "@roo-code/types"
+import type { ModelInfo, ProviderSettings } from "@roo-code/types"
 
 import { ThinkingBudget } from "../ThinkingBudget"
 
@@ -43,16 +44,16 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: (apiConfiguration: any) => {
 		// Return the model ID based on apiConfiguration for testing
 		// For Gemini tests, check if apiProvider is gemini and use apiModelId
-		if (apiConfiguration?.apiProvider === "gemini") {
+		if (apiConfiguration?.apiProvider === providerIdentifiers.gemini) {
 			return {
 				id: apiConfiguration?.apiModelId || "gemini-2.0-flash-exp",
-				provider: "gemini",
+				provider: providerIdentifiers.gemini,
 				info: undefined,
 			}
 		}
 		return {
 			id: apiConfiguration?.apiModelId || "claude-3-5-sonnet-20241022",
-			provider: apiConfiguration?.apiProvider || "anthropic",
+			provider: apiConfiguration?.apiProvider || providerIdentifiers.anthropic,
 			info: undefined,
 		}
 	},
@@ -76,6 +77,12 @@ describe("ThinkingBudget", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	it("should render nothing when model information is unavailable", () => {
+		const { container } = render(<ThinkingBudget {...defaultProps} modelInfo={undefined} />)
+
+		expect(container.firstChild).toBeNull()
 	})
 
 	it("should render nothing when model doesn't support thinking", () => {
@@ -176,7 +183,7 @@ describe("ThinkingBudget", () => {
 				{...defaultProps}
 				apiConfiguration={{
 					modelMaxTokens: 10000,
-					apiProvider: "gemini",
+					apiProvider: providerIdentifiers.gemini,
 					apiModelId: "gemini-2.5-pro-002",
 				}}
 			/>,
@@ -192,7 +199,7 @@ describe("ThinkingBudget", () => {
 				{...defaultProps}
 				apiConfiguration={{
 					modelMaxTokens: 10000,
-					apiProvider: "gemini",
+					apiProvider: providerIdentifiers.gemini,
 					apiModelId: "gemini-2.5-pro-002",
 				}}
 			/>,
@@ -208,7 +215,7 @@ describe("ThinkingBudget", () => {
 				{...defaultProps}
 				apiConfiguration={{
 					modelMaxTokens: 10000,
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-5-sonnet-20241022",
 				}}
 			/>,
@@ -273,11 +280,13 @@ describe("ThinkingBudget", () => {
 		})
 
 		it("should fall back to first available option when stored value is not in the explicit array", () => {
+			const setApiConfigurationField = vi.fn()
 			// Covers the clamp branch: defaultReasoningEffort="disable" but array omits "disable"
 			render(
 				<ThinkingBudget
 					{...defaultProps}
 					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
 					modelInfo={{
 						...reasoningEffortModelInfo,
 						supportsReasoningEffort: ["low", "high"],
@@ -287,6 +296,47 @@ describe("ThinkingBudget", () => {
 
 			// The select value should be "low" (first item), not "disable"
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+
+		it("should use and persist an optional model's advertised reasoning default", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["disable", "high", "max"],
+						reasoningEffort: "high",
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "high")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+
+		it("should preserve an explicit disable selection for optional reasoning", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable", enableReasoningEffort: false }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["disable", "high", "max"],
+						reasoningEffort: "high",
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
+			expect(setApiConfigurationField).not.toHaveBeenCalled()
 		})
 
 		it("should normalize an invalid disabled value to the default for required reasoning", () => {
@@ -306,7 +356,165 @@ describe("ThinkingBudget", () => {
 			)
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "max")
-			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max")
+		})
+
+		it("should use the first supported effort when required reasoning has no advertised default", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high"],
+						requiredReasoningEffort: true,
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+
+		it("should normalize stale disable to the first supported effort after switching to a required model", () => {
+			const setApiConfigurationField = vi.fn()
+			const { rerender } = render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable" }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{ ...reasoningEffortModelInfo, supportsReasoningEffort: true }}
+				/>,
+			)
+
+			setApiConfigurationField.mockClear()
+
+			rerender(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable" }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high"],
+						requiredReasoningEffort: true,
+					}}
+				/>,
+			)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+			// The two effects fire only what is needed: no third enableReasoningEffort write.
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", "disable")
+		})
+
+		it("should use medium when boolean reasoning support is required without an advertised default", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						requiredReasoningEffort: true,
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "medium")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "medium")
+		})
+
+		it("should synchronize a default when model reasoning metadata changes", () => {
+			const setApiConfigurationField = vi.fn()
+			const { rerender } = render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{ ...reasoningEffortModelInfo, supportsReasoningEffort: false }}
+				/>,
+			)
+
+			setApiConfigurationField.mockClear()
+			rerender(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["disable", "high"],
+						reasoningEffort: "high",
+					}}
+				/>,
+			)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high")
+		})
+
+		it.each<{
+			name: string
+			apiConfiguration: ProviderSettings
+			modelInfo: ModelInfo
+			expected: string
+			expectedWrite?: string
+		}>([
+			{
+				name: "keeps a supported stored effort over the model default",
+				apiConfiguration: { reasoningEffort: "low", enableReasoningEffort: true },
+				modelInfo: {
+					...reasoningEffortModelInfo,
+					supportsReasoningEffort: ["disable", "low", "high"],
+					reasoningEffort: "high",
+				},
+				expected: "low",
+				expectedWrite: undefined,
+			},
+			{
+				name: "normalizes an unsupported stored effort to the model default",
+				apiConfiguration: { reasoningEffort: "max", enableReasoningEffort: true },
+				modelInfo: {
+					...reasoningEffortModelInfo,
+					supportsReasoningEffort: ["disable", "low", "high"],
+					reasoningEffort: "high",
+				},
+				expected: "high",
+				expectedWrite: "high",
+			},
+			{
+				name: "defaults optional boolean reasoning support to disabled",
+				apiConfiguration: {},
+				modelInfo: reasoningEffortModelInfo,
+				expected: "disable",
+				expectedWrite: undefined,
+			},
+		])("$name", ({ apiConfiguration, modelInfo, expected, expectedWrite }) => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={apiConfiguration}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={modelInfo}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", expected)
+			if (expectedWrite) {
+				expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", expectedWrite)
+			} else {
+				expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
+				expect(setApiConfigurationField).not.toHaveBeenCalledWith(
+					"enableReasoningEffort",
+					expect.anything(),
+					false,
+				)
+			}
 		})
 
 		it("should fall back to rawReasoningEffort when availableOptions is empty", () => {
@@ -317,13 +525,33 @@ describe("ThinkingBudget", () => {
 					apiConfiguration={{ reasoningEffort: "medium" }}
 					modelInfo={{
 						...reasoningEffortModelInfo,
-						supportsReasoningEffort: [] as any,
+						supportsReasoningEffort: [] as const,
 					}}
 				/>,
 			)
 
 			// With an empty options array, falls back to the stored value "medium"
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "medium")
+		})
+
+		it("should retain the disabled fallback when availableOptions is empty and settings are unset", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: [] as const,
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
+			const writtenFields = setApiConfigurationField.mock.calls.map(([field]) => field)
+			expect(writtenFields).not.toContain("reasoningEffort")
+			expect(writtenFields).not.toContain("enableReasoningEffort")
 		})
 
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {
@@ -419,7 +647,7 @@ describe("ThinkingBudget", () => {
 			supportsPromptCache: true,
 		}
 
-		const glmApiConfiguration = { apiProvider: "zai", apiModelId: "glm-5.1" } as const
+		const glmApiConfiguration = { apiProvider: providerIdentifiers.zai, apiModelId: "glm-5.1" } as const
 
 		it("should render the max output tokens slider alongside the reasoning effort dropdown", () => {
 			render(<ThinkingBudget {...defaultProps} apiConfiguration={glmApiConfiguration} modelInfo={glmModelInfo} />)

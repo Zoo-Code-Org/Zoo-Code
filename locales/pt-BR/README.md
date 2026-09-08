@@ -47,13 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.78.0
+## Novidades na v3.82.0
 
-- **Três novos modelos importantes chegaram** — use os novíssimos Gemini 3.7 Flash, GLM 5.3 e Qwen3.8 Max, além das atualizações de reasoning, preços e cobertura de providers do DeepSeek V4.
-- **Conecte-se ao NanoGPT** — use descoberta dinâmica de modelos, streaming e conclusão de prompts, com preferências de roteamento por velocidade, preço, latência, throughput, suporte a ferramentas e cache.
-- **Providers e tarefas mais confiáveis** — as correções melhoram a configuração de endpoints do Azure OpenAI, os limites de saída do Kimi Code, a preservação de títulos no histórico de tarefas e a importação/exportação das configurações do Zoo.
-- O Destructive Command Guard agora oferece suporte a Macs com processadores Intel.
-- Atualizações de segurança corrigem vulnerabilidades no `undici` e no Mermaid.
+- 🔑 **Use sua chave de API do Zoo Gateway em qualquer lugar** — leve-a para qualquer cliente ou workflow compatível com OpenAI: https://zoocode.dev/models
+- 🎁 **Acesso grátis ao modelo por tempo limitado** — tenha acesso grátis ao MiniMax-M3 pelo Zoo Gateway.
+- ✨ **Modelos novíssimos** — GPT-6 Astra e Claude Fable 5.1 já estão disponíveis.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

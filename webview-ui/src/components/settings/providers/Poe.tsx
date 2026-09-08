@@ -112,7 +112,7 @@ export const Poe = ({
 
 		vscode.postMessage({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { poeApiKey: key, poeBaseUrl: apiConfiguration.poeBaseUrl },
+			values: { provider: providerIdentifiers.poe, poeApiKey: key, poeBaseUrl: apiConfiguration.poeBaseUrl },
 		})
 	}, [apiConfiguration, t])
 

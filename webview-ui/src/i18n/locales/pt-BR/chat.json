@@ -344,9 +344,9 @@
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novidades:",
-			"highlight1": "Três novos modelos importantes chegaram — use os novíssimos Gemini 3.7 Flash, GLM 5.3 e Qwen3.8 Max, além das atualizações de reasoning, preços e cobertura de providers do DeepSeek V4.",
-			"highlight2": "Conecte-se ao NanoGPT — use descoberta dinâmica de modelos, streaming e conclusão de prompts, com preferências de roteamento por velocidade, preço, latência, throughput, suporte a ferramentas e cache.",
-			"highlight3": "Providers e tarefas mais confiáveis — as correções melhoram a configuração de endpoints do Azure OpenAI, os limites de saída do Kimi Code, a preservação de títulos no histórico de tarefas e a importação/exportação das configurações do Zoo."
+			"highlight1": "🔑 Use sua chave de API do Zoo Gateway em qualquer lugar: leve-a para qualquer cliente ou workflow compatível com OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Por tempo limitado, tenha acesso grátis ao MiniMax-M3 pelo Zoo Gateway.",
+			"highlight3": "✨ Já disponíveis: os novíssimos modelos GPT-6 Astra e Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",

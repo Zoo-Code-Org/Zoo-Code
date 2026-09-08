@@ -1,4 +1,4 @@
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types"
 
 import { isSupportedProvider, supportedProviders } from "../types.js"
 
@@ -20,7 +20,7 @@ describe("isSupportedProvider", () => {
 	})
 
 	it("returns false for 'roo' (retired provider)", () => {
-		expect(isSupportedProvider("roo")).toBe(false)
+		expect(isSupportedProvider(retiredProviderIdentifiers.roo)).toBe(false)
 	})
 
 	it("returns false for unknown provider", () => {

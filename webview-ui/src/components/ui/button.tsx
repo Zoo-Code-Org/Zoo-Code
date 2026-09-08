@@ -5,16 +5,17 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-30 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer active:opacity-80",
+	"inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full text-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-30 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer active:opacity-80",
 	{
 		variants: {
 			variant: {
-				primary: "bg-primary text-primary-foreground hover:bg-primary/70",
+				primary:
+					"border border-[var(--vscode-button-border,var(--vscode-contrastBorder,transparent))] bg-primary text-primary-foreground hover:bg-primary/70",
 				secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
 				ghost: "hover:bg-accent hover:text-accent-foreground",
 				destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
 				outline:
-					"border border-vscode-foreground/30 text-vscode-foreground bg-transparent hover:bg-secondary hover:text-accent-foreground",
+					"border border-vscode-foreground/60 text-vscode-foreground bg-transparent hover:bg-secondary hover:text-accent-foreground",
 				link: "text-primary underline-offset-4 hover:underline",
 				combobox:
 					"border border-vscode-dropdown-border focus-visible:border-vscode-focusBorder bg-vscode-dropdown-background hover:bg-transparent text-vscode-dropdown-foreground font-normal",
@@ -34,8 +35,7 @@ const buttonVariants = cva(
 )
 
 export interface ButtonProps
-	extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-		VariantProps<typeof buttonVariants> {
+	extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
 	asChild?: boolean
 }
 

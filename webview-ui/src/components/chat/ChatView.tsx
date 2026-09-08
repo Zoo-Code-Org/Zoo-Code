@@ -21,7 +21,7 @@ import { batchNearby } from "@src/utils/batchNearby"
 import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
 import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
-import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
+import { getCompletionCheckpoint, getSuggestionMode, hasUsableAnswer, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
 import { combineApiRequests } from "@roo/combineApiRequests"
@@ -64,7 +64,7 @@ export interface ChatViewRef {
 	acceptInput: () => void
 }
 
-export const MAX_IMAGES_PER_MESSAGE = 20 // This is the Anthropic limit.
+import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 const CHAT_DEFAULT_ITEM_HEIGHT = 180
 const CHAT_VIEWPORT_BUFFER = {
 	top: 600,
@@ -1431,6 +1431,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const handleSuggestionClickInRow = useCallback(
 		(suggestion: SuggestionItem, event?: React.MouseEvent) => {
+			// The model may emit suggestions with missing or blank answers (issue #1226).
+			// Ignore them instead of pushing an undefined value into the input, which
+			// would crash the text area (inputValue.trim on undefined).
+			const answer = hasUsableAnswer(suggestion) ? suggestion.answer.trim() : ""
+			if (!answer) {
+				return
+			}
+
 			// Mark that user has responded if this is a manual click (not auto-approval)
 			if (event) {
 				userRespondedRef.current = true
@@ -1455,13 +1463,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			if (event?.shiftKey) {
 				// Always append to existing text, don't overwrite
 				setInputValue((currentValue: string) => {
-					return currentValue !== "" ? `${currentValue} \n${suggestion.answer}` : suggestion.answer
+					return currentValue !== "" ? `${currentValue} \n${answer}` : answer
 				})
 			} else {
 				// Don't clear the input value when sending a follow-up choice
 				// The message should be sent but the text area should preserve what the user typed
 				const preservedInput = inputValueRef.current
-				handleSendMessage(suggestion.answer, [])
+				handleSendMessage(answer, [])
 				// Restore the input value after sending
 				setInputValue(preservedInput)
 			}
@@ -1641,7 +1649,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		vscode.postMessage({ type: "condenseTaskContextRequest", text: taskId })
 	}
 
-	const areButtonsVisible = showScrollToBottom || primaryButtonText || secondaryButtonText
+	const hasApprovalButtons = Boolean(primaryButtonText || secondaryButtonText)
+	const areButtonsVisible = showScrollToBottom || hasApprovalButtons
 	const currentTaskAggregatedCosts = currentTaskId ? aggregatedCostsMap.get(currentTaskId) : undefined
 
 	return (
@@ -1735,7 +1744,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							className={`flex h-9 items-center mb-1 px-[15px] ${
 								showScrollToBottom ? "opacity-100" : enableButtons ? "opacity-100" : "opacity-50"
 							}`}>
-							{showScrollToBottom ? (
+							{showScrollToBottom && !hasApprovalButtons ? (
 								<>
 									<StandardTooltip content={t("chat:scrollToBottom")}>
 										<Button
@@ -1759,6 +1768,16 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								</>
 							) : (
 								<>
+									{showScrollToBottom && (
+										<StandardTooltip content={t("chat:scrollToBottom")}>
+											<Button
+												variant="secondary"
+												className="w-9 shrink-0 mr-[6px]"
+												onClick={handleScrollToBottomAndResetCheckpointCursor}>
+												<span className="codicon codicon-chevron-down"></span>
+											</Button>
+										</StandardTooltip>
+									)}
 									{primaryButtonText && (
 										<StandardTooltip
 											content={
@@ -1780,14 +1799,18 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 																			: primaryButtonText ===
 																				  t("chat:proceedWhileRunning.title")
 																				? t("chat:proceedWhileRunning.tooltip")
-																				: undefined
+																				: primaryButtonText
 											}>
 											<Button
 												variant="primary"
 												disabled={!enableButtons}
-												className={secondaryButtonText ? "flex-1 mr-[6px]" : "flex-[2] mr-0"}
+												className={
+													secondaryButtonText
+														? "min-w-0 flex-1 mr-[6px]"
+														: "min-w-0 flex-[2] mr-0"
+												}
 												onClick={() => handlePrimaryButtonClick(inputValue, selectedImages)}>
-												{primaryButtonText}
+												<span className="min-w-0 truncate">{primaryButtonText}</span>
 											</Button>
 										</StandardTooltip>
 									)}
@@ -1802,14 +1825,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 															? t("chat:terminate.tooltip")
 															: secondaryButtonText === t("chat:killCommand.title")
 																? t("chat:killCommand.tooltip")
-																: undefined
+																: secondaryButtonText
 											}>
 											<Button
 												variant="secondary"
 												disabled={!enableButtons}
-												className="flex-1 ml-[6px]"
+												className="min-w-0 flex-1 ml-[6px]"
 												onClick={() => handleSecondaryButtonClick(inputValue, selectedImages)}>
-												{secondaryButtonText}
+												<span className="min-w-0 truncate">{secondaryButtonText}</span>
 											</Button>
 										</StandardTooltip>
 									)}

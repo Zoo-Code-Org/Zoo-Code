@@ -17,7 +17,10 @@ vi.mock("../../../integrations/kimi-code/oauth", () => ({
 	},
 }))
 
-vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
+vi.mock("../fetchers/modelCache", () => ({
+	getModels: mockGetModels,
+	refreshModels: mockGetModels,
+}))
 
 describe("KimiCodeHandler", () => {
 	beforeEach(() => {

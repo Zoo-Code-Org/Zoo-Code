@@ -12,7 +12,9 @@
 	},
 	"telemetry": {
 		"helpImprove": "Pomóż ulepszyć Zoo Code",
-		"helpImproveMessage": "Zoo Code zbiera dane o błędach i użytkowaniu, aby pomóc nam naprawiać błędy i ulepszać rozszerzenie. Ta telemetria nie zbiera kodu, podpowiedzi ani danych osobowych. Możesz je wyłączyć w <settingsLink>ustawieniach</settingsLink>."
+		"helpImproveMessage": "Zoo Code zbiera dane o błędach i użytkowaniu, powiązane z identyfikatorem instalacji, aby pomóc nam naprawiać błędy i ulepszać rozszerzenie. Ta telemetria nie zbiera Twojego kodu ani podpowiedzi. Możesz ją wyłączyć w <settingsLink>ustawieniach</settingsLink>.",
+		"accept": "Akceptuj",
+		"decline": "Odrzuć"
 	},
 	"importSettings": "Importuj ustawienia"
 }

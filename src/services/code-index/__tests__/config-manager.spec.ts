@@ -59,6 +59,26 @@ describe("CodeIndexConfigManager", () => {
 			expect(configManager.isFeatureEnabled).toBe(false)
 			expect(configManager.currentEmbedderProvider).toBe("openai")
 		})
+
+		it("loads Bedrock as the embedder provider with its optional profile", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: providerIdentifiers.bedrock,
+				codebaseIndexEmbedderModelId: "amazon.titan-embed-text-v2:0",
+				codebaseIndexBedrockRegion: "eu-west-1",
+				codebaseIndexBedrockProfile: "development",
+				codebaseIndexQdrantUrl: "http://localhost:6333",
+			})
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+
+			expect(configManager.getConfig()).toMatchObject({
+				embedderProvider: providerIdentifiers.bedrock,
+				modelId: "amazon.titan-embed-text-v2:0",
+				bedrockOptions: { region: "eu-west-1", profile: "development" },
+				isConfigured: true,
+			})
+		})
 	})
 
 	describe("isFeatureEnabled", () => {

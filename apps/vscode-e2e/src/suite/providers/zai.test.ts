@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
@@ -21,7 +22,7 @@ type ZAiRequestCapture = { maxTokens?: number }
 
 function getBaseZAiConfiguration() {
 	return {
-		apiProvider: "zai" as const,
+		apiProvider: providerIdentifiers.zai,
 		zaiApiKey: ZAI_API_KEY ?? "mock-key",
 		zaiApiLine: "international_api" as const,
 		modelMaxTokens: undefined,
@@ -197,7 +198,7 @@ suite("Z.ai GLM provider", function () {
 		await globalThis.api.upsertProfile(
 			"default",
 			{
-				apiProvider: "openrouter" as const,
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 				openRouterModelId: "openai/gpt-4.1",
 				...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),

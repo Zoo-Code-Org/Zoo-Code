@@ -1,3 +1,4 @@
+import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 import { act, screen, fireEvent, waitFor, configure } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -276,6 +277,9 @@ const mockApiOptions = ({ apiConfiguration, setApiConfigurationField }: any) => 
 				{provider}
 			</button>
 		))}
+		<button data-testid="set-reasoning-default" onClick={() => setApiConfigurationField("reasoningEffort", "high")}>
+			Set reasoning default
+		</button>
 	</div>
 )
 
@@ -385,9 +389,9 @@ describe("SettingsView - Change Detection Fix", () => {
 		uriScheme: "vscode",
 		settingsImportedAt: undefined,
 		apiConfiguration: {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 			apiModelId: "", // Empty string initially
-		},
+		} as ProviderSettings,
 		alwaysAllowReadOnly: false,
 		alwaysAllowReadOnlyOutsideWorkspace: false,
 		allowedCommands: [],
@@ -490,6 +494,23 @@ describe("SettingsView - Change Detection Fix", () => {
 		expect(onDone).toHaveBeenCalled()
 	}, 10000)
 
+	it("persists a normalized reasoning default through Save", async () => {
+		;(useExtensionState as any).mockReturnValue(createExtensionState())
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		fireEvent.click(screen.getByTestId("set-reasoning-default"))
+		expect(screen.getByTestId("save-button")).toBeEnabled()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(mockPostMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: expect.objectContaining({ reasoningEffort: "high" }),
+		})
+	}, 10000)
+
 	// These tests are passing for the basic case but failing due to vi.doMock limitations
 	// The core fix has been verified - when no actual changes are made, no unsaved changes dialog appears
 
@@ -516,7 +537,7 @@ describe("SettingsView - Change Detection Fix", () => {
 		let extensionState = createExtensionState({
 			settingsImportedAt: 123,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: "gpt-4.1",
 			},
 		})
@@ -539,7 +560,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			type: "upsertApiConfiguration",
 			text: "default",
 			apiConfiguration: expect.objectContaining({
-				apiProvider: "baseten",
+				apiProvider: providerIdentifiers.baseten,
 				basetenApiKey: "test-baseten-key",
 			}),
 		})
@@ -552,7 +573,7 @@ describe("SettingsView - Change Detection Fix", () => {
 				settingsImportedAt: 123,
 				soundEnabled: true,
 				apiConfiguration: {
-					apiProvider: "baseten",
+					apiProvider: providerIdentifiers.baseten,
 					apiModelId: "zai-org/GLM-4.6",
 					basetenApiKey: "test-baseten-key",
 				},
@@ -577,7 +598,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			type: "upsertApiConfiguration",
 			text: "default",
 			apiConfiguration: expect.objectContaining({
-				apiProvider: "deepseek",
+				apiProvider: providerIdentifiers.deepseek,
 			}),
 		})
 	}, 10000)
@@ -587,7 +608,7 @@ describe("SettingsView - Change Detection Fix", () => {
 		let extensionState = createExtensionState({
 			settingsImportedAt: 100,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: "gpt-4.1",
 			},
 		})
@@ -607,7 +628,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			extensionState = createExtensionState({
 				settingsImportedAt: 101,
 				apiConfiguration: {
-					apiProvider: "baseten",
+					apiProvider: providerIdentifiers.baseten,
 					apiModelId: "zai-org/GLM-4.6",
 					basetenApiKey: "imported-baseten-key",
 				},
@@ -632,7 +653,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			let extensionState = createExtensionState({
 				mode: "code",
 				apiConfiguration: {
-					apiProvider: "openai",
+					apiProvider: providerIdentifiers.openai,
 					apiModelId: "gpt-4.1",
 				},
 			})
@@ -659,7 +680,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			await act(async () => {
 				extensionState.mode = "ask"
 				extensionState.apiConfiguration = {
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 					apiModelId: "claude-3.5-sonnet",
 				}
 
@@ -693,7 +714,7 @@ describe("SettingsView - Change Detection Fix", () => {
 				extensionState = createExtensionState({
 					mode: "ask",
 					apiConfiguration: {
-						apiProvider: "friendli",
+						apiProvider: providerIdentifiers.friendli,
 						apiModelId: "friendli-model",
 					},
 				})
@@ -715,7 +736,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			let extensionState = createExtensionState({
 				mode: "code",
 				apiConfiguration: {
-					apiProvider: "openai",
+					apiProvider: providerIdentifiers.openai,
 					apiModelId: "gpt-4.1",
 				},
 			})
@@ -739,7 +760,7 @@ describe("SettingsView - Change Detection Fix", () => {
 				extensionState = createExtensionState({
 					mode: "code",
 					apiConfiguration: {
-						apiProvider: "openai",
+						apiProvider: providerIdentifiers.openai,
 						apiModelId: "gpt-4.1",
 					},
 				})

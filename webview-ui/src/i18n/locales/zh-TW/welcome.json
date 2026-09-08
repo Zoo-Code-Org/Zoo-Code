@@ -12,7 +12,9 @@
 	},
 	"telemetry": {
 		"helpImprove": "幫助改進 Zoo Code",
-		"helpImproveMessage": "Zoo Code 會收集錯誤和使用情況資料以幫助我們修復錯誤並改進擴充功能。此遙測不會收集程式碼、提示詞或個人資訊。您可以在 <settingsLink>設定</settingsLink> 中關閉。"
+		"helpImproveMessage": "Zoo Code 會收集與安裝識別碼相關聯的錯誤和使用情況資料，以幫助我們修復錯誤並改進擴充功能。此遙測不會收集您的程式碼或提示詞。您可以在 <settingsLink>設定</settingsLink> 中關閉。",
+		"accept": "接受",
+		"decline": "拒絕"
 	},
 	"importSettings": "匯入設定"
 }

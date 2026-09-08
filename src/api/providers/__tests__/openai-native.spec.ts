@@ -29,17 +29,17 @@ const serviceTierPricingCases = [
 	{
 		requestedTier: OpenAiServiceTier.Default,
 		resolvedTier: OpenAiServiceTier.Priority,
-		expectedCost: 0.00275,
+		expectedCost: 0.0016,
 	},
 	{
 		requestedTier: OpenAiServiceTier.Priority,
 		resolvedTier: OpenAiServiceTier.Flex,
-		expectedCost: 0.00055,
+		expectedCost: 0.0004,
 	},
 	{
 		requestedTier: OpenAiServiceTier.Flex,
 		resolvedTier: OpenAiServiceTier.Default,
-		expectedCost: 0.0011,
+		expectedCost: 0.0008,
 	},
 ]
 
@@ -132,6 +132,66 @@ describe("OpenAiNativeHandler", () => {
 	})
 
 	describe("createMessage", () => {
+		it("shapes GPT-6 Astra requests for Responses tool calling", () => {
+			const astraHandler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-6-astra",
+				reasoningEffort: "none",
+				modelTemperature: 0.7,
+			})
+			const model = astraHandler.getModel()
+			const reasoningEffort = astraHandler["getReasoningEffort"](model)
+			const body = astraHandler["buildRequestBody"](model, [], systemPrompt, undefined, reasoningEffort, {
+				taskId: "test-task",
+				tools: [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: "Read a file",
+							parameters: { type: "object", properties: { path: { type: "string" } } },
+						},
+					},
+				],
+			})
+
+			expect(body).toMatchObject({
+				model: "gpt-6-astra",
+				max_output_tokens: 128_000,
+				reasoning: { effort: "medium", summary: "auto" },
+				tools: [{ type: "function", name: "read_file", strict: true }],
+			})
+			expect(body.temperature).toBeUndefined()
+			expect(body.top_p).toBeUndefined()
+			expect(body.logprobs).toBeUndefined()
+			expect(body.text).toBeUndefined()
+		})
+
+		it.each(["low", "medium", "high", "xhigh", "max"] as const)(
+			"accepts the supported Astra %s reasoning effort",
+			(reasoningEffort) => {
+				const astraHandler = new OpenAiNativeHandler({
+					...mockOptions,
+					apiModelId: "gpt-6-astra",
+					reasoningEffort,
+				})
+				expect(astraHandler["getReasoningEffort"](astraHandler.getModel())).toBe(reasoningEffort)
+			},
+		)
+
+		it.each([
+			["the configured effort is disabled", { reasoningEffort: "disable" as const }],
+			["the reasoning toggle is disabled", { enableReasoningEffort: false }],
+		])("uses Astra's required default when %s", (_description, options) => {
+			const astraHandler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-6-astra",
+				...options,
+			})
+
+			expect(astraHandler["getReasoningEffort"](astraHandler.getModel())).toBe("medium")
+		})
+
 		it.each(serviceTiers)("should include the selected %s service tier", async (serviceTier) => {
 			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
 			handler = new OpenAiNativeHandler({
@@ -170,14 +230,9 @@ describe("OpenAiNativeHandler", () => {
 
 				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
-				expect(chunks).toContainEqual(
-					expect.objectContaining({
-						type: "usage",
-						inputTokens: 100,
-						outputTokens: 20,
-						totalCost: expectedCost,
-					}),
-				)
+				const usage = chunks.find((chunk) => chunk.type === "usage")
+				expect(usage).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 20 })
+				expect(usage?.totalCost).toBeCloseTo(expectedCost, 10)
 			},
 		)
 
@@ -198,10 +253,10 @@ describe("OpenAiNativeHandler", () => {
 			},
 			{
 				name: "a resolved service tier without a pricing entry",
-				modelId: "gpt-5.6-luna" as const,
+				modelId: "gpt-5.3-chat-latest" as const,
 				requestedTier: OpenAiServiceTier.Default,
 				resolvedTier: OpenAiServiceTier.Priority,
-				expectedCost: 0.088,
+				expectedCost: 0.1575,
 			},
 		])("retains standard pricing for $name", async ({ modelId, requestedTier, resolvedTier, expectedCost }) => {
 			mockResponsesCreate.mockResolvedValue(
@@ -267,7 +322,8 @@ describe("OpenAiNativeHandler", () => {
 
 				const [, request] = mockFetch.mock.calls[0]
 				expect(JSON.parse(request.body)).toMatchObject({ [SERVICE_TIER_KEY]: requestedTier })
-				expect(chunks).toContainEqual(expect.objectContaining({ type: "usage", totalCost: expectedCost }))
+				const usage = chunks.find((chunk) => chunk.type === "usage")
+				expect(usage?.totalCost).toBeCloseTo(expectedCost, 10)
 			},
 		)
 
@@ -309,14 +365,9 @@ describe("OpenAiNativeHandler", () => {
 
 				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
-				expect(chunks).toContainEqual(
-					expect.objectContaining({
-						type: "usage",
-						inputTokens: 100,
-						outputTokens: 20,
-						totalCost: expectedCost,
-					}),
-				)
+				const usage = chunks.find((chunk) => chunk.type === "usage")
+				expect(usage).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 20 })
+				expect(usage?.totalCost).toBeCloseTo(expectedCost, 10)
 			},
 		)
 
@@ -448,7 +499,7 @@ describe("OpenAiNativeHandler", () => {
 			mockResponsesCreate.mockResolvedValue({ output: [] })
 			handler = new OpenAiNativeHandler({
 				...mockOptions,
-				apiModelId: "gpt-5.6-luna",
+				apiModelId: "gpt-5.3-chat-latest",
 				openAiNativeServiceTier: OpenAiServiceTier.Priority,
 			})
 
@@ -961,7 +1012,7 @@ describe("OpenAiNativeHandler", () => {
 			)
 		})
 
-		it("should support minimal reasoning effort for GPT-5", async () => {
+		it("should replace an unsupported GPT-5.1 reasoning effort with the model default", async () => {
 			// Mock fetch for Responses API
 			const mockFetch = vitest.fn().mockResolvedValue({
 				ok: true,
@@ -994,11 +1045,11 @@ describe("OpenAiNativeHandler", () => {
 				chunks.push(chunk)
 			}
 
-			// With minimal reasoning effort, the model should pass it through
+			// GPT-5.1 does not support minimal, so use the catalog's medium default.
 			expect(mockFetch).toHaveBeenCalledWith(
 				"https://api.openai.com/v1/responses",
 				expect.objectContaining({
-					body: expect.stringContaining('"effort":"minimal"'),
+					body: expect.stringContaining('"effort":"medium"'),
 				}),
 			)
 		})
@@ -1132,7 +1183,7 @@ describe("OpenAiNativeHandler", () => {
 			expect(parsedBody.max_output_tokens).toBeDefined()
 		})
 
-		it("should support both verbosity and reasoning effort together for GPT-5", async () => {
+		it("should support verbosity while normalizing an unsupported GPT-5 effort", async () => {
 			// Mock fetch for Responses API
 			const mockFetch = vitest.fn().mockResolvedValue({
 				ok: true,
@@ -1176,7 +1227,7 @@ describe("OpenAiNativeHandler", () => {
 			const body3 = (mockFetch.mock.calls[0][1] as any).body as string
 			const parsedBody = JSON.parse(body3)
 			expect(parsedBody.model).toBe("gpt-5.1")
-			expect(parsedBody.reasoning?.effort).toBe("minimal")
+			expect(parsedBody.reasoning?.effort).toBe("medium")
 			expect(parsedBody.reasoning?.summary).toBe("auto")
 			expect(parsedBody.text?.verbosity).toBe("high")
 			// GPT-5 models don't include temperature

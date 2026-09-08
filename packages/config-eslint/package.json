@@ -5,7 +5,11 @@
 	"exports": {
 		"./base": "./base.js",
 		"./react": "./react.js",
-		"./next-js": "./next.js"
+		"./next-js": "./next.js",
+		"./provider-identifiers": "./provider-identifiers.js"
+	},
+	"scripts": {
+		"test": "node --test provider-identifiers.test.js"
 	},
 	"devDependencies": {
 		"@eslint/js": "9.39.4",

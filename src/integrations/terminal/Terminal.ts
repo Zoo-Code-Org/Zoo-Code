@@ -127,7 +127,7 @@ export class Terminal extends BaseTerminal {
 						ShellIntegrationManager.zshCleanupTmpDir(this.id)
 
 						// Run the command in the terminal
-						process.run(command)
+						void process.run(command).catch((error) => process.emit("error", error))
 					})
 					.catch(() => {
 						console.log(`[Terminal ${this.id}] Shell integration not available. Command execution aborted.`)

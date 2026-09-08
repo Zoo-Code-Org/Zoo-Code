@@ -220,6 +220,21 @@ describe("useSelectedModel", () => {
 		},
 	)
 
+	it("selects static vision metadata when the DeepSeek catalog is unavailable", () => {
+		const modelId = "deepseek-v4-flash-vision-exp"
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.deepseek]: null }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+		const { result } = renderHook(
+			() => useSelectedModel({ apiProvider: providerIdentifiers.deepseek, apiModelId: modelId }),
+			{ wrapper: createWrapper() },
+		)
+
+		expect(result.current.id).toBe(modelId)
+		expect(result.current.info).toEqual(deepSeekModels[modelId])
+		expect(result.current.info?.supportsImages).toBe(true)
+	})
+
 	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot])(
 		"falls back to static data when the %s router catalog is null",
 		(provider) => {
@@ -1331,13 +1346,14 @@ describe("useSelectedModel", () => {
 		it("uses the International Coding catalog when no API line is configured", () => {
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.zai,
-				apiModelId: "glm-5.3",
+				apiModelId: "glm-5.3-flash",
 			}
 
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
 
-			expect(result.current.id).toBe("glm-5.3")
-			expect(result.current.info).toEqual(getZAiModels("international_coding")["glm-5.3"])
+			expect(result.current.id).toBe("glm-5.3-flash")
+			expect(result.current.info).toEqual(getZAiModels("international_coding")["glm-5.3-flash"])
+			expect(result.current.info?.supportsImages).toBe(true)
 		})
 
 		it("uses the China Coding catalog for GLM-5.3", () => {

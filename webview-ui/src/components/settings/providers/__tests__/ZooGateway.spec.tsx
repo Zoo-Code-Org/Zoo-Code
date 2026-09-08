@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import React from "react"
 import { render, screen, waitFor } from "@/utils/test-utils"
 import type { ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
@@ -94,7 +95,7 @@ describe("ZooGateway component", () => {
 		const setApiConfigurationField = vi.fn()
 		render(
 			<ZooGateway
-				apiConfiguration={{ apiProvider: "zoo-gateway" } as ProviderSettings}
+				apiConfiguration={{ apiProvider: providerIdentifiers.zooGateway } as ProviderSettings}
 				setApiConfigurationField={setApiConfigurationField}
 				routerModels={buildRouterModels(["anthropic/claude-sonnet-4", "anthropic/claude-sonnet-4.5"])}
 				organizationAllowList={baseProps.organizationAllowList}
@@ -112,7 +113,7 @@ describe("ZooGateway component", () => {
 			<ZooGateway
 				apiConfiguration={
 					{
-						apiProvider: "zoo-gateway",
+						apiProvider: providerIdentifiers.zooGateway,
 						zooGatewayModelId: "anthropic/claude-sonnet-4",
 					} as ProviderSettings
 				}
@@ -139,7 +140,7 @@ describe("ZooGateway component", () => {
 			<ZooGateway
 				apiConfiguration={
 					{
-						apiProvider: "zoo-gateway",
+						apiProvider: providerIdentifiers.zooGateway,
 						zooGatewayModelId: "anthropic/claude-sonnet-4.5",
 					} as ProviderSettings
 				}
@@ -158,7 +159,7 @@ describe("ZooGateway component", () => {
 		const setApiConfigurationField = vi.fn()
 		render(
 			<ZooGateway
-				apiConfiguration={{ apiProvider: "zoo-gateway" } as ProviderSettings}
+				apiConfiguration={{ apiProvider: providerIdentifiers.zooGateway } as ProviderSettings}
 				setApiConfigurationField={setApiConfigurationField}
 				routerModels={undefined}
 				organizationAllowList={baseProps.organizationAllowList}
@@ -174,7 +175,7 @@ describe("ZooGateway component", () => {
 		try {
 			render(
 				<ZooGateway
-					apiConfiguration={{ apiProvider: "zoo-gateway" } as ProviderSettings}
+					apiConfiguration={{ apiProvider: providerIdentifiers.zooGateway } as ProviderSettings}
 					setApiConfigurationField={vi.fn()}
 					routerModels={buildRouterModels(["anthropic/claude-sonnet-4"])}
 					organizationAllowList={baseProps.organizationAllowList}

@@ -6,6 +6,7 @@ import {
 	ANTHROPIC_DEFAULT_MAX_TOKENS,
 	isDynamicProvider,
 	isLocalProvider,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 // ApiHandlerOptions
@@ -176,21 +177,21 @@ type CommonFetchParams = {
 // If a new dynamic provider is added in packages/types, this will fail to compile
 // until a corresponding entry is added here.
 const dynamicProviderExtras = {
-	openrouter: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
-	"vercel-ai-gateway": {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
-	"zoo-gateway": {} as { apiKey?: string; baseUrl?: string },
-	litellm: {} as { apiKey?: string; baseUrl: string },
-	requesty: {} as { apiKey?: string; baseUrl?: string },
-	unbound: {} as { apiKey?: string },
-	ollama: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
-	lmstudio: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
-	poe: {} as { apiKey?: string; baseUrl?: string },
-	deepseek: {} as { apiKey?: string; baseUrl?: string },
-	moonshot: {} as { apiKey?: string; baseUrl?: string },
-	"opencode-go": {} as { apiKey?: string },
-	kenari: {} as { apiKey?: string },
-	nanogpt: {} as { apiKey?: string },
-	"kimi-code": {} as { apiKey?: string },
+	[providerIdentifiers.openrouter]: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
+	[providerIdentifiers.vercelAiGateway]: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
+	[providerIdentifiers.zooGateway]: {} as { apiKey?: string; baseUrl?: string },
+	[providerIdentifiers.litellm]: {} as { apiKey?: string; baseUrl: string },
+	[providerIdentifiers.requesty]: {} as { apiKey?: string; baseUrl?: string },
+	[providerIdentifiers.unbound]: {} as { apiKey?: string },
+	[providerIdentifiers.ollama]: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
+	[providerIdentifiers.lmstudio]: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
+	[providerIdentifiers.poe]: {} as { apiKey?: string; baseUrl?: string },
+	[providerIdentifiers.deepseek]: {} as { apiKey?: string; baseUrl?: string },
+	[providerIdentifiers.moonshot]: {} as { apiKey?: string; baseUrl?: string },
+	[providerIdentifiers.opencodeGo]: {} as { apiKey?: string },
+	[providerIdentifiers.kenari]: {} as { apiKey?: string },
+	[providerIdentifiers.nanogpt]: {} as { apiKey?: string },
+	[providerIdentifiers.kimiCode]: {} as { apiKey?: string },
 } as const satisfies Record<RouterName, object>
 
 // Build the dynamic options union from the map, intersected with CommonFetchParams

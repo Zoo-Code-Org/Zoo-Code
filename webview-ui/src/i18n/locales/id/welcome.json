@@ -12,7 +12,9 @@
 	},
 	"telemetry": {
 		"helpImprove": "Bantu Tingkatkan Zoo Code",
-		"helpImproveMessage": "Zoo Code mengumpulkan data kesalahan dan penggunaan untuk membantu kami memperbaiki bug dan meningkatkan ekstensi. Telemetri ini tidak mengumpulkan kode, prompt, atau informasi pribadi. Anda dapat menonaktifkannya di <settingsLink>pengaturan</settingsLink>."
+		"helpImproveMessage": "Zoo Code mengumpulkan data kesalahan dan penggunaan, yang terkait dengan pengenal instalasi, untuk membantu kami memperbaiki bug dan meningkatkan ekstensi. Telemetri ini tidak mengumpulkan kode atau prompt Anda. Anda dapat menonaktifkannya di <settingsLink>pengaturan</settingsLink>.",
+		"accept": "Terima",
+		"decline": "Tolak"
 	},
 	"importSettings": "Impor Pengaturan"
 }

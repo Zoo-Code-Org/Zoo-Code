@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { defaultModeSlug } from "@roo/modes"
 
 import { render, fireEvent, screen } from "@src/utils/test-utils"
@@ -44,7 +45,7 @@ describe("ChatTextArea - lockApiConfigAcrossModes toggle", () => {
 	const defaultState = {
 		filePaths: [],
 		openedTabs: [],
-		apiConfiguration: { apiProvider: "anthropic" },
+		apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 		taskHistory: [],
 		cwd: "/test/workspace",
 		listApiConfigMeta: [{ id: "default", name: "Default", modelId: "claude-3" }],

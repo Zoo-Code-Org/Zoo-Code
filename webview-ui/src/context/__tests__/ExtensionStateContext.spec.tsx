@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { render, screen, act } from "@/utils/test-utils"
 import React from "react"
 
@@ -64,7 +65,9 @@ const ApiConfigTestComponent = () => {
 			<div data-testid="api-configuration">{JSON.stringify(apiConfiguration)}</div>
 			<button
 				data-testid="update-api-config-button"
-				onClick={() => setApiConfiguration({ apiModelId: "new-model", apiProvider: "anthropic" })}>
+				onClick={() =>
+					setApiConfiguration({ apiModelId: "new-model", apiProvider: providerIdentifiers.anthropic })
+				}>
 				Update API Config
 			</button>
 			<button data-testid="partial-update-button" onClick={() => setApiConfiguration({ modelTemperature: 0.7 })}>
@@ -353,7 +356,7 @@ describe("ExtensionStateContext", () => {
 		expect(updatedConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}),
 		)
 	})
@@ -376,7 +379,7 @@ describe("ExtensionStateContext", () => {
 		expect(initialConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}),
 		)
 
@@ -391,7 +394,7 @@ describe("ExtensionStateContext", () => {
 		expect(updatedConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model", // Should retain this from previous update
-				apiProvider: "anthropic", // Should retain this from previous update
+				apiProvider: providerIdentifiers.anthropic, // Should retain this from previous update
 				modelTemperature: 0.7, // Should add this from partial update
 			}),
 		)
@@ -413,7 +416,7 @@ describe("mergeExtensionState", () => {
 			customModes: [],
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
-			apiConfiguration: { providerId: "openrouter" } as ProviderSettings,
+			apiConfiguration: { providerId: providerIdentifiers.openrouter } as ProviderSettings,
 			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,

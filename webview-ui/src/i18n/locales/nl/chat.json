@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Drie belangrijke nieuwe modellen zijn gearriveerd — gebruik de gloednieuwe Gemini 3.7 Flash-, GLM 5.3- en Qwen3.8 Max-modellen, plus bijgewerkte reasoning, prijzen en providerondersteuning voor DeepSeek V4.",
-			"highlight2": "Maak verbinding met NanoGPT — gebruik dynamische modeldetectie, streaming en promptaanvulling, plus routeringsvoorkeuren voor snelheid, prijs, latentie, doorvoer, toolondersteuning en caching.",
-			"highlight3": "Betrouwbaardere providers en taken — oplossingen verbeteren de instelling van Azure OpenAI-endpoints, Kimi Code-uitvoerlimieten, het behouden van titels in de taakgeschiedenis en het importeren/exporteren van Zoo-instellingen."
+			"highlight1": "🔑 Gebruik je Zoo Gateway API-sleutel overal—voeg hem toe aan elke OpenAI-compatibele client of workflow: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Krijg tijdelijk gratis toegang tot MiniMax-M3 via Zoo Gateway.",
+			"highlight3": "✨ Nu beschikbaar: de gloednieuwe modellen GPT-6 Astra en Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

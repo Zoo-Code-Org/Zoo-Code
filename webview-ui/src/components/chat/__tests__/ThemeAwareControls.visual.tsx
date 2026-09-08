@@ -1,8 +1,5 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import UpdateTodoListToolBlock from "../UpdateTodoListToolBlock"
-import { SelectDropdown } from "@/components/ui/select-dropdown"
+import { mountedStory } from "../../../../playwright/mounted-story"
 
 const themes = [
 	{
@@ -10,12 +7,12 @@ const themes = [
 		bodyClass: "vscode-dark",
 		themeId: "Default Dark Modern",
 		expected: {
-			background: "rgb(30, 30, 30)",
+			background: "rgb(31, 31, 31)",
 			description: "rgb(157, 157, 157)",
 			dropdownBorder: "rgb(60, 60, 60)",
-			hoverBackground: "rgb(42, 45, 46)",
-			focusBorder: "rgb(0, 127, 212)",
-			error: "rgb(244, 135, 113)",
+			hoverBackground: "rgba(90, 93, 94, 0.31)",
+			focusBorder: "rgb(0, 120, 212)",
+			error: "color(srgb 0.912157 0.486471 0.466078)",
 			panelBorder: "rgb(43, 43, 43)",
 		},
 	},
@@ -25,33 +22,24 @@ const themes = [
 		themeId: "Default Light Modern",
 		expected: {
 			background: "rgb(255, 255, 255)",
-			description: "rgb(113, 113, 113)",
+			description: "rgb(59, 59, 59)",
 			dropdownBorder: "rgb(206, 206, 206)",
-			hoverBackground: "rgb(232, 232, 232)",
-			focusBorder: "rgb(0, 144, 241)",
-			error: "rgb(161, 38, 13)",
-			panelBorder: "rgb(206, 206, 206)",
+			hoverBackground: "rgba(184, 184, 184, 0.31)",
+			focusBorder: "rgb(0, 95, 184)",
+			error: "color(srgb 0.713137 0.287451 0.267059)",
+			panelBorder: "rgb(229, 229, 229)",
 		},
 	},
 ] as const
 
 for (const theme of themes) {
 	test(`renders selectors and confirmation dialogs in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("theme-aware-controls"))
 		await page.evaluate(({ bodyClass, themeId }) => {
 			document.documentElement.className = bodyClass
 			document.body.className = bodyClass
 			document.body.dataset.vscodeThemeId = themeId
 		}, theme)
-
-		const component = await mount(
-			<div className="flex flex-col gap-4 w-96">
-				<SelectDropdown value="code" options={[{ value: "code", label: "Code" }]} onChange={() => undefined} />
-				<UpdateTodoListToolBlock
-					todos={[{ id: "todo-1", content: "Ship the follow-up", status: "in_progress" }]}
-					onChange={() => undefined}
-				/>
-			</div>,
-		)
 
 		await component.evaluate(async () => {
 			await document.fonts.ready

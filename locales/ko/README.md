@@ -45,13 +45,11 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## v3.78.0의 새로운 기능
+## v3.82.0의 새로운 기능
 
-- **주요 신규 모델 3종이 출시되었습니다** — 완전히 새로운 Gemini 3.7 Flash, GLM 5.3, Qwen3.8 Max 모델과 업데이트된 DeepSeek V4 reasoning, 가격 및 프로바이더 지원을 사용해 보세요.
-- **NanoGPT에 연결하세요** — 동적 모델 검색, 스트리밍 및 prompt completion과 함께 속도, 가격, 지연 시간, 처리량, 도구 지원, 캐싱을 기준으로 한 라우팅 설정을 사용할 수 있습니다.
-- **더 안정적인 프로바이더와 작업** — Azure OpenAI endpoint 설정, Kimi Code 출력 제한, 작업 기록 제목 보존, Zoo 설정 가져오기/내보내기가 개선되었습니다.
-- Destructive Command Guard가 이제 Intel 기반 Mac을 지원합니다.
-- 보안 업데이트로 `undici`와 Mermaid의 취약점을 해결했습니다.
+- 🔑 **Zoo Gateway API 키를 어디서나 사용** — OpenAI 호환 클라이언트나 워크플로에 그대로 연결할 수 있습니다: https://zoocode.dev/models
+- 🎁 **한정 기간 무료 모델 이용** — Zoo Gateway를 통해 MiniMax-M3를 무료로 이용하세요.
+- ✨ **새로운 모델** — GPT-6 Astra와 Claude Fable 5.1을 지금 이용할 수 있습니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 
