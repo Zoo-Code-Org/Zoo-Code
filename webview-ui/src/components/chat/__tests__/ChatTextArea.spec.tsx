@@ -1233,6 +1233,9 @@ describe("ChatTextArea", () => {
 				"data-tooltip-content",
 				"chat:selectModel",
 			)
+		})
+	})
+
 	describe("blank suggestion copy crash (issue #1226)", () => {
 		const getSendButton = (container: HTMLElement) => {
 			const buttons = container.querySelectorAll("button")
