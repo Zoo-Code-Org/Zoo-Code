@@ -35,9 +35,15 @@ type PrivateClineProviderMethods = {
 
 const privateClineProvider = ClineProvider.prototype as unknown as PrivateClineProviderMethods
 
-vi.mock("../../task/Task", () => {
-	// The id must come from the history item so claim/release target the exact
-	// created task; the stub only implements the surface the provider touches.
+// Declared via `vi.hoisted` (not a plain module-scope class) so the class
+// binding is initialized BEFORE the hoisted vi.mock factory runs — the mock
+// factory executes while ClineProvider's imports resolve, so a normally
+// declared class would still be in its temporal dead zone there. This also
+// exposes the stub to tests for `toBeInstanceOf(TaskStub)` assertions.
+const TaskStub = vi.hoisted(() => {
+	// `vi` is not yet initialized at hoist time, so field initializer surfaces
+	// that use vi.fn() are deferred to construction time (class fields run per
+	// instance, well after vitest initializes the mock registry).
 	class TaskStub {
 		public taskId: string
 		public instanceId = "stub-inst"
@@ -46,7 +52,10 @@ vi.mock("../../task/Task", () => {
 		public abandoned = false
 		public abortTask = vi.fn().mockResolvedValue(undefined)
 		constructor(opts: { historyItem?: { id: string }; parentTask?: unknown; onCreated?: (t: TaskStub) => void }) {
-			this.taskId = opts.historyItem?.id ?? `task-${Math.random().toString(36).slice(2, 8)}`
+			// The id must come from the history item so claim/release target the exact
+			// created task; hookless createTask (no historyItem) gets a deterministic
+			// sequential default id, so tests can assert the exact generated value.
+			this.taskId = opts.historyItem?.id ?? `task-stub-${++TaskStub.instanceCount}`
 			this.parentTask = opts.parentTask
 			opts.onCreated?.(this)
 		}
@@ -56,9 +65,14 @@ vi.mock("../../task/Task", () => {
 		on() {}
 		off() {}
 		emit() {}
+		public static instanceCount = 0
 	}
-	return { Task: TaskStub }
+	return TaskStub
 })
+
+vi.mock("../../task/Task", () => ({
+	Task: TaskStub,
+}))
 
 type MockFn = ReturnType<typeof vi.fn>
 
@@ -591,7 +605,14 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 
 		const task = await privateClineProvider.createTask.call(provider, "hello")
 
-		expect(task).toBeDefined()
+		// CodeRabbit round-5: assert the resolution value itself, not just
+		// "defined" — the resolved task must be the mocked TaskStub instance,
+		// and its generated identifier (no historyItem on this path) must be
+		// the stub's most recent sequential default id (deterministic prefix,
+		// preferred over a /^task-/ format check because it pins the exact
+		// id-generation behavior of the stub's constructor fallback).
+		expect(task).toBeInstanceOf(TaskStub)
+		expect(task.taskId).toBe(`task-stub-${TaskStub.instanceCount}`)
 		expect(provider.taskScheduler.schedule).toHaveBeenCalledTimes(1)
 
 		await flushMicrotasks()
