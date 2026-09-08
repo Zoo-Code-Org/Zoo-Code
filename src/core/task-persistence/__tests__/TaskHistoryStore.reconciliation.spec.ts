@@ -20,7 +20,15 @@ const writeJson = async (filePath: string, data: unknown): Promise<void> => {
 
 const safeWriteJsonMock = vi.hoisted(() => vi.fn())
 
-vi.mock("../../../utils/safeWriteJson", () => ({ safeWriteJson: safeWriteJsonMock }))
+// Spread the real module so `LOCK_STALE_MS` keeps its actual value: both
+// reconcile() and getChildFileMtimeMs() compare lock freshness against it,
+// and a factory mock that omits the export would silently disable those
+// checks. Only `safeWriteJson` itself is replaced (with the fs-backed
+// writeJson default below).
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../utils/safeWriteJson")>()
+	return { ...actual, safeWriteJson: safeWriteJsonMock }
+})
 
 safeWriteJsonMock.mockImplementation(writeJson)
 
@@ -367,6 +375,40 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		} finally {
 			pathSpy.mockRestore()
 		}
+	})
+
+	it("classifies a getChildFileMtimeMs ENOENT inside a fresh advisory lock as live (safeWriteJson rename window)", async () => {
+		// Direct probe coverage for the rename-window race: safeWriteJson renames
+		// history_item.json to a backup and back WHILE holding the `<path>.lock`
+		// advisory lock (proper-lockfile creates it via mkdir, so stat works on
+		// the lock directory). During that window fs.stat returns ENOENT even
+		// though a peer window is mid-write, so the probe must consult the lock
+		// exactly like reconcile() does: fresh lock → live (future mtime), no
+		// lock → genuinely absent. The tmpDir rm in afterEach cleans the lock.
+		const internals = store as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const child = makeItem({ id: "lock-window-child", status: "active" })
+		await seedItems(tmpDir, [child])
+		const historyPath = path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem)
+		const lockPath = `${historyPath}.lock`
+
+		// Simulate the rename window: history file momentarily absent, lock held.
+		await fs.rm(historyPath)
+		await fs.mkdir(lockPath)
+
+		const probed = await internals.getChildFileMtimeMs(child.id)
+		// A numeric (live) result is required; the narrowing below asserts it.
+		expect(probed).toBeDefined()
+		if (typeof probed === "number") {
+			// Future timestamp ⇒ negative age ⇒ every liveness guard holds.
+			expect(Date.now() - probed).toBeLessThan(0)
+			expect(Date.now() - probed).toBeLessThan(LIVE_CHILD_MTIME_THRESHOLD_MS)
+		}
+
+		// Lock released while the file is still gone: genuinely absent → undefined.
+		await fs.rmdir(lockPath)
+		expect(await internals.getChildFileMtimeMs(child.id)).toBeUndefined()
 	})
 
 	afterEach(async () => {
@@ -2691,6 +2733,54 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 			} finally {
 				pathSpy.mockRestore()
 			}
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
+	})
+
+	it("keeps a child whose history file is ENOENT during a fresh-lock rename window active through the tick", async () => {
+		// End-to-end companion of the direct lock-window probe test: the startup
+		// pass sees fresh (future-relative-to-FIXED_NOW) mtimes and skips the
+		// repair, then the child's history file disappears mid-write while the
+		// advisory `.lock` directory stays fresh. The periodic delegation pass's
+		// liveness guard must classify the child LIVE via the lock check inside
+		// getChildFileMtimeMs and skip the crash-orphan repair. Without that lock
+		// check, ENOENT → undefined → "not live" → the child would be repaired to
+		// interrupted and the parent released — failing the status assertions.
+		// The tick is invoked directly (same private-method pattern as the
+		// neighboring tests) and no disk write happens after the simulated
+		// deletion, so the fs watcher never fires. Lock dir cleanup rides the
+		// afterEach tmpDir rm.
+		const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z, before real seed mtimes
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const [parent, child] = delegatedPair("parent-lockwin-tick", "child-lockwin-tick")
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			// Startup: fresh (future-relative-to-FIXED_NOW) mtimes → live → skipped.
+			expect(s.get(child.id)?.status).toBe("active")
+			warnSpy.mockClear()
+
+			// Simulate the rename window: file gone, lock held (fresh mtime).
+			const historyPath = path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem)
+			await fs.rm(historyPath)
+			await fs.mkdir(`${historyPath}.lock`)
+
+			const internals = TaskHistoryStore.prototype as unknown as {
+				runPeriodicDelegationReconciliation: () => Promise<void>
+			}
+			await internals.runPeriodicDelegationReconciliation.call(s)
+
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
+			expect(s.get(child.id)?.status).toBe("active")
+			expect(s.get(parent.id)?.status).toBe("delegated")
+			expect(errorSpy).not.toHaveBeenCalled()
 		} finally {
 			warnSpy.mockRestore()
 			errorSpy.mockRestore()

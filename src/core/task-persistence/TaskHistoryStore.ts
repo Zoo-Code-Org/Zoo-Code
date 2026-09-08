@@ -583,6 +583,16 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Release a task id claimed by `markLocallyActive` when its session did not
+	 * start (preparation failure, scheduler rejection, or startTask disabled).
+	 * Re-running reconciliation for the id is safe: without local ownership the
+	 * periodic pass treats it like any other persisted record.
+	 */
+	public markLocallyInactive(taskId: string): void {
+		this.locallyActiveTaskIds.delete(taskId)
+	}
+
+	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side
 	 * when the other side is already at its target, or when both records still
@@ -1245,12 +1255,13 @@ export class TaskHistoryStore {
 
 	/**
 	 * Returns the mtime (ms epoch) of the child's history_item.json, or undefined
-	 * only when the file is genuinely absent (ENOENT). A recent mtime means another
-	 * live extension host is actively persisting this child, so startup repair must
-	 * not treat it as a crash orphan. Any OTHER stat failure (EMFILE, EACCES, EIO,
-	 * ...) is not evidence of absence: the child is reported with a future mtime so
-	 * every `Date.now() - mtimeMs < threshold` liveness guard holds, repair is
-	 * skipped, and a later reconciliation tick retries instead.
+	 * only when the file is genuinely absent (ENOENT with no fresh advisory lock).
+	 * A recent mtime means another live extension host is actively persisting this
+	 * child, so startup repair must not treat it as a crash orphan. Any OTHER stat
+	 * failure (EMFILE, EACCES, EIO, ...) is not evidence of absence: the child is
+	 * reported with a future mtime so every `Date.now() - mtimeMs < threshold`
+	 * liveness guard holds, repair is skipped, and a later reconciliation tick
+	 * retries instead.
 	 */
 	private async getChildFileMtimeMs(childId: string): Promise<number | undefined> {
 		try {
@@ -1258,10 +1269,25 @@ export class TaskHistoryStore {
 			const stat = await fs.stat(filePath)
 			return stat.mtimeMs
 		} catch (error) {
-			// ENOENT: the file is genuinely absent → no window is persisting it;
-			// conservatively proceed with repair. Any other stat failure is treated
-			// as evidence of life via a threshold-shifted future timestamp.
+			// ENOENT: no window is persisting it UNLESS the absence falls inside
+			// safeWriteJson's rename window — see the lock check below. Any other
+			// stat failure is treated as evidence of life via a threshold-shifted
+			// future timestamp.
 			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+				// The write path (safeWriteJson) renames history_item.json to a backup
+				// and back while holding the advisory lock, so a missing file during
+				// that window does NOT mean no window is writing it. Same convention
+				// as reconcile(): a fresh .lock file means a write is in progress —
+				// treat the child as live and let a later tick retry.
+				try {
+					const lockPath = (await this.getTaskFilePath(childId)) + ".lock"
+					const lockStat = await fs.stat(lockPath)
+					if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
+						return Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+					}
+				} catch {
+					// No lock file — the file is genuinely absent.
+				}
 				return undefined
 			}
 			return Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
