@@ -1325,6 +1325,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						<ModelSelector
 							apiConfiguration={apiConfiguration}
 							currentApiConfigName={currentApiConfigName}
+							disabled={selectApiConfigDisabled}
 							title={t("chat:selectModel")}
 							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0"
 							organizationAllowList={organizationAllowList}

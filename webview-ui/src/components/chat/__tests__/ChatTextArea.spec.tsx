@@ -1234,6 +1234,18 @@ describe("ChatTextArea", () => {
 				"chat:selectModel",
 			)
 		})
+
+		it("disables the model selector trigger when selectApiConfigDisabled is true", () => {
+			render(<ChatTextArea {...defaultProps} selectApiConfigDisabled={true} />)
+
+			expect(screen.getByTestId("model-selector-trigger")).toBeDisabled()
+		})
+
+		it("enables the model selector trigger when selectApiConfigDisabled is false", () => {
+			render(<ChatTextArea {...defaultProps} selectApiConfigDisabled={false} />)
+
+			expect(screen.getByTestId("model-selector-trigger")).not.toBeDisabled()
+		})
 	})
 
 	describe("blank suggestion copy crash (issue #1226)", () => {
