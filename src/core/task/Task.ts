@@ -4310,7 +4310,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		state: Pick<ExtensionState, "currentApiConfigName" | "listApiConfigMeta"> | undefined,
 	): string {
 		return (
-			state?.listApiConfigMeta?.find((profile) => profile.name === state?.currentApiConfigName)?.id ?? "default"
+			state?.listApiConfigMeta?.find(
+				// Stryker disable next-line OptionalChaining: equivalent mutant — the find callback only
+				// runs when state is non-nullish, so removing the inner `?.` cannot change behavior.
+				(profile) => profile.name === state?.currentApiConfigName,
+			)?.id ?? "default"
 		)
 	}
 
