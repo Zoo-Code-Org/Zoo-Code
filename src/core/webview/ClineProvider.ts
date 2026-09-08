@@ -80,6 +80,7 @@ import { WebviewMessage } from "../../shared/WebviewMessage"
 import { EMBEDDING_MODEL_PROFILES } from "../../shared/embeddingModels"
 import { ProfileValidator } from "../../shared/ProfileValidator"
 
+import type { DiagnosticData } from "../../integrations/editor/EditorUtils"
 import { Terminal } from "../../integrations/terminal/Terminal"
 import { downloadTask, getTaskFileName } from "../../integrations/misc/export-markdown"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -535,7 +536,14 @@ export class ClineProvider
 		event: K,
 		listener: (...args: TaskProviderEvents[K]) => void | Promise<void>,
 	): this {
-		return super.on(event, listener as any)
+		// @types/node types the listener slot of a generic-K call as a deferred conditional
+		// (`K extends keyof T ? ... : never`) that TS will not resolve while K stays generic,
+		// so even an event-map-shaped listener is rejected against the base method here.
+		// Asserting the method to the base class's untyped-map signature (`EventEmitter["on"]`,
+		// whose listener slot is Node's own `(...args: any[]) => void` fallback) is the
+		// minimal type-only workaround; the assertion is erased at compile time, so the
+		// emitted runtime call remains exactly `super.on(event, listener)`.
+		return (super.on as EventEmitter["on"])(event, listener) as this
 	}
 
 	/**
@@ -545,7 +553,9 @@ export class ClineProvider
 		event: K,
 		listener: (...args: TaskProviderEvents[K]) => void | Promise<void>,
 	): this {
-		return super.off(event, listener as any)
+		// See the `on` override above for why the assertion through the base signature is
+		// required; runtime behavior is unchanged (type assertion only).
+		return (super.off as EventEmitter["off"])(event, listener) as this
 	}
 
 	/**
@@ -959,7 +969,7 @@ export class ClineProvider
 	public static async handleCodeAction(
 		command: CodeActionId,
 		promptType: CodeActionName,
-		params: Record<string, string | any[]>,
+		params: Record<string, string | DiagnosticData[]>,
 	): Promise<void> {
 		// Capture telemetry for code action usage
 		TelemetryService.instance.captureCodeActionUsed(promptType)
@@ -991,7 +1001,7 @@ export class ClineProvider
 	public static async handleTerminalAction(
 		command: TerminalActionId,
 		promptType: TerminalActionPromptType,
-		params: Record<string, string | any[]>,
+		params: Record<string, string | DiagnosticData[]>,
 	): Promise<void> {
 		TelemetryService.instance.captureCodeActionUsed(promptType)
 
@@ -1792,7 +1802,10 @@ export class ClineProvider
 				}
 
 				// Only update the task's mode after successful persistence.
-				;(task as any)._taskMode = newMode
+				// `_taskMode` is private on Task; bracket access is the AGENTS.md-sanctioned
+				// escape hatch for provider-side mutation and emits the same property write as
+				// the previous `(task as any)._taskMode = newMode`, so runtime behavior is unchanged.
+				task["_taskMode"] = newMode
 			} catch (error) {
 				// If persistence fails, log the error but don't update the in-memory state.
 				this.log(
@@ -1910,7 +1923,7 @@ export class ClineProvider
 			task.updateApiConfiguration(providerSettings)
 		} else {
 			// No rebuild needed, just sync apiConfiguration
-			;(task as any).apiConfiguration = providerSettings
+			task.apiConfiguration = providerSettings
 		}
 	}
 
@@ -4021,9 +4034,22 @@ export class ClineProvider
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
 		}
 
-		// 4) Bind the child directly to the delegating task's local provider
-		// context. Delegation never mutates shared profile/global state.
-		// Create child as sole active (parent reference preserved for lineage)
+		// 3) Switch provider mode to child's requested mode BEFORE creating the child
+		// task. Delegation never mutates shared profile/global state, but the mode
+		// switch must happen before createTask() because the Task constructor
+		// initializes its mode from provider.getState() during initializeTaskMode().
+		try {
+			await this.handleModeSwitch(mode)
+		} catch (e) {
+			this.log(
+				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
+					(e as Error)?.message ?? String(e)
+				}`,
+			)
+		}
+
+		// 4) Create child as sole active, bound to the delegating task's local
+		// provider context (parent reference preserved for lineage)
 		// Pass initialStatus: "active" to ensure the child task's historyItem is created
 		// with status from the start, avoiding race conditions where the task might
 		// call attempt_completion before status is persisted separately.
@@ -4034,7 +4060,7 @@ export class ClineProvider
 		// Without this, the child's fire-and-forget startTask() races with step 5,
 		// and the last writer to globalState overwrites the other's changes—
 		// causing the parent's delegation fields to be lost.
-		const child = await this.createTask(message, undefined, parent as any, {
+		const child = await this.createTask(message, undefined, parent, {
 			initialTodos,
 			initialStatus: "active",
 			startTask: false,
