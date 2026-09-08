@@ -794,11 +794,6 @@
 			"count": 2
 		}
 	},
-	"core/task/Task.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
 	"core/task/__tests__/Task.dispose.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
