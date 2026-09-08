@@ -117,7 +117,7 @@ The task delegation checker currently enforces:
 5. Parent-child lineage is acyclic.
 6. Completed task records cannot be changed by later lifecycle events.
 7. Active-child re-delegation, stale completion after ownership moves to another child, duplicate/late completion, and abandonment of a live child are rejected by the shared production guards.
-8. No transition may clear a delegated parent's link to a child that is active and marked live-elsewhere; startup reconciliation repairs only stale-or-unreadable-mtime (crash-orphan) children. This encodes the PR #1495 cross-window misrepair bug class, which broke delegation links so subtask completion could not return to the parent.
+8. No transition may clear a delegated parent's link to a child that is active and marked live-elsewhere; startup reconciliation repairs only stale-mtime or genuinely missing (crash-orphan) children, while transient stat failures are treated as live and retried later. This encodes the PR #1495 cross-window misrepair bug class, which broke delegation links so subtask completion could not return to the parent.
 
 The completion persistence checker additionally enforces:
 
