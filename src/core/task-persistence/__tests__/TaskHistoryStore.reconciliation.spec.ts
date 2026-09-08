@@ -7,6 +7,7 @@ import * as os from "os"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../../shared/globalFileNames"
+import { LOCK_STALE_MS } from "../../../utils/safeWriteJson"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 
 vi.mock("../../../utils/storage", () => ({
@@ -2428,6 +2429,164 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		expect(ownedIds(s).has("dm-3")).toBe(false)
 		// Untouched task keeps its ownership.
 		expect(ownedIds(s).has("dm-2")).toBe(true)
+	})
+
+	it("markLocallyInactive releases an eager markLocallyActive claim so the tick repairs the orphan (kills L592 CallExpression)", async () => {
+		// markLocallyInactive: `this.locallyActiveTaskIds.delete(taskId)` — the rollback of the
+		// eager claim ClineProvider takes before scheduling. Its documented consumer is the
+		// periodic tick's orphan filter; the sequence below exercises both phases of that
+		// contract against the exact claim/release cycle production uses:
+		//   phase 1: claim (markLocallyActive) → the tick leaves the orphan alone (owned);
+		//   phase 2: release (markLocallyInactive, the scheduler-rejection rollback) → the
+		//            next tick repairs it (child → interrupted, parent → active).
+		// Under the `;` mutant the set keeps the id, phase 2 repairs nothing, and BOTH the
+		// direct membership assertion and the end-status assertions fail.
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "orphan-l592"
+			const parentId = "parent-l592"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			useTickClock()
+			// Fresh seed mtimes → the startup pass treats the child as live and skips repair.
+			await s.initialize()
+			expect(s.get(childId)?.status).toBe("active")
+
+			// Phase 1: the eager claim. Make the mtime stale for the tick, then run it.
+			s.markLocallyActive(childId)
+			installStaleChildInjector(childId)
+			const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+			const timerBeforeFirstTick = timerState.reconcileTimer
+			await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+			await flushUntil(() => timerState.reconcileTimer !== timerBeforeFirstTick, {
+				label: "locally-owned orphan was left alone by the tick",
+				snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
+			})
+			expect(ownedIds(s).has(childId)).toBe(true)
+			expect(s.get(childId)?.status).toBe("active")
+
+			// Phase 2: the rollback. Direct set assertion first (the kill), then the
+			// behavioral consequence: the id must no longer be excluded from the tick's
+			// repair candidate set.
+			s.markLocallyInactive(childId)
+			expect(ownedIds(s).has(childId)).toBe(false)
+			await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+			await flushUntil(() => s.get(childId)?.status === "interrupted", {
+				label: "released claim let the tick repair the orphan",
+				snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
+			})
+			expect(s.get(childId)?.status).toBe("interrupted")
+			expect(s.get(parentId)?.status).toBe("active")
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("a code-less stat rejection (null/string) is classified live, not absent, and never throws (kills L1276 OptionalChaining)", async () => {
+		// getChildFileMtimeMs: `if ((error as NodeJS.ErrnoException)?.code === "ENOENT")`. The
+		// optional chain is a real guard: dropping it (`(error).code`) dereferences null when
+		// the caught rejection has no payload wrapper at all. fs.stat itself cannot be spied
+		// (sealed ESM namespace), so the seam is the private getTaskFilePath promise — the
+		// awaited call at the top of getChildFileMtimeMs. A REJECTED getTaskFilePath throws
+		// into the same catch the classifier reads, with exactly the payload we choose:
+		//   correct code: null?.code → undefined ≠ "ENOENT" → transient → live future mtime;
+		//   mutant: null.code → TypeError thrown out of getChildFileMtimeMs.
+		// The string case additionally pins the "rejection without a `.code` property"
+		// classification: a plain non-Error rejection is evidence of life, never absence.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		const internals = s as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getTaskFilePath: (taskId: string) => Promise<string>
+		}
+		const originalGetTaskFilePath = probe.getTaskFilePath
+
+		const pathSpy = vi
+			.spyOn(probe, "getTaskFilePath")
+			.mockImplementation((taskId: string) =>
+				taskId === "null-reject-child" ? Promise.reject(null) : originalGetTaskFilePath.call(s, taskId),
+			)
+		try {
+			const probed = await internals.getChildFileMtimeMs("null-reject-child")
+			// Correct code resolves with a future (live) mtime rather than throwing.
+			expect(probed).toBeDefined()
+			if (typeof probed === "number") {
+				expect(Date.now() - probed).toBeLessThan(0)
+			}
+		} finally {
+			pathSpy.mockRestore()
+		}
+
+		const stringSpy = vi
+			.spyOn(probe, "getTaskFilePath")
+			.mockImplementation((taskId: string) =>
+				taskId === "string-reject-child" ? Promise.reject("boom") : originalGetTaskFilePath.call(s, taskId),
+			)
+		try {
+			const probed = await internals.getChildFileMtimeMs("string-reject-child")
+			expect(probed).toBeDefined()
+			if (typeof probed === "number") {
+				expect(Date.now() - probed).toBeLessThan(0)
+			}
+		} finally {
+			stringSpy.mockRestore()
+		}
+	})
+
+	it("ENOENT under an exactly-LOCK_STALE_MS-old or STALER advisory lock means the file is genuinely absent (kills L1285 Conditional->true, L1285 EqualityOperator '<'->'<=')", async () => {
+		// `Date.now() - lockStat.mtimeMs < LOCK_STALE_MS` — the fresh-lock (rename-window)
+		// guard in the ENOENT branch. Two mutants:
+		//   `true` : every lock is fresh, so a stale leftover lock would report the child LIVE;
+		//   `<=`   : a lock EXACTLY LOCK_STALE_MS old still counts as fresh.
+		// A fixed clock plus a `.lock` DIRECTORY stamped via fs.utimes pins both boundaries
+		// exactly, independent of filesystem mtime precision (same FIXED_NOW pattern as the
+		// neighboring liveness tests; the fresh-lock rename-window test covers the other side).
+		const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		try {
+			const s = (store = new TaskHistoryStore(tmpDir))
+			const internals = s as unknown as {
+				getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+			}
+			const child = makeItem({ id: "lock-stale-child", status: "active" })
+			await seedItems(tmpDir, [child])
+			const historyPath = path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem)
+			const lockPath = `${historyPath}.lock`
+
+			// Simulate the rename window: history file gone, advisory lock directory held.
+			await fs.rm(historyPath)
+			await fs.mkdir(lockPath)
+			const stampLock = async (ageMs: number) => {
+				const stamp = new Date(FIXED_NOW - ageMs)
+				await fs.utimes(lockPath, stamp, stamp)
+			}
+
+			// Sanity: a young lock → the child is live (future mtime), as the existing
+			// rename-window test asserts more fully.
+			await stampLock(1_000)
+			const fresh = await internals.getChildFileMtimeMs(child.id)
+			expect(fresh).toBeDefined()
+			if (typeof fresh === "number") {
+				expect(Date.now() - fresh).toBeLessThan(0)
+			}
+
+			// EXACTLY LOCK_STALE_MS old: not fresh under strict '<' → genuinely absent.
+			// Under the `<=` mutant the probe returns a future mtime (live) instead of undefined.
+			await stampLock(LOCK_STALE_MS)
+			expect(await internals.getChildFileMtimeMs(child.id)).toBeUndefined()
+
+			// Past the stale threshold: a leftover lock is not evidence of life.
+			// Under the `true` mutant the probe returns a future mtime instead of undefined.
+			await stampLock(LOCK_STALE_MS + 5_000)
+			expect(await internals.getChildFileMtimeMs(child.id)).toBeUndefined()
+		} finally {
+			nowSpy.mockRestore()
+		}
 	})
 
 	it("replay liveness guard treats child file age exactly at threshold as NOT live and repairs (kills L627 EqualityOperator '<'->'<=')", async () => {
