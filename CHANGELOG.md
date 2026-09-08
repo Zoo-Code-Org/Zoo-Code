@@ -1,5 +1,50 @@
 # Zoo Code Changelog
 
+## [3.82.0]
+
+- 🔑 **Use your Zoo Gateway API key anywhere** — bring it to any OpenAI-compatible client or workflow: https://zoocode.dev/models
+- 🎁 **Free model access for a limited time** — get free access to MiniMax-M3 through Zoo Gateway.
+- ✨ **Brand-new models** — GPT-6 Astra and Claude Fable 5.1 are now available.
+
+### Minor Changes
+
+- Add verified GPT-6 Astra support across providers (PR #1506 by @app/zoomote)
+- Add Claude Fable 5.1 support (#1507 by @navedmerchant, PR #1508 by @navedmerchant)
+- Add DeepSeek V4 Flash Vision Experimental support to DeepSeek AI (PR #1438 by @PipeYume)
+- Complete DeepSeek V4 Flash Vision Experimental support with verified native metadata, Fireworks availability, image preservation, and reasoning controls (PR #1488 by @app/zoomote)
+- Let users add custom request fields for OpenAI-compatible providers (#1104 by @grade1000, PR #1350 by @app/zoomote)
+- Add abort-signal support to Amazon Bedrock prompt completion and message creation (PR #1292 by @easonLiangWorldedtech)
+- Add an API cancellation helper and regression coverage for prompt-completion options (PR #1288 by @easonLiangWorldedtech)
+- Route GPT-5.6 Luna through the Responses API for OpenCode Go (#1431 by @AntzCode, PR #1443 by @AntzCode)
+- Prevent OpenCode Go requests from failing when a session header is unavailable (PR #1512 by @app/zoomote)
+- Make Gemini CLI handler routing explicit and prevent provider misrouting (#1029 by @WebMad, PR #1442 by @enestunc10)
+- Preserve provider reasoning order by yielding reasoning chunks before content (#1461 by @daewoongoh, PR #1462 by @daewoongoh)
+- Keep approval controls visible while users scroll through chat (#1447 by @app/zoomote, PR #1448 by @app/zoomote)
+- Keep the child-task view open during extension-state updates (#1456 by @app/zoomote, PR #1458 by @app/zoomote)
+- Prevent Chat and History labels from clipping at narrow widths (#1444 by @app/zoomote, PR #1445 by @app/zoomote)
+- Keep provider-profile actions accessible within narrow settings layouts (#1476 by @DiscantX, PR #1515 by @app/zoomote)
+- Remove obsolete cloud-account lifecycle listeners (PR #1353 by @app/zoomote)
+- Share the canonical provider-identifier ESLint rule across packages (PR #1421 by @WebMad)
+- Add Extension Host visual-regression coverage (#1358 by @app/zoomote, PR #1426 by @app/zoomote)
+- Merge the v3.80.1 release preparation state into `main` (PR #1432 by @edelauna)
+- Configure CodeRabbit to perform adversarial pull-request reviews (PR #1433 by @edelauna)
+- Stabilize restored-subtask approval coverage in Extension Host E2E tests (PR #1434 by @app/zoomote)
+- Run CodeRabbit only after required CI checks complete (PR #1437 by @app/zoomote)
+- Capture typed extension-host messages in Story Gallery fixtures (#517 by @edelauna, PR #1446 by @app/zoomote)
+- Prevent mocked E2E tests from timing out on streaming previews (PR #1449 by @app/zoomote)
+- Remove the unused nightly-extension path from CI (PR #1454 by @app/zoomote)
+- Allow reviewed pull requests from forks to enter the merge queue (PR #1455 by @app/zoomote)
+- Ensure CodeRabbit reviews updated commits on label-opted pull requests (PR #1457 by @app/zoomote)
+- Refresh pull-request labels after CI completes (PR #1467 by @app/zoomote)
+- Allow Renovate updates to trigger CI validation (PR #1473 by @app/zoomote)
+- Add model checking for concurrent task-lifecycle transitions (PR #1478 by @app/zoomote)
+- Require changed-code mutation tests before review (PR #1479 by @app/zoomote)
+- Ground CodeRabbit reviews with current web-search context (PR #1490 by @app/zoomote)
+- Fix the mutation gate for both stale and current pull requests (#1498 by @edelauna, PR #1499 by @app/zoomote)
+- Refresh pull-request review labels after automated reviews and base conflicts (PR #1509 by @app/zoomote)
+- Refresh review state for pull requests from forks after automated review (PR #1510 by @app/zoomote)
+- Prevent task cleanup from producing unit-test teardown errors (#1526 by @app/zoomote, PR #1527 by @app/zoomote)
+
 ## [3.80.1]
 
 🤖 Try GLM-5.3-Flash and Gemini 3.7 Flash at 50% Discount for 2 Weeks and MiniMax M3 completely FREE for users with a balance on the new Zoo Gateway. https://zoocode.dev/models

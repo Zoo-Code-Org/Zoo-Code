@@ -10,7 +10,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
-import { OpenAiCodexHandler, transformLunaResponsesLiteBody } from "../openai-codex"
+import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
@@ -66,6 +66,23 @@ describe("OpenAiCodexHandler.getModel", () => {
 
 		expect(model.id).toBe("gpt-5.4-mini")
 		expect(model.info).toBeDefined()
+	})
+
+	it("uses the Codex catalog capabilities for GPT-6 Astra", () => {
+		const model = new OpenAiCodexHandler({ apiModelId: "gpt-6-astra" }).getModel()
+
+		expect(model).toMatchObject({
+			id: "gpt-6-astra",
+			info: {
+				contextWindow: 872000,
+				maxTokens: 128000,
+				supportsImages: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "low",
+				supportsTemperature: false,
+			},
+		})
 	})
 })
 
@@ -584,7 +601,7 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 	})
 })
 
-describe("transformLunaResponsesLiteBody", () => {
+describe("transformResponsesLiteBody", () => {
 	it("creates the exact Responses Lite body while preserving unrelated fields and reasoning", () => {
 		const tools = [{ type: "function", name: "read_file", parameters: { type: "object" } }]
 		const input = [
@@ -621,7 +638,7 @@ describe("transformLunaResponsesLiteBody", () => {
 			custom_field: { preserved: true },
 		}
 
-		expect(transformLunaResponsesLiteBody(body, "task-123")).toEqual({
+		expect(transformResponsesLiteBody(body, "task-123")).toEqual({
 			model: "gpt-5.6-luna",
 			input: [
 				{ type: "additional_tools", role: "developer", tools },
@@ -663,7 +680,7 @@ describe("transformLunaResponsesLiteBody", () => {
 		const input = [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }]
 
 		expect(
-			transformLunaResponsesLiteBody(
+			transformResponsesLiteBody(
 				{
 					model: "gpt-5.6-luna",
 					input,
@@ -684,7 +701,7 @@ describe("transformLunaResponsesLiteBody", () => {
 	})
 
 	it("overwrites a pre-existing reasoning context with all_turns", () => {
-		const result = transformLunaResponsesLiteBody(
+		const result = transformResponsesLiteBody(
 			{
 				model: "gpt-5.6-luna",
 				input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }],
@@ -701,14 +718,51 @@ describe("transformLunaResponsesLiteBody", () => {
 		["tools", { input: [], tools: {} }, "tools must be an array when provided"],
 		["instructions", { input: [], instructions: [] }, "instructions must be a string when provided"],
 	])("rejects malformed %s locally", (_field, body, expectedMessage) => {
-		expect(() => transformLunaResponsesLiteBody(body, "session-1")).toThrow(expectedMessage)
+		expect(() => transformResponsesLiteBody(body, "session-1")).toThrow(expectedMessage)
 	})
 })
 
-describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
+describe("OpenAiCodexHandler Responses Lite requests", () => {
 	afterEach(() => {
 		vitest.restoreAllMocks()
 		vitest.unstubAllGlobals()
+	})
+
+	it("uses Responses Lite with required reasoning for GPT-6 Astra", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6-astra", reasoningEffort: "none" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
+		Reflect.set(handler, "client", { responses: { create: mockCreate } })
+
+		await collectStream(
+			handler.createMessage("Astra instructions", [{ role: "user", content: "Hello" }], {
+				taskId: "task-astra",
+				tools: [],
+				tool_choice: "required",
+				parallelToolCalls: true,
+			}),
+		)
+
+		const [body, options] = mockCreate.mock.calls[0]
+		expect(body).toMatchObject({
+			model: "gpt-6-astra",
+			prompt_cache_key: "task-astra",
+			tool_choice: "auto",
+			parallel_tool_calls: false,
+			reasoning: { effort: "low", summary: "auto", context: "all_turns" },
+		})
+		expect(body).not.toHaveProperty("tools")
+		expect(body).not.toHaveProperty("instructions")
+		expect(options.headers).toMatchObject({
+			originator: "zoo-code",
+			session_id: "task-astra",
+			"session-id": "task-astra",
+			"x-openai-internal-codex-responses-lite": "true",
+			"ChatGPT-Account-Id": "acct_test",
+		})
+		expect(options.headers).not.toHaveProperty("x-session-affinity")
+		expect(options.headers).not.toHaveProperty("version")
 	})
 
 	it("uses a single task session ID in the Luna SDK body and headers", async () => {
@@ -815,7 +869,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 
 	it("preserves Luna session affinity while retrying with refreshed authentication", async () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna" })
-		const transformSpy = vitest.spyOn(handler as any, "buildLunaRequestBody")
+		const transformSpy = vitest.spyOn(handler as any, "buildResponsesLiteRequestBody")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("expired-token")
 		vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken").mockResolvedValue("refreshed-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")

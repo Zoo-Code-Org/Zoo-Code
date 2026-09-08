@@ -220,6 +220,21 @@ describe("useSelectedModel", () => {
 		},
 	)
 
+	it("selects static vision metadata when the DeepSeek catalog is unavailable", () => {
+		const modelId = "deepseek-v4-flash-vision-exp"
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.deepseek]: null }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+		const { result } = renderHook(
+			() => useSelectedModel({ apiProvider: providerIdentifiers.deepseek, apiModelId: modelId }),
+			{ wrapper: createWrapper() },
+		)
+
+		expect(result.current.id).toBe(modelId)
+		expect(result.current.info).toEqual(deepSeekModels[modelId])
+		expect(result.current.info?.supportsImages).toBe(true)
+	})
+
 	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot])(
 		"falls back to static data when the %s router catalog is null",
 		(provider) => {

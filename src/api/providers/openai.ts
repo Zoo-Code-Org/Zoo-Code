@@ -10,6 +10,7 @@ import {
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
+	parseOpenAiExtraBody,
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -34,10 +35,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected options: ApiHandlerOptions
 	protected client: OpenAI
 	private readonly providerName = "OpenAI"
+	private readonly extraBody: Record<string, unknown>
 
 	constructor(options: ApiHandlerOptions) {
 		super()
 		this.options = options
+		this.extraBody = parseOpenAiExtraBody(options.openAiExtraBody).data
 
 		const baseURL = this.options.openAiBaseUrl || "https://api.openai.com/v1"
 		const apiKey = this.options.openAiApiKey ?? NOT_PROVIDED
@@ -152,7 +155,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
 
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
 				// Some OpenAI-Compatible models (e.g. claude-opus-4-7, claude-opus-4-8) reject
 				// `temperature` as deprecated/unsupported, so honor the model's `supportsTemperature`
@@ -174,6 +177,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let stream
 			try {
@@ -227,7 +231,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				yield this.processUsageMetrics(lastUsage, modelInfo)
 			}
 		} else {
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: deepseekReasoner
 					? convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
@@ -240,6 +244,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
 			try {
@@ -304,13 +309,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			const model = this.getModel()
 			const modelInfo = model.info
 
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: model.id,
 				messages: [{ role: "user", content: prompt }],
 			}
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
 			try {
@@ -350,7 +356,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
 
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
 				messages: [
 					{
@@ -373,6 +379,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			// but they do support max_completion_tokens (the modern OpenAI parameter)
 			// This allows O3 models to limit response length when includeMaxTokens is enabled
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let stream
 			try {
@@ -386,7 +393,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			yield* this.handleStreamResponse(stream)
 		} else {
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: [
 					{
@@ -407,6 +414,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			// but they do support max_completion_tokens (the modern OpenAI parameter)
 			// This allows O3 models to limit response length when includeMaxTokens is enabled
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
 			try {
@@ -542,6 +550,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			// Using max_completion_tokens as max_tokens is deprecated
 			requestOptions.max_completion_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
 		}
+	}
+
+	private withExtraBody<T extends object>(requestOptions: T): T {
+		return { ...this.extraBody, ...requestOptions }
 	}
 }
 

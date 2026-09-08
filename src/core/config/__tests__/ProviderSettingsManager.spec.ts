@@ -484,6 +484,36 @@ describe("ProviderSettingsManager", () => {
 			},
 		)
 
+		it("persists OpenAI-compatible Extra Body only on OpenAI-compatible profiles", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: { default: {} },
+					modeApiConfigs: {},
+				}),
+			)
+			const openAiExtraBody = JSON.stringify({ metadata: { completion_window: "balanced" } })
+
+			await providerSettingsManager.saveConfig("sail", {
+				apiProvider: providerIdentifiers.openai,
+				openAiModelId: "zai-org/GLM-5.2-FP8",
+				openAiExtraBody,
+			})
+
+			let storedProfiles = JSON.parse(mockSecrets.store.mock.calls.at(-1)?.[1])
+			expect(storedProfiles.apiConfigs.sail).toMatchObject({ openAiExtraBody })
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(storedProfiles))
+			await providerSettingsManager.saveConfig("anthropic", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-key",
+				openAiExtraBody,
+			})
+
+			storedProfiles = JSON.parse(mockSecrets.store.mock.calls.at(-1)?.[1])
+			expect(storedProfiles.apiConfigs.anthropic).not.toHaveProperty("openAiExtraBody")
+		})
+
 		it("should only save provider relevant settings", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({

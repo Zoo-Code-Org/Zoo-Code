@@ -31,6 +31,7 @@ describe("getDeepSeekModels", () => {
 		expect(globalThis.fetch).toHaveBeenCalledWith("http://127.0.0.1:43123/models", expect.any(Object))
 		expect(models["deepseek-v4-flash"]).toEqual(deepSeekModels["deepseek-v4-flash"])
 		expect(models["deepseek-v4-pro"]).toEqual(deepSeekModels["deepseek-v4-pro"])
+		expect(models["deepseek-v4-flash-vision-exp"]).toEqual(deepSeekModels["deepseek-v4-flash-vision-exp"])
 	})
 
 	it("throws for 404 responses when fallback flag is not enabled", async () => {

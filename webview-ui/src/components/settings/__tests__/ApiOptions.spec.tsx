@@ -16,6 +16,9 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			<input type="text" value={value} onChange={onBlur} />
 		</div>
 	),
+	VSCodeTextArea: ({ value, onInput, ...props }: any) => (
+		<textarea value={value} onChange={(event) => onInput?.(event)} {...props} />
+	),
 	VSCodeLink: ({ children, href }: any) => <a href={href}>{children}</a>,
 	VSCodeRadio: ({ value, checked }: any) => <input type="radio" value={value} checked={checked} />,
 	VSCodeRadioGroup: ({ children }: any) => <div>{children}</div>,
