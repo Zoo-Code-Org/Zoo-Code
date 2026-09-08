@@ -2380,21 +2380,20 @@ export class ClineProvider
 		}
 
 		// This view pins an unrelated profile, which must survive the deletion: sync the
-		// shared profile list and post the updated state only.
+		// shared profile list and post the updated state only. The buffer already holds
+		// the surviving pin, so the current-profile slot is left untouched here: a
+		// setValue would only trigger a viewStates prune write and could clobber the pin
+		// with the shared slot's value.
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
-		// Write the other settings in one bulk call, then route the current-profile write
-		// through setValue so the in-memory viewLocalState buffer tracks the activated
-		// profile: a plain ContextProxy write would leave a stale loaded
-		// currentApiConfigName shadowing the new value in getValues().
+		// Write the other settings in one bulk call, excluding the current-profile slot
+		// so the view-local buffer keeps the surviving pin.
 		const { currentApiConfigName: _previousApiConfigName, ...globalSettingsWithoutCurrent } = globalSettings
 
 		await this.contextProxy.setValues({
 			...globalSettingsWithoutCurrent,
 			listApiConfigMeta: entries,
 		})
-
-		await this.setValue("currentApiConfigName", profileToActivate)
 
 		await this.postStateToWebview()
 	}

@@ -1881,13 +1881,11 @@ describe("ClineProvider", () => {
 				activateProfile: vi.fn().mockResolvedValue(profile),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
-				getProfile: vi
-					.fn()
-					.mockResolvedValue({
-						name: "old-profile",
-						id: "old-id",
-						apiProvider: providerIdentifiers.anthropic,
-					}),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "old-profile",
+					id: "old-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.contextProxy.setValue(
@@ -1942,6 +1940,14 @@ describe("ClineProvider", () => {
 			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
 			await provider.setValue("currentApiConfigName", "old-profile")
+			// @ts-ignore - Replace providerSettingsManager with a test double: deleting the
+			// current profile now activates the fallback, which reads its settings.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				setModeConfig: vi.fn(),
+			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			await provider.deleteProviderProfile(oldProfile)
