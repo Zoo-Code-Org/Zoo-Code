@@ -1437,6 +1437,20 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
 	})
+
+	it("routes the write through provider.setValue so view-local state stays in sync", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: false },
+		})
+
+		// The provider-level call is the write path under test. The mock forwards to
+		// contextProxy.setValue, so an assertion on the proxy alone would also pass
+		// if the handler bypassed the provider and skipped the view-local sync.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
 })
 
 // Both allowlists are normalized by the same branch, so both are held to the

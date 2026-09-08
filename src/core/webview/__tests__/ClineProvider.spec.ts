@@ -1781,21 +1781,6 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should build the buffered apiConfiguration from provider settings keys", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			provider["viewLocalState"] = { apiConfiguration: { openRouterApiKey: "key-1" } }
-			await provider.setValues({ apiProvider: providerIdentifiers.openrouter })
-			expect(provider["viewLocalState"].apiConfiguration).toStrictEqual({
-				apiProvider: providerIdentifiers.openrouter,
-			})
-			await provider.setValues({ openRouterModelId: "model-x" })
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
-				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "model-x",
-			})
-			await provider.dispose()
-		})
-
 		it("should remove the buffered apiConfiguration when it is cleared", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const save = provider.saveViewState.bind(provider) as (key: string, value: unknown) => Promise<void>
@@ -2111,7 +2096,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should update viewLocalState apiConfiguration when setValues receives flat provider settings", async () => {
+		it("should keep flat provider settings out of the view-local buffer", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			await provider.saveViewState("apiConfiguration", {
@@ -2129,12 +2114,16 @@ describe("ClineProvider", () => {
 				awsBedrockEndpointEnabled: true,
 			})
 
-			const state = await provider.getState()
-
-			expect(state.apiConfiguration.apiProvider).toBe("bedrock")
-			expect(state.apiConfiguration.awsBedrockEndpoint).toBe("http://127.0.0.1:4567")
-			expect(provider["viewLocalState"].apiConfiguration?.apiProvider).toBe("bedrock")
-			expect(provider["viewLocalState"].apiConfiguration).not.toHaveProperty("openRouterModelId")
+			// Flat provider-settings keys are shared settings: they must flow through
+			// the ContextProxy only and must not be merged into the view-local buffer,
+			// which would turn them into a per-view override masking later shared
+			// updates from other views. The explicit view-local override survives.
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openrouter/old-model",
+			})
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.bedrock)
+			expect(provider.contextProxy.getValue("awsBedrockEndpoint")).toBe("http://127.0.0.1:4567")
 
 			await provider.dispose()
 		})

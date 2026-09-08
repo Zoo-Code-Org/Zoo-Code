@@ -56,7 +56,6 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
-	PROVIDER_SETTINGS_KEYS,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -3777,23 +3776,11 @@ export class ClineProvider
 			} else {
 				this.viewLocalState.apiConfiguration = val
 			}
-		} else if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
-			const providerSettingsUpdate = PROVIDER_SETTINGS_KEYS.reduce((acc, key) => {
-				if (key in values) {
-					return { ...acc, [key]: values[key as keyof RooCodeSettings] }
-				}
-
-				return acc
-			}, {} as ProviderSettings)
-
-			this.viewLocalState.apiConfiguration =
-				"apiProvider" in providerSettingsUpdate
-					? providerSettingsUpdate
-					: {
-							...(this.viewLocalState.apiConfiguration ?? {}),
-							...providerSettingsUpdate,
-						}
 		}
+		// Flat provider-settings keys (PROVIDER_SETTINGS_KEYS) are shared settings:
+		// they are written through the ContextProxy above and must NOT be merged
+		// into viewLocalState.apiConfiguration, which would turn them into a
+		// per-view override masking later shared updates from other views.
 	}
 
 	/**
