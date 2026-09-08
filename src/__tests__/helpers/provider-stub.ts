@@ -5,7 +5,11 @@ import { type Task } from "../../core/task/Task"
 type ProviderStubFields = {
 	cancelledDelegationChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
-	taskHistoryStore?: { get: (id: string) => unknown; invalidate?: (id: string) => Promise<void> }
+	taskHistoryStore?: {
+		get: (id: string) => unknown
+		invalidate?: (id: string) => Promise<void>
+		markLocallyActive?: (taskId: string) => void
+	}
 	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
@@ -38,6 +42,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.taskHistoryStore.invalidate ??= async () => {}
+	s.taskHistoryStore.markLocallyActive ??= () => {}
 	s.taskScheduler ??= { schedule: async (_task, run) => run() }
 
 	// Convert legacy clineStack array into a TaskRegistry

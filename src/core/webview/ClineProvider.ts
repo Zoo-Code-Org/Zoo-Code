@@ -1378,6 +1378,17 @@ export class ClineProvider
 			diffFuzzyThreshold,
 		})
 
+		// Eagerly claim local session ownership so the store's periodic delegation
+		// reconciliation cannot treat this resumed task as a crash orphan while
+		// Task.run()'s first active-status write is still in flight (resumeTaskFromHistory
+		// starts with an async disk read and scheduleTask may queue the run). Every Task
+		// built here passes historyItem without task/images, so Task's own
+		// `_isHistoryTask = !!historyItem && !task && !images` discriminator
+		// (src/core/task/Task.ts) is always true for this method — the unconditional
+		// claim below mirrors it exactly. Ownership stays self-correcting via
+		// trackLocalSessionOwnership: the task's next non-active status write releases it.
+		this.taskHistoryStore.markLocallyActive(task.taskId)
+
 		if (isRehydratingCurrentTask) {
 			// Replace the current task in-place to avoid UI flicker
 			const oldTask = this.taskRegistry.current

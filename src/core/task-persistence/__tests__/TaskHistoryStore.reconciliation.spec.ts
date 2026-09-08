@@ -69,6 +69,78 @@ function makeRepairIntent(parent: HistoryItem, child: HistoryItem): object {
 	}
 }
 
+/**
+ * Fake only what the tick scheduling needs: the 5-minute `setTimeout` clock
+ * and `Date` (consumed by the liveness guard). Everything else (fs I/O,
+ * microtasks) stays real so `flushUntil()` below can pump the event
+ * loop while the timer clock advances only 1 ms per yield.
+ */
+function useTickClock(): void {
+	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+}
+
+/**
+ * Drain pending real fs I/O by polling an observable condition instead of
+ * burning a fixed number of yields. The tick's reconcile/repair chain
+ * completes on libuv callbacks that fake timers alone never advance, and
+ * each `advanceTimersByTimeAsync(1)` yields one REAL macrotask turn
+ * (processing the poll phase) while advancing the fake clock only 1 ms.
+ * The yield count the chain needs is environment-dependent (~155 yields on
+ * a fast local SSD; higher on contended CI runners — the old fixed
+ * 2000-yield pumps intermittently starved on ubuntu CI, which is exactly
+ * what this helper replaces). Polling the SAME final state the assertions
+ * check makes the wait deterministic without weakening them. The pump
+ * stops as soon as the condition holds, so correct-code runs stay fast,
+ * and the generous cap costs sub-second wall time even when exhausted
+ * because fake timers never sleep (measured ~123 ms per 55K idle yields).
+ * On exhaustion it THROWS with a state snapshot rather than silently
+ * proceeding, converting a future hang into a loud, diagnosable failure.
+ *
+ * Predicates MUST be cheap and side-effect free: poll the in-memory cache
+ * getters (`store.get(...)`, which never touches disk) or spy call logs.
+ */
+async function flushUntil(
+	predicate: () => boolean,
+	options: { maxYields?: number; label?: string; snapshot?: () => string } = {},
+): Promise<void> {
+	const { maxYields = 50_000, label = "flushUntil predicate", snapshot } = options
+	for (let i = 0; i < maxYields; i++) {
+		if (predicate()) {
+			return
+		}
+		await vi.advanceTimersByTimeAsync(1)
+	}
+	if (predicate()) {
+		return
+	}
+	let state = "snapshot unavailable"
+	try {
+		state = snapshot ? snapshot() : "no snapshot supplied"
+	} catch {
+		// A throwing snapshot must not mask the primary diagnostic below.
+	}
+	throw new Error(
+		`flushUntil: "${label}" was not satisfied within ${maxYields} yields (~${maxYields} ms of fake ` +
+			`time). The tick's async chain never settled; final state: ${state}.`,
+	)
+}
+
+/**
+ * Write history items to `<dir>/tasks/<id>/history_item.json` so a freshly
+ * constructed TaskHistoryStore sees them on `initialize()`. `dir` is the
+ * caller's per-describe temp directory; passed explicitly because this helper
+ * is shared by every describe block in the spec.
+ */
+async function seedItems(dir: string, items: HistoryItem[]): Promise<void> {
+	const tasksDir = path.join(dir, "tasks")
+	await fs.mkdir(tasksDir, { recursive: true })
+	for (const item of items) {
+		const taskDir = path.join(tasksDir, item.id)
+		await fs.mkdir(taskDir, { recursive: true })
+		await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // assertValidTransition — pure function tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,16 +233,6 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		return nextStore
 	}
 
-	async function seedItems(items: HistoryItem[]): Promise<void> {
-		const tasksDir = path.join(tmpDir, "tasks")
-		await fs.mkdir(tasksDir, { recursive: true })
-		for (const item of items) {
-			const taskDir = path.join(tasksDir, item.id)
-			await fs.mkdir(taskDir, { recursive: true })
-			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
-		}
-	}
-
 	/**
 	 * Backdate a task's history file mtime so the cross-instance liveness guard
 	 * treats it as a crash orphan (last write > 5 minutes ago) rather than a
@@ -238,7 +300,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("getChildFileMtimeMs returns the file mtime for an existing child and undefined for a missing one", async () => {
 		// Direct coverage of the private mtime probe used by the cross-instance
 		// liveness guard (TaskHistoryStore.ts getChildFileMtimeMs): the happy
-		// path returns stat.mtimeMs and the catch path returns undefined.
+		// path returns stat.mtimeMs and a missing (ENOENT) file returns undefined.
 		// Bracket/typed access follows the same private-member pattern used by
 		// "removes the repair-intent file after successful replay" below.
 		const internals = store as unknown as {
@@ -248,10 +310,63 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(await internals.getChildFileMtimeMs("missing-mtime-child")).toBeUndefined()
 
 		const child = makeItem({ id: "present-mtime-child", status: "active" })
-		await seedItems([child])
+		await seedItems(tmpDir, [child])
 		const mtimeMs = await internals.getChildFileMtimeMs("present-mtime-child")
 		expect(typeof mtimeMs).toBe("number")
 		expect(mtimeMs).toBeGreaterThan(0)
+		// Exact equality with a fresh independent stat: a probe that returned,
+		// say, Date.now() instead of stat.mtimeMs would still pass the
+		// typeof/>0 checks but diverge from the real file's mtime here.
+		const filePath = path.join(tmpDir, "tasks", "present-mtime-child", GlobalFileNames.historyItem)
+		const fileStat = await fs.stat(filePath)
+		expect(mtimeMs).toBe(fileStat.mtimeMs)
+	})
+
+	it("classifies getChildFileMtimeMs stat errors: ENOENT → undefined, transient errors → live", async () => {
+		// Direct coverage of the error-classification branches: a genuinely
+		// missing file (real FS ENOENT) returns undefined so repair may proceed,
+		// while a transient stat failure returns a FUTURE mtime so the
+		// `Date.now() - mtimeMs < threshold` liveness guards hold and repair is
+		// skipped (a later tick retries). `fs.stat` cannot be spied (the ESM
+		// namespace is sealed), so the transient failure is produced by routing
+		// the child's path through the private `getTaskFilePath` seam with an
+		// embedded NUL byte: Node's real `fs.stat` rejects such paths with
+		// ERR_INVALID_ARG_VALUE on every platform — a deterministic, never-ENOENT
+		// error that exercises the classifier against the real fs call.
+		const internals = store as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+
+		// ENOENT: no such task directory exists on disk — real filesystem miss.
+		expect(await internals.getChildFileMtimeMs("enoent-classify-missing")).toBeUndefined()
+
+		const child = makeItem({ id: "transient-classify-child", status: "active" })
+		await seedItems(tmpDir, [child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getTaskFilePath: (taskId: string) => Promise<string>
+		}
+		const originalGetTaskFilePath = probe.getTaskFilePath
+		const pathSpy = vi
+			.spyOn(probe, "getTaskFilePath")
+			.mockImplementation((taskId: string) =>
+				taskId === "transient-classify-child"
+					? Promise.resolve(path.join(tasksDir, taskId, "his\0tory_item.json"))
+					: originalGetTaskFilePath.call(store, taskId),
+			)
+		try {
+			const probed = await internals.getChildFileMtimeMs("transient-classify-child")
+			// A numeric (live) result is required; the type narrowing below is the
+			// assertion, so a `undefined` return would already have failed here.
+			expect(probed).toBeDefined()
+			if (typeof probed === "number") {
+				// Future timestamp ⇒ negative age ⇒ every live-child guard holds.
+				expect(Date.now() - probed).toBeLessThan(0)
+				expect(Date.now() - probed).toBeLessThan(LIVE_CHILD_MTIME_THRESHOLD_MS)
+			}
+		} finally {
+			pathSpy.mockRestore()
+		}
 	})
 
 	afterEach(async () => {
@@ -265,7 +380,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 	it("repairs orphaned delegation: delegated parent whose child does not exist → active", async () => {
 		const parent = makeItem({ id: "parent-1", status: "delegated", awaitingChildId: "missing-child" })
-		await seedItems([parent])
+		await seedItems(tmpDir, [parent])
 
 		await store.initialize()
 
@@ -287,7 +402,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: "child-2",
 			delegatedToId: "child-2",
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		await store.initialize()
 
@@ -302,7 +417,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("uses fallback summary when child has no completionResultSummary", async () => {
 		const child = makeItem({ id: "child-3", status: "completed" })
 		const parent = makeItem({ id: "parent-3", status: "delegated", awaitingChildId: "child-3" })
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		await store.initialize()
 
@@ -325,7 +440,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: "child-4",
 			childIds: ["child-4"],
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		await markStaleMtime("child-4")
 
 		await store.initialize()
@@ -404,7 +519,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: "child-live",
 			childIds: ["child-live"],
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		// Simulate another live window actively persisting the child: the file
 		// was just written, so its mtime is within the 5-minute threshold.
@@ -455,7 +570,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: "child-stale",
 			childIds: ["child-stale"],
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		// Simulate a crash orphan: the child file has not been written for 6
 		// minutes, exceeding the 5-minute liveness threshold.
@@ -530,7 +645,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			// persistedActiveIds); only the stat probe is forced to undefined,
 			// simulating a file that races away or is unreadable at the moment
 			// the liveness guard checks it.
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 
 			await store.initialize()
 
@@ -597,7 +712,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				awaitingChildId: "child-boundary-equal",
 				delegatedToId: "child-boundary-equal",
 			})
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 			await setChildMtimeAge("child-boundary-equal", 300_000)
 
 			await store.initialize()
@@ -638,7 +753,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				awaitingChildId: "child-boundary-live",
 				delegatedToId: "child-boundary-live",
 			})
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 			await setChildMtimeAge("child-boundary-live", 299_999)
 
 			await store.initialize()
@@ -688,7 +803,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				awaitingChildId: "child-epoch-mtime",
 				delegatedToId: "child-epoch-mtime",
 			})
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 			await setChildMtimeAge("child-epoch-mtime", FIXED_NOW - 1_000) // store observes mtime 1970-01-01T00:00:01.000Z
 
 			await store.initialize()
@@ -727,7 +842,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				awaitingChildId: "child-future-mtime",
 				delegatedToId: "child-future-mtime",
 			})
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 			await setChildMtimeAge("child-future-mtime", -100_000) // store observes a mtime 100s in the future
 
 			await store.initialize()
@@ -763,7 +878,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				awaitingChildId: "child-boundary-ceil",
 				delegatedToId: "child-boundary-ceil",
 			})
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 			await setChildMtimeAge("child-boundary-ceil", 299_499)
 
 			await store.initialize()
@@ -791,7 +906,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		await markStaleMtime(child.id)
 
 		await store.initialize()
@@ -815,7 +930,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
 		await fs.writeFile(
@@ -852,7 +967,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		await markStaleMtime(child.id)
 		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
 			if (filePath.includes(child.id) && filePath.endsWith(GlobalFileNames.historyItem))
@@ -890,7 +1005,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		await markStaleMtime(child.id)
 		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
 			if (filePath.includes(parent.id) && filePath.endsWith(GlobalFileNames.historyItem))
@@ -924,7 +1039,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		await markStaleMtime(child.id)
 		store.dispose()
 		store = registerStore(
@@ -955,7 +1070,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("replays a both-at-target intent without writing task files", async () => {
 		const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
 		const parent = makeItem({ id: "parent-at-target", status: "active" })
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(
 			intentPath,
@@ -981,7 +1096,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
 		// Keep this a crash-orphan replay: the child file must not look live in
@@ -1000,7 +1115,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 	it("quarantines malformed and stale intents without blocking unrelated startup", async () => {
 		const unrelated = makeItem({ id: "unrelated-startup", status: "active" })
-		await seedItems([unrelated])
+		await seedItems(tmpDir, [unrelated])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify({ malformed: true }))
@@ -1020,7 +1135,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const unrelated = makeItem({ id: "unrelated-missing-intent", status: "active" })
 		const missingChild = makeItem({ id: "missing-intent-child", status: "active" })
 		const parent = makeItem({ id: "missing-intent-parent", status: "delegated", awaitingChildId: missingChild.id })
-		await seedItems([unrelated])
+		await seedItems(tmpDir, [unrelated])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, missingChild)))
@@ -1049,7 +1164,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent({ ...parent, status: "delegated" }, child)))
@@ -1082,7 +1197,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			id: "parent-mismatched-child-intent",
 			status: "active",
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(
@@ -1133,7 +1248,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
@@ -1189,7 +1304,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
@@ -1228,7 +1343,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
@@ -1244,9 +1359,11 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	})
 
 	it("proceeds with a replay when the child history file mtime is unreadable", async () => {
-		// Matches the reconcile-path convention: getChildFileMtimeMs returns
-		// undefined for a missing/unreadable history file, which conservatively
-		// proceeds with the repair instead of treating the child as live.
+		// getChildFileMtimeMs now returns undefined only for a genuinely missing
+		// (ENOENT) history file; transient stat errors return a future mtime and
+		// are treated as live. This test mocks the probe directly to pin the
+		// missing-file contract: undefined ⇒ the replay proceeds instead of
+		// treating the child as live-elsewhere.
 		const probe = TaskHistoryStore.prototype as unknown as {
 			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
 		}
@@ -1263,7 +1380,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const tasksDir = path.join(tmpDir, "tasks")
 		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
@@ -1283,7 +1400,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: "stale-child",
 			awaitingChildId: "",
 		})
-		await seedItems([parent])
+		await seedItems(tmpDir, [parent])
 
 		await store.initialize()
 
@@ -1297,7 +1414,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("does not touch active or completed tasks", async () => {
 		const active = makeItem({ id: "task-active", status: "active" })
 		const completed = makeItem({ id: "task-completed", status: "completed" })
-		await seedItems([active, completed])
+		await seedItems(tmpDir, [active, completed])
 
 		await store.initialize()
 
@@ -1309,7 +1426,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const childA = makeItem({ id: "child-a", status: "completed" })
 		const parentA = makeItem({ id: "parent-a", status: "delegated", awaitingChildId: "child-a" })
 		const parentB = makeItem({ id: "parent-b", status: "delegated", awaitingChildId: "missing-b" })
-		await seedItems([childA, parentA, parentB])
+		await seedItems(tmpDir, [childA, parentA, parentB])
 
 		await store.initialize()
 
@@ -1326,7 +1443,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			status: "delegated",
 			awaitingChildId: "missing-child-chain",
 		})
-		await seedItems([parentA, parentB])
+		await seedItems(tmpDir, [parentA, parentB])
 
 		await store.initialize()
 
@@ -1361,7 +1478,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			parentTaskId: parent.id,
 			rootTaskId: grandparent.id,
 		})
-		await seedItems([grandparent, parent, child])
+		await seedItems(tmpDir, [grandparent, parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
 		// Crash-orphan scenario: the child must not look live in another window, or
@@ -1413,7 +1530,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		await markStaleMtime(child.id)
 
 		await store.initialize()
@@ -1436,7 +1553,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("is idempotent: running initialize twice produces the same result", async () => {
 		const child = makeItem({ id: "child-6", status: "completed", completionResultSummary: "Done" })
 		const parent = makeItem({ id: "parent-6", status: "delegated", awaitingChildId: "child-6" })
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		await store.initialize()
 		const afterFirst = { ...store.get("parent-6") }
@@ -1457,7 +1574,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 		const parent = makeItem({ id: "parent-log", status: "delegated", awaitingChildId: "nonexistent" })
-		await seedItems([parent])
+		await seedItems(tmpDir, [parent])
 
 		await store.initialize()
 
@@ -1473,7 +1590,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		store = registerStore(new TaskHistoryStore(tmpDir, { onWrite }))
 
 		const parent = makeItem({ id: "parent-onwrite", status: "delegated", awaitingChildId: "nonexistent-child" })
-		await seedItems([parent])
+		await seedItems(tmpDir, [parent])
 
 		await store.initialize()
 
@@ -1542,16 +1659,6 @@ describe("TaskHistoryStore upsert transition guard", () => {
 	let tmpDir: string
 	let store: TaskHistoryStore
 
-	async function seedItems(items: HistoryItem[]): Promise<void> {
-		const tasksDir = path.join(tmpDir, "tasks")
-		await fs.mkdir(tasksDir, { recursive: true })
-		for (const item of items) {
-			const taskDir = path.join(tasksDir, item.id)
-			await fs.mkdir(taskDir, { recursive: true })
-			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
-		}
-	}
-
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "upsert-guard-test-"))
 		store = new TaskHistoryStore(tmpDir)
@@ -1565,7 +1672,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 	it("rejects completed → active transition, preserving the completed status", async () => {
 		const item = makeItem({ id: "task-guard-1", status: "completed" })
-		await seedItems([item])
+		await seedItems(tmpDir, [item])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1583,7 +1690,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		// Must include a live active child so reconciliation doesn't repair the parent to active
 		const child = makeItem({ id: "child-guard-2", status: "interrupted" })
 		const item = makeItem({ id: "task-guard-2", status: "delegated", awaitingChildId: "child-guard-2" })
-		await seedItems([child, item])
+		await seedItems(tmpDir, [child, item])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1600,7 +1707,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 	it("allows valid active → completed transition", async () => {
 		const item = makeItem({ id: "task-guard-3", status: "active" })
-		await seedItems([item])
+		await seedItems(tmpDir, [item])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1611,7 +1718,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 	it("rejects interrupted → active transition, preserving the interrupted status", async () => {
 		const item = makeItem({ id: "task-guard-interrupted", status: "interrupted" })
-		await seedItems([item])
+		await seedItems(tmpDir, [item])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1624,7 +1731,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 	it("allows valid interrupted → completed transition", async () => {
 		const item = makeItem({ id: "task-guard-interrupted-complete", status: "interrupted" })
-		await seedItems([item])
+		await seedItems(tmpDir, [item])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1645,7 +1752,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		// to "active". Writing status: "active" must not throw as an invalid self-loop.
 		const item = makeItem({ id: "task-guard-legacy" })
 		const { status: _status, ...legacyItem } = item
-		await seedItems([legacyItem])
+		await seedItems(tmpDir, [legacyItem])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1656,7 +1763,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 	it("allows upsert without a status field (no-op on status)", async () => {
 		const item = makeItem({ id: "task-guard-4", status: "completed" })
-		await seedItems([item])
+		await seedItems(tmpDir, [item])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()
@@ -1712,72 +1819,6 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 
 	const CHILD_ID = "child-tick"
 	const PARENT_ID = "parent-tick"
-
-	/**
-	 * Fake only what the tick scheduling needs: the 5-minute `setTimeout` clock
-	 * and `Date` (consumed by the liveness guard). Everything else (fs I/O,
-	 * microtasks) stays real so `flushUntil()` below can pump the event
-	 * loop while the timer clock advances only 1 ms per yield.
-	 */
-	function useTickClock(): void {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-	}
-
-	/**
-	 * Drain pending real fs I/O by polling an observable condition instead of
-	 * burning a fixed number of yields. The tick's reconcile/repair chain
-	 * completes on libuv callbacks that fake timers alone never advance, and
-	 * each `advanceTimersByTimeAsync(1)` yields one REAL macrotask turn
-	 * (processing the poll phase) while advancing the fake clock only 1 ms.
-	 * The yield count the chain needs is environment-dependent (~155 yields on
-	 * a fast local SSD; higher on contended CI runners — the old fixed
-	 * 2000-yield pumps intermittently starved on ubuntu CI, which is exactly
-	 * what this helper replaces). Polling the SAME final state the assertions
-	 * check makes the wait deterministic without weakening them. The pump
-	 * stops as soon as the condition holds, so correct-code runs stay fast,
-	 * and the generous cap costs sub-second wall time even when exhausted
-	 * because fake timers never sleep (measured ~123 ms per 55K idle yields).
-	 * On exhaustion it THROWS with a state snapshot rather than silently
-	 * proceeding, converting a future hang into a loud, diagnosable failure.
-	 *
-	 * Predicates MUST be cheap and side-effect free: poll the in-memory cache
-	 * getters (`store.get(...)`, which never touches disk) or spy call logs.
-	 */
-	async function flushUntil(
-		predicate: () => boolean,
-		options: { maxYields?: number; label?: string; snapshot?: () => string } = {},
-	): Promise<void> {
-		const { maxYields = 50_000, label = "flushUntil predicate", snapshot } = options
-		for (let i = 0; i < maxYields; i++) {
-			if (predicate()) {
-				return
-			}
-			await vi.advanceTimersByTimeAsync(1)
-		}
-		if (predicate()) {
-			return
-		}
-		let state = "snapshot unavailable"
-		try {
-			state = snapshot ? snapshot() : "no snapshot supplied"
-		} catch {
-			// A throwing snapshot must not mask the primary diagnostic below.
-		}
-		throw new Error(
-			`flushUntil: "${label}" was not satisfied within ${maxYields} yields (~${maxYields} ms of fake ` +
-				`time). The tick's async chain never settled; final state: ${state}.`,
-		)
-	}
-
-	async function seedItems(items: HistoryItem[]): Promise<void> {
-		const tasksDir = path.join(tmpDir, "tasks")
-		await fs.mkdir(tasksDir, { recursive: true })
-		for (const item of items) {
-			const taskDir = path.join(tasksDir, item.id)
-			await fs.mkdir(taskDir, { recursive: true })
-			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
-		}
-	}
 
 	/**
 	 * Stateful mtime injection for the liveness guard. The guard computes
@@ -1837,7 +1878,7 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		const [parent, child] = makeDelegatedPair()
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		const s = (store = new TaskHistoryStore(tmpDir))
 		installChildAgeInjector()
@@ -1973,7 +2014,7 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 	it("does not repair a child that stays live across the periodic tick (no cross-window clobbering)", async () => {
 		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const [parent, child] = makeDelegatedPair()
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		const s = (store = new TaskHistoryStore(tmpDir))
 		installChildAgeInjector()
@@ -2020,7 +2061,7 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 
 	it("logs and keeps re-arming when the periodic delegation step throws", async () => {
 		const [parent, child] = makeDelegatedPair()
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		const internals = TaskHistoryStore.prototype as unknown as {
 			runPeriodicDelegationReconciliation: () => Promise<void>
@@ -2080,50 +2121,6 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 
 	const RECONCILE_INTERVAL_MS = (TaskHistoryStore as unknown as { RECONCILE_INTERVAL_MS: number })
 		.RECONCILE_INTERVAL_MS
-
-	function useTickClock(): void {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-	}
-
-	// Condition-polling pump; see the full doc comment on the identical helper
-	// in the "periodic delegation reconciliation" block above for the
-	// rationale (the fixed 2000-yield pumps intermittently starved on slow
-	// ubuntu CI runners).
-	async function flushUntil(
-		predicate: () => boolean,
-		options: { maxYields?: number; label?: string; snapshot?: () => string } = {},
-	): Promise<void> {
-		const { maxYields = 50_000, label = "flushUntil predicate", snapshot } = options
-		for (let i = 0; i < maxYields; i++) {
-			if (predicate()) {
-				return
-			}
-			await vi.advanceTimersByTimeAsync(1)
-		}
-		if (predicate()) {
-			return
-		}
-		let state = "snapshot unavailable"
-		try {
-			state = snapshot ? snapshot() : "no snapshot supplied"
-		} catch {
-			// A throwing snapshot must not mask the primary diagnostic below.
-		}
-		throw new Error(
-			`flushUntil: "${label}" was not satisfied within ${maxYields} yields (~${maxYields} ms of fake ` +
-				`time). The tick's async chain never settled; final state: ${state}.`,
-		)
-	}
-
-	async function seedItems(items: HistoryItem[]): Promise<void> {
-		const tasksDir = path.join(tmpDir, "tasks")
-		await fs.mkdir(tasksDir, { recursive: true })
-		for (const item of items) {
-			const taskDir = path.join(tasksDir, item.id)
-			await fs.mkdir(taskDir, { recursive: true })
-			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
-		}
-	}
 
 	/**
 	 * Read the private `locallyActiveTaskIds` set — the exact piece of state every
@@ -2196,7 +2193,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 			awaitingChildId: child.id,
 			delegatedToId: child.id,
 		})
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		const s = (store = new TaskHistoryStore(tmpDir))
 		await s.initialize()
@@ -2239,7 +2236,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// Step 3: rewrite disk so the same child id is once more an ACTIVE orphan of a delegated
 		// parent (as if another window crashed mid-delegation), then reload into a fresh store.
 		const [parent, child] = delegatedPair(parentId, childId)
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const s2 = (store = new TaskHistoryStore(tmpDir))
 		useTickClock()
 
@@ -2306,7 +2303,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		const childId = "child-l566-undef"
 		const parentId = "parent-l566-undef"
 		const [parent, child] = delegatedPair(parentId, childId)
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 
 		const s = (store = new TaskHistoryStore(tmpDir))
 		useTickClock()
@@ -2411,7 +2408,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 				awaitingChildId: child.id,
 				delegatedToId: child.id,
 			})
-			await seedItems([parent, child])
+			await seedItems(tmpDir, [parent, child])
 			const tasksDir = path.join(tmpDir, "tasks")
 			const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 			await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
@@ -2498,7 +2495,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// - L1080->false: a concurrent second call would NOT see the flag set and would run twice.
 		// - L1087->true: after completion the flag stays set, so every subsequent call no-ops.
 		const [parent, child] = delegatedPair("parent-flag", "child-flag")
-		await seedItems([parent, child])
+		await seedItems(tmpDir, [parent, child])
 		const s = (store = new TaskHistoryStore(tmpDir))
 		installStaleChildInjector(child.id)
 		await s.initialize()
@@ -2595,5 +2592,109 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// Under L1181 `;` that call vanishes and pf-first stays absent.
 		expect(ownedIds(s).has("pf-first")).toBe(true)
 		writeSpy.mockRestore()
+	})
+
+	it("markLocallyActive claims ownership before the first runtime write, shielding a stale-mtime child from the tick", async () => {
+		// Seam for the resumed-task race fixed in ClineProvider.createTaskWithHistoryItemUnlocked:
+		// a resumed history task calls store.markLocallyActive(taskId) BEFORE its run is
+		// scheduled, so the periodic pass excludes the id from the persisted-active snapshot
+		// even while Task.run()'s first active-status write is still in flight. This simulates
+		// exactly that eager claim: with a stale-looking mtime injector armed, the owned child
+		// must survive the tick untouched. If markLocallyActive's add() were dropped, the id
+		// would not be excluded, the guard would see the stale mtime, and the child would be
+		// repaired to interrupted — failing the status assertions below.
+		const childId = "child-eager-claim"
+		const parentId = "parent-eager-claim"
+		const [parent, child] = delegatedPair(parentId, childId)
+		await seedItems(tmpDir, [parent, child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+		await s.initialize()
+
+		s.markLocallyActive(childId)
+		expect(ownedIds(s).has(childId)).toBe(true)
+
+		// The child now LOOKS like a crash orphan, but local ownership excludes it
+		// from this tick's persisted-active snapshot.
+		installStaleChildInjector(childId)
+
+		const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+		const timerBeforeTick = timerState.reconcileTimer
+		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+		await flushUntil(() => timerState.reconcileTimer !== timerBeforeTick, {
+			label: "tick completed without repairing the eagerly-claimed child",
+			snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
+		})
+
+		expect(s.get(childId)?.status).toBe("active")
+		expect(s.get(parentId)?.status).toBe("delegated")
+	})
+
+	it("transient stat failure at the liveness guard skips repair and logs 'Skipping repair for live child' (ENOENT-only classification)", async () => {
+		// End-to-end for the getChildFileMtimeMs classification through the real
+		// periodic-delegation pass: at tick time the guard's stat of the child's
+		// history file fails with a NON-ENOENT code. Under ENOENT-only semantics
+		// the probe treats that as evidence of life (future mtime), the
+		// live-elsewhere guard holds, and repair is skipped with a warn log so a
+		// later tick retries. Under the old catch → undefined behavior the guard
+		// would see "not live" and repair the child to interrupted — the status
+		// assertions below would then fail.
+		// The stat failure is injected via the private `getTaskFilePath` seam by
+		// embedding a NUL byte in the child's path only: Node's real `fs.stat`
+		// rejects such paths with ERR_INVALID_ARG_VALUE on every platform (never
+		// ENOENT), so the classifier runs against the genuine fs call. The tick is
+		// invoked directly (same private-method pattern as the neighboring
+		// runPeriodicDelegationReconciliation tests) and no disk writes happen
+		// after initialize(), so the fs watcher never fires and reconcile() can
+		// never evict the child while its path is poisoned. Date is frozen to a
+		// fixed instant in the past so the freshly seeded mtimes read as live at
+		// startup and the startup pass provably skips the repair.
+		const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z, before real seed mtimes
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			const [parent, child] = delegatedPair("parent-eacces", "child-eacces")
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			// Startup: fresh (future-relative-to-FIXED_NOW) mtimes → live → skipped.
+			expect(s.get(child.id)?.status).toBe("active")
+			// Clear the startup skip-log so the assertion below only observes the
+			// TICK's decision after the stat failure is armed.
+			warnSpy.mockClear()
+
+			const tasksDir = path.join(tmpDir, "tasks")
+			const pathProbe = TaskHistoryStore.prototype as unknown as {
+				getTaskFilePath: (taskId: string) => Promise<string>
+			}
+			const originalGetTaskFilePath = pathProbe.getTaskFilePath
+			const pathSpy = vi
+				.spyOn(pathProbe, "getTaskFilePath")
+				.mockImplementation((taskId: string) =>
+					taskId === child.id
+						? Promise.resolve(path.join(tasksDir, taskId, "his\0tory_item.json"))
+						: originalGetTaskFilePath.call(s, taskId),
+				)
+			try {
+				const internals = TaskHistoryStore.prototype as unknown as {
+					runPeriodicDelegationReconciliation: () => Promise<void>
+				}
+				await internals.runPeriodicDelegationReconciliation.call(s)
+
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
+				expect(s.get(child.id)?.status).toBe("active")
+				expect(s.get(parent.id)?.status).toBe("delegated")
+				expect(errorSpy).not.toHaveBeenCalled()
+			} finally {
+				pathSpy.mockRestore()
+			}
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
 	})
 })
