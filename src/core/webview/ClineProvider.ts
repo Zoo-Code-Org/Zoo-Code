@@ -669,6 +669,7 @@ export class ClineProvider
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
 		return Object.fromEntries(
 			Object.entries(states)
+				.filter(([, entry]) => !!entry && typeof entry === "object")
 				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
 				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
 		)
@@ -2346,7 +2347,7 @@ export class ClineProvider
 						// view-local mutation path: also refresh this view's buffer so a stale
 						// loaded apiConfiguration cannot keep shadowing the new settings in
 						// getState().
-						this._saveViewLocalStateFromMutation(providerSettings),
+						this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 					])
 
 					// Other live views may have buffered this profile's settings earlier;
@@ -2553,7 +2554,7 @@ export class ClineProvider
 				// view-local mutation path: also refresh this view's buffer so a stale
 				// loaded apiConfiguration cannot keep shadowing the new settings in
 				// getState().
-				this._saveViewLocalStateFromMutation(providerSettings),
+				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
 
 			// Other live views may have buffered this profile's settings earlier;

@@ -362,4 +362,38 @@ describe("SwitchModeTool", () => {
 			"Successfully switched from Code mode to Ask mode because: test.",
 		)
 	})
+
+	// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
+	// when the provider was already disposed the deref is undefined, so the optional chain
+	// must swallow the call and the tool still reports success instead of erroring out.
+	it("should report a successful switch when the provider reference is already released", async () => {
+		const toolTask = {
+			consecutiveMistakeCount: 0,
+			recordToolError: vi.fn(),
+			didToolFailInCurrentTurn: false,
+			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
+			ask: vi.fn().mockResolvedValue({}),
+			getTaskMode: vi.fn().mockResolvedValue("code"),
+			providerRef: {
+				deref: vi.fn().mockReturnValue(undefined),
+			},
+		} as unknown as Task // structural double: the tool only reads the fields above
+		const callbacks: ToolCallbacks = {
+			askApproval: vi.fn().mockResolvedValue(true),
+			handleError: vi.fn(),
+			pushToolResult: vi.fn(),
+		}
+		const block = {
+			type: "tool_use" as const,
+			name: "switch_mode" as const,
+			params: { mode_slug: "architect", reason: "test" },
+			partial: false,
+			nativeArgs: { mode_slug: "architect", reason: "test" },
+		} as unknown as ToolUse<"switch_mode"> // mirrors the createBlock helper above
+
+		await switchModeTool.handle(toolTask, block, callbacks)
+
+		expect(callbacks.handleError).not.toHaveBeenCalled()
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
+	})
 })

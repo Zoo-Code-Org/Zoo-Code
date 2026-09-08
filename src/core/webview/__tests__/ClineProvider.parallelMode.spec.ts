@@ -15,12 +15,9 @@ import {
 import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
-import { switchModeTool } from "../../tools/SwitchModeTool"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { Task } from "../../task/Task"
-import type { ToolCallbacks } from "../../tools/BaseTool"
-import type { ToolUse } from "../../../shared/tools"
 
 // Mock p-wait-for
 vi.mock("p-wait-for", () => ({
@@ -1111,7 +1108,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.handleModeSwitch("architect")
 
 			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
-			expect(postMessage).toHaveBeenCalled()
+			expect(postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state", state: expect.objectContaining({ mode: "architect" }) }),
+			)
 
 			await provider.dispose()
 		})
@@ -1223,40 +1222,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
 
 			await provider.dispose()
-		})
-
-		// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
-		// when the provider was already disposed the deref is undefined, so the optional chain
-		// must swallow the call and the tool still reports success instead of erroring out.
-		it("should report a successful switch when the provider reference is already released", async () => {
-			const toolTask = {
-				consecutiveMistakeCount: 0,
-				recordToolError: vi.fn(),
-				didToolFailInCurrentTurn: false,
-				sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
-				ask: vi.fn().mockResolvedValue({}),
-				getTaskMode: vi.fn().mockResolvedValue("code"),
-				providerRef: {
-					deref: vi.fn().mockReturnValue(undefined),
-				},
-			} as unknown as Task // structural double: the tool only reads the fields above
-			const callbacks: ToolCallbacks = {
-				askApproval: vi.fn().mockResolvedValue(true),
-				handleError: vi.fn(),
-				pushToolResult: vi.fn(),
-			}
-			const block = {
-				type: "tool_use" as const,
-				name: "switch_mode" as const,
-				params: { mode_slug: "architect", reason: "test" },
-				partial: false,
-				nativeArgs: { mode_slug: "architect", reason: "test" },
-			} as unknown as ToolUse<"switch_mode"> // mirrors createBlock in switchModeTool.spec.ts
-
-			await switchModeTool.handle(toolTask, block, callbacks)
-
-			expect(callbacks.handleError).not.toHaveBeenCalled()
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
 		})
 
 		// K1: a no-task switch captures its target before any task is focused; a task gains
