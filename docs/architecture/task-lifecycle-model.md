@@ -78,7 +78,7 @@ The delegation is then durably committed through `TaskHistoryStore.atomicReadAnd
 
 This yields a crash/restart invariant for the handoff identity: the child's durable record always precedes the parent's durable pointer, so a crash between the two writes leaves a recoverable trail instead of a parent pointing at a child whose identity was lost. Startup reconciliation in `TaskHistoryStore.reconcilePendingHandoffRecords` replays it:
 
-- committed (the parent durably delegates to this child): the stale marker is stripped; the child's persisted `mode`/`apiConfigName` drive the normal resume path, and the existing active-child repair handles the never-started child.
+- committed (the parent durably delegates to this child): `set` and `preserve` markers are stripped. A `clear` marker remains until its profile projection succeeds, so restart reconstruction does not reuse an old global identity. The child's persisted `mode`/`apiConfigName` drive the normal resume path, and the existing active-child repair handles the never-started child.
 - pre-commit orphan (guarded by valid marker version, lineage to a present parent record, pre-start child status, no delegation bookkeeping of its own, and no matching parent delegation): the child record and its task directory are removed.
 
 The guards are deliberately conservative: a false negative only leaves a stale record on disk, while a false positive would delete user data. Ambiguous records are left untouched. The invariant covers the mode/profile identity — it does not claim that a frozen secret-bearing API configuration survives restart, and it does not replace the repair journal or `readFresh` reconciliation for parent-record ambiguity.

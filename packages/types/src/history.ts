@@ -60,7 +60,7 @@ export const pendingHandoffSchema = z.discriminatedUnion("kind", [
 		kind: z.literal("preserve"),
 		version: z.literal(1),
 		mode: z.string().min(1),
-		profileName: z.string().optional(),
+		profileName: z.string().min(1).optional(),
 	}),
 	z.object({
 		kind: z.literal("clear"),

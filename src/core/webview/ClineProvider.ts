@@ -755,22 +755,25 @@ export class ClineProvider
 			return true
 		}
 		// Durable reconstruction (provider reload): the in-memory sets above
-		// are empty after a reload, but an explicit clear durably removed the
-		// profile-store identity and the resumed child still carries no sticky
-		// profile. Reconstruct the clear from that durable state instead of
-		// falling back to the "default" identity. Only the still-current task
-		// is affected, and the read is best-effort: a failed read keeps the
-		// ordinary default fallback. Fresh installs carry the seeded "default"
-		// identity, so the legacy fallback there is unchanged.
+		// are empty after a reload. A committed clear marker remains on the
+		// child's record until the profile projection succeeds, so it remains
+		// authoritative if the process stopped before clearing the legacy store.
+		// Older records without that marker retain the profile-store fallback.
 		const currentTask = this.getCurrentTask()
 		if (currentTask?.taskId !== currentTaskId || currentTask.taskApiConfigName !== undefined) {
 			return false
 		}
 		let durableClear = this.durableProfileClearByTaskId.get(currentTaskId)
 		if (!durableClear) {
-			durableClear = this.providerSettingsManager
-				.getCurrentProfileName()
-				.then((durableIdentity) => durableIdentity === undefined)
+			const durableTaskRead =
+				this.taskHistoryStore?.readFresh(currentTaskId) ?? Promise.resolve({ kind: "missing" } as const)
+			durableClear = durableTaskRead
+				.then((result) => {
+					if (result.kind === "found" && result.item.pendingHandoff?.kind === "clear") return true
+					return this.providerSettingsManager
+						.getCurrentProfileName()
+						.then((durableIdentity) => durableIdentity === undefined)
+				})
 				.catch(() => false)
 			this.durableProfileClearByTaskId.set(currentTaskId, durableClear)
 		}
@@ -3418,9 +3421,9 @@ export class ClineProvider
 			terminalZdotdir: terminalZdotdir ?? false,
 			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
-			currentApiConfigName:
-				currentApiConfigName ??
-				((await this.isExplicitProfileClearInForce(currentTask?.taskId)) ? undefined : "default"),
+			currentApiConfigName: (await this.isExplicitProfileClearInForce(currentTask?.taskId))
+				? undefined
+				: (currentApiConfigName ?? "default"),
 			listApiConfigMeta: listApiConfigMeta ?? [],
 			pinnedApiConfigs: pinnedApiConfigs ?? {},
 			mode: mode ?? defaultModeSlug,
@@ -3688,9 +3691,9 @@ export class ClineProvider
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
 			// Preserve an explicit no-profile handoff for the current child:
 			// publish the absence instead of the legacy "default" fallback.
-			currentApiConfigName:
-				stateValues.currentApiConfigName ??
-				((await this.isExplicitProfileClearInForce(this.getCurrentTask()?.taskId)) ? undefined : "default"),
+			currentApiConfigName: (await this.isExplicitProfileClearInForce(this.getCurrentTask()?.taskId))
+				? undefined
+				: (stateValues.currentApiConfigName ?? "default"),
 			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
 			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
 			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),
@@ -5329,30 +5332,34 @@ export class ClineProvider
 		handoffProtocol.advance({ type: "start-child" })
 
 		// 8) Best-effort finalization as handled background work, started only
-		//    after the child is scheduled: the write-ahead marker is no longer
-		//    needed once the delegation is durable and the child's in-memory
-		//    context is authoritative. Store-lock contention, storage delay,
+		//    after the child is scheduled. A clear marker remains durable until
+		//    its profile projection succeeds. Other markers can finish now.
+		//    Store-lock contention, storage delay,
 		//    write-through callbacks, or a strip that never settles can never
 		//    block scheduling or this method's completion. A rejected strip is
 		//    logged and the marker is left for restart reconciliation.
-		const finalizeCompletion = this.taskHistoryStore
-			.atomicReadAndUpdate(child.taskId, (historyItem) => ({
-				...historyItem,
-				pendingHandoff: undefined,
-			}))
-			.then(() => {
-				handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
-			})
-			.catch((finalizeError) => {
-				handoffProtocol.advance({ type: "finalize-child-wal", ok: false })
-				this.log(
-					`[delegateParentAndOpenChild] Pending handoff marker for child ${child.taskId} left for restart replay: ${
-						(finalizeError as Error)?.message ?? String(finalizeError)
-					}`,
-				)
-			})
-		this.providerHandoffFinalizationCompletion = finalizeCompletion
-		void finalizeCompletion
+		const finalizeChildWal = () =>
+			this.taskHistoryStore
+				.atomicReadAndUpdate(child.taskId, (historyItem) => ({
+					...historyItem,
+					pendingHandoff: undefined,
+				}))
+				.then(() => {
+					handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
+				})
+				.catch((finalizeError) => {
+					handoffProtocol.advance({ type: "finalize-child-wal", ok: false })
+					this.log(
+						`[delegateParentAndOpenChild] Pending handoff marker for child ${child.taskId} left for restart replay: ${
+							(finalizeError as Error)?.message ?? String(finalizeError)
+						}`,
+					)
+				})
+		if (prepared.profile.intent.kind !== "clear") {
+			const finalizeCompletion = finalizeChildWal()
+			this.providerHandoffFinalizationCompletion = finalizeCompletion
+			void finalizeCompletion
+		}
 
 		// 9) Best-effort legacy projection of the prepared context onto global
 		//    state and the durable profile store — fire-and-forget background
@@ -5362,12 +5369,15 @@ export class ClineProvider
 		//    records the protocol landmark when still relevant. Tests await the
 		//    exposed completion hook deterministically instead of sleeping.
 		const projectionCompletion = this.projectPreparedProviderHandoffState(prepared, child.taskId)
-			.then((outcome) => {
+			.then(async (outcome) => {
 				handoffProtocol.advance({
 					type: "project-legacy",
 					boundary: outcome.boundary ?? "context-proxy",
 					ok: outcome.ok,
 				})
+				if (outcome.ok && prepared.profile.intent.kind === "clear") {
+					await finalizeChildWal()
+				}
 				return outcome
 			})
 			.catch(() => {
@@ -5380,6 +5390,9 @@ export class ClineProvider
 				return { ok: false, boundary: "queue" as const }
 			})
 		this.providerHandoffProjectionCompletion = projectionCompletion
+		if (prepared.profile.intent.kind === "clear") {
+			this.providerHandoffFinalizationCompletion = projectionCompletion.then(() => undefined)
+		}
 		void projectionCompletion
 
 		// 10) Emit TaskDelegated (provider-level)

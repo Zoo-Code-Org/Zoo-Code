@@ -145,6 +145,8 @@ describe("provider handoff contract", () => {
 		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code" })).toBe(false)
 		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code", profileName: "" })).toBe(false)
 		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code", profileName: " " })).toBe(true)
+		expect(isValidPendingHandoff({ kind: "preserve", version: 1, mode: "code", profileName: "" })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "preserve", version: 1, mode: "code", profileName: " " })).toBe(true)
 		expect(isValidPendingHandoff({ kind: "unknown", version: 1, mode: "code" })).toBe(false)
 		expect(isValidPendingHandoff({ kind: "clear", version: 1 })).toBe(false)
 		expect(isValidPendingHandoff({ kind: "clear", version: 1, mode: "" })).toBe(false)
@@ -869,7 +871,7 @@ describe("provider handoff transaction protocol", () => {
 	})
 
 	it("accepts a background marker strip after the child started, once only", () => {
-		const { states } = drive(initialProviderHandoffState(), [
+		const { states, rejections } = drive(initialProviderHandoffState(), [
 			...happyPath.slice(0, 6),
 			{ type: "start-child" },
 			{ type: "finalize-child-wal", ok: true },
@@ -881,6 +883,7 @@ describe("provider handoff transaction protocol", () => {
 		expect(states[8]).toMatchObject({ phase: "child-running", childWal: "finalized" })
 		// Single-shot: a second strip is rejected and changes nothing.
 		expect(states[9]).toMatchObject({ phase: "child-running", childWal: "finalized" })
+		expect(rejections).toEqual(["unexpected-event"])
 
 		// A rejected late strip stays visible for restart reconciliation.
 		const failedLate = drive(initialProviderHandoffState(), [

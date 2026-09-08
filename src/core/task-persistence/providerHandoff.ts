@@ -193,7 +193,10 @@ export function isValidPendingHandoff(value: unknown): value is PendingHandoff {
 		case "set":
 			return typeof candidate.profileName === "string" && candidate.profileName.length > 0
 		case "preserve":
-			return candidate.profileName === undefined || typeof candidate.profileName === "string"
+			return (
+				candidate.profileName === undefined ||
+				(typeof candidate.profileName === "string" && candidate.profileName.length > 0)
+			)
 		case "clear":
 			return true
 		default:

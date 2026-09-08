@@ -560,8 +560,12 @@ export class TaskHistoryStore {
 			if (!parent) continue
 
 			if (parent.status === "delegated" && parent.awaitingChildId === item.id) {
-				// Committed: the parent delegation is durable. Strip the stale
-				// marker; the child's own mode/apiConfigName fields remain.
+				// Committed clear markers remain durable until the legacy profile
+				// projection succeeds. A restart can then reconstruct the exact
+				// clear intent even when the process stopped before that projection.
+				if (pending.kind === "clear") continue
+				// Other committed markers are stale bookkeeping. The child's own
+				// mode/apiConfigName fields retain their execution identity.
 				try {
 					await this.upsertCore({ ...item, pendingHandoff: undefined }, { skipTransitionCheck: true })
 					console.warn(`[TaskHistoryStore] Finalized pending handoff marker for committed child ${item.id}`)

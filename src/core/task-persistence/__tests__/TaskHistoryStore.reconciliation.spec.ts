@@ -1106,6 +1106,28 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 		expect(store.get("wal-parent")?.status).toBe("active")
 	})
 
+	it("retains a committed clear marker until its profile projection succeeds", async () => {
+		const child = makeItem({
+			id: "wal-clear-child",
+			parentTaskId: "wal-clear-parent",
+			status: "active",
+			mode: "ask",
+			pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+		})
+		const parent = makeItem({
+			id: "wal-clear-parent",
+			status: "delegated",
+			awaitingChildId: "wal-clear-child",
+		})
+		await seedItems([parent, child])
+
+		await store.initialize()
+
+		expect(store.get("wal-clear-child")?.pendingHandoff).toEqual({ kind: "clear", version: 1, mode: "ask" })
+		expect(store.get("wal-clear-child")?.status).toBe("interrupted")
+		expect(store.get("wal-clear-parent")?.status).toBe("active")
+	})
+
 	it("leaves ambiguous WAL records untouched (fail-safe guards)", async () => {
 		const emptyMode = makeItem({
 			id: "wal-guard-empty-mode",

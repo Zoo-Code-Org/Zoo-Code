@@ -1316,6 +1316,33 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(state.apiConfiguration).toEqual(staleMarker?.apiConfiguration)
 		})
 
+		test("a committed clear marker overrides a stale legacy profile identity after reload", async () => {
+			const { child } = await setupSoleParentDelegation()
+			child["_taskApiConfigName"] = undefined
+			provider["explicitProfileClearChildIds"].clear()
+			provider["durableProfileClearByTaskId"].clear()
+			provider["staleProviderHandoffProjection"] = undefined
+			await provider.contextProxy.setValue("currentApiConfigName", "stale-profile")
+			vi.spyOn(provider.taskHistoryStore, "readFresh").mockResolvedValue({
+				kind: "found",
+				item: {
+					id: child.taskId,
+					number: 2,
+					ts: Date.now(),
+					task: "child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+				},
+			})
+
+			const state = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+
+			expect(state.currentApiConfigName).toBeUndefined()
+			expect(provider["providerSettingsManager"].getCurrentProfileName).not.toHaveBeenCalled()
+		})
+
 		test("a later successful same-child mode mutation supersedes the stale projection marker", async () => {
 			const { child } = await setupSoleParentDelegation()
 

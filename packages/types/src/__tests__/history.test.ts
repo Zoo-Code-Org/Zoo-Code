@@ -1,4 +1,15 @@
-import { historyItemSchema, pendingTaskActionSchema } from "../history.js"
+import { historyItemSchema, pendingHandoffSchema, pendingTaskActionSchema } from "../history.js"
+
+describe("pendingHandoffSchema", () => {
+	it("rejects an empty preserve profile name but keeps exact whitespace identities", () => {
+		expect(
+			pendingHandoffSchema.safeParse({ kind: "preserve", version: 1, mode: "code", profileName: "" }).success,
+		).toBe(false)
+		expect(
+			pendingHandoffSchema.safeParse({ kind: "preserve", version: 1, mode: "code", profileName: " " }).success,
+		).toBe(true)
+	})
+})
 
 describe("pendingTaskActionSchema", () => {
 	it("accepts create and finish subtask actions", () => {
