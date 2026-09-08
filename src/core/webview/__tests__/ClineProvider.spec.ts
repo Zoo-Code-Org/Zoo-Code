@@ -1488,18 +1488,22 @@ describe("ClineProvider", () => {
 				openRouterModelId: string
 			}) => void = () => {}
 			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
-			provider.providerSettingsManager = {
-				getProfile: vi
-					.fn()
-					.mockImplementation(
-						() =>
-							new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
-								(resolve) => (resolveProfile = resolve),
-							),
-					),
-			}
+			const getProfileSpy = vi
+				.fn()
+				.mockImplementation(
+					() =>
+						new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
+							(resolve) => (resolveProfile = resolve),
+						),
+				)
+			// @ts-ignore - The spy-backed double only needs the stalled getProfile member.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// Let the stalled lookup begin so the in-flight mutations and the resolver
+			// target the pending promise rather than the initial no-op.
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
 
 			// Selections made while the profile lookup is in flight must survive the load.
 			await provider.saveViewState("mode", "architect")
@@ -1553,6 +1557,32 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should not restore a persisted mode whose custom mode no longer exists", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const logSpy = vi.spyOn(provider, "log")
+			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
+			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			// The file-level modes mock resolves every slug to a mode; drop the pinned slug.
+			const modesModule = vi.mocked(await import("../../../shared/modes"))
+			const originalMode = modesModule.getModeBySlug("code")
+			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
+				slug === "deleted-custom-mode" ? undefined : originalMode) as typeof modesModule.getModeBySlug)
+			try {
+				await provider["setViewStateId"]("stable-sidebar-view")
+				await provider.saveViewState("mode", "deleted-custom-mode")
+				// Reload the persisted entry: the custom mode was deleted in the meantime.
+				await provider["loadViewState"]()
+				// The stale slug must not be restored into the buffer.
+				expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining('Ignoring unknown persisted mode "deleted-custom-mode"'),
+				)
+			} finally {
+				modesModule.getModeBySlug.mockReturnValue(originalMode)
+			}
+			await provider.dispose()
+		})
+
 		it("should not resurrect a field cleared mid-load from the pre-load buffer", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			let resolveProfile: (value: { name: string }) => void = () => {}
@@ -1578,7 +1608,166 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should persist known modes, ignore unknown modes and pass through non-string modes", async () => {
+		it("should reapply an independently mutated mode when the load settles", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			let resolveProfile: (value: {
+				name: string
+				apiProvider: string
+				openRouterModelId: string
+			}) => void = () => {}
+			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
+			const getProfileSpy = vi
+				.fn()
+				.mockImplementation(
+					() =>
+						new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
+							(resolve) => (resolveProfile = resolve),
+						),
+				)
+			// @ts-ignore - The spy-backed double only needs the stalled getProfile member.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// Let the stalled lookup begin so the in-flight mutation and the resolver
+			// target the pending promise rather than the initial no-op.
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// Only the mode is mutated while the profile lookup is in flight.
+			await provider.saveViewState("mode", "architect")
+
+			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			await load
+
+			expect(provider["viewLocalState"]).toEqual({
+				mode: "architect",
+				currentApiConfigName: "cfg-a",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" },
+			})
+			await provider.dispose()
+		})
+
+		it("should reapply an independently mutated profile name when the load settles", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			let resolveProfile: (value: {
+				name: string
+				apiProvider: string
+				openRouterModelId: string
+			}) => void = () => {}
+			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
+			const getProfileSpy = vi
+				.fn()
+				.mockImplementation(
+					() =>
+						new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
+							(resolve) => (resolveProfile = resolve),
+						),
+				)
+			// @ts-ignore - The spy-backed double only needs the stalled getProfile member.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// Let the stalled lookup begin so the in-flight mutation and the resolver
+			// target the pending promise rather than the initial no-op.
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// The profile name changes while the lookup is in flight; the load still
+			// resolves the name persisted at load start.
+			await provider.saveViewState("currentApiConfigName", "cfg-b")
+
+			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			await load
+
+			// The in-flight selection wins over the loaded state.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+			await provider.dispose()
+		})
+
+		it("should reapply an independently mutated apiConfiguration when the load settles", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			let resolveProfile: (value: {
+				name: string
+				apiProvider: string
+				openRouterModelId: string
+			}) => void = () => {}
+			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
+			const getProfileSpy = vi
+				.fn()
+				.mockImplementation(
+					() =>
+						new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
+							(resolve) => (resolveProfile = resolve),
+						),
+				)
+			// @ts-ignore - The spy-backed double only needs the stalled getProfile member.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// Let the stalled lookup begin so the in-flight mutation and the resolver
+			// target the pending promise rather than the initial no-op.
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// Only the apiConfiguration is mutated while the profile lookup is in flight.
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-y",
+			})
+
+			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			await load
+
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-y",
+			})
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-a")
+			await provider.dispose()
+		})
+
+		it("should keep every persisted field authoritative when the load is untouched", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			let resolveProfile: (value: {
+				name: string
+				apiProvider: string
+				openRouterModelId: string
+			}) => void = () => {}
+			// @ts-ignore - Replace providerSettingsManager with a test double that stalls the profile lookup.
+			const getProfileSpy = vi
+				.fn()
+				.mockImplementation(
+					() =>
+						new Promise<{ name: string; apiProvider: string; openRouterModelId: string }>(
+							(resolve) => (resolveProfile = resolve),
+						),
+				)
+			// @ts-ignore - The spy-backed double only needs the stalled getProfile member.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
+			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
+			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			await provider.saveViewState("mode", "code")
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			const load = provider["setViewStateId"]("stable-sidebar-view")
+
+			// Let the stalled lookup begin so the in-flight mutation and the resolver
+			// target the pending promise rather than the initial no-op.
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// No mutation while the lookup is in flight: the persisted values must win.
+			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			await load
+
+			expect(provider["viewLocalState"]).toEqual({
+				mode: "code",
+				currentApiConfigName: "cfg-a",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" },
+			})
+			await provider.dispose()
+		})
+
+		it("should persist known modes and reject unknown or non-string modes", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
@@ -1593,13 +1782,15 @@ describe("ClineProvider", () => {
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
 				expect(provider["viewLocalState"].mode).toBe("refactor")
 				await provider.setValues({ mode: "bogus-mode" })
-				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring unknown mode "bogus-mode"'))
+				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "bogus-mode"'))
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
 				expect(provider["viewLocalState"].mode).toBe("refactor")
-				// A non-string mode bypasses the slug validation (double assertion: the type excludes non-strings).
+				// A non-string mode must be rejected before persistence (double assertion: the type
+				// excludes non-strings), so it must not reach global state or the buffer.
 				await provider.setValues({ mode: 42 } as unknown as RooCodeSettings)
-				expect(mockContext.globalState.get("mode")).toBe(42)
-				expect(provider["viewLocalState"].mode).toBe(42)
+				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "42"'))
+				expect(mockContext.globalState.get("mode")).toBe("refactor")
+				expect(provider["viewLocalState"].mode).toBe("refactor")
 			} finally {
 				modesModule.getModeBySlug.mockReturnValue(originalMode)
 			}
@@ -1667,6 +1858,96 @@ describe("ClineProvider", () => {
 			await provider.resetState()
 			expect(provider["viewLocalState"]).toEqual({})
 			expect(mockContext.globalState.get("viewStates")).toEqual({})
+			await provider.dispose()
+		})
+	})
+
+	describe("provider profile mutations", () => {
+		it("should sync the view-local buffer when activating a profile over a loaded view state", async () => {
+			const writer = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await writer["setViewStateId"]("shared-view")
+			await writer.saveViewState("currentApiConfigName", "old-profile")
+
+			const profile: ProviderSettingsEntry = {
+				name: "new-profile",
+				id: "new-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				activateProfile: vi.fn().mockResolvedValue(profile),
+				listConfig: vi.fn().mockResolvedValue([profile]),
+				setModeConfig: vi.fn(),
+				getProfile: vi
+					.fn()
+					.mockResolvedValue({
+						name: "old-profile",
+						id: "old-id",
+						apiProvider: providerIdentifiers.anthropic,
+					}),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.contextProxy.setValue(
+				"viewStates",
+				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
+			)
+			await provider["setViewStateId"]("shared-view")
+			expect(provider.getValues().currentApiConfigName).toBe("old-profile")
+
+			await provider.activateProviderProfile({ name: "new-profile" })
+
+			// The buffer must track the activated profile so getValues() agrees with the proxy.
+			expect(provider.getValues().currentApiConfigName).toBe("new-profile")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("new-profile")
+			await writer.dispose()
+			await provider.dispose()
+		})
+
+		it("should sync the view-local buffer when creating and activating a profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const profile: ProviderSettingsEntry = {
+				name: "fresh-profile",
+				id: "fresh-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("fresh-id"),
+				listConfig: vi.fn().mockResolvedValue([profile]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.setValue("currentApiConfigName", "stale-profile")
+
+			await provider.upsertProviderProfile("fresh-profile", { apiProvider: providerIdentifiers.openrouter })
+
+			expect(provider.getValues().currentApiConfigName).toBe("fresh-profile")
+			await provider.dispose()
+		})
+
+		it("should sync the view-local buffer when deleting the current profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "old-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.deleteProviderProfile(oldProfile)
+
+			// The fallback profile must replace the deleted one in both the proxy and the buffer.
+			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
 			await provider.dispose()
 		})
 	})

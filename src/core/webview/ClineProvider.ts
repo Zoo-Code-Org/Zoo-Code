@@ -729,7 +729,15 @@ export class ClineProvider
 			const preLoadBuffer = { ...this.viewLocalState }
 
 			if (persisted?.mode) {
-				loadedState.mode = persisted.mode as Mode
+				// A persisted mode may reference a custom mode that was deleted after it was
+				// pinned: restore it only when the slug still resolves, so a stale slug cannot
+				// shadow the shared mode from getState().
+				const customModes = await this.customModesManager.getCustomModes()
+				if (getModeBySlug(persisted.mode, customModes)) {
+					loadedState.mode = persisted.mode as Mode
+				} else {
+					this.log(`[loadViewState] Ignoring unknown persisted mode "${persisted.mode}"`)
+				}
 			}
 
 			if (persisted?.currentApiConfigName) {
@@ -2219,7 +2227,10 @@ export class ClineProvider
 					// I left the original implementation in just to be safe.
 					await Promise.all([
 						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-						this.updateGlobalState("currentApiConfigName", name),
+						// Route through setValue so the in-memory viewLocalState buffer tracks the
+						// activated profile: a plain global write would leave a stale loaded
+						// currentApiConfigName shadowing the new value in getValues().
+						this.setValue("currentApiConfigName", name),
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
 					])
@@ -2261,11 +2272,18 @@ export class ClineProvider
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
+		// Write the other settings in one bulk call, then route the current-profile write
+		// through setValue so the in-memory viewLocalState buffer tracks the activated
+		// profile: a plain ContextProxy write would leave a stale loaded
+		// currentApiConfigName shadowing the new value in getValues().
+		const { currentApiConfigName: _previousApiConfigName, ...globalSettingsWithoutCurrent } = globalSettings
+
 		await this.contextProxy.setValues({
-			...globalSettings,
-			currentApiConfigName: profileToActivate,
+			...globalSettingsWithoutCurrent,
 			listApiConfigMeta: entries,
 		})
+
+		await this.setValue("currentApiConfigName", profileToActivate)
 
 		await this.postStateToWebview()
 	}
@@ -2336,7 +2354,10 @@ export class ClineProvider
 			// See `upsertProviderProfile` for a description of what this is doing.
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				this.contextProxy.setValue("currentApiConfigName", name),
+				// Route through setValue so the in-memory viewLocalState buffer tracks the
+				// activated profile: a plain ContextProxy write would leave a stale loaded
+				// currentApiConfigName shadowing the new value in getValues().
+				this.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 		}
@@ -3517,14 +3538,16 @@ export class ClineProvider
 	public async setValues(values: RooCodeSettings) {
 		const sanitizedValues = { ...values }
 
-		if (
-			typeof sanitizedValues.mode === "string" &&
-			!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
-		) {
-			// An unknown mode (e.g. from an API payload) must not be persisted: a new Task
-			// would read it from getState() and persist it into task history.
-			this.log(`[ClineProvider#setValues] Ignoring unknown mode "${sanitizedValues.mode}"`)
-			delete sanitizedValues.mode
+		if (sanitizedValues.mode !== undefined) {
+			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
+			// a new Task would read it from getState() and persist it into task history.
+			if (
+				typeof sanitizedValues.mode !== "string" ||
+				!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
+			) {
+				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
+				delete sanitizedValues.mode
+			}
 		}
 
 		await this.contextProxy.setValues(sanitizedValues)
