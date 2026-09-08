@@ -2431,7 +2431,10 @@ export class ClineProvider
 		}
 
 		// This view pins an unrelated profile, which must survive the deletion: sync the
-		// shared profile list and post the updated state only.
+		// shared profile list and post the updated state only. The buffer already holds
+		// the surviving pin, so the current-profile slot is left untouched here: a
+		// setValue would only trigger a viewStates prune write and could clobber the pin
+		// with the shared slot's value.
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
 		// Write only the profile list back: replaying the full settings snapshot
@@ -2440,9 +2443,9 @@ export class ClineProvider
 		// with this view's stale cached copy.
 		await this.contextProxy.setValue("listApiConfigMeta", entries)
 
-		// Resolve the surviving profile's settings so this view and any other
-		// live view still pinned to the deleted profile can be re-pinned with
-		// a matching configuration.
+		// Resolve the surviving profile's settings so the shared provider keys
+		// and any other live view still pinned to the deleted profile can be
+		// updated with a matching configuration.
 		let survivingSettings: ProviderSettings | undefined
 		try {
 			const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
@@ -2457,14 +2460,12 @@ export class ClineProvider
 			)
 		}
 
-		await this.setValue("currentApiConfigName", profileToActivate)
-
 		if (profileToDelete.name === globalSettings.currentApiConfigName && survivingSettings) {
-			// The deleted profile was the active one, so the shared provider keys
-			// and this view's buffer still carry its settings; replace both so
-			// getState() reports the surviving profile's configuration.
+			// The deleted profile was the shared current, so the shared provider
+			// keys still carry its settings; replace the shared slot so views
+			// that follow the shared current report the surviving profile's
+			// configuration. This view's buffer keeps its surviving pin.
 			await this.contextProxy.setProviderSettings(survivingSettings)
-			await this._saveViewLocalStateFromMutation(survivingSettings)
 		}
 
 		// Re-pin other live views still buffered on the deleted profile: their
