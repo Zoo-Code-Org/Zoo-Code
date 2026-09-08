@@ -511,6 +511,20 @@ export class TaskHistoryStore {
 							)
 							continue
 						}
+						// Re-check local ownership after the async stat await: the
+						// persistedActiveIds snapshot was captured before this point, and
+						// ClineProvider can claim the child for a live session in THIS
+						// window (markLocallyActive, the eager claim in
+						// createTaskWithHistoryItemUnlocked) while getChildFileMtimeMs was
+						// in flight. The snapshot no longer reflects that claim, so the
+						// child is no longer a crash orphan — skip the repair.
+						if (this.locallyActiveTaskIds.has(child.id)) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
+									`(claimed by this window during reconciliation)`,
+							)
+							continue
+						}
 						// An active child persisted across startup cannot have a live task session
 						// behind it. Mark it interrupted before releasing the parent's delegation
 						// link so the normal resume/re-delegate flow can take over. This is an

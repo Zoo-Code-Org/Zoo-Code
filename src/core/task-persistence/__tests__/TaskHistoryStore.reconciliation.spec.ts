@@ -2114,39 +2114,43 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 			.mockRejectedValue(new Error("tick delegation boom"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		const s = (store = new TaskHistoryStore(tmpDir))
-		useTickClock()
-		await s.initialize()
+		try {
+			const s = (store = new TaskHistoryStore(tmpDir))
+			useTickClock()
+			await s.initialize()
 
-		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		// The error log happens in the tick callback's catch AFTER the throwing
-		// delegation step settles, so the spy firing means the tick is done.
-		await flushUntil(
-			() =>
-				errorSpy.mock.calls.some(
-					(c) => typeof c[0] === "string" && c[0].includes("Periodic delegation reconciliation failed"),
-				),
-			{
-				label: "tick logged the delegation failure",
-				snapshot: () => `errorCalls=${errorSpy.mock.calls.length}`,
-			},
-		)
-		expect(errorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Periodic delegation reconciliation failed"),
-			expect.objectContaining({ message: "tick delegation boom" }),
-		)
+			await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+			// The error log happens in the tick callback's catch AFTER the throwing
+			// delegation step settles, so the spy firing means the tick is done.
+			await flushUntil(
+				() =>
+					errorSpy.mock.calls.some(
+						(c) => typeof c[0] === "string" && c[0].includes("Periodic delegation reconciliation failed"),
+					),
+				{
+					label: "tick logged the delegation failure",
+					snapshot: () => `errorCalls=${errorSpy.mock.calls.length}`,
+				},
+			)
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Periodic delegation reconciliation failed"),
+				expect.objectContaining({ message: "tick delegation boom" }),
+			)
 
-		// One more interval still fires the delegation step: the recursive
-		// re-arm is preserved even though the step threw.
-		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushUntil(() => throwingSpy.mock.calls.length >= 2, {
-			label: "second tick invoked the throwing delegation step",
-			snapshot: () => `throwingSpyCalls=${throwingSpy.mock.calls.length}`,
-		})
-		expect(throwingSpy).toHaveBeenCalledTimes(2)
-
-		errorSpy.mockRestore()
-		throwingSpy.mockRestore()
+			// One more interval still fires the delegation step: the recursive
+			// re-arm is preserved even though the step threw.
+			await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+			await flushUntil(() => throwingSpy.mock.calls.length >= 2, {
+				label: "second tick invoked the throwing delegation step",
+				snapshot: () => `throwingSpyCalls=${throwingSpy.mock.calls.length}`,
+			})
+			expect(throwingSpy).toHaveBeenCalledTimes(2)
+		} finally {
+			// Spy restoration must survive assertion failures mid-test — a leaked
+			// prototype spy would poison every subsequent test in this spec.
+			errorSpy.mockRestore()
+			throwingSpy.mockRestore()
+		}
 	})
 })
 
@@ -2485,6 +2489,22 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		}
 	})
 
+	it("markLocallyInactive removes an eagerly claimed id from locallyActiveTaskIds (direct ownership membership)", async () => {
+		// Direct membership companion to the L592 kill test above, mirroring the
+		// delete()/deleteMany() ownership tests: claim the id via the public
+		// markLocallyActive path, then release it and assert the ownership set
+		// dropped it. No tick or seeded delegation pair needed — this isolates
+		// the claim/release bookkeeping contract from the repair pipeline.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+
+		s.markLocallyActive("mli-direct")
+		expect(ownedIds(s).has("mli-direct")).toBe(true)
+
+		s.markLocallyInactive("mli-direct")
+		expect(ownedIds(s).has("mli-direct")).toBe(false)
+	})
+
 	it("a code-less stat rejection (null/string) is classified live, not absent, and never throws (kills L1276 OptionalChaining)", async () => {
 		// getChildFileMtimeMs: `if ((error as NodeJS.ErrnoException)?.code === "ENOENT")`. The
 		// optional chain is a real guard: dropping it (`(error).code`) dereferences null when
@@ -2804,32 +2824,135 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// must survive the tick untouched. If markLocallyActive's add() were dropped, the id
 		// would not be excluded, the guard would see the stale mtime, and the child would be
 		// repaired to interrupted — failing the status assertions below.
-		const childId = "child-eager-claim"
-		const parentId = "parent-eager-claim"
-		const [parent, child] = delegatedPair(parentId, childId)
-		await seedItems(tmpDir, [parent, child])
+		//
+		// The negative log assertion pins WHERE the exclusion happens: ownership claimed
+		// BEFORE the snapshot must be excluded at snapshot time, so the post-await
+		// re-check's skip log ("claimed by this window during reconciliation") must NOT
+		// fire for it. A mutant that removes the snapshot `.filter(...)` (Stryker
+		// MethodExpression) lets the owned child into the snapshot; the post-await
+		// re-check would then spare it but EMIT that log, failing the assertion below —
+		// proving the snapshot filter is not redundant with the re-check.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			const childId = "child-eager-claim"
+			const parentId = "parent-eager-claim"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
 
-		const s = (store = new TaskHistoryStore(tmpDir))
-		useTickClock()
-		await s.initialize()
+			const s = (store = new TaskHistoryStore(tmpDir))
+			useTickClock()
+			await s.initialize()
 
-		s.markLocallyActive(childId)
-		expect(ownedIds(s).has(childId)).toBe(true)
+			s.markLocallyActive(childId)
+			expect(ownedIds(s).has(childId)).toBe(true)
+			// The startup pass logged a live-elsewhere skip for the fresh-seeded child;
+			// clear so only the tick's logs remain observable below.
+			warnSpy.mockClear()
 
-		// The child now LOOKS like a crash orphan, but local ownership excludes it
-		// from this tick's persisted-active snapshot.
-		installStaleChildInjector(childId)
+			// The child now LOOKS like a crash orphan, but local ownership excludes it
+			// from this tick's persisted-active snapshot.
+			installStaleChildInjector(childId)
 
-		const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
-		const timerBeforeTick = timerState.reconcileTimer
-		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushUntil(() => timerState.reconcileTimer !== timerBeforeTick, {
-			label: "tick completed without repairing the eagerly-claimed child",
-			snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
-		})
+			const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+			const timerBeforeTick = timerState.reconcileTimer
+			await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
+			await flushUntil(() => timerState.reconcileTimer !== timerBeforeTick, {
+				label: "tick completed without repairing the eagerly-claimed child",
+				snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
+			})
 
-		expect(s.get(childId)?.status).toBe("active")
-		expect(s.get(parentId)?.status).toBe("delegated")
+			expect(s.get(childId)?.status).toBe("active")
+			expect(s.get(parentId)?.status).toBe("delegated")
+			// Pre-snapshot ownership is handled by the snapshot filter alone: the
+			// post-await re-check must never see (or log) a child excluded up front.
+			expect(warnSpy).not.toHaveBeenCalledWith(
+				expect.stringContaining("claimed by this window during reconciliation"),
+			)
+		} finally {
+			warnSpy.mockRestore()
+		}
+	})
+
+	it("skips repair when the child is claimed locally while the mtime stat is in flight (closes the snapshot race)", async () => {
+		// CodeRabbit follow-up Item 5: runPeriodicDelegationReconciliation snapshots
+		// persistedActiveIds (minus locally-owned ids) BEFORE reconcileDelegationState
+		// awaits getChildFileMtimeMs per candidate. ClineProvider's eager
+		// markLocallyActive claim (createTaskWithHistoryItemUnlocked) can land DURING
+		// that await, so the snapshot no longer reflects it and the tick would repair
+		// a child that JUST became locally owned in this window. The core must
+		// re-check locallyActiveTaskIds after the await, immediately before
+		// repairActiveDelegation, and skip when ownership was claimed mid-stat.
+		//
+		// Technique: spy getChildFileMtimeMs (the internals seam this spec already
+		// uses) and claim ownership for the child INSIDE the mock before resolving a
+		// stale mtime — exactly the moment between the snapshot and the repair where
+		// the eager claim can interleave. Under the pre-fix code the stale mtime
+		// proceeds straight to repairActiveDelegation (child -> interrupted, parent
+		// -> active), failing the status assertions below.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-claim-race"
+			const parentId = "parent-claim-race"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			// Fresh seed mtimes -> the startup pass treats the child as live and skips repair.
+			expect(s.get(childId)?.status).toBe("active")
+			expect(s.get(parentId)?.status).toBe("delegated")
+			// Not yet owned locally, so the child IS in the tick's persisted-active snapshot.
+			expect(ownedIds(s).has(childId)).toBe(false)
+			// The startup pass logged a live-elsewhere skip for the fresh-seeded
+			// child (same "Skipping repair for live child" prefix). Clear it so the
+			// log assertions below observe ONLY the tick's re-check skip — otherwise
+			// a mutated skip message could still "match" via the startup log.
+			warnSpy.mockClear()
+
+			// Arm the seam: claim ownership for the child while the stat await is in
+			// flight, then report a stale mtime so the pre-fix code would repair it.
+			const probe = TaskHistoryStore.prototype as unknown as {
+				getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+			}
+			const original = probe.getChildFileMtimeMs
+			mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockImplementation((id: string) => {
+				if (id === childId) {
+					s.markLocallyActive(childId)
+					return Promise.resolve(Date.now() - 10 * 60 * 1000)
+				}
+				return original.call(s, id)
+			})
+
+			const internals = TaskHistoryStore.prototype as unknown as {
+				runPeriodicDelegationReconciliation: () => Promise<void>
+			}
+			await internals.runPeriodicDelegationReconciliation.call(s)
+
+			// The post-await re-check must see the mid-stat claim and skip the repair:
+			// child stays active, parent keeps its delegation links, skip is logged.
+			expect(ownedIds(s).has(childId)).toBe(true)
+			expect(s.get(childId)?.status).toBe("active")
+			expect(s.get(parentId)?.status).toBe("delegated")
+			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
+			expect(s.get(parentId)?.delegatedToId).toBe(childId)
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`Skipping repair for live child ${childId}`))
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("(claimed by this window during reconciliation)"),
+			)
+			// Combined-phrase assertion: both template fragments concatenated. A
+			// StringLiteral->'' mutant on EITHER fragment breaks this exact substring,
+			// and the pre-tick mockClear guarantees no other warn call can supply it.
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining(
+					`Skipping repair for live child ${childId} (claimed by this window during reconciliation)`,
+				),
+			)
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
 	})
 
 	it("transient stat failure at the liveness guard skips repair and logs 'Skipping repair for live child' (ENOENT-only classification)", async () => {

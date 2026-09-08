@@ -234,6 +234,12 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		await flushMicrotasks()
 		expect(store.markLocallyInactive).not.toHaveBeenCalled()
 		expect(provider.taskScheduler.schedule).toHaveBeenCalledTimes(1)
+		// CodeRabbit: ordering, not just invocation — the eager claim exists to cover
+		// the gap BEFORE Task.run()'s first active-status write, so the claim must
+		// precede the scheduler handoff on the recorded invocation order.
+		expect(store.markLocallyActive.mock.invocationCallOrder[0]).toBeLessThan(
+			provider.taskScheduler.schedule.mock.invocationCallOrder[0],
+		)
 	})
 
 	it("claims ownership on the in-place rehydrate success path without releasing it", async () => {
@@ -250,6 +256,10 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		await flushMicrotasks()
 		expect(store.markLocallyInactive).not.toHaveBeenCalled()
 		expect(provider.taskScheduler.schedule).toHaveBeenCalledTimes(1)
+		// Same claim-before-schedule ordering contract on the rehydrate branch.
+		expect(store.markLocallyActive.mock.invocationCallOrder[0]).toBeLessThan(
+			provider.taskScheduler.schedule.mock.invocationCallOrder[0],
+		)
 	})
 
 	it("releases the claim when preparation fails on the rehydrate path and rethrows", async () => {
@@ -326,6 +336,47 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 				expect.objectContaining({ message: "permit failed" }),
 			),
 		)
+	})
+
+	it("failure paths claim the id exactly once and release it exactly once (no double-release)", async () => {
+		// CodeRabbit: with BOTH performPreparationTasks and taskScheduler.schedule
+		// configured to reject, the id must still be claimed exactly once and released
+		// exactly once. The two failure sources are mutually exclusive at runtime by
+		// control flow — a prep failure throws before scheduleTask is ever reached —
+		// so the schedule rejection cannot stack a second release on top of the
+		// catch-path release (asserted by schedule's zero calls below).
+		{
+			const store = makeStore()
+			const provider = makeRehydrateProvider(store, "hist-once-prep", {
+				performPreparationTasks: vi.fn().mockRejectedValue(new Error("prep exploded")),
+				taskScheduler: { schedule: vi.fn().mockRejectedValue(new Error("permit failed")) },
+			})
+
+			await expect(
+				privateClineProvider.createTaskWithHistoryItem.call(provider, makeHistoryItem("hist-once-prep")),
+			).rejects.toThrow("prep exploded")
+
+			expect(store.markLocallyActive).toHaveBeenCalledTimes(1)
+			expect(store.markLocallyActive).toHaveBeenCalledWith("hist-once-prep")
+			expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+			expect(store.markLocallyInactive).toHaveBeenCalledWith("hist-once-prep")
+			expect(provider.taskScheduler.schedule).not.toHaveBeenCalled()
+		}
+
+		// Scheduler-rejection path: prep succeeds, the release arrives solely through
+		// scheduleTask's onScheduleFailure hook — one claim, one release.
+		{
+			const store = makeStore()
+			const provider = makeProvider(store, {
+				taskScheduler: { schedule: vi.fn().mockRejectedValue(new Error("permit failed")) },
+			})
+
+			await privateClineProvider.createTaskWithHistoryItem.call(provider, makeHistoryItem("hist-once-sched"))
+
+			await vi.waitFor(() => expect(store.markLocallyInactive).toHaveBeenCalledWith("hist-once-sched"))
+			expect(store.markLocallyActive).toHaveBeenCalledTimes(1)
+			expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		}
 	})
 
 	it("keeps the claim when startTask is false: the installed task starts via a later explicit path, not the scheduler", async () => {
