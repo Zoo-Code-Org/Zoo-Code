@@ -273,6 +273,7 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 				deleteMany: vi.fn().mockResolvedValue(undefined),
 				migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
 				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			}
 		}),
 		readApiMessages: vi.fn().mockResolvedValue([]),

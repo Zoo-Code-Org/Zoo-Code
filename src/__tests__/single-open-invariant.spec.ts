@@ -80,7 +80,11 @@ describe("Single-open-task invariant", () => {
 			taskRegistry: registry,
 			taskScheduler: { schedule: schedulespy },
 			getCurrentTask: vi.fn(() => existingTask),
-			taskHistoryStore: { get: vi.fn(() => undefined), markLocallyActive: vi.fn() },
+			taskHistoryStore: {
+				get: vi.fn(() => undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
+			},
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
 				return privateClineProvider.evictCurrentTask.bind(this)
@@ -168,7 +172,11 @@ describe("Single-open-task invariant", () => {
 
 		const provider = {
 			getCurrentTask: vi.fn(() => undefined), // ensure not rehydrating
-			taskHistoryStore: { get: vi.fn(() => undefined), markLocallyActive: vi.fn() },
+			taskHistoryStore: {
+				get: vi.fn(() => undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
+			},
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
 				return privateClineProvider.evictCurrentTask.bind(this)
@@ -243,7 +251,11 @@ describe("Single-open-task invariant", () => {
 		const provider = {
 			getCurrentTask: vi.fn(() => existingTask),
 			taskRegistry: registry,
-			taskHistoryStore: { get: vi.fn(() => undefined), markLocallyActive: vi.fn() },
+			taskHistoryStore: {
+				get: vi.fn(() => undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
+			},
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
 				return privateClineProvider.evictCurrentTask.bind(this)
@@ -319,7 +331,11 @@ describe("Single-open-task invariant", () => {
 			historyTaskCreationQueue: Promise.resolve(),
 			getCurrentTask: vi.fn(() => registry.current),
 			taskRegistry: registry,
-			taskHistoryStore: { get: vi.fn(() => undefined), markLocallyActive: vi.fn() },
+			taskHistoryStore: {
+				get: vi.fn(() => undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
+			},
 			evictCurrentTask,
 			addClineToStack: vi.fn().mockImplementation(async (task: Task) => registry.push(task)),
 			log: vi.fn(),
@@ -386,7 +402,11 @@ describe("Single-open-task invariant", () => {
 		const provider = {
 			context: {} as unknown,
 			getCurrentTask: vi.fn(() => undefined),
-			taskHistoryStore: { get: vi.fn(() => undefined), markLocallyActive: vi.fn() },
+			taskHistoryStore: {
+				get: vi.fn(() => undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
+			},
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
 				return privateClineProvider.evictCurrentTask.bind(this)
