@@ -235,11 +235,15 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only when the sidebar panel was
-			// focused: the tab takes selection priority in focusPanel, so
-			// the sidebar receives the message only when no tab panel is
-			// tracked.
-			if (sidebarPanel && !tabPanel) {
+			// Post to the surface focusPanel selected: the tab takes
+			// selection priority, so the sidebar is targeted only when no
+			// tab panel is tracked.
+			if (tabPanel) {
+				const tabProvider = getTabProvider()
+				if (tabProvider) {
+					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				}
+			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {
@@ -383,6 +387,14 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 	newPanel.onDidChangeViewState(
 		(e) => {
 			const panel = e.webviewPanel
+			// Re-point the tracked tab ref at the panel the user is actually
+			// looking at: several tab panels can stay visible at once, but
+			// only the active one is the current tab, and the title-bar
+			// commands must resolve that instance, not the last created one.
+			if (panel.active) {
+				// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
+				setPanel(panel, "tab")
+			}
 			if (panel.visible) {
 				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
 			}

@@ -760,29 +760,38 @@ export class ClineProvider
 				return
 			}
 
-			// Reapply only the fields mutated while the load was in flight: untouched
-			// fields keep the persisted values authoritative, and the pre-load buffer is
-			// never merged wholesale so stale temporary-id state or a cleared field cannot
-			// override the stable persisted state.
+			// Reapply the buffer fields that changed while the load was in flight,
+			// tracking the change instead of testing against undefined: a field cleared
+			// during the load window must stay cleared (the loaded value must not
+			// resurrect it), and a field written to a new value must win over it.
+			// Untouched fields keep the persisted values authoritative, and the
+			// pre-load buffer is never merged wholesale so stale temporary-id state
+			// cannot override the stable persisted state.
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
-			if (postLoadBuffer.mode !== preLoadBuffer.mode && postLoadBuffer.mode !== undefined) {
-				mergedState.mode = postLoadBuffer.mode
+			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
+				if (postLoadBuffer.mode === undefined) {
+					delete mergedState.mode
+				} else {
+					mergedState.mode = postLoadBuffer.mode
+				}
 			}
 
-			if (
-				postLoadBuffer.currentApiConfigName !== preLoadBuffer.currentApiConfigName &&
-				postLoadBuffer.currentApiConfigName !== undefined
-			) {
-				mergedState.currentApiConfigName = postLoadBuffer.currentApiConfigName
+			if (!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName)) {
+				if (postLoadBuffer.currentApiConfigName === undefined) {
+					delete mergedState.currentApiConfigName
+				} else {
+					mergedState.currentApiConfigName = postLoadBuffer.currentApiConfigName
+				}
 			}
 
-			if (
-				postLoadBuffer.apiConfiguration !== preLoadBuffer.apiConfiguration &&
-				postLoadBuffer.apiConfiguration !== undefined
-			) {
-				mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
+			if (!Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)) {
+				if (postLoadBuffer.apiConfiguration === undefined) {
+					delete mergedState.apiConfiguration
+				} else {
+					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
+				}
 			}
 
 			this.viewLocalState = mergedState
@@ -1791,8 +1800,13 @@ export class ClineProvider
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(message)).catch(() => {
+		void Promise.resolve(webview.postMessage(message)).catch((error) => {
 			// Swallow: postMessage rejects when the webview is disposed in flight.
+			// Log the dropped message type so a wedged webview channel is diagnosable
+			// instead of silently losing state updates.
+			this.log(
+				`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		})
 	}
 
@@ -2075,7 +2089,36 @@ export class ClineProvider
 			}
 		}
 
-		await this.updateGlobalState("mode", newMode)
+		// A cancelled or timed-out switch must not write the mode or emit
+		// ModeChanged: check the mutation signal right before the durable write.
+		if (signal?.aborted) {
+			return
+		}
+
+		// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
+		// buffer stays in sync with the durable global write: getValues() merges
+		// viewLocalState on top of the ContextProxy values, so an unsynced stale
+		// restored mode would otherwise shadow the fresh switch for consumers.
+		// If the durable write fails, roll the shared write back so getValues()
+		// cannot mix a fresh shared mode with the stale pre-switch buffer.
+		const previousMode = this.getValue("mode")
+		try {
+			await this.setValue("mode", newMode)
+		} catch (error) {
+			try {
+				await this.contextProxy.setValue("mode", previousMode)
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			this.log(
+				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
+			)
+			throw error
+		}
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
 
@@ -2233,7 +2276,17 @@ export class ClineProvider
 						this.setValue("currentApiConfigName", name),
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
+						// setProviderSettings writes the shared store directly, bypassing the
+						// view-local mutation path: also refresh this view's buffer so a stale
+						// loaded apiConfiguration cannot keep shadowing the new settings in
+						// getState().
+						this._saveViewLocalStateFromMutation(providerSettings),
 					])
+
+					// Other live views may have buffered this profile's settings earlier;
+					// refresh them so their getState() cannot report the updated profile's
+					// name with stale settings.
+					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 
 					// Change the provider for the current task.
 					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2272,18 +2325,43 @@ export class ClineProvider
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
-		// Write the other settings in one bulk call, then route the current-profile write
-		// through setValue so the in-memory viewLocalState buffer tracks the activated
-		// profile: a plain ContextProxy write would leave a stale loaded
-		// currentApiConfigName shadowing the new value in getValues().
-		const { currentApiConfigName: _previousApiConfigName, ...globalSettingsWithoutCurrent } = globalSettings
+		// Write only the profile list back: replaying the full settings snapshot
+		// captured above would also rewrite unrelated keys (including viewStates,
+		// which ClineProvider mutates directly in storage for concurrent views)
+		// with this view's stale cached copy.
+		await this.contextProxy.setValue("listApiConfigMeta", entries)
 
-		await this.contextProxy.setValues({
-			...globalSettingsWithoutCurrent,
-			listApiConfigMeta: entries,
-		})
+		// Resolve the surviving profile's settings so this view and any other
+		// live view still pinned to the deleted profile can be re-pinned with
+		// a matching configuration.
+		let survivingSettings: ProviderSettings | undefined
+		try {
+			const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
+				name: profileToActivate,
+			})
+			survivingSettings = settings as ProviderSettings
+		} catch (error) {
+			this.log(
+				`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		await this.setValue("currentApiConfigName", profileToActivate)
+
+		if (profileToDelete.name === globalSettings.currentApiConfigName && survivingSettings) {
+			// The deleted profile was the active one, so the shared provider keys
+			// and this view's buffer still carry its settings; replace both so
+			// getState() reports the surviving profile's configuration.
+			await this.contextProxy.setProviderSettings(survivingSettings)
+			await this._saveViewLocalStateFromMutation(survivingSettings)
+		}
+
+		// Re-pin other live views still buffered on the deleted profile: their
+		// buffer and durable viewStates entry would otherwise keep serving the
+		// deleted profile's name and configuration.
+		await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
 
 		await this.postStateToWebview()
 	}
@@ -2359,7 +2437,17 @@ export class ClineProvider
 				// currentApiConfigName shadowing the new value in getValues().
 				this.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
+				// setProviderSettings writes the shared store directly, bypassing the
+				// view-local mutation path: also refresh this view's buffer so a stale
+				// loaded apiConfiguration cannot keep shadowing the new settings in
+				// getState().
+				this._saveViewLocalStateFromMutation(providerSettings),
 			])
+
+			// Other live views may have buffered this profile's settings earlier;
+			// refresh them so their getState() cannot report the activated profile's
+			// name with stale settings.
+			await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 		}
 
 		const { mode } = await this.getState()
@@ -2384,6 +2472,70 @@ export class ClineProvider
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
 		}
+	}
+
+	/**
+	 * Refresh the view-local apiConfiguration buffer of the other live views
+	 * pinned to the given profile. An upsert/activation rewrites the profile's
+	 * settings in the shared store and the store-backed manager, but a view
+	 * whose buffer loaded the profile earlier keeps shadowing the stale
+	 * settings in its getState() until its own next mutation. The originating
+	 * view refreshes its buffer at the mutation site itself.
+	 */
+	private async refreshViewLocalStateForUpdatedProfile(
+		name: string,
+		providerSettings: ProviderSettings,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter(
+			(instance) => instance !== this && instance["viewLocalState"].currentApiConfigName === name,
+		)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				await instance["_saveViewLocalStateFromMutation"]({ apiConfiguration: providerSettings })
+				await instance.postStateToWebview()
+			}),
+		)
+	}
+
+	/**
+	 * Re-pin the other live views whose buffer still names a deleted profile:
+	 * without this their in-memory buffer and durable viewStates entry keep
+	 * serving the deleted profile's name and configuration on top of the
+	 * surviving shared state. Each affected view's durable entry is re-pinned
+	 * through the serialized write queue, so the rename survives reloads.
+	 */
+	private async rePinViewLocalStateForDeletedProfile(
+		deletedProfileName: string,
+		replacementName: string,
+		replacementSettings: ProviderSettings | undefined,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter(
+			(instance) => instance !== this && instance["viewLocalState"].currentApiConfigName === deletedProfileName,
+		)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
+					currentApiConfigName: replacementName,
+				}
+
+				if (replacementSettings) {
+					values.apiConfiguration = replacementSettings
+				}
+
+				await instance["_saveViewLocalStateFromMutation"](values)
+				await instance.postStateToWebview()
+			}),
+		)
 	}
 
 	async updateCustomInstructions(instructions?: string) {

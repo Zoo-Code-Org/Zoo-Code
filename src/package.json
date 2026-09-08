@@ -289,19 +289,19 @@
 			"commandPalette": [
 				{
 					"command": "zoo-code.plusButtonClickedInTab",
-					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+					"when": "false"
 				},
 				{
 					"command": "zoo-code.settingsButtonClickedInTab",
-					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+					"when": "false"
 				},
 				{
 					"command": "zoo-code.marketplaceButtonClickedInTab",
-					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+					"when": "false"
 				},
 				{
 					"command": "zoo-code.historyButtonClickedInTab",
-					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+					"when": "false"
 				}
 			]
 		},
