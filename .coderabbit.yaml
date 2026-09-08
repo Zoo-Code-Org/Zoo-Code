@@ -146,17 +146,19 @@ reviews:
 
     pre_merge_checks:
         override_requested_reviewers_only: true
+        # Warning failures are mergeable but prevent CodeRabbit's automatic approval.
+        # Keep only intentional blocking gates enabled so approval matches enforcement.
         docstrings:
             mode: off
         title:
-            mode: warning
+            mode: off
         description:
-            mode: warning
+            mode: off
         issue_assessment:
-            mode: warning
+            mode: off
         custom_checks:
             - name: Regression evidence
-              mode: warning
+              mode: error
               instructions: >-
                   Fail only when a concrete changed behavior lacks focused coverage at the lowest valid
                   test layer, tests merely mirror implementation, an affected error/negative/unset branch
