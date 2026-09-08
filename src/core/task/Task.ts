@@ -141,7 +141,22 @@ const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
-const MAX_AUTO_APPROVAL_RETRIES = 3 // Bounds the auto-approval retry loop (persistent API errors, e.g. HTTP 429)
+// Bounds the auto-approval retry loop for persistent API errors (e.g. HTTP 429 fair usage).
+// Applied at both boundaries: first-chunk failures inside attemptApiRequest, and the
+// streaming_failed re-push loop in recursivelyMakeClineRequests. Does not govern mid-stream
+// retries when auto-approval is disabled (those re-push without backoff, upstream behavior).
+const MAX_AUTO_APPROVAL_RETRIES = 3
+
+// Terminal signal that the auto-approval retry cap is spent. Thrown by attemptApiRequest on
+// first-chunk failures; the streaming_failed handler in recursivelyMakeClineRequests must
+// honor it instead of re-pushing — attemptApiRequest only checks the cap after an error
+// occurs, so a re-push would issue another full API request and loop forever.
+export class ApiRetryCapExceededError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ApiRetryCapExceededError"
+	}
+}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -3297,6 +3312,35 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
 							const stateForBackoff = await this.providerRef.deref()?.getState()
+
+							// Terminal — auto-approval retry cap spent (roo-extensions#3195). Stop loudly
+							// instead of re-pushing: attemptApiRequest checks the cap only after an error,
+							// so every re-push would issue another full API request and the loop would
+							// never end. ApiRetryCapExceededError comes from the first-chunk path (only
+							// thrown with auto-approval on, so it stays terminal even if the toggle was
+							// flipped mid-flight); the retryAttempt check bounds mid-stream failures,
+							// which re-enter here directly with the counter already at the cap.
+							if (
+								error instanceof ApiRetryCapExceededError ||
+								(stateForBackoff?.autoApprovalEnabled &&
+									(currentItem.retryAttempt ?? 0) >= MAX_AUTO_APPROVAL_RETRIES)
+							) {
+								const capMessage =
+									error instanceof ApiRetryCapExceededError
+										? error.message
+										: `[Task#recursivelyMakeClineRequests] task ${this.taskId}.${this.instanceId} aborted after ` +
+											`${MAX_AUTO_APPROVAL_RETRIES} mid-stream auto-approval retries — persistent API error ` +
+											`(last: ${rawErrorMessage}). Retry loop capped (roo-extensions#3195).`
+								await this.say("error", capMessage)
+								this.abortReason = "streaming_failed"
+								await this.abortTask()
+								// Re-throw into the loop's outer catch so the parent sees
+								// didEndLoop=true — a bare `break` exits the stack loop and
+								// reports "completed normally" (return false) for what is a
+								// task-level terminal stop.
+								throw error instanceof ApiRetryCapExceededError ? error : new Error(capMessage)
+							}
+
 							if (stateForBackoff?.autoApprovalEnabled) {
 								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
 
@@ -4431,9 +4475,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// attempt is charged against the account and postpones recovery. Stop loudly instead of
 				// recursing until abort.
 				if (retryAttempt >= MAX_AUTO_APPROVAL_RETRIES) {
-					throw new Error(
-						`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted after ` +
-							`${MAX_AUTO_APPROVAL_RETRIES} auto-approval retries — persistent API error ` +
+					// Context-window errors fall through to this branch once their own retries are
+					// spent — name that cause instead of blaming the auto-approval cap.
+					const cause = isContextWindowExceededError
+						? `context window retries exhausted (${MAX_CONTEXT_WINDOW_RETRIES}) — truncation did not make the request fit`
+						: `persistent API error after ${MAX_AUTO_APPROVAL_RETRIES} auto-approval retries`
+					throw new ApiRetryCapExceededError(
+						`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted — ${cause} ` +
 							`(last: ${error.message ?? JSON.stringify(serializeError(error))}). Retry loop capped (roo-extensions#3195).`,
 					)
 				}
