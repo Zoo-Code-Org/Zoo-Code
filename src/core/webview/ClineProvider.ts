@@ -4541,9 +4541,10 @@ export class ClineProvider
 			savedProfile: savedProfile ? { name: savedProfile.name, id: savedProfile.id } : undefined,
 		})
 
+		const selectedProfile = decision.source === "saved" ? savedProfile : snapshot.currentProfile
 		let apiConfiguration: ProviderSettings
-		if (savedProfile) {
-			const { name: _savedProfileName, id: _savedProfileId, ...profileSettings } = savedProfile
+		if (selectedProfile) {
+			const { name: _selectedProfileName, id: _selectedProfileId, ...profileSettings } = selectedProfile
 			apiConfiguration = structuredClone(profileSettings)
 		} else {
 			apiConfiguration = structuredClone(this.contextProxy.getProviderSettings())

@@ -8,6 +8,7 @@ describe("pendingHandoffSchema", () => {
 		expect(
 			pendingHandoffSchema.safeParse({ kind: "preserve", version: 1, mode: "code", profileName: " " }).success,
 		).toBe(true)
+		expect(pendingHandoffSchema.safeParse({ kind: "preserve", version: 1, mode: "code" }).success).toBe(true)
 	})
 })
 

@@ -66,7 +66,7 @@ Each transition holds an opaque owner token for its parent. Paths that run while
 
 Production order is prepare-before-remove.
 
-While the parent is still the current task, handoff preparation is read-only. It runs off the provider profile mutation queue. Preparation captures the requested mode, an explicit profile projection intent (`preserve | set{name} | clear`), and a deep-cloned API configuration into one context. It performs zero writes. A hung or timed-out queued mutation can never block delegation preparation.
+While the parent is still the current task, handoff preparation is read-only. It runs off the provider profile mutation queue. One locked profile-store snapshot captures the current profile and the requested mode's saved profile. The handoff decision selects both the exact profile identity and its deep-cloned API configuration from that snapshot. Preparation also captures the requested mode and explicit profile projection intent (`preserve | set{name} | clear`). It performs zero writes. A hung or timed-out queued mutation can never block delegation preparation.
 
 If preparation rejects, delegation aborts fail-closed. The parent stays current.
 

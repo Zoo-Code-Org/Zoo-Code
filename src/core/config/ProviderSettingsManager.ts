@@ -41,6 +41,7 @@ export interface SyncCloudProfilesResult {
  */
 export interface ProviderProfileSnapshot {
 	currentApiConfigName: string | undefined
+	currentProfile: (ProviderSettingsWithId & { name: string }) | undefined
 	entries: ProviderSettingsEntry[]
 	modeApiConfigId: string | undefined
 	savedProfile: (ProviderSettingsWithId & { name: string }) | undefined
@@ -550,6 +551,14 @@ export class ProviderSettingsManager {
 				)
 
 				const modeApiConfigId = providerProfiles.modeApiConfigs?.[mode]
+				const currentProfile = providerProfiles.currentApiConfigName
+					? providerProfiles.apiConfigs[providerProfiles.currentApiConfigName]
+						? structuredClone({
+								name: providerProfiles.currentApiConfigName,
+								...providerProfiles.apiConfigs[providerProfiles.currentApiConfigName],
+							})
+						: undefined
+					: undefined
 
 				let savedProfile: (ProviderSettingsWithId & { name: string }) | undefined
 				if (modeApiConfigId) {
@@ -565,6 +574,7 @@ export class ProviderSettingsManager {
 
 				return {
 					currentApiConfigName: providerProfiles.currentApiConfigName,
+					currentProfile,
 					entries,
 					modeApiConfigId,
 					savedProfile,

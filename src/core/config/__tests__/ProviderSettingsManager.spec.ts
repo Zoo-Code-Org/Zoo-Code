@@ -1549,6 +1549,11 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 
 			expect(snapshot.currentApiConfigName).toBe("current-profile")
+			expect(snapshot.currentProfile).toMatchObject({
+				name: "current-profile",
+				id: "current-id",
+				apiProvider: providerIdentifiers.openai,
+			})
 			expect(snapshot.modeApiConfigId).toBe("ask-id")
 			expect(snapshot.entries.map(({ name, id, apiProvider }) => ({ name, id, apiProvider }))).toEqual([
 				{ name: "current-profile", id: "current-id", apiProvider: providerIdentifiers.openai },
@@ -1588,6 +1593,11 @@ describe("ProviderSettingsManager", () => {
 
 			expect(snapshot.modeApiConfigId).toBeUndefined()
 			expect(snapshot.savedProfile).toBeUndefined()
+			expect(snapshot.currentProfile).toMatchObject({
+				name: "current-profile",
+				id: "current-id",
+				apiProvider: providerIdentifiers.openai,
+			})
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 

@@ -292,6 +292,12 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}),
 			snapshotForHandoff: vi.fn().mockResolvedValue({
 				currentApiConfigName: "test-config",
+				currentProfile: {
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
 				entries: [
 					{
 						name: "test-config",
@@ -1181,6 +1187,12 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			provider["providerSettingsManager"].snapshotForHandoff = vi.fn().mockResolvedValue({
 				currentApiConfigName: "test-config",
+				currentProfile: {
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
 				entries: [{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }],
 				modeApiConfigId: "ask-id",
 				savedProfile: {
@@ -1249,6 +1261,26 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const { createTaskSpy } = await setupSoleParentDelegation()
 
 			vi.mocked(mockContext.workspaceState.get).mockReturnValue(true)
+			provider["providerSettingsManager"].snapshotForHandoff = vi.fn().mockResolvedValue({
+				currentApiConfigName: "test-config",
+				currentProfile: {
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.openai,
+					openAiApiKey: "sk-current-profile",
+				},
+				entries: [
+					{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.openai },
+					{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				modeApiConfigId: "ask-id",
+				savedProfile: {
+					name: "ask-profile",
+					id: "ask-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "sk-saved-profile",
+				},
+			})
 			vi.mocked(mockContext.globalState.update).mockClear()
 
 			await provider.delegateParentAndOpenChild({
@@ -1270,10 +1302,12 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					apiConfigName: "test-config",
 				},
 			})
-			// Locked: the child continues with the current context configuration.
-			expect(creationOptions.handoffExecutionContext?.apiConfiguration).toEqual(
-				provider.contextProxy.getProviderSettings(),
-			)
+			// Locked: the child receives the same durable profile identity and
+			// configuration from one snapshot, not the requested mode's saved profile.
+			expect(creationOptions.handoffExecutionContext?.apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openai,
+				openAiApiKey: "sk-current-profile",
+			})
 
 			// A locked handoff carries an explicit preserve intent: no profile
 			// write at all — and with the pin engaged there is no mode mapping
@@ -1384,6 +1418,12 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const sentinel = "sk-handoff-sentinel-246810"
 			provider["providerSettingsManager"].snapshotForHandoff = vi.fn().mockResolvedValue({
 				currentApiConfigName: "test-config",
+				currentProfile: {
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
 				entries: [{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }],
 				modeApiConfigId: "ask-id",
 				savedProfile: {

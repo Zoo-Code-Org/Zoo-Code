@@ -67,6 +67,9 @@ function snapshotForHandoff(world: SharedWorld) {
 		}
 		return {
 			currentApiConfigName: store.currentApiConfigName,
+			currentProfile: store.currentApiConfigName
+				? structuredClone({ name: store.currentApiConfigName, ...store.profiles[store.currentApiConfigName] })
+				: undefined,
 			entries: structuredClone(store.entries),
 			modeApiConfigId,
 			savedProfile,
