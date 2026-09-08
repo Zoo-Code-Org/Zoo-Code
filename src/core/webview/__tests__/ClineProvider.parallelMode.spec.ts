@@ -711,8 +711,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const pruned = provider["prunePersistedViewStates"](states)
 
 			expect(Object.keys(pruned)).toHaveLength(50)
-			expect(pruned["view-0"]).toBeDefined()
-			expect(pruned["view-49"]).toBeDefined()
+			expect(pruned["view-0"]).toEqual({ mode: "mode-0", updatedAt: 1 })
+			expect(pruned["view-49"]).toEqual({ mode: "mode-49", updatedAt: 1 })
 			expect(pruned["view-50"]).toBeUndefined()
 
 			await provider.dispose()
@@ -725,11 +725,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider["setViewStateId"]("tab-to-preserve")
 			await provider.saveViewState("mode", "architect")
-			expect(provider.contextProxy.getValue("viewStates")).toHaveProperty("tab-to-preserve")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"tab-to-preserve": { mode: "architect" },
+			})
 
 			await provider.dispose()
 
-			expect(provider.contextProxy.getValue("viewStates")).toHaveProperty("tab-to-preserve")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"tab-to-preserve": { mode: "architect" },
+			})
 		})
 	})
 })

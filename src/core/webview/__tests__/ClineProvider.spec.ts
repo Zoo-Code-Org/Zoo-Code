@@ -2127,7 +2127,9 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+	})
 
+	describe("persisted view state", () => {
 		it("should persist setValue mutations for view-local mode", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
