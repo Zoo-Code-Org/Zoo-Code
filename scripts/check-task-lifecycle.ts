@@ -128,6 +128,10 @@ function transitions(state: ModelState): Transition[] {
 		const parent = state.tasks[parentId]
 		if (!parent) continue
 
+		// A parent marked live-elsewhere is owned by another window; window-local
+		// delegation from it would race that window's own lifecycle operations.
+		if (state.liveElsewhere[parentId]) continue
+
 		for (const childId of taskIds) {
 			if (childId === parentId || state.tasks[childId]) continue
 			const awaitedStatus = parent.awaitingChildId

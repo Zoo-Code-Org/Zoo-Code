@@ -571,6 +571,18 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Mark a task id as owned by a live session in THIS window before its first
+	 * runtime write settles. Resumed tasks only enter `locallyActiveTaskIds` via
+	 * `trackLocalSessionOwnership` when Task.run() persists an active item; the
+	 * async gap before that write lets the periodic delegation pass see the task
+	 * as a quiet, unowned disk record and repair it mid-resume. Registering the
+	 * id eagerly closes that window; a later non-active write still removes it.
+	 */
+	public markLocallyActive(taskId: string): void {
+		this.locallyActiveTaskIds.add(taskId)
+	}
+
+	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side
 	 * when the other side is already at its target, or when both records still
@@ -619,7 +631,9 @@ export class TaskHistoryStore {
 			// intent would overwrite the live child as "interrupted", so quarantine it instead.
 			// Only enforced when the replay would actually write the child record: a child
 			// already at its target needs no write, and parent-only completion must not be
-			// blocked by child liveness. An unreadable mtime conservatively proceeds.
+			// blocked by child liveness. Only a genuinely missing (ENOENT) history file
+			// proceeds; a transient stat failure is treated as evidence of life (see
+			// `getChildFileMtimeMs`) and lets a later tick retry.
 			if (!childAtTarget) {
 				const mtimeMs = await this.getChildFileMtimeMs(child.id)
 				const isLiveElsewhere =
@@ -1231,16 +1245,26 @@ export class TaskHistoryStore {
 
 	/**
 	 * Returns the mtime (ms epoch) of the child's history_item.json, or undefined
-	 * when unreadable. A recent mtime means another live extension host is actively
-	 * persisting this child, so startup repair must not treat it as a crash orphan.
+	 * only when the file is genuinely absent (ENOENT). A recent mtime means another
+	 * live extension host is actively persisting this child, so startup repair must
+	 * not treat it as a crash orphan. Any OTHER stat failure (EMFILE, EACCES, EIO,
+	 * ...) is not evidence of absence: the child is reported with a future mtime so
+	 * every `Date.now() - mtimeMs < threshold` liveness guard holds, repair is
+	 * skipped, and a later reconciliation tick retries instead.
 	 */
 	private async getChildFileMtimeMs(childId: string): Promise<number | undefined> {
 		try {
 			const filePath = await this.getTaskFilePath(childId)
 			const stat = await fs.stat(filePath)
 			return stat.mtimeMs
-		} catch {
-			return undefined // File missing/unreadable → conservatively proceed with repair
+		} catch (error) {
+			// ENOENT: the file is genuinely absent → no window is persisting it;
+			// conservatively proceed with repair. Any other stat failure is treated
+			// as evidence of life via a threshold-shifted future timestamp.
+			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+				return undefined
+			}
+			return Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
 		}
 	}
 }
