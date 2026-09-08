@@ -95,7 +95,13 @@ describe("Task.buildCleanConversationHistory: encrypted reasoning first block", 
 		// `summary` must be `[]` (mutants: `??`→`&&` produces `undefined`;
 		// array-declaration produces a placeholder), and no `id` key at all
 		// (ObjectLiteral mutant on the conditional spread would add one).
-		expect(buildHistory(task, messages)).toEqual([
+		// `toEqual` ignores `undefined`-valued keys, so the key-absence claim is
+		// pinned separately via `not.toHaveProperty` — a mutant that flattens the
+		// conditional spread to an unconditional `id: encryptedReasoning.id`
+		// would pass the deep-equal but fails the property check.
+		const history = buildHistory(task, messages)
+		expect(history[0]).not.toHaveProperty("id")
+		expect(history).toEqual([
 			{ type: "reasoning", summary: [], encrypted_content: "enc-2" },
 			{
 				role: "assistant",
@@ -113,7 +119,11 @@ describe("Task.buildCleanConversationHistory: encrypted reasoning first block", 
 			asApiMessage({ role: "assistant", content: [{ type: "reasoning", encrypted_content: "enc-3" }] }),
 		]
 
-		expect(buildHistory(task, messages)).toEqual([
+		// Same id-absence pin as above: the conditionally-spread `id` must not
+		// appear as an `undefined`-valued key that `toEqual` would ignore.
+		const history = buildHistory(task, messages)
+		expect(history[0]).not.toHaveProperty("id")
+		expect(history).toEqual([
 			{ type: "reasoning", summary: [], encrypted_content: "enc-3" },
 			{ role: "assistant", content: "" },
 		])
@@ -265,6 +275,10 @@ describe("Task.buildCleanConversationHistory: standalone reasoning messages", ()
 		const task = buildTask()
 		const history = buildHistory(task, [asApiMessage({ type: "reasoning", encrypted_content: "enc" })])
 
+		// Key absence must be pinned explicitly: `toEqual` treats `{ id: undefined }`
+		// as equal to `{}`, so the standalone item's `...(msg.id ? { id: msg.id } : {})`
+		// spread needs the property check to kill an unconditional-spread mutant.
+		expect(history[0]).not.toHaveProperty("id")
 		expect(history).toEqual([{ type: "reasoning", encrypted_content: "enc" }])
 	})
 })

@@ -178,15 +178,13 @@ function scheduleTask(
 	run: () => Promise<void> = () => task.run(),
 	onScheduleFailure?: (error: unknown) => void,
 ): void {
-	void scheduler
-		.schedule(task, run)
-		.catch((error) => {
-			console.error(`[${source}] taskScheduler.schedule failed:`, error)
-			// Fire-and-forget stays fire-and-forget; the optional hook lets the
-			// caller roll back state that was claimed before scheduling (e.g. the
-			// eager markLocallyActive claim in createTaskWithHistoryItemUnlocked).
-			onScheduleFailure?.(error)
-		})
+	void scheduler.schedule(task, run).catch((error) => {
+		console.error(`[${source}] taskScheduler.schedule failed:`, error)
+		// Fire-and-forget stays fire-and-forget; the optional hook lets the
+		// caller roll back state that was claimed before scheduling (e.g. the
+		// eager markLocallyActive claim in createTaskWithHistoryItemUnlocked).
+		onScheduleFailure?.(error)
+	})
 }
 
 type GetStateOptions = {
@@ -1453,7 +1451,7 @@ export class ClineProvider
 				)
 
 				if (options?.startTask !== false) {
-					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", () =>
+					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, () =>
 						this.taskHistoryStore.markLocallyInactive(task.taskId),
 					)
 				}
@@ -1465,7 +1463,7 @@ export class ClineProvider
 				)
 
 				if (options?.startTask !== false) {
-					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", () =>
+					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, () =>
 						this.taskHistoryStore.markLocallyInactive(task.taskId),
 					)
 				}
@@ -4031,20 +4029,6 @@ export class ClineProvider
 				}`,
 			)
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
-		}
-
-		// 3) Switch provider mode to child's requested mode BEFORE creating the child
-		// task. Delegation never mutates shared profile/global state, but the mode
-		// switch must happen before createTask() because the Task constructor
-		// initializes its mode from provider.getState() during initializeTaskMode().
-		try {
-			await this.handleModeSwitch(mode)
-		} catch (e) {
-			this.log(
-				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
-					(e as Error)?.message ?? String(e)
-				}`,
-			)
 		}
 
 		// 4) Create child as sole active, bound to the delegating task's local
