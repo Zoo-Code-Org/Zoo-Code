@@ -285,26 +285,26 @@
 					"group": "overflow@2",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
 				}
+			],
+			"commandPalette": [
+				{
+					"command": "zoo-code.plusButtonClickedInTab",
+					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				},
+				{
+					"command": "zoo-code.settingsButtonClickedInTab",
+					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				},
+				{
+					"command": "zoo-code.marketplaceButtonClickedInTab",
+					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				},
+				{
+					"command": "zoo-code.historyButtonClickedInTab",
+					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				}
 			]
 		},
-		"commandPalette": [
-			{
-				"command": "zoo-code.plusButtonClickedInTab",
-				"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-			},
-			{
-				"command": "zoo-code.settingsButtonClickedInTab",
-				"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-			},
-			{
-				"command": "zoo-code.marketplaceButtonClickedInTab",
-				"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-			},
-			{
-				"command": "zoo-code.historyButtonClickedInTab",
-				"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-			}
-		],
 		"keybindings": [
 			{
 				"command": "zoo-code.addToContext",
