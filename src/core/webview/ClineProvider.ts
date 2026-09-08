@@ -343,6 +343,8 @@ export class ClineProvider
 	 * In-memory only; bounded by no-profile delegations in this session.
 	 */
 	private explicitProfileClearChildIds = new Set<string>()
+	/** Per-task durable clear reconstruction, including both true and false results. */
+	private durableProfileClearByTaskId = new Map<string, Promise<boolean>>()
 
 	/**
 	 * Completion hook for the most recent background handoff projection.
@@ -350,6 +352,15 @@ export class ClineProvider
 	 * the projection outcome without polling or sleeps.
 	 */
 	private providerHandoffProjectionCompletion?: Promise<ProviderHandoffProjectionOutcome>
+
+	/**
+	 * Completion hook for the most recent background child-WAL finalization
+	 * (the post-commit pending-handoff marker strip). Deterministic
+	 * test/observability access: awaiting this promise observes settlement
+	 * without polling or sleeps. A strip that never settles keeps this
+	 * promise pending forever without affecting the delegation.
+	 */
+	private providerHandoffFinalizationCompletion?: Promise<void>
 
 	/**
 	 * Protocol bookkeeping for the delegation in flight, advanced at semantic
@@ -481,6 +492,9 @@ export class ClineProvider
 				if (admittedGeneration === undefined) {
 					return
 				}
+				// A successful profile mutation can change the durable identity.
+				// Force later publications to reconstruct it once for their task.
+				this.durableProfileClearByTaskId.clear()
 				this.providerProfileMutationSettledGeneration = admittedGeneration
 				this.supersedeStaleProviderHandoffProjection(admittedGeneration)
 			},
@@ -752,10 +766,15 @@ export class ClineProvider
 		if (currentTask?.taskId !== currentTaskId || currentTask.taskApiConfigName !== undefined) {
 			return false
 		}
-		const durableIdentity = await this.providerSettingsManager
-			.getCurrentProfileName()
-			.catch(() => "unreadable" as const)
-		return durableIdentity === undefined
+		let durableClear = this.durableProfileClearByTaskId.get(currentTaskId)
+		if (!durableClear) {
+			durableClear = this.providerSettingsManager
+				.getCurrentProfileName()
+				.then((durableIdentity) => durableIdentity === undefined)
+				.catch(() => false)
+			this.durableProfileClearByTaskId.set(currentTaskId, durableClear)
+		}
+		return durableClear
 	}
 
 	/**
@@ -779,6 +798,7 @@ export class ClineProvider
 	 */
 	private invalidateProviderHandoffProjectionState(childTaskId: string): void {
 		this.explicitProfileClearChildIds.delete(childTaskId)
+		this.durableProfileClearByTaskId.delete(childTaskId)
 		this.providerHandoffProjectionTargets?.delete(childTaskId)
 		const marker = this.staleProviderHandoffProjection
 		if (marker?.childTaskId === childTaskId) {
@@ -5301,30 +5321,38 @@ export class ClineProvider
 			this.explicitProfileClearChildIds.add(child.taskId)
 		}
 
-		// 7.5) Best-effort finalization: the delegation is durable and the
-		//      child's in-memory context is authoritative, so the write-ahead
-		//      marker is no longer needed. A failed strip is non-fatal —
-		//      restart reconciliation replays it for committed children.
-		try {
-			await this.taskHistoryStore.atomicReadAndUpdate(child.taskId, (historyItem) => ({
+		// 7.5) Start the child task immediately: the durable delegation is
+		//      committed and the child's execution context is authoritative, so
+		//      the child must never await marker finalization or the legacy
+		//      projection.
+		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
+		handoffProtocol.advance({ type: "start-child" })
+
+		// 8) Best-effort finalization as handled background work, started only
+		//    after the child is scheduled: the write-ahead marker is no longer
+		//    needed once the delegation is durable and the child's in-memory
+		//    context is authoritative. Store-lock contention, storage delay,
+		//    write-through callbacks, or a strip that never settles can never
+		//    block scheduling or this method's completion. A rejected strip is
+		//    logged and the marker is left for restart reconciliation.
+		const finalizeCompletion = this.taskHistoryStore
+			.atomicReadAndUpdate(child.taskId, (historyItem) => ({
 				...historyItem,
 				pendingHandoff: undefined,
 			}))
-			handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
-		} catch (finalizeError) {
-			handoffProtocol.advance({ type: "finalize-child-wal", ok: false })
-			this.log(
-				`[delegateParentAndOpenChild] Pending handoff marker for child ${child.taskId} left for restart replay: ${
-					(finalizeError as Error)?.message ?? String(finalizeError)
-				}`,
-			)
-		}
-
-		// 8) Start the child task immediately: the durable delegation is
-		//    committed and the child's execution context is authoritative, so
-		//    the child must never await the legacy projection.
-		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
-		handoffProtocol.advance({ type: "start-child" })
+			.then(() => {
+				handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
+			})
+			.catch((finalizeError) => {
+				handoffProtocol.advance({ type: "finalize-child-wal", ok: false })
+				this.log(
+					`[delegateParentAndOpenChild] Pending handoff marker for child ${child.taskId} left for restart replay: ${
+						(finalizeError as Error)?.message ?? String(finalizeError)
+					}`,
+				)
+			})
+		this.providerHandoffFinalizationCompletion = finalizeCompletion
+		void finalizeCompletion
 
 		// 9) Best-effort legacy projection of the prepared context onto global
 		//    state and the durable profile store — fire-and-forget background

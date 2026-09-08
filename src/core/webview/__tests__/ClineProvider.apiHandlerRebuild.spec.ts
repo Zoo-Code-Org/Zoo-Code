@@ -105,15 +105,17 @@ vi.mock("../../task/Task", () => ({
 	isCompleteTaskHandoffExecutionContext: (execution: unknown) => {
 		const candidate = execution as
 			| { mode?: unknown; apiConfigName?: unknown; apiConfiguration?: unknown }
+			| null
 			| undefined
 		return (
+			candidate !== null &&
 			candidate !== undefined &&
 			typeof candidate === "object" &&
 			typeof candidate.mode === "string" &&
 			candidate.mode.length > 0 &&
-			typeof candidate.apiConfigName === "string" &&
-			candidate.apiConfigName.length > 0 &&
-			candidate.apiConfiguration !== undefined
+			(candidate.apiConfigName === undefined || typeof candidate.apiConfigName === "string") &&
+			typeof candidate.apiConfiguration === "object" &&
+			candidate.apiConfiguration !== null
 		)
 	},
 	Task: vi.fn().mockImplementation(function (options) {

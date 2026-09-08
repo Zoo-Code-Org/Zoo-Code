@@ -98,13 +98,17 @@ export type ProviderHandoffProfileIntent =
  * Derive the explicit projection intent from a prepared profile decision.
  * A named profile projects as `set` — except under workspace profile locking,
  * where the identity is user-pinned and the projection must not rewrite it
- * (`preserve`). A profile without a name is an explicit `clear`.
+ * (`preserve`). A profile without a usable name (absent or empty string) is an
+ * explicit `clear`: an empty name carries no durable identity, and a `set`
+ * marker with an empty profile name would be rejected by
+ * `isValidPendingHandoff` and by the persisted schema. Names are exact
+ * identities, so a whitespace-only name stays a `set` intent.
  */
 export function deriveProviderHandoffProfileIntent(profile: {
 	source: ProviderHandoffProfileDecision["source"]
 	name: string | undefined
 }): ProviderHandoffProfileIntent {
-	if (profile.name === undefined) return { kind: "clear" }
+	if (!profile.name) return { kind: "clear" }
 	if (profile.source === "locked-current") return { kind: "preserve" }
 	return { kind: "set", name: profile.name }
 }
@@ -184,7 +188,7 @@ export function isValidPendingHandoff(value: unknown): value is PendingHandoff {
 	if (!value || typeof value !== "object") return false
 	const candidate = value as Record<string, unknown>
 	if (candidate.version !== PENDING_HANDOFF_VERSION) return false
-	if (typeof candidate.mode !== "string") return false
+	if (typeof candidate.mode !== "string" || candidate.mode.length === 0) return false
 	switch (candidate.kind) {
 		case "set":
 			return typeof candidate.profileName === "string" && candidate.profileName.length > 0
@@ -396,8 +400,10 @@ export interface ProviderHandoffState {
 	 * Durability of the child-side write-ahead handoff record. The
 	 * delegation commit is legal only once the child's pending-handoff
 	 * record is durable ("durable"); "finalized"/"finalize-failed" record
-	 * the best-effort post-commit marker strip (restart replay covers a
-	 * failure).
+	 * the best-effort post-commit marker strip, which production starts as
+	 * background work after the child is scheduled. "durable" persisting
+	 * after activation means the strip has not settled yet; restart replay
+	 * covers a failed or never-settling strip.
 	 */
 	readonly childWal: "none" | "durable" | "finalized" | "finalize-failed"
 	readonly projection: ProviderHandoffProjectionState
@@ -424,8 +430,10 @@ export type ProviderHandoffEvent =
 	| { type: "commit-delegation" }
 	| { type: "commit-failed" }
 	/**
-	 * Best-effort post-commit strip of the child's pending-handoff marker. A
-	 * failure is non-fatal: restart reconciliation replays the strip.
+	 * Best-effort background strip of the child's pending-handoff marker,
+	 * started after the child is scheduled. It may settle before or after
+	 * the child started. A failure is non-fatal: restart reconciliation
+	 * replays the strip.
 	 */
 	| { type: "finalize-child-wal"; ok: boolean }
 	| {
@@ -611,12 +619,16 @@ export function applyProviderHandoffEvent(
 			if (event.generation !== state.generation) return reject(state, "generation-mismatch")
 			return accept({ ...state, phase: "context-active", contextAuthority: "child" })
 		case "finalize-child-wal":
-			// Best-effort marker strip between activation and child start. A
-			// failure stays visible ("finalize-failed") and is replayed by the
-			// restart reconciliation; it never blocks the child from starting.
-			if (state.phase !== "context-active" || state.childWal !== "durable") {
+			// Best-effort background marker strip: production starts it after
+			// the child is scheduled, so it may settle while the protocol is
+			// still in context-active OR after the child already started
+			// (child-running). Single-shot either way. A failure stays visible
+			// ("finalize-failed") and is replayed by the restart
+			// reconciliation; it never blocks the child from starting.
+			if (state.phase !== "context-active" && state.phase !== "child-running") {
 				return reject(state, "unexpected-event")
 			}
+			if (state.childWal !== "durable") return reject(state, "unexpected-event")
 			return accept({ ...state, childWal: event.ok ? "finalized" : "finalize-failed" })
 		case "project-legacy":
 			// Legacy projection is background work: it may settle while the

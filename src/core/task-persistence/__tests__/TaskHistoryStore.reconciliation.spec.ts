@@ -1107,6 +1107,14 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 	})
 
 	it("leaves ambiguous WAL records untouched (fail-safe guards)", async () => {
+		const emptyMode = makeItem({
+			id: "wal-guard-empty-mode",
+			parentTaskId: "wal-guard-parent",
+			status: "active",
+			// Disk data can bypass the schema. Reconciliation must not delete a
+			// child when its current-version marker has no executable mode.
+			pendingHandoff: { kind: "clear", version: 1, mode: "" },
+		})
 		const unknownVersion = makeItem({
 			id: "wal-guard-version",
 			parentTaskId: "wal-guard-parent",
@@ -1144,6 +1152,7 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 		// the sweep must treat conservatively.
 		await seedItems([
 			makeItem({ id: "wal-guard-parent", status: "active" }),
+			emptyMode,
 			unknownVersion,
 			interruptedChild,
 			noParent,
@@ -1155,6 +1164,7 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 
 		// Every ambiguous record survives; nothing was deleted.
 		for (const id of [
+			"wal-guard-empty-mode",
 			"wal-guard-version",
 			"wal-guard-interrupted",
 			"wal-guard-orphan-root",

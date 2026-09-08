@@ -51,19 +51,21 @@ export const pendingHandoffSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("set"),
 		version: z.literal(1),
-		mode: z.string(),
-		profileName: z.string(),
+		mode: z.string().min(1),
+		// Parity with `isValidPendingHandoff`: a `set` marker without a
+		// durable identity must never parse as valid.
+		profileName: z.string().min(1),
 	}),
 	z.object({
 		kind: z.literal("preserve"),
 		version: z.literal(1),
-		mode: z.string(),
+		mode: z.string().min(1),
 		profileName: z.string().optional(),
 	}),
 	z.object({
 		kind: z.literal("clear"),
 		version: z.literal(1),
-		mode: z.string(),
+		mode: z.string().min(1),
 	}),
 ])
 

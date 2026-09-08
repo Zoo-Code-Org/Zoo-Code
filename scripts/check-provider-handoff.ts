@@ -214,21 +214,17 @@ function candidateEvents(ms: ModelState): Candidate[] {
 		case "delegation-committed":
 			return [{ name: "activate-context", event: { type: "activate-context", generation } }]
 		case "context-active": {
-			// Production finalizes the child's write-ahead marker (best-effort,
-			// both outcomes modeled) before the child starts, then starts the
-			// child immediately: the child must never await the legacy
-			// projection; the projection itself is fire-and-forget background
-			// work that may settle before OR after the child started. Both
-			// orders (and a projection that never completes before
-			// publication) are protocol states.
-			const candidates: Candidate[] = []
+			// Production schedules the child immediately after activation; the
+			// write-ahead marker strip and the legacy projection are both
+			// fire-and-forget background work that may settle before OR after
+			// the child started (or never settle before publication). All
+			// orders are protocol states.
+			const candidates: Candidate[] = [{ name: "start-child", event: { type: "start-child" } }]
 			if (p.childWal === "durable") {
 				candidates.push(
 					{ name: "finalize-child-wal:ok", event: { type: "finalize-child-wal", ok: true } },
 					{ name: "finalize-child-wal:fail", event: { type: "finalize-child-wal", ok: false } },
 				)
-			} else {
-				candidates.push({ name: "start-child", event: { type: "start-child" } })
 			}
 			if (p.projection === "original") {
 				candidates.push(
@@ -249,9 +245,18 @@ function candidateEvents(ms: ModelState): Candidate[] {
 			return candidates
 		}
 		case "child-running": {
-			// A projection still unresolved when the child started may settle
-			// while the child runs; publication is policy-gated and independent.
+			// A marker strip or projection still unresolved when the child
+			// started may settle while the child runs; publication is
+			// policy-gated and independent.
 			const candidates: Candidate[] = [{ name: "publish", event: { type: "publish" } }]
+			if (p.childWal === "durable") {
+				// The background marker strip may settle (either outcome) after
+				// the child started, or never settle before publication.
+				candidates.push(
+					{ name: "finalize-child-wal:ok", event: { type: "finalize-child-wal", ok: true } },
+					{ name: "finalize-child-wal:fail", event: { type: "finalize-child-wal", ok: false } },
+				)
+			}
 			if (p.projection === "original") {
 				candidates.push(
 					{
@@ -599,11 +604,17 @@ function violations(ms: ModelState): string[] {
 		if (p.projection === "original" && e.projectionWriteStarted) {
 			found.push("a started projection write vanished without settling")
 		}
-		// Production always attempts the best-effort marker strip between
-		// activation and child start, so a settled state has either finalized
-		// the marker or left it for restart reconciliation.
-		if (p.childWal !== "finalized" && p.childWal !== "finalize-failed") {
-			found.push("settled without finalizing the child write-ahead marker")
+		// Production starts the best-effort marker strip right after the
+		// child is scheduled, so a settled state has either finalized the
+		// marker or left it for restart reconciliation (a failed strip, or a
+		// background strip that never settled).
+		if (p.childWal !== "finalized" && p.childWal !== "finalize-failed" && p.childWal !== "durable") {
+			found.push("settled without starting the child write-ahead marker strip")
+		}
+		// A strip that never settled must have left the marker on disk for
+		// restart reconciliation.
+		if (p.childWal === "durable" && !e.childWalRecord) {
+			found.push("settled with an unresolved marker strip but no marker on disk for restart replay")
 		}
 		// A started-but-stale projection never overwrites a newer generation's
 		// publication: stale publication derives from the child's prepared
@@ -661,6 +672,12 @@ function landmarksOf(ms: ModelState): string[] {
 		// settlement or child start.
 		marks.push("settlement:wal-restart-replay")
 	}
+	if (e.childStarted && p.childWal === "durable" && (p.phase === "child-running" || p.phase === "settled")) {
+		// The child was scheduled before the marker strip settled (or the
+		// strip never settled): finalization is background work and the
+		// marker remains for restart reconciliation.
+		marks.push("start:wal-finalize-pending")
+	}
 	if (p.failure?.boundary === "delegation-commit" && p.failure.commitDurability === "uncommitted") {
 		marks.push("commit-ambiguity:observed-uncommitted")
 	}
@@ -709,6 +726,7 @@ const REQUIRED_LANDMARKS = [
 	"commit-ambiguity:observed-committed-settled",
 	"commit-ambiguity:incoherent-degraded",
 	"start:projection-unresolved",
+	"start:wal-finalize-pending",
 	"projection:preserve-pinned-identity",
 	"settlement:projection-still-original",
 	"wal:durable-before-commit",

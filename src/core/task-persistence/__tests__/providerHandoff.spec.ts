@@ -57,6 +57,12 @@ describe("provider handoff contract", () => {
 		expect(deriveProviderHandoffProfileIntent({ source: "locked-current", name: undefined })).toEqual({
 			kind: "clear",
 		})
+		// An empty name carries no durable identity: it is a clear, never a
+		// `set` marker that `isValidPendingHandoff` would reject.
+		expect(deriveProviderHandoffProfileIntent({ source: "saved", name: "" })).toEqual({ kind: "clear" })
+		expect(deriveProviderHandoffProfileIntent({ source: "locked-current", name: "" })).toEqual({ kind: "clear" })
+		// Names are exact identities: a whitespace-only name stays a set.
+		expect(deriveProviderHandoffProfileIntent({ source: "saved", name: " " })).toEqual({ kind: "set", name: " " })
 	})
 
 	it("carries the derived intent on the prepared context", () => {
@@ -97,6 +103,26 @@ describe("provider handoff contract", () => {
 				}),
 			}),
 		).toEqual({ kind: "clear", version: 1, mode: "code" })
+		// An empty profile name can never produce a `set` marker.
+		expect(
+			createPendingHandoffMarker({
+				prepared: createPreparedProviderHandoffContext({
+					requestedMode: "code",
+					profile: { source: "saved", name: "", id: "empty-id" },
+					...base,
+				}),
+			}),
+		).toEqual({ kind: "clear", version: 1, mode: "code" })
+		// A whitespace-only name is a durable identity exactly as given.
+		expect(
+			createPendingHandoffMarker({
+				prepared: createPreparedProviderHandoffContext({
+					requestedMode: "code",
+					profile: { source: "saved", name: " ", id: "space-id" },
+					...base,
+				}),
+			}),
+		).toEqual({ kind: "set", version: 1, mode: "code", profileName: " " })
 		// The marker never carries configuration or secret-shaped fields.
 		const marker = createPendingHandoffMarker({
 			prepared: createPreparedProviderHandoffContext({
@@ -117,8 +143,11 @@ describe("provider handoff contract", () => {
 		// Unknown version: fail safe, leave untouched.
 		expect(isValidPendingHandoff({ kind: "clear", version: 2, mode: "code" })).toBe(false)
 		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code" })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code", profileName: "" })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "set", version: 1, mode: "code", profileName: " " })).toBe(true)
 		expect(isValidPendingHandoff({ kind: "unknown", version: 1, mode: "code" })).toBe(false)
 		expect(isValidPendingHandoff({ kind: "clear", version: 1 })).toBe(false)
+		expect(isValidPendingHandoff({ kind: "clear", version: 1, mode: "" })).toBe(false)
 		expect(isValidPendingHandoff(null)).toBe(false)
 		expect(isValidPendingHandoff("clear")).toBe(false)
 	})
@@ -837,6 +866,29 @@ describe("provider handoff transaction protocol", () => {
 			commitObservation: "drifted",
 		})
 		expect(drifted.state.rollbackFailures).toEqual([])
+	})
+
+	it("accepts a background marker strip after the child started, once only", () => {
+		const { states } = drive(initialProviderHandoffState(), [
+			...happyPath.slice(0, 6),
+			{ type: "start-child" },
+			{ type: "finalize-child-wal", ok: true },
+			{ type: "finalize-child-wal", ok: true },
+		])
+		expect(states[6]).toMatchObject({ phase: "context-active", childWal: "durable" })
+		// The strip is background work: it settles only after the child started.
+		expect(states[7]).toMatchObject({ phase: "child-running", childPresence: "running", childWal: "durable" })
+		expect(states[8]).toMatchObject({ phase: "child-running", childWal: "finalized" })
+		// Single-shot: a second strip is rejected and changes nothing.
+		expect(states[9]).toMatchObject({ phase: "child-running", childWal: "finalized" })
+
+		// A rejected late strip stays visible for restart reconciliation.
+		const failedLate = drive(initialProviderHandoffState(), [
+			...happyPath.slice(0, 6),
+			{ type: "start-child" },
+			{ type: "finalize-child-wal", ok: false },
+		])
+		expect(failedLate.states[8]).toMatchObject({ phase: "child-running", childWal: "finalize-failed" })
 	})
 
 	it("carries no secrets or configuration in protocol state", () => {

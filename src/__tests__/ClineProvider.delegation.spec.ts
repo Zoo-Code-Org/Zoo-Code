@@ -146,6 +146,7 @@ const makeProviderStub = (partial: Record<string, unknown>): ClineProvider =>
 		delegationTransitionOwners: new Map<string, symbol>(),
 		cancelledDelegationChildIds: new Set<string>(),
 		explicitProfileClearChildIds: new Set<string>(),
+		durableProfileClearByTaskId: new Map<string, Promise<boolean>>(),
 		providerProfileMutationQueue: Promise.resolve(),
 		providerProfileMutationReservation: 0,
 		providerProfileMutationGeneration: 0,
@@ -2145,10 +2146,158 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		await delegation
 		expect(await completion).toBe(false)
 		// The completion's store read happened only after the delegation
-		// committed and its marker strip finalized inside the delegation.
+		// committed and its marker strip started inside the delegation, after
+		// the child was scheduled.
 		expect(order[0]).toBe("committed")
 		expect(order[1]).toBe("finalize-child-wal")
 		expect(order[2]).toBe("read:parent-1")
+	})
+
+	it("schedules the child while the marker strip is still pending and settles it in the background", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const order: string[] = []
+
+		let releaseFinalize!: () => void
+		const finalizeGate = new Promise<void>((resolve) => {
+			releaseFinalize = resolve
+		})
+		const taskHistoryStore = makeStoreStub({
+			atomicReadAndUpdate: vi.fn(async (taskId: string) => {
+				if (taskId === "child-1") {
+					// The best-effort background marker strip: gated so it stays
+					// pending past the delegation's completion.
+					order.push("finalize-started")
+					await finalizeGate
+					order.push("finalize-settled")
+					return []
+				}
+				order.push("committed")
+				return []
+			}),
+		})
+
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(makePreparedHandoff()),
+			projectPreparedProviderHandoffState: vi.fn().mockResolvedValue({ ok: true }),
+			deleteTaskWithId: vi.fn(),
+			createTaskWithHistoryItem: vi.fn(),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "First",
+			initialTodos: [],
+			mode: "code",
+		})
+		await Promise.resolve() // drain scheduler microtask so child.run() is invoked
+
+		// The child was scheduled and the delegation completed while the
+		// marker strip was still pending.
+		expect(child.run).toHaveBeenCalledTimes(1)
+		expect(order).toEqual(["committed", "finalize-started"])
+
+		releaseFinalize()
+		await (provider as unknown as { providerHandoffFinalizationCompletion?: Promise<void> })
+			.providerHandoffFinalizationCompletion
+		expect(order).toEqual(["committed", "finalize-started", "finalize-settled"])
+	})
+
+	it("completes the delegation even when the marker strip never settles", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const taskHistoryStore = makeStoreStub({
+			atomicReadAndUpdate: vi.fn(async (taskId: string) => {
+				if (taskId === "child-1") {
+					// A strip whose storage write never settles: lock
+					// contention, a hung store, or a lost write-through.
+					return new Promise<HistoryItem[]>(() => {})
+				}
+				return []
+			}),
+		})
+
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(makePreparedHandoff()),
+			projectPreparedProviderHandoffState: vi.fn().mockResolvedValue({ ok: true }),
+			deleteTaskWithId: vi.fn(),
+			createTaskWithHistoryItem: vi.fn(),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "First",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).resolves.toBe(child)
+		await Promise.resolve() // drain scheduler microtask so child.run() is invoked
+		expect(child.run).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps a rejected marker strip non-fatal and logged for restart replay", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const log = vi.fn()
+		const taskHistoryStore = makeStoreStub({
+			atomicReadAndUpdate: vi.fn(async (taskId: string) => {
+				if (taskId === "child-1") {
+					throw new Error("storage rejected the strip")
+				}
+				return []
+			}),
+		})
+
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(makePreparedHandoff()),
+			projectPreparedProviderHandoffState: vi.fn().mockResolvedValue({ ok: true }),
+			deleteTaskWithId: vi.fn(),
+			createTaskWithHistoryItem: vi.fn(),
+			log,
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "First",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).resolves.toBe(child)
+		await Promise.resolve() // drain scheduler microtask so child.run() is invoked
+		expect(child.run).toHaveBeenCalledTimes(1)
+
+		await (provider as unknown as { providerHandoffFinalizationCompletion?: Promise<void> })
+			.providerHandoffFinalizationCompletion
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("left for restart replay"))
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("storage rejected the strip"))
 	})
 
 	it("starts the child after a timed-out projection and ignores the late completion", async () => {
@@ -2649,14 +2798,19 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		// store identity was cleared and the resumed child still carries no
 		// sticky profile, so the clear is reconstructed for publication.
 		const resumedChild = { taskId: "child-1", taskApiConfigName: undefined }
+		const getCurrentProfileName = vi.fn().mockResolvedValue(undefined)
 		const provider = makeProviderStub({
 			log: vi.fn(),
 			getCurrentTask: vi.fn(() => resumedChild),
-			providerSettingsManager: { getCurrentProfileName: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: { getCurrentProfileName },
 		})
 		await expect(ClineProvider.prototype["isExplicitProfileClearInForce"].call(provider, "child-1")).resolves.toBe(
 			true,
 		)
+		await expect(ClineProvider.prototype["isExplicitProfileClearInForce"].call(provider, "child-1")).resolves.toBe(
+			true,
+		)
+		expect(getCurrentProfileName).toHaveBeenCalledTimes(1)
 
 		// A durable identity means no explicit clear: the ordinary default
 		// fallback is unchanged (including fresh installs).
@@ -2668,6 +2822,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		await expect(
 			ClineProvider.prototype["isExplicitProfileClearInForce"].call(withIdentity, "child-1"),
 		).resolves.toBe(false)
+		await expect(
+			ClineProvider.prototype["isExplicitProfileClearInForce"].call(withIdentity, "child-1"),
+		).resolves.toBe(false)
+		expect(withIdentity["providerSettingsManager"].getCurrentProfileName).toHaveBeenCalledTimes(1)
 
 		// A child that later gained a sticky profile is no longer cleared.
 		const profiledChild = { taskId: "child-1", taskApiConfigName: "chosen" }
@@ -2689,6 +2847,25 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		await expect(
 			ClineProvider.prototype["isExplicitProfileClearInForce"].call(staleCheck, "child-1"),
 		).resolves.toBe(false)
+	})
+
+	it("invalidates cached durable clear reconstruction after a successful profile mutation", async () => {
+		const resumedChild = { taskId: "child-1", taskApiConfigName: undefined }
+		const getCurrentProfileName = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValue("chosen")
+		const provider = makeProviderStub({
+			log: vi.fn(),
+			getCurrentTask: vi.fn(() => resumedChild),
+			providerSettingsManager: { getCurrentProfileName },
+		})
+
+		await expect(ClineProvider.prototype["isExplicitProfileClearInForce"].call(provider, "child-1")).resolves.toBe(
+			true,
+		)
+		await ClineProvider.prototype["enqueueProviderProfileMutation"].call(provider, async () => undefined)
+		await expect(ClineProvider.prototype["isExplicitProfileClearInForce"].call(provider, "child-1")).resolves.toBe(
+			false,
+		)
+		expect(getCurrentProfileName).toHaveBeenCalledTimes(2)
 	})
 
 	it("cleans a removed child's explicit-clear markers when it leaves the stack", async () => {

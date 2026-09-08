@@ -7,6 +7,7 @@ type ProviderStubFields = {
 	delegationTransitionOwners?: Map<string, symbol>
 	cancelledDelegationChildIds?: Set<string>
 	explicitProfileClearChildIds?: Set<string>
+	durableProfileClearByTaskId?: Map<string, Promise<boolean>>
 	log?: ReturnType<typeof vi.fn>
 	taskHistoryStore?: { get: (id: string) => unknown }
 	taskRegistry?: TaskRegistry
@@ -44,6 +45,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.delegationTransitionOwners ??= new Map()
 	s.cancelledDelegationChildIds ??= new Set()
 	s.explicitProfileClearChildIds ??= new Set()
+	s.durableProfileClearByTaskId ??= new Map()
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
 
