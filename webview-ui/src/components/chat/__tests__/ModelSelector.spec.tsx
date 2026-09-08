@@ -1,4 +1,4 @@
-import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, retiredProviderIdentifiers, type OrganizationAllowList } from "@roo-code/types"
 
 import { render, screen, fireEvent, within } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
@@ -751,5 +751,144 @@ describe("ModelSelector", () => {
 		fireEvent.click(within(screen.getByTestId("popover-content")).getByText("openrouter/model-b"))
 
 		expect(vscode.postMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "config-two" }))
+	})
+
+	it("hides the custom-arn pseudo-model for a Bedrock provider and allows selecting a normal model", () => {
+		useSelectedModelMock.mockReturnValue({ id: "anthropic.claude-sonnet-4-5-20250929-v1:0", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.bedrock,
+						apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+					} as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const list = within(screen.getByTestId("popover-content"))
+
+		// A normal Bedrock model is present in the list.
+		expect(list.getByText("anthropic.claude-3-5-haiku-20241022-v1:0")).toBeInTheDocument()
+
+		// The custom-arn pseudo-model is hidden from the chat selector.
+		expect(list.queryByText("Use Custom ARN")).not.toBeInTheDocument()
+		expect(list.queryByText("custom-arn")).not.toBeInTheDocument()
+
+		// Selecting a normal Bedrock model sends the expected apiModelId update.
+		fireEvent.click(list.getByText("anthropic.claude-3-5-haiku-20241022-v1:0"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				text: "default",
+				apiConfiguration: expect.objectContaining({
+					apiModelId: "anthropic.claude-3-5-haiku-20241022-v1:0",
+				}),
+			}),
+		)
+	})
+
+	it("filters static models by the organization allow list when not all models are allowed", () => {
+		useSelectedModelMock.mockReturnValue({ id: "claude-3-5-haiku-20241022", isLoading: false })
+
+		const allowList: OrganizationAllowList = {
+			allowAll: false,
+			providers: {
+				anthropic: {
+					allowAll: false,
+					models: ["claude-3-5-haiku-20241022"],
+				},
+			},
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-haiku-20241022" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+				organizationAllowList={allowList}
+			/>,
+		)
+
+		const list = within(screen.getByTestId("popover-content"))
+
+		// Only the allowed model is present.
+		expect(list.getByText("claude-3-5-haiku-20241022")).toBeInTheDocument()
+
+		// Other models are filtered out by the allow list.
+		expect(list.queryByText("claude-sonnet-4-5")).not.toBeInTheDocument()
+	})
+
+	it("filters dynamic router models by the organization allow list", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		const allowList: OrganizationAllowList = {
+			allowAll: false,
+			providers: {
+				openrouter: {
+					allowAll: false,
+					models: ["openrouter/model-a"],
+				},
+			},
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+				organizationAllowList={allowList}
+			/>,
+		)
+
+		const list = within(screen.getByTestId("popover-content"))
+
+		// Only the allowed model is present.
+		expect(list.getByText("openrouter/model-a")).toBeInTheDocument()
+
+		// The blocked model is filtered out.
+		expect(list.queryByText("openrouter/model-b")).not.toBeInTheDocument()
+	})
+
+	it("does not filter models when the organization allow list allows all", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		const allowList: OrganizationAllowList = {
+			allowAll: true,
+			providers: {},
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+				organizationAllowList={allowList}
+			/>,
+		)
+
+		const list = within(screen.getByTestId("popover-content"))
+
+		// All models are present when allowAll is true.
+		expect(list.getByText("openrouter/model-a")).toBeInTheDocument()
+		expect(list.getByText("openrouter/model-b")).toBeInTheDocument()
 	})
 })

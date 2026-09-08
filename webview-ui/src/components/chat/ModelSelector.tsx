@@ -4,6 +4,7 @@ import { Fzf } from "fzf"
 import {
 	type ModelInfo,
 	type ModelRecord,
+	type OrganizationAllowList,
 	type ProviderSettings,
 	isDynamicProvider,
 	isRetiredProvider,
@@ -24,6 +25,7 @@ import {
 	getStaticModelsForProvider,
 	isStaticModelProvider,
 } from "../settings/utils/providerModelConfig"
+import { filterModels } from "../settings/utils/organizationFilters"
 
 const SEARCH_THRESHOLD = 6
 
@@ -33,6 +35,7 @@ interface ModelSelectorProps {
 	disabled?: boolean
 	title: string
 	triggerClassName?: string
+	organizationAllowList?: OrganizationAllowList
 }
 
 export const ModelSelector = ({
@@ -41,6 +44,7 @@ export const ModelSelector = ({
 	disabled = false,
 	title,
 	triggerClassName = "",
+	organizationAllowList,
 }: ModelSelectorProps) => {
 	const { t } = useAppTranslation()
 	const [open, setOpen] = useState(false)
@@ -65,7 +69,7 @@ export const ModelSelector = ({
 		}
 
 		if (dynamicProvider) {
-			return routerModels.data?.[dynamicProvider] ?? {}
+			return filterModels(routerModels.data?.[dynamicProvider] ?? {}, provider, organizationAllowList) ?? {}
 		}
 
 		// Stryker disable next-line ConditionalExpression: getStaticModelsForProvider already
@@ -74,11 +78,11 @@ export const ModelSelector = ({
 		if (isStaticModelProvider(provider)) {
 			const staticModels = getStaticModelsForProvider(provider, undefined, apiConfiguration)
 			const { "custom-arn": _customArn, ...rest } = staticModels
-			return rest
+			return filterModels(rest, provider, organizationAllowList) ?? {}
 		}
 
 		return {}
-	}, [modelConfig, dynamicProvider, routerModels.data, provider, apiConfiguration])
+	}, [modelConfig, dynamicProvider, routerModels.data, provider, apiConfiguration, organizationAllowList])
 
 	const modelIds = useMemo(() => Object.keys(models), [models])
 
