@@ -105,7 +105,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
-import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
@@ -2324,16 +2324,17 @@ export class ClineProvider
 		}
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
-		// resurrected by a later listApiConfigMeta sync. A "not found" rejection means
-		// the secret was already gone (e.g. pruned by an earlier run): treat it as an
-		// idempotent success so the stale list entry below is still pruned, while any
-		// other failure (e.g. refusing to delete the last remaining configuration)
-		// propagates.
+		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
+		// the secret was already gone (e.g. pruned by an earlier run): branch on the
+		// typed ProviderSettingsNotFoundError so the stale list entry below is still
+		// pruned as an idempotent success, while any other failure (e.g. refusing to
+		// delete the last remaining configuration) propagates. Matching message text
+		// instead would let a profile whose name contains "not found" swallow an
+		// unrelated failure.
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			if (!message.includes("not found")) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
 				throw error
 			}
 			this.log(

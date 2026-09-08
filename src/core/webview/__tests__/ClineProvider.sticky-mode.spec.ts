@@ -469,6 +469,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			// mode: getValues() merges viewLocalState on top of the ContextProxy
 			// values, so an unsynced buffer would hide the fresh mode from consumers.
 			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			// The durable per-view write must land too: a regression that left the
+			// persisted entry on the stale restored mode would reload it on restart.
+			// setValue awaits the serialized write queue, so the entry is settled here.
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted.mode).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
 		})
 	})
 
