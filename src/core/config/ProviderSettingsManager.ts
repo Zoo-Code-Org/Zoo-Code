@@ -21,6 +21,8 @@ import { buildApiHandler } from "../../api"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
 import type { ProviderHandoffProfileIntent } from "../task-persistence/providerHandoff"
 
+const providerSettingsLocks = new WeakMap<ExtensionContext["secrets"], Promise<void>>()
+
 // Type-safe model migrations mapping
 type ModelMigrations = {
 	[K in ProviderName]?: Record<string, string>
@@ -110,10 +112,18 @@ export class ProviderSettingsManager {
 	}
 
 	// Synchronize readConfig/writeConfig operations to avoid data loss.
-	private _lock = Promise.resolve()
 	private lock<T>(cb: () => Promise<T>) {
-		const next = this._lock.then(cb)
-		this._lock = next.catch(() => {}) as Promise<void>
+		// Provider instances in one extension host share SecretStorage. Use one
+		// queue per store so their load-modify-store transactions cannot interleave.
+		const previous = providerSettingsLocks.get(this.context.secrets) ?? Promise.resolve()
+		const next = previous.then(cb)
+		providerSettingsLocks.set(
+			this.context.secrets,
+			next.then(
+				() => undefined,
+				() => undefined,
+			),
+		)
 		return next
 	}
 
@@ -551,14 +561,15 @@ export class ProviderSettingsManager {
 				)
 
 				const modeApiConfigId = providerProfiles.modeApiConfigs?.[mode]
-				const currentProfile = providerProfiles.currentApiConfigName
-					? providerProfiles.apiConfigs[providerProfiles.currentApiConfigName]
-						? structuredClone({
-								name: providerProfiles.currentApiConfigName,
-								...providerProfiles.apiConfigs[providerProfiles.currentApiConfigName],
-							})
+				const currentProfile =
+					providerProfiles.currentApiConfigName !== undefined
+						? providerProfiles.apiConfigs[providerProfiles.currentApiConfigName]
+							? structuredClone({
+									name: providerProfiles.currentApiConfigName,
+									...providerProfiles.apiConfigs[providerProfiles.currentApiConfigName],
+								})
+							: undefined
 						: undefined
-					: undefined
 
 				let savedProfile: (ProviderSettingsWithId & { name: string }) | undefined
 				if (modeApiConfigId) {
@@ -774,7 +785,10 @@ export class ProviderSettingsManager {
 			const content = await this.context.secrets.get(this.secretsKey)
 
 			if (!content) {
-				return this.defaultProviderProfiles
+				// Callers perform load-modify-store transactions. Never expose the
+				// shared fresh-install template to a mutation that can outlive a
+				// rejected store operation.
+				return structuredClone(this.defaultProviderProfiles)
 			}
 
 			const providerProfiles = providerProfilesSchema

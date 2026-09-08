@@ -7,6 +7,7 @@ import * as os from "os"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../../shared/globalFileNames"
+import { withAdvisoryFileLock } from "../../../utils/advisoryFileLock"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 
 vi.mock("../../../utils/storage", () => ({
@@ -1074,10 +1075,38 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 
 		await store.initialize()
 
-		// The orphan and its task directory are gone; the parent is untouched.
+		// The orphan record is gone; the parent is untouched.
 		expect(store.get("wal-orphan")).toBeUndefined()
 		expect(await taskFileExists("wal-orphan")).toBe(false)
 		expect(store.get("wal-parent")?.status).toBe("active")
+	})
+
+	it("retains a child when the parent commits after the startup scan", async () => {
+		const child = makeItem({
+			id: "wal-race-child",
+			parentTaskId: "wal-race-parent",
+			status: "active",
+			mode: "ask",
+			apiConfigName: "profile-1",
+			pendingHandoff: { kind: "set", version: 1, mode: "ask", profileName: "profile-1" },
+		})
+		const parent = makeItem({ id: "wal-race-parent", status: "active" })
+		await seedItems([parent, child])
+		const parentPath = path.join(tmpDir, "tasks", parent.id, "history_item.json")
+
+		let initialization: Promise<void> | undefined
+		await withAdvisoryFileLock(parentPath, async () => {
+			initialization = store.initialize()
+			await vi.waitFor(() => expect(store.get(child.id)).toBeDefined())
+			await fs.writeFile(
+				parentPath,
+				JSON.stringify({ ...parent, status: "delegated", awaitingChildId: child.id }),
+			)
+		})
+		await initialization
+
+		expect(await taskFileExists(child.id)).toBe(true)
+		expect(store.get(child.id)?.pendingHandoff).toEqual(child.pendingHandoff)
 	})
 
 	it("strips the marker from a committed child and recovers the delegation for resume", async () => {

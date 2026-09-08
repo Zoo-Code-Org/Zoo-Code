@@ -4521,9 +4521,10 @@ export class ClineProvider
 		const locked = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		const snapshot = await this.providerSettingsManager.snapshotForHandoff(requestedMode)
 
-		const currentEntry = snapshot.currentApiConfigName
-			? snapshot.entries.find((entry) => entry.name === snapshot.currentApiConfigName)
-			: undefined
+		const currentEntry =
+			snapshot.currentApiConfigName !== undefined
+				? snapshot.entries.find((entry) => entry.name === snapshot.currentApiConfigName)
+				: undefined
 		const currentProfileRef =
 			snapshot.currentApiConfigName !== undefined
 				? { name: snapshot.currentApiConfigName, id: currentEntry?.id }

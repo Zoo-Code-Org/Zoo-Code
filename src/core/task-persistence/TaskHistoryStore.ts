@@ -7,12 +7,8 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import {
-	LOCK_STALE_MS,
-	safeWriteJson,
-	withAdvisoryFileLock,
-	ADVISORY_READ_LOCK_RETRIES,
-} from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import { withAdvisoryFileLock, ADVISORY_READ_LOCK_RETRIES } from "../../utils/advisoryFileLock"
 import { getStorageBasePath, getTaskDirectoryPath } from "../../utils/storage"
 import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 import { isValidPendingHandoff } from "./providerHandoff"
@@ -594,22 +590,8 @@ export class TaskHistoryStore {
 			// child (checked above) — a pre-commit orphan.
 			if (!this.isSafeTaskId(item.id)) continue
 			try {
-				this.cache.delete(item.id)
-				this.taskFileMtimes.delete(item.id)
-				try {
-					await fs.unlink(await this.getTaskFilePath(item.id))
-				} catch {
-					// Record file may already be gone.
-				}
-				try {
-					const taskDir = await getTaskDirectoryPath(this.globalStoragePath, item.id)
-					await fs.rm(taskDir, { recursive: true, force: true })
-				} catch (error) {
-					console.warn(
-						`[TaskHistoryStore] Failed to remove orphaned handoff task directory ${item.id}:`,
-						error,
-					)
-				}
+				const removed = await this.removePendingHandoffOrphanUnderAdvisoryLocks(parentId, item.id)
+				if (!removed) continue
 				if (this.onWrite) {
 					await this.onWrite(this.getAll())
 				}
@@ -619,6 +601,82 @@ export class TaskHistoryStore {
 			} catch (error) {
 				console.error(`[TaskHistoryStore] Failed to remove orphaned handoff child ${item.id}:`, error)
 			}
+		}
+	}
+
+	/**
+	 * Revalidate and remove one pre-start WAL orphan while holding both task-file
+	 * locks in lexical order. The final reads close the startup-snapshot race.
+	 * The method leaves the task directory in place. Removing it after lock
+	 * release could delete a new writer's files, while removing the lock directory
+	 * before release would break advisory-lock ownership.
+	 */
+	private async removePendingHandoffOrphanUnderAdvisoryLocks(
+		parentTaskId: string,
+		childTaskId: string,
+	): Promise<boolean> {
+		const paths = new Map([
+			[parentTaskId, await this.getTaskFilePath(parentTaskId)],
+			[childTaskId, await this.getTaskFilePath(childTaskId)],
+		])
+		const orderedIds = [parentTaskId, childTaskId].sort()
+
+		const withLocks = async (index: number, fn: () => Promise<boolean>): Promise<boolean> => {
+			if (index === orderedIds.length) return fn()
+			const filePath = paths.get(orderedIds[index])
+			if (!filePath) return false
+			return withAdvisoryFileLock(filePath, () => withLocks(index + 1, fn), {
+				retries: ADVISORY_READ_LOCK_RETRIES,
+			})
+		}
+
+		return withLocks(0, async () => {
+			const parentPath = paths.get(parentTaskId)
+			const childPath = paths.get(childTaskId)
+			if (!parentPath || !childPath) return false
+			const parentRead = await this.readTaskFileUnderAdvisoryLock(parentTaskId, parentPath)
+			const childRead = await this.readTaskFileUnderAdvisoryLock(childTaskId, childPath)
+			if (parentRead.kind !== "found" || childRead.kind !== "found") return false
+
+			const parent = parentRead.item
+			const child = childRead.item
+			const pending = child.pendingHandoff
+			if (
+				!pending ||
+				!isValidPendingHandoff(pending) ||
+				child.parentTaskId !== parentTaskId ||
+				(parent.status === "delegated" && parent.awaitingChildId === childTaskId) ||
+				(child.status ?? "active") !== "active" ||
+				child.awaitingChildId !== undefined ||
+				child.delegatedToId !== undefined ||
+				child.completedByChildId !== undefined ||
+				child.completionResultSummary !== undefined
+			) {
+				return false
+			}
+
+			await fs.unlink(childPath)
+			this.cache.delete(childTaskId)
+			this.taskFileMtimes.delete(childTaskId)
+			return true
+		})
+	}
+
+	/** Read a task file without changing the cache while its advisory lock is held. */
+	private async readTaskFileUnderAdvisoryLock(taskId: string, filePath: string): Promise<StrictTaskReadResult> {
+		try {
+			const parsed: unknown = JSON.parse(await fs.readFile(filePath, "utf8"))
+			if (typeof parsed !== "object" || parsed === null || (parsed as HistoryItem).id !== taskId) {
+				return {
+					kind: "error",
+					reason: "incompatible",
+					error: new Error(`[TaskHistoryStore] task ${taskId} record has a mismatched or missing id`),
+				}
+			}
+			return { kind: "found", item: parsed as HistoryItem }
+		} catch (error) {
+			if (this.isFileNotFoundError(error)) return { kind: "missing" }
+			return { kind: "error", reason: error instanceof SyntaxError ? "parse" : "read", error }
 		}
 	}
 

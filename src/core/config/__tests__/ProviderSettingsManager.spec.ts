@@ -411,6 +411,51 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("SaveConfig", () => {
+		it("serializes mutations from managers that share one secret store", async () => {
+			const secondManager = new ProviderSettingsManager(mockContext)
+			let storedProfiles: unknown = null
+			let releaseFirstRead: (() => void) | undefined
+			const firstReadStarted = new Promise<void>((resolve) => {
+				releaseFirstRead = resolve
+			})
+			let continueFirstRead: (() => void) | undefined
+			const firstReadMayContinue = new Promise<void>((resolve) => {
+				continueFirstRead = resolve
+			})
+			let isFirstRead = true
+
+			mockSecrets.get.mockImplementation(async () => {
+				if (isFirstRead) {
+					isFirstRead = false
+					releaseFirstRead?.()
+					await firstReadMayContinue
+				}
+				return storedProfiles === null ? null : JSON.stringify(storedProfiles)
+			})
+			mockSecrets.store.mockImplementation(async (_key, value) => {
+				storedProfiles = JSON.parse(value)
+			})
+
+			const firstSave = providerSettingsManager.saveConfig("first", {
+				id: "first-id",
+				apiProvider: providerIdentifiers.openai,
+			})
+			await firstReadStarted
+			const secondSave = secondManager.saveConfig("second", {
+				id: "second-id",
+				apiProvider: providerIdentifiers.openai,
+			})
+			continueFirstRead?.()
+
+			await Promise.all([firstSave, secondSave])
+			expect(storedProfiles).toMatchObject({
+				apiConfigs: {
+					first: { id: "first-id" },
+					second: { id: "second-id" },
+				},
+			})
+		})
+
 		it("should save new config", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -1601,6 +1646,26 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
+		it("resolves an exact empty profile name from the locked snapshot", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "",
+					apiConfigs: { "": { id: "empty-id", apiProvider: providerIdentifiers.openai } },
+					modeApiConfigs: {},
+					migrations: fullyMigrated,
+				}),
+			)
+
+			const snapshot = await providerSettingsManager.snapshotForHandoff("code")
+
+			expect(snapshot.currentApiConfigName).toBe("")
+			expect(snapshot.currentProfile).toMatchObject({
+				name: "",
+				id: "empty-id",
+				apiProvider: providerIdentifiers.openai,
+			})
+		})
+
 		it("propagates load failures without mutating the store", async () => {
 			mockSecrets.get.mockResolvedValue("not-json{{{")
 
@@ -1679,13 +1744,16 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
-		it("propagates failures without a partial write", async () => {
+		it("does not mutate the fresh-install template when a projection store fails", async () => {
 			mockSecrets.get.mockResolvedValue(null)
 			mockSecrets.store.mockRejectedValue(new Error("disk full"))
 
 			await expect(
 				providerSettingsManager.projectHandoffState({ intent: { kind: "set", name: "child-profile" } }),
 			).rejects.toThrow("Failed to project provider handoff state")
+
+			mockSecrets.store.mockResolvedValue(undefined)
+			await expect(providerSettingsManager.getCurrentProfileName()).resolves.toBe("default")
 		})
 
 		it("clear writes the explicit absence of a current profile identity and survives reload", async () => {
