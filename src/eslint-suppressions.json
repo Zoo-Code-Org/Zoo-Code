@@ -1024,11 +1024,6 @@
 			"count": 2
 		}
 	},
-	"core/webview/ClineProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 34
