@@ -35,6 +35,7 @@ import {
 	type PendingTaskAction,
 	type CreateTaskOptions,
 	type ModelInfo,
+	type ExtensionState,
 	type ClineApiReqCancelReason,
 	type ClineApiReqInfo,
 	RooCodeEventName,
@@ -64,6 +65,7 @@ import { CloudService } from "@roo-code/cloud"
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
+import { type ReasoningDetail } from "../../api/transform/openai-format"
 
 // shared
 import { findLastIndex } from "../../shared/array"
@@ -214,6 +216,77 @@ type AssistantMessagePersistenceCancellation = {
 	cancelled: boolean
 	promise: Promise<void>
 	resolve: () => void
+}
+
+/**
+ * OpenAI Responses API reasoning summary element (e.g. `{ type: "summary_text", text }`).
+ * Derived from the installed `openai` SDK types rather than restated locally.
+ */
+type ReasoningSummaryItem = NonNullable<OpenAI.Responses.ResponseReasoningItem["summary"]>[number]
+
+/**
+ * Reasoning content block stored at the head of an assistant message's `content` array by
+ * OpenAI-family providers. It is not part of the Anthropic `ContentBlockParam` union, so the
+ * conversation-history builder handles it as a parallel block variant.
+ */
+type ReasoningContentBlockParam = {
+	type: "reasoning"
+	id?: string
+	summary?: ReasoningSummaryItem[]
+	encrypted_content?: string
+	text?: string
+}
+
+/** A `ReasoningContentBlockParam` whose encrypted payload is confirmed present. */
+type EncryptedReasoningContentBlockParam = ReasoningContentBlockParam & { encrypted_content: string }
+
+function asEncryptedReasoningContentBlockParam(
+	block: { type?: string } | undefined,
+): EncryptedReasoningContentBlockParam | undefined {
+	if (!block || block.type !== "reasoning") {
+		return undefined
+	}
+	const candidate = block as ReasoningContentBlockParam
+	return typeof candidate.encrypted_content === "string"
+		? (candidate as EncryptedReasoningContentBlockParam)
+		: undefined
+}
+
+function asPlainTextReasoningContentBlockParam(
+	block: { type?: string } | undefined,
+): (ReasoningContentBlockParam & { text: string }) | undefined {
+	if (!block || block.type !== "reasoning") {
+		return undefined
+	}
+	const candidate = block as ReasoningContentBlockParam
+	return typeof candidate.text === "string" ? (candidate as ReasoningContentBlockParam & { text: string }) : undefined
+}
+
+type ReasoningItemForRequest = {
+	type: "reasoning"
+	encrypted_content: string
+	id?: string
+	summary?: ReasoningSummaryItem[]
+}
+
+/** Assistant message carrying OpenRouter-style reasoning details (Gemini 3, etc.). */
+type MessageParamWithReasoningDetails = Anthropic.Messages.MessageParam & {
+	reasoning_details?: ReasoningDetail[]
+}
+
+/** Entry shape produced by `buildCleanConversationHistory`: regular messages plus the two reasoning variants. */
+type CleanConversationHistoryEntry =
+	| Anthropic.Messages.MessageParam
+	| ReasoningItemForRequest
+	| MessageParamWithReasoningDetails
+
+/**
+ * Error shape providers surface during retries: an optional HTTP status plus an optional
+ * Google-RPC-style `errorDetails` array (e.g. the RetryInfo entry sent on HTTP 429).
+ */
+interface BackoffApiError extends Error {
+	status?: number
+	errorDetails?: { "@type"?: string; retryDelay?: string }[]
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -2852,7 +2925,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error("Provider not available")
 		}
 
-		const child = await (provider as any).delegateParentAndOpenChild({
+		const child = await provider.delegateParentAndOpenChild({
 			parentTaskId: this.taskId,
 			message,
 			initialTodos,
@@ -3394,7 +3467,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										// Store the ID for native protocol
-										;(partialToolUse as any).id = event.id
+										partialToolUse.id = event.id
 
 										// Add to content and present
 										this.assistantMessageContent.push(partialToolUse)
@@ -3414,7 +3487,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											const toolUseIndex = this.streamingToolCallIndices.get(event.id)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
-												;(partialToolUse as any).id = event.id
+												partialToolUse.id = event.id
 
 												// Update the existing tool use with new partial data
 												this.assistantMessageContent[toolUseIndex] = partialToolUse
@@ -3792,7 +3865,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						if (finalToolUse) {
 							// Store the tool call ID
-							;(finalToolUse as any).id = event.id
+							finalToolUse.id = event.id
 
 							// Get the index and replace partial with final
 							if (toolUseIndex !== undefined) {
@@ -3816,7 +3889,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							if (existingToolUse && existingToolUse.type === "tool_use") {
 								existingToolUse.partial = false
 								// Ensure it has the ID for native protocol
-								;(existingToolUse as any).id = event.id
+								existingToolUse.id = event.id
 							}
 
 							// Clean up tracking
@@ -4317,10 +4390,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		})()
 	}
 
-	private getCurrentProfileId(state: any): string {
+	private getCurrentProfileId(
+		state: Pick<ExtensionState, "currentApiConfigName" | "listApiConfigMeta"> | undefined,
+	): string {
 		return (
-			state?.listApiConfigMeta?.find((profile: any) => profile.name === state?.currentApiConfigName)?.id ??
-			"default"
+			state?.listApiConfigMeta?.find((profile) => profile.name === state?.currentApiConfigName)?.id ?? "default"
 		)
 	}
 
@@ -5005,7 +5079,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	// Shared exponential backoff for retries (first-chunk and mid-stream)
-	private async backoffAndAnnounce(retryAttempt: number, error: any): Promise<void> {
+	private async backoffAndAnnounce(retryAttempt: number, error: BackoffApiError): Promise<void> {
 		try {
 			const state = await this.providerRef.deref()?.getState()
 			const baseDelay = state?.requestDelaySeconds || 5
@@ -5027,7 +5101,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Prefer RetryInfo on 429 if present
 			if (error?.status === 429) {
 				const retryInfo = error?.errorDetails?.find(
-					(d: any) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+					(d) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
 				)
 				const match = retryInfo?.retryDelay?.match?.(/^(\d+)s$/)
 				if (match) {
@@ -5088,17 +5162,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private buildCleanConversationHistory(
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
-	): Array<
-		Anthropic.Messages.MessageParam | { type: "reasoning"; encrypted_content: string; id?: string; summary?: any[] }
-	> {
-		type ReasoningItemForRequest = {
-			type: "reasoning"
-			encrypted_content: string
-			id?: string
-			summary?: any[]
-		}
-
-		const cleanConversationHistory: (Anthropic.Messages.MessageParam | ReasoningItemForRequest)[] = []
+	): CleanConversationHistoryEntry[] {
+		const cleanConversationHistory: CleanConversationHistoryEntry[] = []
 
 		for (const msg of messages) {
 			// Standalone reasoning: send encrypted, skip plain text
@@ -5147,26 +5212,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						role: "assistant",
 						content: assistantContent,
 						reasoning_details: msgWithDetails.reasoning_details,
-					} as any)
+					})
 
 					continue
 				}
 
 				// Embedded reasoning: encrypted (send) or plain text (skip)
-				const hasEncryptedReasoning =
-					first && (first as any).type === "reasoning" && typeof (first as any).encrypted_content === "string"
-				const hasPlainTextReasoning =
-					first && (first as any).type === "reasoning" && typeof (first as any).text === "string"
+				const encryptedReasoning = asEncryptedReasoningContentBlockParam(first)
+				const plainTextReasoning = asPlainTextReasoningContentBlockParam(first)
 
-				if (hasEncryptedReasoning) {
-					const reasoningBlock = first as any
-
+				if (encryptedReasoning) {
 					// Send as separate reasoning item (OpenAI Native)
 					cleanConversationHistory.push({
 						type: "reasoning",
-						summary: reasoningBlock.summary ?? [],
-						encrypted_content: reasoningBlock.encrypted_content,
-						...(reasoningBlock.id ? { id: reasoningBlock.id } : {}),
+						summary: encryptedReasoning.summary ?? [],
+						encrypted_content: encryptedReasoning.encrypted_content,
+						...(encryptedReasoning.id ? { id: encryptedReasoning.id } : {}),
 					})
 
 					// Send assistant message without reasoning
@@ -5186,7 +5247,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					} satisfies Anthropic.Messages.MessageParam)
 
 					continue
-				} else if (hasPlainTextReasoning) {
+				} else if (plainTextReasoning) {
 					// Check if the model's preserveReasoning flag is set, resolved from
 					// the request's threaded model snapshot (same per-request source as
 					// the prompt and tool arrays) rather than a fresh getModel() re-read,
