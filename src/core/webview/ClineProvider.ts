@@ -175,10 +175,17 @@ function scheduleTask(
 	task: Task,
 	source: string,
 	run: () => Promise<void> = () => task.run(),
+	onScheduleFailure?: (error: unknown) => void,
 ): void {
 	void scheduler
 		.schedule(task, run)
-		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+		.catch((error) => {
+			console.error(`[${source}] taskScheduler.schedule failed:`, error)
+			// Fire-and-forget stays fire-and-forget; the optional hook lets the
+			// caller roll back state that was claimed before scheduling (e.g. the
+			// eager markLocallyActive claim in createTaskWithHistoryItemUnlocked).
+			onScheduleFailure?.(error)
+		})
 }
 
 type GetStateOptions = {
@@ -1389,53 +1396,75 @@ export class ClineProvider
 		// trackLocalSessionOwnership: the task's next non-active status write releases it.
 		this.taskHistoryStore.markLocallyActive(task.taskId)
 
-		if (isRehydratingCurrentTask) {
-			// Replace the current task in-place to avoid UI flicker
-			const oldTask = this.taskRegistry.current
+		// Roll the eager claim back on every path that never reaches a scheduled run:
+		// a preparation/stack failure throws before scheduling (catch below), and a
+		// scheduler rejection is reported through scheduleTask's onScheduleFailure
+		// hook. Without the release, an id whose task never started would be excluded
+		// from orphan reconciliation for the lifetime of this window. startTask:false
+		// is intentionally NOT released: its only production caller
+		// (reopenParentFromDelegation) persists the task's `active` history item
+		// through the delegation transition — which re-registers ownership via
+		// trackLocalSessionOwnership — and immediately runs it via
+		// Task.resumeAfterDelegation(), so releasing here would reopen the exact
+		// crash-orphan window this claim closes.
+		try {
+			if (isRehydratingCurrentTask) {
+				// Replace the current task in-place to avoid UI flicker
+				const oldTask = this.taskRegistry.current
 
-			if (oldTask) {
-				// Abort the old task to stop running processes and mark as abandoned
-				try {
-					await oldTask.abortTask(true)
-				} catch (e) {
-					this.log(
-						`[createTaskWithHistoryItem] abortTask() failed for old task ${oldTask.taskId}.${oldTask.instanceId}: ${e.message}`,
+				if (oldTask) {
+					// Abort the old task to stop running processes and mark as abandoned
+					try {
+						await oldTask.abortTask(true)
+					} catch (e) {
+						this.log(
+							`[createTaskWithHistoryItem] abortTask() failed for old task ${oldTask.taskId}.${oldTask.instanceId}: ${e.message}`,
+						)
+					}
+
+					// Remove event listeners from the old task
+					const cleanupFunctions = this.taskEventListeners.get(oldTask)
+					if (cleanupFunctions) {
+						cleanupFunctions.forEach((cleanup) => cleanup())
+						this.taskEventListeners.delete(oldTask)
+					}
+
+					// Replace in-place: preserves stack index and current pointer
+					this.taskRegistry.replace(oldTask.taskId, task)
+				}
+
+				task.emit(RooCodeEventName.TaskFocused)
+
+				// Perform preparation tasks and set up event listeners
+				await this.performPreparationTasks(task)
+
+				this.log(
+					`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
+				)
+
+				if (options?.startTask !== false) {
+					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", () =>
+						this.taskHistoryStore.markLocallyInactive(task.taskId),
 					)
 				}
+			} else {
+				await this.addClineToStack(task)
 
-				// Remove event listeners from the old task
-				const cleanupFunctions = this.taskEventListeners.get(oldTask)
-				if (cleanupFunctions) {
-					cleanupFunctions.forEach((cleanup) => cleanup())
-					this.taskEventListeners.delete(oldTask)
+				this.log(
+					`[createTaskWithHistoryItem] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
+				)
+
+				if (options?.startTask !== false) {
+					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", () =>
+						this.taskHistoryStore.markLocallyInactive(task.taskId),
+					)
 				}
-
-				// Replace in-place: preserves stack index and current pointer
-				this.taskRegistry.replace(oldTask.taskId, task)
 			}
-
-			task.emit(RooCodeEventName.TaskFocused)
-
-			// Perform preparation tasks and set up event listeners
-			await this.performPreparationTasks(task)
-
-			this.log(
-				`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
-			)
-
-			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
-			}
-		} else {
-			await this.addClineToStack(task)
-
-			this.log(
-				`[createTaskWithHistoryItem] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
-			)
-
-			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
-			}
+		} catch (error) {
+			// Preparation/stack failure: the task never started, so release the claim
+			// and let the caller handle the rethrown error.
+			this.taskHistoryStore.markLocallyInactive(task.taskId)
+			throw error
 		}
 
 		// Check if there's a pending edit after checkpoint restoration

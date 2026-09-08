@@ -9,6 +9,7 @@ type ProviderStubFields = {
 		get: (id: string) => unknown
 		invalidate?: (id: string) => Promise<void>
 		markLocallyActive?: (taskId: string) => void
+		markLocallyInactive?: (taskId: string) => void
 	}
 	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
@@ -43,6 +44,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.taskHistoryStore.invalidate ??= async () => {}
 	s.taskHistoryStore.markLocallyActive ??= () => {}
+	s.taskHistoryStore.markLocallyInactive ??= () => {}
 	s.taskScheduler ??= { schedule: async (_task, run) => run() }
 
 	// Convert legacy clineStack array into a TaskRegistry
