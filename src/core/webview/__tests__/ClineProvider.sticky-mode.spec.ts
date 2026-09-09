@@ -1074,8 +1074,6 @@ describe("ClineProvider - Sticky Mode", () => {
 	describe("Multiple tasks switching modes simultaneously", () => {
 		it("should handle multiple tasks switching modes independently", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			vi.mocked(mockContext.workspaceState.get).mockReturnValue(true)
-			vi.spyOn(provider as any, "postStateToWebview").mockResolvedValue(undefined)
 
 			// Create multiple mock tasks
 			const task1 = {
@@ -1107,6 +1105,11 @@ describe("ClineProvider - Sticky Mode", () => {
 				apiConversationHistory: [],
 				updateApiConfiguration: vi.fn(),
 			}
+
+			// Add tasks to provider stack
+			await provider.addClineToStack(task1 as any)
+			await provider.addClineToStack(task2 as any)
+			await provider.addClineToStack(task3 as any)
 
 			// Mock getGlobalState to return all tasks
 			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
@@ -1226,9 +1229,6 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		it("should handle rapid task switches during mode changes", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			vi.mocked(mockContext.workspaceState.get).mockReturnValue(true)
-			vi.spyOn(provider as any, "postStateToWebview").mockResolvedValue(undefined)
-			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 
 			// Create multiple tasks
 			const tasks = Array.from({ length: 5 }, (_, i) => ({
@@ -1241,11 +1241,20 @@ describe("ClineProvider - Sticky Mode", () => {
 				updateApiConfiguration: vi.fn(),
 			}))
 
-			// Rapidly switch the explicitly targeted tasks and modes.
+			// Add all tasks to provider
+			for (const task of tasks) {
+				await provider.addClineToStack(task as any)
+			}
+
+			// Mock getCurrentTask
+			const getCurrentTaskSpy = vi.spyOn(provider, "getCurrentTask")
+
+			// Rapidly switch between tasks and modes
 			const switches: Promise<void>[] = []
 			tasks.forEach((task, index) => {
+				getCurrentTaskSpy.mockReturnValue(task as any)
 				const mode = ["architect", "debug", "code"][index % 3]
-				switches.push(provider.handleModeSwitch(mode as any, task as unknown as Task))
+				switches.push(provider.handleModeSwitch(mode as any))
 			})
 
 			await Promise.all(switches)

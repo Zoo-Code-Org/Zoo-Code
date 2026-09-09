@@ -19,9 +19,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
-import type { ProviderHandoffProfileIntent } from "../task-persistence/providerHandoff"
-
-const providerSettingsLocks = new WeakMap<ExtensionContext["secrets"], Promise<void>>()
 
 // Type-safe model migrations mapping
 type ModelMigrations = {
@@ -36,29 +33,8 @@ export interface SyncCloudProfilesResult {
 	activeProfileId: string
 }
 
-/**
- * Read-only snapshot of the durable profile store state needed to prepare a
- * provider handoff. `savedProfile` carries the full profile (including
- * provider secret fields) for the requested mode's saved mapping, if any.
- */
-export interface ProviderProfileSnapshot {
-	currentApiConfigName: string | undefined
-	currentProfile: (ProviderSettingsWithId & { name: string }) | undefined
-	entries: ProviderSettingsEntry[]
-	modeApiConfigId: string | undefined
-	savedProfile: (ProviderSettingsWithId & { name: string }) | undefined
-}
-
-/**
- * The current profile identity is optional so an explicit handoff `clear`
- * intent can durably remove it. Backward compatibility: existing stores that
- * carry an identity parse unchanged; fresh installs are explicitly seeded with
- * the "default" identity in {@link defaultProviderProfiles}; a store whose
- * identity was cleared parses as `undefined` and stays cleared on reload
- * (initialization only seeds the defaults when the store file is absent).
- */
 export const providerProfilesSchema = z.object({
-	currentApiConfigName: z.string().optional(),
+	currentApiConfigName: z.string(),
 	apiConfigs: z.record(z.string(), providerSettingsWithIdSchema),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),
 	cloudProfileIds: z.array(z.string()).optional(),
@@ -112,18 +88,10 @@ export class ProviderSettingsManager {
 	}
 
 	// Synchronize readConfig/writeConfig operations to avoid data loss.
+	private _lock = Promise.resolve()
 	private lock<T>(cb: () => Promise<T>) {
-		// Provider instances in one extension host share SecretStorage. Use one
-		// queue per store so their load-modify-store transactions cannot interleave.
-		const previous = providerSettingsLocks.get(this.context.secrets) ?? Promise.resolve()
-		const next = previous.then(cb)
-		providerSettingsLocks.set(
-			this.context.secrets,
-			next.then(
-				() => undefined,
-				() => undefined,
-			),
-		)
+		const next = this._lock.then(cb)
+		this._lock = next.catch(() => {}) as Promise<void>
 		return next
 	}
 
@@ -144,12 +112,10 @@ export class ProviderSettingsManager {
 
 				// Migrate existing installs to have per-mode API config map
 				if (!providerProfiles.modeApiConfigs) {
-					// Use the currently selected config for all modes initially.
-					// The current identity is optional (explicit clear); fall
-					// back to the first profile, then the generated default id.
+					// Use the currently selected config for all modes initially
 					const currentName = providerProfiles.currentApiConfigName
 					const seedId =
-						(currentName !== undefined ? providerProfiles.apiConfigs[currentName]?.id : undefined) ??
+						providerProfiles.apiConfigs[currentName]?.id ??
 						Object.values(providerProfiles.apiConfigs)[0]?.id ??
 						this.defaultConfigId
 					providerProfiles.modeApiConfigs = Object.fromEntries(modes.map((m) => [m.slug, seedId]))
@@ -538,125 +504,6 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Read-only, single-lock snapshot used by provider handoff preparation.
-	 *
-	 * Reads the durable current-profile identity, the requested mode's saved
-	 * mapping, the profile metadata list, and the matching full profile
-	 * (including provider secret fields) under one lock acquisition with a
-	 * single store load. Performs no writes, so a failing preparation cannot
-	 * mutate the profile store.
-	 */
-	public async snapshotForHandoff(mode: Mode): Promise<ProviderProfileSnapshot> {
-		try {
-			return await this.lock(async () => {
-				const providerProfiles = await this.load()
-
-				const entries: ProviderSettingsEntry[] = Object.entries(providerProfiles.apiConfigs).map(
-					([name, apiConfig]) => ({
-						name,
-						id: apiConfig.id || "",
-						apiProvider: apiConfig.apiProvider,
-						modelId: this.cleanModelId(getModelId(apiConfig)),
-					}),
-				)
-
-				const modeApiConfigId = providerProfiles.modeApiConfigs?.[mode]
-				const currentProfile =
-					providerProfiles.currentApiConfigName !== undefined
-						? providerProfiles.apiConfigs[providerProfiles.currentApiConfigName]
-							? structuredClone({
-									name: providerProfiles.currentApiConfigName,
-									...providerProfiles.apiConfigs[providerProfiles.currentApiConfigName],
-								})
-							: undefined
-						: undefined
-
-				let savedProfile: (ProviderSettingsWithId & { name: string }) | undefined
-				if (modeApiConfigId) {
-					const savedEntry = Object.entries(providerProfiles.apiConfigs).find(
-						([_, apiConfig]) => apiConfig.id === modeApiConfigId,
-					)
-
-					if (savedEntry) {
-						// Clone so the snapshot never aliases the live store data.
-						savedProfile = structuredClone({ name: savedEntry[0], ...savedEntry[1] })
-					}
-				}
-
-				return {
-					currentApiConfigName: providerProfiles.currentApiConfigName,
-					currentProfile,
-					entries,
-					modeApiConfigId,
-					savedProfile,
-				}
-			})
-		} catch (error) {
-			throw new Error(`Failed to snapshot provider profiles for handoff: ${error}`)
-		}
-	}
-
-	/**
-	 * Post-commit handoff projection driven by an explicit profile intent:
-	 *
-	 * - `set`: durably persist the given profile identity (and the requested
-	 *   mode's mapping when provided) in one locked load/store cycle.
-	 * - `preserve`: perform no store write at all — the profile identity is
-	 *   pinned across modes and must never be rewritten by the handoff.
-	 * - `clear`: durably remove the current-profile identity by writing
-	 *   `undefined` (never by skipping the write).
-	 *
-	 * This is a legacy projection — the delegating child's task-local context
-	 * is already authoritative when this runs.
-	 */
-	public async projectHandoffState(params: {
-		intent: ProviderHandoffProfileIntent
-		mode?: Mode
-		modeConfigId?: string
-	}) {
-		try {
-			return await this.lock(async () => {
-				if (params.intent.kind === "preserve") {
-					// Explicit no-op: the pinned identity is left untouched.
-					return
-				}
-
-				const providerProfiles = await this.load()
-				let isDirty = false
-
-				if (params.intent.kind === "set") {
-					const name = params.intent.name
-					if (providerProfiles.currentApiConfigName !== name) {
-						providerProfiles.currentApiConfigName = name
-						isDirty = true
-					}
-				} else if (providerProfiles.currentApiConfigName !== undefined) {
-					// Explicit clear: write the absence durably instead of skipping.
-					providerProfiles.currentApiConfigName = undefined
-					isDirty = true
-				}
-
-				if (params.mode && params.modeConfigId) {
-					if (!providerProfiles.modeApiConfigs) {
-						providerProfiles.modeApiConfigs = {}
-					}
-
-					if (providerProfiles.modeApiConfigs[params.mode] !== params.modeConfigId) {
-						providerProfiles.modeApiConfigs[params.mode] = params.modeConfigId
-						isDirty = true
-					}
-				}
-
-				if (isDirty) {
-					await this.store(providerProfiles)
-				}
-			})
-		} catch (error) {
-			throw new Error(`Failed to project provider handoff state: ${error}`)
-		}
-	}
-
-	/**
 	 * Set the API config for a specific mode.
 	 */
 	public async setModeConfig(mode: Mode, configId: string) {
@@ -687,20 +534,6 @@ export class ProviderSettingsManager {
 			})
 		} catch (error) {
 			throw new Error(`Failed to get mode config: ${error}`)
-		}
-	}
-
-	/**
-	 * Durable current-profile identity, or `undefined` when an explicit clear
-	 * removed it. One locked store read; used to reconstruct an explicit
-	 * profile clear after a provider reload (the in-memory per-child markers
-	 * do not survive a reload, the durable store identity does).
-	 */
-	public async getCurrentProfileName(): Promise<string | undefined> {
-		try {
-			return await this.lock(async () => (await this.load()).currentApiConfigName)
-		} catch (error) {
-			throw new Error(`Failed to get current profile name: ${error}`)
 		}
 	}
 
@@ -785,10 +618,7 @@ export class ProviderSettingsManager {
 			const content = await this.context.secrets.get(this.secretsKey)
 
 			if (!content) {
-				// Callers perform load-modify-store transactions. Never expose the
-				// shared fresh-install template to a mutation that can outlive a
-				// rejected store operation.
-				return structuredClone(this.defaultProviderProfiles)
+				return this.defaultProviderProfiles
 			}
 
 			const providerProfiles = providerProfilesSchema

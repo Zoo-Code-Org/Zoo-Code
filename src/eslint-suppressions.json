@@ -44,9 +44,9 @@
 			"count": 9
 		}
 	},
-	"__tests__/ClineProvider.delegation.spec.ts": {
+	"__tests__/provider-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 2
+			"count": 9
 		}
 	},
 	"activate/CodeActionProvider.ts": {
@@ -1026,12 +1026,12 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 7
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 32
+			"count": 34
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
@@ -1041,7 +1041,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 34
+			"count": 37
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 2
+			"count": 4
 		}
 	},
 	"utils/tts.ts": {

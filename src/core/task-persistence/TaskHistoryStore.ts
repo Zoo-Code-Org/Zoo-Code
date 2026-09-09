@@ -4,14 +4,12 @@ import * as path from "path"
 import crypto from "crypto"
 
 import deepEqual from "fast-deep-equal"
-import { historyItemSchema, type HistoryItem } from "@roo-code/types"
+import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
-import { withAdvisoryFileLock, ADVISORY_READ_LOCK_RETRIES } from "../../utils/advisoryFileLock"
-import { getStorageBasePath, getTaskDirectoryPath } from "../../utils/storage"
+import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
-import { isValidPendingHandoff } from "./providerHandoff"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -67,16 +65,6 @@ interface DelegationRepairIntent {
  * dropped. Within a single extension host process, an in-process write
  * lock serializes mutations.
  */
-/**
- * Discriminated result of a strict fresh read. `missing` means the durable
- * record is definitively absent; `error` means it exists but is unreadable,
- * unparseable, or incompatible — durability is unknowable, not absent.
- */
-export type StrictTaskReadResult =
-	| { readonly kind: "found"; readonly item: HistoryItem }
-	| { readonly kind: "missing" }
-	| { readonly kind: "error"; readonly reason: "read" | "parse" | "incompatible"; readonly error: unknown }
-
 /**
  * Options for TaskHistoryStore constructor.
  */
@@ -439,11 +427,6 @@ export class TaskHistoryStore {
 		let repairsInThisPass: number
 		do {
 			repairsInThisPass = 0
-			// Replay the child-side delegation write-ahead records BEFORE the
-			// delegated-parent pass, using its own snapshot: the pass below must
-			// see the finalized or removed post-sweep cache, not a stale copy.
-			await this.reconcilePendingHandoffRecords(new Map(Array.from(this.cache.values()).map((i) => [i.id, i])))
-
 			// Rebuild the lookup map each pass so repairs from the previous pass
 			// are visible when evaluating chained delegations.
 			const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
@@ -516,169 +499,6 @@ export class TaskHistoryStore {
 				// child.status === "interrupted" or "delegated" → leave as-is this pass
 			}
 		} while (repairsInThisPass > 0)
-	}
-
-	/**
-	 * Replay the child-side delegation write-ahead records (`pendingHandoff`).
-	 *
-	 * The delegating provider writes the child's history record with this
-	 * marker BEFORE the parent's delegation record is committed, so a crash
-	 * between the two writes leaves a recoverable trail:
-	 *
-	 * - committed: the parent record durably points at this child
-	 *   (`status === "delegated"` and `awaitingChildId === child.id`). The
-	 *   marker is stale bookkeeping; strip it (idempotent finalization
-	 *   replay). The normal delegated-parent pass below then handles the
-	 *   child's status as usual.
-	 * - orphan: the parent never durably committed this delegation. If — and
-	 *   only if — every guard predicate holds (valid marker version, lineage
-	 *   to a present parent record, pre-start child status, no delegation
-	 *   bookkeeping of its own, and no matching parent delegation), the
-	 *   pre-start child record and its task directory are removed.
-	 *
-	 * Guards are deliberately conservative: a false negative only leaves a
-	 * stale record on disk, while a false positive would delete user data.
-	 * Ambiguous records are left untouched. Must run under the store lock.
-	 */
-	private async reconcilePendingHandoffRecords(byId: ReadonlyMap<string, HistoryItem>): Promise<void> {
-		for (const [, item] of byId) {
-			const pending = item.pendingHandoff
-			if (!pending) continue
-
-			// Guard 1: only markers this build understands are actionable.
-			if (!isValidPendingHandoff(pending)) continue
-
-			// Guard 2: lineage — a write-ahead record always references its
-			// delegating parent, and that record must be present.
-			const parentId = item.parentTaskId
-			if (!parentId || !this.isSafeTaskId(parentId)) continue
-			const parent = byId.get(parentId)
-			if (!parent) continue
-
-			if (parent.status === "delegated" && parent.awaitingChildId === item.id) {
-				// Committed clear markers remain durable until the legacy profile
-				// projection succeeds. A restart can then reconstruct the exact
-				// clear intent even when the process stopped before that projection.
-				if (pending.kind === "clear") continue
-				// Other committed markers are stale bookkeeping. The child's own
-				// mode/apiConfigName fields retain their execution identity.
-				try {
-					await this.upsertCore({ ...item, pendingHandoff: undefined }, { skipTransitionCheck: true })
-					console.warn(`[TaskHistoryStore] Finalized pending handoff marker for committed child ${item.id}`)
-				} catch (error) {
-					console.error(
-						`[TaskHistoryStore] Failed to finalize pending handoff marker for child ${item.id}:`,
-						error,
-					)
-				}
-				continue
-			}
-
-			// Guard 3: pre-start only. A child that ran (messages, completion,
-			// its own delegation, or a terminal status) is never deleted here.
-			if ((item.status ?? "active") !== "active") continue
-			if (
-				item.awaitingChildId !== undefined ||
-				item.delegatedToId !== undefined ||
-				item.completedByChildId !== undefined ||
-				item.completionResultSummary !== undefined
-			) {
-				continue
-			}
-
-			// Guard 4: the parent record exists and does NOT delegate to this
-			// child (checked above) — a pre-commit orphan.
-			if (!this.isSafeTaskId(item.id)) continue
-			try {
-				const removed = await this.removePendingHandoffOrphanUnderAdvisoryLocks(parentId, item.id)
-				if (!removed) continue
-				if (this.onWrite) {
-					await this.onWrite(this.getAll())
-				}
-				console.warn(
-					`[TaskHistoryStore] Removed pre-commit orphaned handoff child ${item.id} (parent ${parentId} never delegated to it)`,
-				)
-			} catch (error) {
-				console.error(`[TaskHistoryStore] Failed to remove orphaned handoff child ${item.id}:`, error)
-			}
-		}
-	}
-
-	/**
-	 * Revalidate and remove one pre-start WAL orphan while holding both task-file
-	 * locks in lexical order. The final reads close the startup-snapshot race.
-	 * The method leaves the task directory in place. Removing it after lock
-	 * release could delete a new writer's files, while removing the lock directory
-	 * before release would break advisory-lock ownership.
-	 */
-	private async removePendingHandoffOrphanUnderAdvisoryLocks(
-		parentTaskId: string,
-		childTaskId: string,
-	): Promise<boolean> {
-		const paths = new Map([
-			[parentTaskId, await this.getTaskFilePath(parentTaskId)],
-			[childTaskId, await this.getTaskFilePath(childTaskId)],
-		])
-		const orderedIds = [parentTaskId, childTaskId].sort()
-
-		const withLocks = async (index: number, fn: () => Promise<boolean>): Promise<boolean> => {
-			if (index === orderedIds.length) return fn()
-			const filePath = paths.get(orderedIds[index])
-			if (!filePath) return false
-			return withAdvisoryFileLock(filePath, () => withLocks(index + 1, fn), {
-				retries: ADVISORY_READ_LOCK_RETRIES,
-			})
-		}
-
-		return withLocks(0, async () => {
-			const parentPath = paths.get(parentTaskId)
-			const childPath = paths.get(childTaskId)
-			if (!parentPath || !childPath) return false
-			const parentRead = await this.readTaskFileUnderAdvisoryLock(parentTaskId, parentPath)
-			const childRead = await this.readTaskFileUnderAdvisoryLock(childTaskId, childPath)
-			if (parentRead.kind !== "found" || childRead.kind !== "found") return false
-
-			const parent = parentRead.item
-			const child = childRead.item
-			const pending = child.pendingHandoff
-			if (
-				!pending ||
-				!isValidPendingHandoff(pending) ||
-				child.parentTaskId !== parentTaskId ||
-				(parent.status === "delegated" && parent.awaitingChildId === childTaskId) ||
-				(child.status ?? "active") !== "active" ||
-				child.awaitingChildId !== undefined ||
-				child.delegatedToId !== undefined ||
-				child.completedByChildId !== undefined ||
-				child.completionResultSummary !== undefined
-			) {
-				return false
-			}
-
-			await fs.unlink(childPath)
-			this.cache.delete(childTaskId)
-			this.taskFileMtimes.delete(childTaskId)
-			return true
-		})
-	}
-
-	/** Read a task file without changing the cache while its advisory lock is held. */
-	private async readTaskFileUnderAdvisoryLock(taskId: string, filePath: string): Promise<StrictTaskReadResult> {
-		try {
-			const parsed: unknown = JSON.parse(await fs.readFile(filePath, "utf8"))
-			const validated = historyItemSchema.safeParse(parsed)
-			if (!validated.success || validated.data.id !== taskId) {
-				return {
-					kind: "error",
-					reason: "incompatible",
-					error: new Error(`[TaskHistoryStore] task ${taskId} record is invalid or has a mismatched id`),
-				}
-			}
-			return { kind: "found", item: validated.data }
-		} catch (error) {
-			if (this.isFileNotFoundError(error)) return { kind: "missing" }
-			return { kind: "error", reason: error instanceof SyntaxError ? "parse" : "read", error }
-		}
 	}
 
 	private getPersistedActiveIds(): ReadonlySet<string> {
@@ -930,96 +750,6 @@ export class TaskHistoryStore {
 	}
 
 	// ────────────────────────────── Cache invalidation ──────────────────────────────
-
-	/**
-	 * Fresh, lock-held read of a task's durable record that distinguishes the
-	 * three outcomes callers must tell apart at the delegation reconciliation
-	 * boundary:
-	 *
-	 * - `found`: the record exists and parsed; the cache is refreshed from it.
-	 * - `missing`: the task file does not exist (definitively absent).
-	 * - `error`: the record exists but could not be read or parsed, or is
-	 *   incompatible (no usable `id`).
-	 *
-	 * Unlike `invalidate` — which collapses every read/parse failure into a
-	 * cache delete — this result lets the caller treat "definitively absent"
-	 * differently from "unknowable", which is the difference between a safe
-	 * rollback and a non-destructive degraded abort.
-	 */
-	async readFresh(taskId: string): Promise<StrictTaskReadResult> {
-		return this.withLock(async () => {
-			const filePath = await this.getTaskFilePath(taskId)
-
-			// Lock order: the store's in-process write lock is already held;
-			// the advisory per-file lock below is the same `proper-lockfile`
-			// lock `safeWriteJson` acquires for this exact path (writers take
-			// the two locks in the same order, so this can wait out an
-			// in-flight write without deadlocking). Holding it means this read
-			// can never observe safeWriteJson's backup/commit rename gap or a
-			// stale pre-commit file from another host.
-			try {
-				return await withAdvisoryFileLock(filePath, () => this.readFreshUnderAdvisoryLock(taskId, filePath), {
-					retries: ADVISORY_READ_LOCK_RETRIES,
-				})
-			} catch (error) {
-				// The advisory lock itself could not be acquired or was
-				// compromised: durability is unknowable — never "missing", and
-				// the cache is left untouched.
-				return { kind: "error", reason: "read", error }
-			}
-		})
-	}
-
-	/**
-	 * The file read behind {@link readFresh}'s advisory lock. Only reachable
-	 * while the per-task file cannot be mid-write by another host.
-	 */
-	private async readFreshUnderAdvisoryLock(taskId: string, filePath: string): Promise<StrictTaskReadResult> {
-		let raw: string
-		try {
-			raw = await fs.readFile(filePath, "utf8")
-		} catch (error) {
-			if (this.isFileNotFoundError(error)) {
-				this.cache.delete(taskId)
-				this.taskFileMtimes.delete(taskId)
-				return { kind: "missing" }
-			}
-			return { kind: "error", reason: "read", error }
-		}
-
-		let parsed: unknown
-		try {
-			parsed = JSON.parse(raw)
-		} catch (error) {
-			return { kind: "error", reason: "parse", error }
-		}
-
-		const validated = historyItemSchema.safeParse(parsed)
-		if (!validated.success) {
-			return {
-				kind: "error",
-				reason: "incompatible",
-				error: new Error(`[TaskHistoryStore] readFresh: task ${taskId} record failed schema validation`),
-			}
-		}
-
-		const item = validated.data
-
-		// Identity-strict: a record whose own id does not match the requested
-		// task id is incompatible with that key. It must never be cached under
-		// the requested key.
-		if (item.id !== taskId) {
-			return {
-				kind: "error",
-				reason: "incompatible",
-				error: new Error(`[TaskHistoryStore] readFresh: task ${taskId} record has mismatched id ${item.id}`),
-			}
-		}
-
-		this.cache.set(taskId, item)
-		this.taskFileMtimes.delete(taskId)
-		return { kind: "found", item }
-	}
 
 	/**
 	 * Invalidate a single task's cache entry (re-read from disk on next access).

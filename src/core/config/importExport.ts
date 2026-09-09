@@ -15,7 +15,7 @@ import {
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { ProviderSettingsManager, providerProfilesSchema, type ProviderProfiles } from "./ProviderSettingsManager"
+import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
 import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
@@ -136,15 +136,9 @@ export async function importSettingsFromPath(
 	filePath: string,
 	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
 ) {
-	// Use a lenient schema that accepts any apiConfigs, then validate each individually.
-	// `currentApiConfigCleared` is the explicit-clear sentinel written by
-	// exportSettings: JSON cannot distinguish an absent identity key from a
-	// legacy export that never carried one, so an intentionally cleared
-	// export marks itself. Older versions strip the unknown key on parse and
-	// keep their historical fallback behavior.
+	// Use a lenient schema that accepts any apiConfigs, then validate each individually
 	const lenientProviderProfilesSchema = providerProfilesSchema.extend({
 		apiConfigs: z.record(z.string(), z.any()),
-		currentApiConfigCleared: z.boolean().optional(),
 	})
 
 	const lenientSchema = z.object({
@@ -191,30 +185,16 @@ export async function importSettingsFromPath(
 		}
 
 		// Determine the currentApiConfigName:
-		// 0. An export explicitly marked as cleared (`currentApiConfigCleared`)
-		//    preserves its intentional clear — the absent identity is NOT
-		//    normalized to the first profile.
 		// 1. If the imported currentApiConfigName exists in validApiConfigs, use it
-		// 2. Otherwise (invalid named identity, or legacy export without the
-		//    marker whose identity is absent), fall back to the first valid
-		//    imported profile
+		// 2. Otherwise, fall back to the first valid imported profile
 		// 3. If no valid profiles were imported, keep the previous currentApiConfigName
 		let currentApiConfigName = rawProviderProfiles.currentApiConfigName
 		const validProfileNames = Object.keys(validApiConfigs)
-		// The sentinel distinguishes an intentional clear from an unavailable
-		// profile name and from a legacy export that simply lacks the field.
-		const explicitClear = rawProviderProfiles.currentApiConfigCleared === true
-		if (explicitClear) {
-			// Intentional clear: keep the identity absent and durably clear it.
-			currentApiConfigName = undefined
-		} else if (currentApiConfigName === undefined || !validApiConfigs[currentApiConfigName]) {
+		if (!validApiConfigs[currentApiConfigName]) {
 			if (validProfileNames.length > 0) {
-				const previousName = currentApiConfigName
 				currentApiConfigName = validProfileNames[0]
 				warnings.push(
-					previousName === undefined
-						? `No current profile was specified; defaulting to "${currentApiConfigName}".`
-						: `Profile "${previousName}" was not available; defaulting to "${currentApiConfigName}".`,
+					`Profile "${rawProviderProfiles.currentApiConfigName}" was not available; defaulting to "${currentApiConfigName}".`,
 				)
 			} else {
 				// No valid imported profiles; keep the existing currentApiConfigName
@@ -251,8 +231,7 @@ export async function importSettingsFromPath(
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
-		const currentProvider =
-			currentProviderName !== undefined ? providerProfiles.apiConfigs[currentProviderName] : undefined
+		const currentProvider = providerProfiles.apiConfigs[currentProviderName]
 		await contextProxy.setValue("currentApiConfigName", currentProviderName)
 
 		// TODO: It seems like we don't need to have the provider settings in
@@ -330,22 +309,6 @@ export const importSettingsFromFile = async (
 	})
 }
 
-/**
- * Explicit-clear sentinel for exported provider profiles. An export whose
- * current identity is absent is an intentional state (an explicit handoff or
- * import clear), but JSON serialization cannot distinguish an absent key from
- * a legacy export that never carried the field. Cleared exports therefore
- * mark themselves with `currentApiConfigCleared: true` so import can preserve
- * the clear instead of normalizing it to the first profile. Exports that
- * still carry an identity are written unchanged.
- */
-function withExplicitClearMarker(profiles: ProviderProfiles): ProviderProfiles & { currentApiConfigCleared?: true } {
-	if (profiles.currentApiConfigName !== undefined) {
-		return profiles
-	}
-	return { ...profiles, currentApiConfigCleared: true }
-}
-
 export const exportSettings = async ({ providerSettingsManager, contextProxy }: ExportOptions) => {
 	const defaultUri = await resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
@@ -380,10 +343,7 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 
 		const dirname = path.dirname(uri.fsPath)
 		await fs.mkdir(dirname, { recursive: true })
-		await safeWriteJson(uri.fsPath, {
-			providerProfiles: withExplicitClearMarker(providerProfiles),
-			globalSettings,
-		})
+		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings })
 	} catch (e) {
 		console.error("Failed to export settings:", e)
 		// Don't re-throw - the UI will handle showing error messages

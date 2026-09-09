@@ -646,127 +646,29 @@ describe("Cline", () => {
 		})
 	})
 
-	describe("handoff execution context", () => {
-		it("adopts changed handoff values and rebuilds the API handler", async () => {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-			const nextConfig: ProviderSettings = {
-				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "openai/gpt-4",
-			}
-			const updateApiConfiguration = vi.spyOn(task, "updateApiConfiguration")
-
-			task.adoptHandoffExecutionContext({
-				mode: "ask",
-				apiConfigName: "handoff-profile",
-				apiConfiguration: nextConfig,
-			})
-
-			await expect(task.getTaskMode()).resolves.toBe("ask")
-			await expect(task.getTaskApiConfigName()).resolves.toBe("handoff-profile")
-			expect(updateApiConfiguration).toHaveBeenCalledOnce()
-			expect(updateApiConfiguration).toHaveBeenCalledWith(nextConfig)
-		})
-
-		it("does not rebuild the API handler for a value-equal configuration", () => {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-			const updateApiConfiguration = vi.spyOn(task, "updateApiConfiguration")
-
-			task.adoptHandoffExecutionContext({
-				mode: "ask",
-				apiConfigName: undefined,
-				apiConfiguration: structuredClone(mockApiConfig),
-			})
-
-			expect(task.taskMode).toBe("ask")
-			expect(task.taskApiConfigName).toBeUndefined()
-			expect(updateApiConfiguration).not.toHaveBeenCalled()
-		})
-
-		it("adopts a complete explicit execution context synchronously at construction", async () => {
-			const handoffConfig: ProviderSettings = {
+	describe("constructor", () => {
+		it("uses an explicit delegated-child context without reading shared provider state", async () => {
+			const localConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}
 			const task = new Task({
 				provider: mockProvider,
-				// Production passes the prepared snapshot as both the handler
-				// configuration and the handoff execution context.
-				apiConfiguration: handoffConfig,
-				task: "test task",
+				apiConfiguration: mockApiConfig,
+				task: "delegated child",
 				startTask: false,
 				handoffExecutionContext: {
 					mode: "ask",
-					apiConfigName: "handoff-profile",
-					apiConfiguration: handoffConfig,
+					apiConfigName: "parent-local-profile",
+					apiConfiguration: localConfiguration,
 				},
 			})
 
-			// Mode and sticky profile are authoritative immediately: no
-			// asynchronous inference from mutable global provider state.
 			await expect(task.getTaskMode()).resolves.toBe("ask")
-			await expect(task.getTaskApiConfigName()).resolves.toBe("handoff-profile")
-			// The handler configuration is the prepared snapshot, not global state.
-			expect(task.apiConfiguration).toEqual(handoffConfig)
+			await expect(task.getTaskApiConfigName()).resolves.toBe("parent-local-profile")
+			expect(task.apiConfiguration).toEqual(localConfiguration)
 		})
 
-		it("rejects an incomplete handoff execution context at runtime", () => {
-			expect(
-				() =>
-					new Task({
-						provider: mockProvider,
-						apiConfiguration: mockApiConfig,
-						task: "test task",
-						startTask: false,
-						// Missing apiConfiguration: a partially explicit context must
-						// fail loudly instead of silently falling back to global state.
-						handoffExecutionContext: { mode: "ask", apiConfigName: undefined } as never,
-					}),
-			).toThrow("handoffExecutionContext must be complete")
-
-			expect(
-				() =>
-					new Task({
-						provider: mockProvider,
-						apiConfiguration: mockApiConfig,
-						task: "test task",
-						startTask: false,
-						// Empty mode with a configuration is equally incomplete.
-						handoffExecutionContext: {
-							mode: "",
-							apiConfigName: undefined,
-							apiConfiguration: mockApiConfig,
-						},
-					}),
-			).toThrow("handoffExecutionContext must be complete")
-		})
-
-		it("keeps ordinary initialization unchanged without a handoff context", async () => {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-
-			expect(task.apiConfiguration).toEqual(mockApiConfig)
-			// Without an explicit context the mode and profile still initialize
-			// asynchronously from provider state (the proxy defaults).
-			await expect(task.getTaskMode()).resolves.toBe("architect")
-			await expect(task.getTaskApiConfigName()).resolves.toBe("default")
-		})
-	})
-
-	describe("constructor", () => {
 		it("should always have diff strategy defined", async () => {
 			const cline = new Task({
 				provider: mockProvider,
