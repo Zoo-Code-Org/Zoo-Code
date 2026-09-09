@@ -279,6 +279,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			}),
 			getCurrentProfileName: vi.fn(),
 		}
+		const workspaceGet = vi.fn().mockReturnValue(false)
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
@@ -289,7 +290,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
 			providerSettingsManager,
-			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
+			context: { workspaceState: { get: workspaceGet } },
 		} as unknown as ClineProvider
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -300,6 +301,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		expect(providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("ask")
+		expect(workspaceGet).toHaveBeenCalledWith("lockApiConfigAcrossModes", false)
 		expect(providerSettingsManager.getProfile).toHaveBeenCalledWith({ id: "ask-profile-id" })
 		expect(providerSettingsManager.getCurrentProfileName).not.toHaveBeenCalled()
 		expect(createTask).toHaveBeenCalledWith(
@@ -313,6 +315,60 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 					apiConfiguration: {
 						apiProvider: providerIdentifiers.openrouter,
 						openRouterModelId: "openai/gpt-4.1-mini",
+					},
+				},
+			}),
+		)
+	})
+
+	it.each([
+		{ name: "has no saved mode profile", savedConfigId: undefined, savedProfile: undefined },
+		{
+			name: "has an unconfigured saved mode profile",
+			savedConfigId: "empty-id",
+			savedProfile: { name: "empty", id: "empty-id" },
+		},
+	])("keeps the parent task-local profile when a different mode $name", async ({ savedConfigId, savedProfile }) => {
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-fallback", run: vi.fn().mockResolvedValue(undefined) }
+		const createTask = vi.fn().mockResolvedValue(child)
+		const getProfile = vi.fn().mockResolvedValue(savedProfile)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: makeStoreStub(),
+			providerSettingsManager: {
+				getModeConfigId: vi.fn().mockResolvedValue(savedConfigId),
+				getProfile,
+			},
+			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Fallback child",
+			initialTodos: [],
+			mode: "ask",
+		})
+
+		if (savedConfigId) expect(getProfile).toHaveBeenCalledWith({ id: savedConfigId })
+		else expect(getProfile).not.toHaveBeenCalled()
+		expect(createTask).toHaveBeenCalledWith(
+			"Fallback child",
+			undefined,
+			parentTask,
+			expect.objectContaining({
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "task-local-profile",
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+						anthropicApiKey: "task-local-key",
 					},
 				},
 			}),
