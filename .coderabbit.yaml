@@ -21,7 +21,7 @@ reviews:
     high_level_summary_in_walkthrough: true
     review_status: true
     review_details: true
-    collapse_walkthrough: true
+    collapse_walkthrough: false
     changed_files_summary: true
     poem: false
 
@@ -149,16 +149,14 @@ reviews:
 
     pre_merge_checks:
         override_requested_reviewers_only: true
-        # Warning failures are mergeable but prevent CodeRabbit's automatic approval.
-        # Keep only intentional blocking gates enabled so approval matches enforcement.
         docstrings:
             mode: off
         title:
-            mode: off
+            mode: warning
         description:
-            mode: off
+            mode: warning
         issue_assessment:
-            mode: off
+            mode: warning
         custom_checks:
             - name: Regression evidence
               mode: error
