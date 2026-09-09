@@ -203,7 +203,8 @@ export class ClineProvider
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
-	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
+	private static readonly delegationStartLocks = new Map<string, Promise<void>>()
+	private delegationTransitionLocks?: Map<string, Promise<void>>
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -243,7 +244,8 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
+		this.delegationTransitionLocks ??= new Map()
+		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, fn)
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -3832,7 +3834,7 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, params.parentTaskId, () =>
+		return runDelegationTransition(ClineProvider.delegationStartLocks, params.parentTaskId, () =>
 			ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
 		)
 	}
