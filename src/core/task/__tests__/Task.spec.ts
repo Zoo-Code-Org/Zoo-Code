@@ -648,6 +648,8 @@ describe("Cline", () => {
 
 	describe("constructor", () => {
 		it("uses an explicit delegated-child context without reading shared provider state", async () => {
+			const captureTaskCreated = vi.spyOn(TelemetryService.instance, "captureTaskCreated")
+			const captureTaskRestarted = vi.spyOn(TelemetryService.instance, "captureTaskRestarted")
 			const localConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
@@ -667,6 +669,8 @@ describe("Cline", () => {
 			await expect(task.getTaskMode()).resolves.toBe("ask")
 			await expect(task.getTaskApiConfigName()).resolves.toBe("parent-local-profile")
 			expect(task.apiConfiguration).toEqual(localConfiguration)
+			expect(captureTaskCreated).toHaveBeenCalledWith(task.taskId)
+			expect(captureTaskRestarted).not.toHaveBeenCalled()
 		})
 
 		it("should always have diff strategy defined", async () => {
