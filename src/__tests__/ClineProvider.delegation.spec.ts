@@ -368,8 +368,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		if (savedConfigId) expect(getProfile).toHaveBeenCalledWith({ id: savedConfigId })
 		else expect(getProfile).not.toHaveBeenCalled()
 		if (savedProfile instanceof Error) {
-			expect(log).toHaveBeenCalledWith(expect.stringContaining("stale-id"))
-			expect(log).toHaveBeenCalledWith(expect.stringContaining("parent parent-1"))
+			expect(
+				log.mock.calls.some(([message]) => message.includes("stale-id") && message.includes("parent parent-1")),
+			).toBe(true)
 		}
 		expect(createTask).toHaveBeenCalledWith(
 			"Fallback child",

@@ -14,6 +14,7 @@ type Policy = {
 	name: string
 	startBeforeCommit?: boolean
 	resumeBeforePermitRelease?: boolean
+	redelegateBeforePermitRelease?: boolean
 	emptyPublication?: boolean
 	staleConcurrentCommits?: boolean
 }
@@ -75,6 +76,11 @@ const LEGACY_POLICIES: Array<Policy & { expectedViolation: string }> = [
 		resumeBeforePermitRelease: true,
 		expectedViolation: "parent resumed before child permit release",
 	},
+	{
+		name: "redelegate-before-permit-release",
+		redelegateBeforePermitRelease: true,
+		expectedViolation: "parent redelegated before child permit release",
+	},
 	{ name: "empty-publication", emptyPublication: true, expectedViolation: "observable current task is empty" },
 	{
 		name: "stale-concurrent-provider-commits",
@@ -87,10 +93,9 @@ const parentConfiguration: ProviderSettings = { apiProvider: "anthropic", consec
 const savedConfiguration: ProviderSettings = { apiProvider: "openrouter", consecutiveMistakeLimit: 7 }
 const parentContext = { mode: "code", apiConfigName: undefined, apiConfiguration: parentConfiguration }
 const PROFILE_SCENARIOS = [
-	{ name: "unsaved", lookup: "absent", locked: false, saved: undefined, expectedName: undefined, expectedLimit: 3 },
+	{ name: "unsaved", locked: false, saved: undefined, expectedName: undefined, expectedLimit: 3 },
 	{
 		name: "saved",
-		lookup: "resolved",
 		locked: false,
 		saved: { name: "ask-profile", apiConfiguration: savedConfiguration },
 		expectedName: "ask-profile",
@@ -98,13 +103,11 @@ const PROFILE_SCENARIOS = [
 	},
 	{
 		name: "locked",
-		lookup: "resolved",
 		locked: true,
 		saved: { name: "ask-profile", apiConfiguration: savedConfiguration },
 		expectedName: undefined,
 		expectedLimit: 3,
 	},
-	{ name: "stale", lookup: "failed", locked: false, saved: undefined, expectedName: undefined, expectedLimit: 3 },
 ] as const
 
 for (const scenario of PROFILE_SCENARIOS) {
@@ -314,9 +317,12 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 	}
 	if (
 		state.generation === 0 &&
-		state.parentResumed &&
-		state.childPermit === "released" &&
-		!state.redelegationOpened
+		!state.redelegationOpened &&
+		((state.parentResumed && state.childPermit === "released") ||
+			(policy.redelegateBeforePermitRelease &&
+				state.parentQueued &&
+				state.parentPublished &&
+				state.childPermit === "held"))
 	) {
 		result.push(
 			action("redelegate(g1)", "redelegate", state, (next) => {
