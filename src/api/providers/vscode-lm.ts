@@ -909,12 +909,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// prompt) that we must not touch. Dropping messages here would orphan a tool_result from
 			// its tool_use — the exact 400 this guard exists to prevent — so fail loudly instead of
 			// sending a request we already know is over the window.
+			// Admission is judged against the RAW budget, not the clamped one: the clamp exists only
+			// to keep trimming productive, so accepting up to it would send a request the window
+			// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
 			const remainingChars = estimateMessagesChars(cleanedMessages)
-			if (remainingChars > messagesBudgetChars) {
+			if (remainingChars > rawBudgetChars) {
 				throw new Error(
 					"Zoo Code <Language Model API>: The request is too large for this model's context window " +
 						`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
-						`${messagesBudgetChars.toLocaleString("en-US")}), and it cannot be reduced further without ` +
+						`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
 						"breaking tool-call pairing. Condense the conversation or start a new task.",
 				)
 			}

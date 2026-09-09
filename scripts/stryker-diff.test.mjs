@@ -98,36 +98,41 @@ describe("pull request revision selection", () => {
 	it("excludes unrelated upstream files by diffing from the merge commit's first parent", () => {
 		const { repository, eventBaseSha, upstreamSha, mergeSha } = createSyntheticPullRequestRepository()
 
-		const manifest = selectFromGit(repository, eventBaseSha, mergeSha)
-		const changedPaths = manifest.packages.flatMap((entry) => entry.files.map((file) => file.path))
+		// A failed assertion must still remove the temporary repository, or a failing run leaks it.
+		try {
+			const manifest = selectFromGit(repository, eventBaseSha, mergeSha)
+			const changedPaths = manifest.packages.flatMap((entry) => entry.files.map((file) => file.path))
 
-		assert.deepEqual(changedPaths, ["packages/core/src/feature.ts"])
-		assert.equal(manifest.baseSha, upstreamSha)
-		assert.equal(manifest.mergeBase, upstreamSha)
+			assert.deepEqual(changedPaths, ["packages/core/src/feature.ts"])
+			assert.equal(manifest.baseSha, upstreamSha)
+			assert.equal(manifest.mergeBase, upstreamSha)
 
-		// Selectors must stay aligned with the checked-out head content.
-		assert.equal(manifest.headSha, mergeSha)
-		assert.deepEqual(
-			manifest.packages.flatMap((entry) => entry.selectors),
-			["src/feature.ts:1-1"],
-		)
-
-		fs.rmSync(repository, { recursive: true, force: true })
+			// Selectors must stay aligned with the checked-out head content.
+			assert.equal(manifest.headSha, mergeSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.selectors),
+				["src/feature.ts:1-1"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
 	})
 
 	it("keeps the supplied base for non-merge heads such as manual runs", () => {
 		const { repository, eventBaseSha, upstreamSha } = createSyntheticPullRequestRepository()
 
-		const manifest = selectFromGit(repository, eventBaseSha, upstreamSha)
+		try {
+			const manifest = selectFromGit(repository, eventBaseSha, upstreamSha)
 
-		assert.equal(manifest.baseSha, eventBaseSha)
-		assert.equal(manifest.mergeBase, eventBaseSha)
-		assert.deepEqual(
-			manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
-			["packages/core/src/unrelated.ts"],
-		)
-
-		fs.rmSync(repository, { recursive: true, force: true })
+			assert.equal(manifest.baseSha, eventBaseSha)
+			assert.equal(manifest.mergeBase, eventBaseSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unrelated.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
 	})
 })
 

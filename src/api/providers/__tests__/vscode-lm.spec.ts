@@ -321,6 +321,69 @@ describe("VsCodeLmHandler", () => {
 			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
 		})
 
+		it("refuses a request that exceeds a small positive raw budget below the trimming floor", async () => {
+			// The clamp to MIN_TOOL_RESULT_CHARS only keeps trimming productive; admission must still
+			// respect the raw budget, otherwise a conversation between the raw budget and the floor is
+			// sent over-window. Sized so the remaining content exceeds the raw budget but stays under
+			// the floor, and so no tool_result is large enough for trimming to shrink anything.
+			const targetRawBudgetChars = 1000
+			const systemPrompt = "S".repeat(
+				Math.floor(handler.getCondenseContextWindow() * 0.8 * 3) - targetRawBudgetChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1500) }],
+				},
+			]
+
+			// No sendRequest response is queued: refusal must happen before the request is sent.
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(/too large for this model's context window/)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("sends a request that fits within a small positive raw budget", async () => {
+			const targetRawBudgetChars = 1000
+			const systemPrompt = "S".repeat(
+				Math.floor(handler.getCondenseContextWindow() * 0.8 * 3) - targetRawBudgetChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Y".repeat(500) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+		})
+
 		it("sends the request when trimming brings the conversation back under budget", async () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{
@@ -566,9 +629,20 @@ describe("VsCodeLmHandler", () => {
 				expect(streamedText).toContain('<invoke name="calculator">')
 				expect(streamedText).toContain(filler)
 			})
+		})
 
+		describe("system prompt sanitization", () => {
 			it("sanitizes lone surrogates in the system prompt", async () => {
-				streamTextParts(["ok"])
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
 				const stream = handler.createMessage("sys\uD800tem", [{ role: "user" as const, content: "hi" }])
 				for await (const _chunk of stream) {
 					// drain
