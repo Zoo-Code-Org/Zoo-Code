@@ -39,6 +39,7 @@ const makeParentTask = () =>
 	({
 		taskId: "parent-1",
 		apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
+		getTaskMode: vi.fn().mockResolvedValue("code"),
 		getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
 		emit: vi.fn(),
 		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),

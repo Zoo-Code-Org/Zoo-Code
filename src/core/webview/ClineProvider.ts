@@ -3879,6 +3879,29 @@ export class ClineProvider
 				)
 			}
 		}
+
+		const handoffExecutionContext: DelegatedChildContext = {
+			mode,
+			apiConfigName: await parent.getTaskApiConfigName(),
+			apiConfiguration: structuredClone(parent.apiConfiguration),
+		}
+		const parentMode = await parent.getTaskMode()
+		if (mode !== parentMode && !this.context.workspaceState.get("lockApiConfigAcrossModes", false)) {
+			const savedConfigId = await this.providerSettingsManager.getModeConfigId(mode as Mode)
+			if (savedConfigId) {
+				const {
+					name,
+					id: _id,
+					...savedConfiguration
+				} = await this.providerSettingsManager.getProfile({
+					id: savedConfigId,
+				})
+				if (savedConfiguration.apiProvider) {
+					handoffExecutionContext.apiConfigName = name
+					handoffExecutionContext.apiConfiguration = structuredClone(savedConfiguration)
+				}
+			}
+		}
 		// 2) Flush pending tool results to API history BEFORE disposing the parent.
 		//    This is critical: when tools are called before new_task,
 		//    their tool_result blocks are in userMessageContent but not yet saved to API history.
@@ -3929,12 +3952,6 @@ export class ClineProvider
 
 		// 4) Bind the child directly to the delegating task's local provider
 		// context. Delegation never mutates shared profile/global state.
-		const handoffExecutionContext: DelegatedChildContext = {
-			mode,
-			apiConfigName: await parent.getTaskApiConfigName(),
-			apiConfiguration: structuredClone(parent.apiConfiguration),
-		}
-
 		// Create child as sole active (parent reference preserved for lineage)
 		// Pass initialStatus: "active" to ensure the child task's historyItem is created
 		// with status from the start, avoiding race conditions where the task might
