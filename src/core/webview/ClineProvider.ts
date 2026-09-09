@@ -55,6 +55,7 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
+	providerSettingsSchema,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -128,6 +129,7 @@ import {
 	delegateTaskToChild,
 	getProviderHandoffActivationOptions,
 	interruptDelegatedChild,
+	isValidPendingHandoff,
 	publishProviderHandoffState,
 	type NamedProviderHandoffProjectionResult,
 	type PreparedProviderHandoffContext,
@@ -273,11 +275,20 @@ export class ClineProvider
 	 */
 	private profileMutationAbortControllers = new Set<AbortController>()
 	/**
+	 * Disposal hooks paired with the live mutation controllers above. Besides
+	 * aborting queued work, each hook clears its operation deadline and settles
+	 * the caller-facing cancellation race so no timer or caller remains retained
+	 * after provider shutdown.
+	 */
+	private profileMutationDisposalCancellations = new Map<AbortController, () => void>()
+	/**
 	 * Bounded deadline for draining started (non-cancellable) profile writes
 	 * during provider disposal. Past the deadline the queue is detached with
 	 * handled promises — disposal is never unbounded.
 	 */
 	private static readonly PROFILE_MUTATION_DISPOSAL_DRAIN_TIMEOUT_MS = 5000
+	private static readonly HANDOFF_EXECUTION_CONTEXT_SECRET_VERSION = 1
+	private static readonly HANDOFF_EXECUTION_CONTEXT_SECRET_PREFIX = "roo.providerHandoffExecutionContext."
 	/**
 	 * Monotonic enqueue reservation counter. Every queued operation reserves
 	 * the next number when it is enqueued, before it is admitted. Reservations
@@ -467,20 +478,38 @@ export class ClineProvider
 		const timedOutSignal = new Promise<void>((resolve) => {
 			fireTimeoutSignal = resolve
 		})
+		let rejectCancellation!: (error: Error) => void
+		let cancellationSettled = false
 		const timedOut = new Promise<never>((_, reject) => {
-			timeoutId = setTimeout(() => {
-				// Abort first: every fn must check its signal before each write,
-				// so a timed-out-before-start operation performs no writes and
-				// its late completion cannot overwrite newer state.
-				controller.abort()
+			rejectCancellation = reject
+		})
+		const cancel = (message: string, logTimeout: boolean): void => {
+			if (cancellationSettled) return
+			cancellationSettled = true
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+				timeoutId = undefined
+			}
+			// Abort first: every fn must check its signal before each write,
+			// so a cancelled-before-start operation performs no writes and its
+			// late completion cannot overwrite newer state.
+			controller.abort()
+			if (logTimeout) {
 				this.log(
 					`Provider profile mutation ${reservation} timed out; the caller is released and later admitted mutations supersede it` +
 						(started ? "; the queue stays owned until the started write settles" : ""),
 				)
-				reject(new Error("Provider profile mutation timed out"))
-				fireTimeoutSignal()
-			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
-		})
+			}
+			rejectCancellation(new Error(message))
+			fireTimeoutSignal()
+		}
+		timeoutId = setTimeout(
+			() => cancel("Provider profile mutation timed out", true),
+			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
+		)
+		this.profileMutationDisposalCancellations.set(controller, () =>
+			cancel("Provider profile mutation cancelled: provider is disposed", false),
+		)
 		// The caller-facing race consumes the timeout rejection, but a late fire
 		// after the caller already settled (or detached) must never surface as
 		// an unhandled rejection.
@@ -495,6 +524,7 @@ export class ClineProvider
 		void run.then(
 			() => {
 				this.profileMutationAbortControllers.delete(controller)
+				this.profileMutationDisposalCancellations.delete(controller)
 				// Post-dispose completions are inert: no marker supersession or
 				// settled-generation bookkeeping once disposal began.
 				if (this._disposed) {
@@ -520,6 +550,7 @@ export class ClineProvider
 			},
 			(error) => {
 				this.profileMutationAbortControllers.delete(controller)
+				this.profileMutationDisposalCancellations.delete(controller)
 				if (controller.signal.aborted) {
 					this.log(
 						`Provider profile mutation ${reservation} errored after cancellation: ${
@@ -567,9 +598,10 @@ export class ClineProvider
 		// dispose() sets this flag earlier as well; setting it here keeps the
 		// queue-disposal contract true on its own.)
 		this._disposed = true
-		for (const controller of this.profileMutationAbortControllers) {
-			controller.abort()
+		for (const cancel of this.profileMutationDisposalCancellations.values()) {
+			cancel()
 		}
+		this.profileMutationDisposalCancellations.clear()
 		this.profileMutationAbortControllers.clear()
 
 		const drained = this.providerProfileMutationQueue.then(
@@ -1847,6 +1879,12 @@ export class ClineProvider
 			await this.evictCurrentTask(options?.transitionOwner)
 		}
 
+		// A committed clear marker has no profile identity to reload. Reapply
+		// its secure task-scoped snapshot before any mode-based restoration can
+		// select an unrelated profile, and keep that snapshot authoritative for
+		// the Task constructor below.
+		const recoveredClearHandoff = await this.recoverPendingClearHandoff(historyItem)
+
 		// If the history item has a saved mode, restore it and its associated API configuration.
 		if (historyItem.mode) {
 			// Validate that the mode still exists
@@ -1868,7 +1906,12 @@ export class ClineProvider
 			// since the task's specific provider profile will override it anyway.
 			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 
-			if (!historyItem.apiConfigName && !lockApiConfigAcrossModes && !skipProfileRestoreFromHistory) {
+			if (
+				!recoveredClearHandoff &&
+				!historyItem.apiConfigName &&
+				!lockApiConfigAcrossModes &&
+				!skipProfileRestoreFromHistory
+			) {
 				const savedConfigId = await this.providerSettingsManager.getModeConfigId(historyItem.mode)
 				const listApiConfig = await this.providerSettingsManager.listConfig()
 
@@ -1953,13 +1996,14 @@ export class ClineProvider
 			taskSyncEnabled,
 			diffFuzzyThreshold,
 		} = await this.getState()
+		const restoredApiConfiguration = recoveredClearHandoff?.apiConfiguration ?? apiConfiguration
 
 		const task = new Task({
 			provider: this,
-			apiConfiguration,
+			apiConfiguration: restoredApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
-			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			consecutiveMistakeLimit: restoredApiConfiguration.consecutiveMistakeLimit,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -4589,6 +4633,133 @@ export class ClineProvider
 		})
 	}
 
+	private providerHandoffExecutionContextSecretKey(taskId: string): string {
+		return `${ClineProvider.HANDOFF_EXECUTION_CONTEXT_SECRET_PREFIX}${taskId}`
+	}
+
+	/**
+	 * A clear intent has no profile name from which restart can reload the
+	 * child's configuration. Keep that one exceptional execution snapshot in
+	 * SecretStorage until its post-commit projection and marker finalization
+	 * succeed. Named-profile handoffs continue to recover by identity.
+	 */
+	private async persistClearHandoffExecutionContext(
+		childTaskId: string,
+		prepared: Readonly<PreparedProviderHandoffContext>,
+	): Promise<void> {
+		await this.context.secrets.store(
+			this.providerHandoffExecutionContextSecretKey(childTaskId),
+			JSON.stringify({
+				version: ClineProvider.HANDOFF_EXECUTION_CONTEXT_SECRET_VERSION,
+				mode: prepared.requestedMode,
+				apiConfiguration: prepared.apiConfiguration,
+			}),
+		)
+	}
+
+	private async deleteClearHandoffExecutionContext(childTaskId: string): Promise<void> {
+		await this.context.secrets.delete(this.providerHandoffExecutionContextSecretKey(childTaskId))
+	}
+
+	private async loadClearHandoffExecutionContext(historyItem: HistoryItem): Promise<PreparedProviderHandoffContext> {
+		const pending = historyItem.pendingHandoff
+		if (!isValidPendingHandoff(pending) || pending.kind !== "clear" || pending.mode !== historyItem.mode) {
+			throw new Error(`Cannot recover clear provider handoff for task ${historyItem.id}: invalid durable marker`)
+		}
+
+		const parentId = historyItem.parentTaskId
+		if (!parentId) {
+			throw new Error(`Cannot recover clear provider handoff for task ${historyItem.id}: missing parent identity`)
+		}
+		const parentRead = await this.taskHistoryStore.readFresh(parentId)
+		if (
+			parentRead.kind !== "found" ||
+			parentRead.item.status !== "delegated" ||
+			parentRead.item.awaitingChildId !== historyItem.id
+		) {
+			throw new Error(
+				`Cannot recover clear provider handoff for task ${historyItem.id}: delegation is not committed`,
+			)
+		}
+
+		const serialized = await this.context.secrets.get(this.providerHandoffExecutionContextSecretKey(historyItem.id))
+		if (!serialized) {
+			throw new Error(
+				`Cannot recover clear provider handoff for task ${historyItem.id}: secure context is unavailable`,
+			)
+		}
+
+		let value: unknown
+		try {
+			value = JSON.parse(serialized)
+		} catch {
+			throw new Error(
+				`Cannot recover clear provider handoff for task ${historyItem.id}: secure context is invalid`,
+			)
+		}
+		if (!value || typeof value !== "object") {
+			throw new Error(
+				`Cannot recover clear provider handoff for task ${historyItem.id}: secure context is invalid`,
+			)
+		}
+		const candidate = value as Record<string, unknown>
+		const parsedConfiguration = providerSettingsSchema.safeParse(candidate.apiConfiguration)
+		if (
+			candidate.version !== ClineProvider.HANDOFF_EXECUTION_CONTEXT_SECRET_VERSION ||
+			candidate.mode !== pending.mode ||
+			!parsedConfiguration.success
+		) {
+			throw new Error(
+				`Cannot recover clear provider handoff for task ${historyItem.id}: secure context is invalid`,
+			)
+		}
+
+		return createPreparedProviderHandoffContext({
+			requestedMode: pending.mode,
+			profile: { source: "unsaved-current", name: undefined, id: undefined },
+			apiConfiguration: parsedConfiguration.data,
+		})
+	}
+
+	/**
+	 * Replay a committed clear projection before constructing the restored
+	 * child. Failure is deliberately fail-closed: the marker and secure context
+	 * remain durable, and no Task is created with mutable legacy settings.
+	 */
+	private async recoverPendingClearHandoff(
+		historyItem: HistoryItem,
+	): Promise<PreparedProviderHandoffContext | undefined> {
+		if (historyItem.pendingHandoff?.kind !== "clear") return undefined
+
+		const prepared = await this.loadClearHandoffExecutionContext(historyItem)
+		await this.enqueueProviderProfileMutation(async (signal) => {
+			const results = await this.runProviderHandoffProjectionWrites(prepared, signal)
+			const outcome = classifyProviderHandoffProjectionResults(results)
+			if (signal.aborted || !outcome.ok) {
+				throw new Error(
+					`Cannot recover clear provider handoff for task ${historyItem.id}: profile projection failed`,
+				)
+			}
+		})
+
+		await this.taskHistoryStore.atomicReadAndUpdate(historyItem.id, (current) => {
+			if (current.pendingHandoff?.kind !== "clear") return current
+			return { ...current, pendingHandoff: undefined }
+		})
+		historyItem.pendingHandoff = undefined
+		try {
+			await this.deleteClearHandoffExecutionContext(historyItem.id)
+		} catch (error) {
+			this.log(
+				`Recovered clear provider handoff for task ${historyItem.id}, but failed to remove its secure recovery context: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+		this.explicitProfileClearChildIds.add(historyItem.id)
+		return prepared
+	}
+
 	/**
 	 * Best-effort restoration of the parent when child creation fails after the
 	 * parent was removed from the stack. Never masks the original error.
@@ -4750,6 +4921,19 @@ export class ClineProvider
 				`[delegateParentAndOpenChild] Failed to delete paused child ${childTaskId} during rollback: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
+			)
+		}
+
+		// Clear-intent children may have written a task-scoped SecretStorage
+		// recovery snapshot before the delegation commit. Rollback must remove
+		// it even when the child history cleanup above failed; deleting a key for
+		// a named-profile child is harmless.
+		try {
+			await this.deleteClearHandoffExecutionContext(childTaskId)
+		} catch (error) {
+			cleanupErrors.push(error)
+			this.log(
+				`[delegateParentAndOpenChild] Failed to remove secure recovery context for child ${childTaskId} during rollback`,
 			)
 		}
 
@@ -5154,11 +5338,16 @@ export class ClineProvider
 		//      between this write and the parent commit can always classify
 		//      the child as a recoverable pre-commit orphan, and a crash
 		//      after the parent commit still preserves the child's handoff
-		//      identity. The full API configuration is deliberately NOT
-		//      persisted: restart re-resolves it from the durable profile
-		//      store by name, matching normal resumed-task behavior. The
-		//      commit below is protocol-illegal until this record is durable.
+		//      identity. Named-profile handoffs re-resolve configuration from
+		//      the profile store. A clear intent has no such identity, so its
+		//      configuration is first written to task-scoped SecretStorage and
+		//      retained until projection/finalization succeeds. The commit below
+		//      is protocol-illegal until the required recovery state is durable.
+		const clearRecoveryContextRequired = prepared.profile.intent.kind === "clear"
 		try {
+			if (clearRecoveryContextRequired) {
+				await this.persistClearHandoffExecutionContext(child.taskId, prepared)
+			}
 			await this.taskHistoryStore.upsert({
 				id: child.taskId,
 				rootTaskId: child.rootTaskId,
@@ -5368,7 +5557,18 @@ export class ClineProvider
 					...historyItem,
 					pendingHandoff: undefined,
 				}))
-				.then(() => {
+				.then(async () => {
+					if (prepared.profile.intent.kind === "clear") {
+						try {
+							await this.deleteClearHandoffExecutionContext(child.taskId)
+						} catch (error) {
+							this.log(
+								`[delegateParentAndOpenChild] Finalized child ${child.taskId}, but failed to remove its secure recovery context: ${
+									error instanceof Error ? error.message : String(error)
+								}`,
+							)
+						}
+					}
 					if (this._disposed) return
 					handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
 				})

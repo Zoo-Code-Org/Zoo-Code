@@ -114,6 +114,9 @@ const makePreparationStub = (prepared: PreparedProviderHandoffContext) => vi.fn(
  */
 const handoffPrototype = {
 	prepareProviderHandoffContext: ClineProvider.prototype["prepareProviderHandoffContext"],
+	providerHandoffExecutionContextSecretKey: ClineProvider.prototype["providerHandoffExecutionContextSecretKey"],
+	persistClearHandoffExecutionContext: ClineProvider.prototype["persistClearHandoffExecutionContext"],
+	deleteClearHandoffExecutionContext: ClineProvider.prototype["deleteClearHandoffExecutionContext"],
 	projectPreparedProviderHandoffState: ClineProvider.prototype["projectPreparedProviderHandoffState"],
 	runProviderHandoffProjectionWrites: ClineProvider.prototype["runProviderHandoffProjectionWrites"],
 	rollbackFailedDelegation: ClineProvider.prototype["rollbackFailedDelegation"],
@@ -152,8 +155,16 @@ const makeProviderStub = (partial: Record<string, unknown>): ClineProvider =>
 		providerProfileMutationGeneration: 0,
 		providerProfileMutationSettledGeneration: 0,
 		profileMutationAbortControllers: new Set<AbortController>(),
+		profileMutationDisposalCancellations: new Map<AbortController, () => void>(),
 		nextProviderHandoffProjectionToken: 0,
 		_disposed: false,
+		context: {
+			secrets: {
+				get: vi.fn().mockResolvedValue(undefined),
+				store: vi.fn().mockResolvedValue(undefined),
+				delete: vi.fn().mockResolvedValue(undefined),
+			},
+		},
 		// No current task by default: the durable explicit-clear fallback
 		// only consults the manager for a still-current task.
 		getCurrentTask: vi.fn(() => undefined),
@@ -526,6 +537,73 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			pendingHandoff: { kind: "set", version: 1, mode: "code", profileName: "profile-1" },
 		})
 		expect(JSON.stringify(walRecord)).not.toContain("apiKey")
+	})
+
+	it("persists a clear handoff execution snapshot securely before committing", async () => {
+		const parentTask = makeParentTask()
+		const child = makeChildTask("child-1")
+		const taskHistoryStore = makeStoreStub()
+		const prepared = createPreparedProviderHandoffContext({
+			requestedMode: "code",
+			profile: { source: "unsaved-current", name: undefined, id: undefined },
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: SENTINEL_API_KEY,
+			},
+		})
+		let finishProjection!: (outcome: ProviderHandoffProjectionOutcome) => void
+		const projection = new Promise<ProviderHandoffProjectionOutcome>((resolve) => {
+			finishProjection = resolve
+		})
+		const provider = makeProviderStub({
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			prepareProviderHandoffContext: makePreparationStub(prepared),
+			projectPreparedProviderHandoffState: vi.fn(() => projection),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		})
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+		})
+
+		const secrets = (
+			provider.context as unknown as {
+				secrets: { store: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> }
+			}
+		).secrets
+		expect(secrets.store).toHaveBeenCalledTimes(1)
+		const [secretKey, serialized] = secrets.store.mock.calls[0] as [string, string]
+		expect(secretKey).toContain("child-1")
+		expect(JSON.parse(serialized)).toEqual({
+			version: 1,
+			mode: "code",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: SENTINEL_API_KEY,
+			},
+		})
+		expect(secrets.store.mock.invocationCallOrder[0]).toBeLessThan(
+			taskHistoryStore.upsert.mock.invocationCallOrder[0],
+		)
+		expect(taskHistoryStore.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+			taskHistoryStore.atomicReadAndUpdate.mock.invocationCallOrder[0],
+		)
+		expect(secrets.delete).not.toHaveBeenCalled()
+
+		finishProjection({ ok: true })
+		await (provider as unknown as { providerHandoffFinalizationCompletion?: Promise<void> })
+			.providerHandoffFinalizationCompletion
+		expect(secrets.delete).toHaveBeenCalledWith(secretKey)
 	})
 
 	it("fails closed when the child write-ahead write rejects: no commit, parent restored", async () => {
@@ -2719,6 +2797,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			const disposed = ClineProvider.prototype["disposeProviderProfileMutationQueue"].call(provider)
 			await vi.advanceTimersByTimeAsync(5001)
 			await disposed
+			expect(vi.getTimerCount()).toBe(0)
 
 			expect(startedWrite).toHaveBeenCalledTimes(1)
 			// The queued callback was cancelled at admission and never starts —
@@ -2727,8 +2806,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			releaseFirst()
 			await vi.advanceTimersByTimeAsync(0)
 			expect(queuedWrite).not.toHaveBeenCalled()
-			expect(await queuedOutcome).toContain("cancelled before admission")
-			await expect(startedOutcome).resolves.toBe("resolved")
+			expect(await queuedOutcome).toContain("provider is disposed")
+			await expect(startedOutcome).resolves.toContain("provider is disposed")
 
 			// No new work is admitted after disposal.
 			await expect(
@@ -2775,12 +2854,13 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			await vi.advanceTimersByTimeAsync(5001)
 			await disposed
 			expect(write).toHaveBeenCalledTimes(1)
+			expect(vi.getTimerCount()).toBe(0)
 
 			// The write settles after disposal: its completion is inert — no
 			// marker supersession, no settled-generation advance, no events.
 			releaseWrite()
 			await vi.advanceTimersByTimeAsync(0)
-			await expect(outcome).resolves.toBe("resolved")
+			await expect(outcome).resolves.toContain("provider is disposed")
 			const providerState = provider as unknown as {
 				providerProfileMutationSettledGeneration: number
 				staleProviderHandoffProjection?: { requestedMode: string }
@@ -2788,6 +2868,48 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			expect(providerState.providerProfileMutationSettledGeneration).toBe(0)
 			expect(providerState.staleProviderHandoffProjection).toMatchObject({ requestedMode: "code" })
 			expect(providerEmit).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("bounds disposal of a stuck handoff finalizer and keeps its late settlement inert", async () => {
+		vi.useFakeTimers()
+		try {
+			const log = vi.fn()
+			const advance = vi.fn()
+			let releaseFinalizer!: () => void
+			const finalizer = new Promise<void>((resolve) => {
+				releaseFinalizer = resolve
+			})
+			const provider = makeProviderStub({
+				log,
+				providerHandoffFinalizations: new Set([finalizer]),
+				providerHandoffProtocol: { advance },
+				staleProviderHandoffProjection: { requestedMode: "code" },
+			})
+
+			let settled = false
+			const drained = ClineProvider.prototype["drainProviderHandoffFinalizations"].call(provider).then(() => {
+				settled = true
+			})
+			await vi.advanceTimersByTimeAsync(4999)
+			expect(settled).toBe(false)
+
+			await vi.advanceTimersByTimeAsync(1)
+			await drained
+			expect(log).toHaveBeenCalledWith(
+				expect.stringContaining("detached 1 still-running handoff finalization operation"),
+			)
+
+			releaseFinalizer()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(advance).not.toHaveBeenCalled()
+			expect(
+				(provider as unknown as { staleProviderHandoffProjection?: { requestedMode: string } })
+					.staleProviderHandoffProjection,
+			).toEqual({ requestedMode: "code" })
+			expect(vi.getTimerCount()).toBe(0)
 		} finally {
 			vi.useRealTimers()
 		}

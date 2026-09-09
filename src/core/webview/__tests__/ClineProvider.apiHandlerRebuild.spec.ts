@@ -1377,6 +1377,65 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["providerSettingsManager"].getCurrentProfileName).not.toHaveBeenCalled()
 		})
 
+		test("restores a committed clear handoff from its secure execution snapshot", async () => {
+			const historyItem: HistoryItem = {
+				id: "recovered-clear-child",
+				parentTaskId: "recovered-parent",
+				number: 2,
+				ts: Date.now(),
+				task: "Recovered child",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "interrupted",
+				mode: "ask",
+				pendingHandoff: { kind: "clear", version: 1, mode: "ask" },
+			}
+			const recoveredConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude-sonnet-4",
+				openRouterApiKey: "sk-recovered-clear-context",
+				consecutiveMistakeLimit: 9,
+			}
+			const secretKey = provider["providerHandoffExecutionContextSecretKey"](historyItem.id)
+			await mockContext.secrets.store(
+				secretKey,
+				JSON.stringify({ version: 1, mode: "ask", apiConfiguration: recoveredConfiguration }),
+			)
+			vi.mocked(mockContext.secrets.delete).mockClear()
+			vi.spyOn(provider.taskHistoryStore, "readFresh").mockResolvedValue({
+				kind: "found",
+				item: {
+					id: "recovered-parent",
+					number: 1,
+					ts: Date.now(),
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "delegated",
+					awaitingChildId: historyItem.id,
+				},
+			})
+			const finalize = vi
+				.spyOn(provider.taskHistoryStore, "atomicReadAndUpdate")
+				.mockImplementation(async (_taskId, updater) => [updater(historyItem)])
+			provider["customModesManager"].getCustomModes = vi.fn().mockResolvedValue([])
+
+			const restored = await provider.createTaskWithHistoryItem(historyItem, { startTask: false })
+
+			expect(restored.apiConfiguration).toEqual(recoveredConfiguration)
+			expect(provider["providerSettingsManager"].projectHandoffState).toHaveBeenCalledWith({
+				intent: { kind: "clear" },
+				mode: "ask",
+				modeConfigId: undefined,
+			})
+			expect(finalize).toHaveBeenCalledWith(historyItem.id, expect.any(Function))
+			expect(historyItem.pendingHandoff).toBeUndefined()
+			expect(mockContext.secrets.delete).toHaveBeenCalledWith(secretKey)
+			expect(restored.apiConfiguration.consecutiveMistakeLimit).toBe(9)
+		})
+
 		test("a later successful same-child mode mutation supersedes the stale projection marker", async () => {
 			const { child } = await setupSoleParentDelegation()
 

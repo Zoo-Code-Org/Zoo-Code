@@ -107,6 +107,9 @@ type SharedStore = ReturnType<typeof makeSharedStore>
 
 const handoffPrototype = {
 	prepareProviderHandoffContext: ClineProvider.prototype["prepareProviderHandoffContext"],
+	providerHandoffExecutionContextSecretKey: ClineProvider.prototype["providerHandoffExecutionContextSecretKey"],
+	persistClearHandoffExecutionContext: ClineProvider.prototype["persistClearHandoffExecutionContext"],
+	deleteClearHandoffExecutionContext: ClineProvider.prototype["deleteClearHandoffExecutionContext"],
 	projectPreparedProviderHandoffState: ClineProvider.prototype["projectPreparedProviderHandoffState"],
 	rollbackFailedDelegation: ClineProvider.prototype["rollbackFailedDelegation"],
 	restoreParentAfterFailedChildCreation: ClineProvider.prototype["restoreParentAfterFailedChildCreation"],
@@ -141,12 +144,18 @@ function makeWorldProvider(
 		providerProfileMutationGeneration: 0,
 		providerProfileMutationSettledGeneration: 0,
 		profileMutationAbortControllers: new Set<AbortController>(),
+		profileMutationDisposalCancellations: new Map<AbortController, () => void>(),
 		nextProviderHandoffProjectionToken: 0,
 		_disposed: false,
 		context: {
 			workspaceState: {
 				get: (_key: string, defaultValue?: unknown) =>
 					_key === "lockApiConfigAcrossModes" ? world.lockAcrossModes : defaultValue,
+			},
+			secrets: {
+				get: vi.fn().mockResolvedValue(undefined),
+				store: vi.fn().mockResolvedValue(undefined),
+				delete: vi.fn().mockResolvedValue(undefined),
 			},
 		},
 		contextProxy: {
