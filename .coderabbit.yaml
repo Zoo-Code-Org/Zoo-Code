@@ -55,7 +55,10 @@ reviews:
               or upstream repositories. Report only concrete, actionable conflicts or failure modes, citing
               the relevant repository location or external source. Prioritize correctness, security, data loss,
               lifecycle, and test gaps. Do not report generic best practices, unsupported concerns, speculative
-              style comments, or unrelated refactors. Search for existing helpers before suggesting abstractions.
+              style comments, or unrelated refactors. When changed code introduces a local implementation of a
+              cross-cutting concern, check whether it bypasses or duplicates an established repository abstraction
+              or nearby convention. Report only a concrete inconsistency with behavioral or maintenance impact,
+              and allow intentional deviations.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
@@ -104,15 +107,6 @@ reviews:
               Verify extension/webview contracts, cancellation and error propagation, VS Code
               lifecycle correctness, and behavior under retries and partial failure. Check listeners,
               resources, and providers are disposed without stale state or duplicate work.
-
-        - path: "src/api/providers/**"
-          instructions: >-
-              For provider request configuration and cancellation changes, check whether existing shared
-              abstractions, especially `RequestConfigBuilder` and the shared abort-signal utilities, can preserve
-              the provider SDK contract before adding local controller, listener, timeout, or request-option
-              logic. Flag unnecessary duplication. Accept provider-specific handling when the SDK boundary
-              requires it and pre-abort behavior, cancellation propagation, timeout and error semantics, and
-              cleanup remain correct.
 
         - path: "webview-ui/**"
           instructions: >-
