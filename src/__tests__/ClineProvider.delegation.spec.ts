@@ -479,12 +479,35 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				initialTodos: [],
 				mode: "code",
 			}),
-		).rejects.toThrow("Cannot re-delegate")
+		).rejects.toThrow("Cannot re-delegate while the awaited child is not interrupted")
 
 		// The authoritative preflight rejects before either provider mutates its stack.
 		expect(child.run).not.toHaveBeenCalled()
 		expect(createTask).not.toHaveBeenCalled()
 		expect((provider as any).deleteTaskWithId).not.toHaveBeenCalled()
+	})
+
+	it("rejects a delegated parent whose awaited-child identity is missing", async () => {
+		const parentTask = makeParentTask()
+		const taskHistoryStore = makeStoreStub({
+			get: vi.fn().mockReturnValue({ ...parentHistoryItem, status: "delegated" }),
+		})
+		const provider = {
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn(),
+			createTask: vi.fn(),
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Continue",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow("Cannot re-delegate a parent with no awaited child")
+		expect(provider.removeClineFromStack).not.toHaveBeenCalled()
 	})
 
 	it("serializes same-parent delegation across provider instances and starts only one child", async () => {

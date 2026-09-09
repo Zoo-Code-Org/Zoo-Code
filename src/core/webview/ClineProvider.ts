@@ -3863,14 +3863,12 @@ export class ClineProvider
 		// waited on the shared lock. Refresh before mutating either task stack.
 		await this.taskHistoryStore.invalidate(parentTaskId)
 		const authoritativeParent = this.taskHistoryStore.get(parentTaskId)
-		if ((authoritativeParent?.status ?? "active") === "delegated") {
-			const awaitedChildId = authoritativeParent?.awaitingChildId
-			if (awaitedChildId) await this.taskHistoryStore.invalidate(awaitedChildId)
-			const awaitedChildStatus = awaitedChildId ? this.taskHistoryStore.get(awaitedChildId)?.status : undefined
-			if (awaitedChildStatus !== "interrupted") {
-				throw new Error(
-					`Cannot re-delegate parent ${parentTaskId} while child ${awaitedChildId ?? "unknown"} is ${awaitedChildStatus ?? "missing"}`,
-				)
+		if (authoritativeParent?.status === "delegated") {
+			const awaitedChildId = authoritativeParent.awaitingChildId
+			if (!awaitedChildId) throw new Error("Cannot re-delegate a parent with no awaited child")
+			await this.taskHistoryStore.invalidate(awaitedChildId)
+			if (this.taskHistoryStore.get(awaitedChildId)?.status !== "interrupted") {
+				throw new Error("Cannot re-delegate while the awaited child is not interrupted")
 			}
 		}
 		if (pendingActionId) {
