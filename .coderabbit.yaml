@@ -105,6 +105,15 @@ reviews:
               lifecycle correctness, and behavior under retries and partial failure. Check listeners,
               resources, and providers are disposed without stale state or duplicate work.
 
+        - path: "src/api/providers/**"
+          instructions: >-
+              For provider request configuration and cancellation changes, check whether existing shared
+              abstractions, especially `RequestConfigBuilder` and the shared abort-signal utilities, can preserve
+              the provider SDK contract before adding local controller, listener, timeout, or request-option
+              logic. Flag unnecessary duplication. Accept provider-specific handling when the SDK boundary
+              requires it and pre-abort behavior, cancellation propagation, timeout and error semantics, and
+              cleanup remain correct.
+
         - path: "webview-ui/**"
           instructions: >-
               Check React state and effect dependencies, cleanup, accessibility, i18n, and light/dark
