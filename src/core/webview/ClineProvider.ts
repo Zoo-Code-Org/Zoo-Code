@@ -2809,8 +2809,7 @@ export class ClineProvider
 			terminalZdotdir: terminalZdotdir ?? false,
 			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
-			currentApiConfigName:
-				currentTask && hasTaskApiConfigName ? currentTaskApiConfigName : (currentApiConfigName ?? "default"),
+			currentApiConfigName: currentTask && hasTaskApiConfigName ? currentTaskApiConfigName : currentApiConfigName,
 			listApiConfigMeta: listApiConfigMeta ?? [],
 			pinnedApiConfigs: pinnedApiConfigs ?? {},
 			mode: currentTaskMode ?? mode ?? defaultModeSlug,
