@@ -51,6 +51,32 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
+	it("replays each Anthropic thinking block with its own signature", () => {
+		// Double assertion: the stub only implements the optional history hooks
+		// this path reads, not the full ApiHandler surface.
+		const api = {
+			getThoughtSignature: () => "signature-2",
+			getThinkingBlocks: () => [
+				{ thinking: "first thought", signature: "signature-1" },
+				{ thinking: "second thought", signature: "signature-2" },
+			],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "first thought\nsecond thought",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "thinking", thinking: "first thought", signature: "signature-1" },
+			{ type: "thinking", thinking: "second thought", signature: "signature-2" },
+			{ type: "text", text: "answer" },
+		])
+	})
+
 	it("falls back to generic reasoning blocks for Anthropic messages without thought signatures", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: "answer" },

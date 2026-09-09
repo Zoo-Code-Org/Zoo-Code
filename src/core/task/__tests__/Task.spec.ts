@@ -465,6 +465,218 @@ describe("Cline", () => {
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
+
+		async function createTaskWithAutoApproval(autoApprovalEnabled: boolean) {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: mockApiConfig,
+				autoApprovalEnabled,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			return task
+		}
+
+		it("does not retry when the response ends with stop_reason max_tokens and no usable content", async () => {
+			// Auto-approval is on to prove the max_tokens branch stops instead of
+			// silently auto-retrying (and re-billing the full context).
+			const task = await createTaskWithAutoApproval(true)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi.spyOn(task, "ask")
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				stream([
+					{ type: "reasoning", text: "reasoning that consumed the whole output budget" },
+					{ type: "usage", inputTokens: 1000, outputTokens: 8192, stopReason: "max_tokens" },
+				]),
+			)
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy).not.toHaveBeenCalled()
+			expect(
+				saySpy.mock.calls.some(
+					([type, text]) => type === "error" && typeof text === "string" && text.includes("max_tokens"),
+				),
+			).toBe(true)
+			expect(task.apiConversationHistory).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "text",
+							text: "Failure: response hit the max output token limit before producing any visible content.",
+						},
+					],
+				},
+			])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("bounds automatic empty-response retries and asks the user after the cap", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			// Initial attempt + MAX_AUTOMATIC_API_RETRIES (3) automatic retries.
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+			// Every automatic retry was announced via the visible countdown:
+			// one final (non-partial) announcement per retry.
+			const retryAnnouncements = saySpy.mock.calls.filter(
+				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+			)
+			expect(retryAnnouncements).toHaveLength(3)
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy.mock.calls[0]?.[0]).toBe("api_req_failed")
+			expect(task.apiConversationHistory).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
+			])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("mid-stream retries", () => {
+		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+			return (async function* () {
+				yield* chunks
+			})()
+		}
+
+		function failingStream(error: Error): AsyncGenerator<ApiStreamChunk> {
+			return (async function* () {
+				// Yield one chunk first so the failure is genuinely mid-stream.
+				yield { type: "text", text: "partial output" }
+				throw error
+			})()
+		}
+
+		async function createTaskWithAutoApproval(autoApprovalEnabled: boolean) {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: mockApiConfig,
+				autoApprovalEnabled,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			return task
+		}
+
+		it("announces each automatic retry and asks the user after the cap is exhausted", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => failingStream(new Error("overloaded_error")))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			// Initial attempt + MAX_AUTOMATIC_API_RETRIES (3) automatic retries.
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+			// Every automatic retry ran through the visible backoff countdown:
+			// one final (non-partial) announcement per retry.
+			const retryAnnouncements = saySpy.mock.calls.filter(
+				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+			)
+			expect(retryAnnouncements).toHaveLength(3)
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy.mock.calls[0]?.[0]).toBe("api_req_failed")
+			// Declined retry surfaces the error and records the failure without
+			// losing or duplicating the user message.
+			expect(saySpy.mock.calls.some(([type]) => type === "error")).toBe(true)
+			expect(task.apiConversationHistory).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "Failure: the API stream failed mid-response." }],
+				},
+			])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("makes retries visible even when auto-approval is disabled", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => failingStream(new Error("overloaded_error")))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			// Retries stay visible even without auto-approval: one final
+			// (non-partial) countdown announcement per automatic retry.
+			const retryAnnouncements = saySpy.mock.calls.filter(
+				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+			)
+			expect(retryAnnouncements).toHaveLength(3)
+			expect(askSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("resets the retry budget without duplicating the user message when the user approves retry", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			let askCount = 0
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				askCount++
+				// Approve the first capped-retry prompt; decline the one that
+				// follows after the recovered turn fails again.
+				return { response: askCount === 1 ? "yesButtonClicked" : "noButtonClicked" } as TaskAskResult
+			})
+
+			let attempt = 0
+			let historyAtSuccess: ApiMessage[] | undefined
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				attempt++
+				if (attempt === 5) {
+					historyAtSuccess = structuredClone(task.apiConversationHistory)
+					return stream([{ type: "text", text: "recovered" }])
+				}
+				return failingStream(new Error("overloaded_error"))
+			})
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			// Attempts 1-4: first turn fails to the cap and is approved.
+			// Attempt 5: recovered text response. Attempts 6-9: the recovered
+			// turn's no-tool follow-up fails to the cap again and is declined.
+			expect(attempt).toBe(9)
+			expect(askCount).toBe(2)
+			// The retried request re-added the user message exactly once.
+			expect(historyAtSuccess).toHaveLength(1)
+			expect(historyAtSuccess?.[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			// Final history: original user turn, recovered assistant turn, the
+			// follow-up user turn, and the recorded failure.
+			expect(task.messageCounts).toEqual({ user: 2, assistant: 2 })
+		})
 	})
 
 	describe("native tool-call request isolation", () => {

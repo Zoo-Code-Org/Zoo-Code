@@ -171,6 +171,10 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+// Maximum automatic retries for mid-stream failures and empty responses before
+// asking the user. Every retry re-bills the full input context, so retries must
+// be bounded and user-visible.
+const MAX_AUTOMATIC_API_RETRIES = 3
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -3192,6 +3196,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, { skipProviderRateLimit: true })
 				let assistantMessage = ""
 				let reasoningMessage = ""
+				// Stop reason reported by the provider for this request (if any).
+				// Used to distinguish terminal ends like "max_tokens" (no retry -
+				// the same request would fail again while re-billing the full
+				// context) from genuinely empty responses.
+				let lastStopReason: string | undefined
 				const pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
 
@@ -3258,6 +3267,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
+								lastStopReason = chunk.stopReason ?? lastStopReason
 								break
 							case "grounding":
 								// Handle grounding sources separately from regular content
@@ -3645,16 +3655,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							this.abortReason = cancelReason
 							await this.abortTask()
 						} else {
-							// Stream failed - log the error and retry with the same content
-							// The existing rate limiting will prevent rapid retries
+							// Stream failed mid-flight. Every automatic retry re-bills
+							// the full input context, so retries are bounded and always
+							// announced via the shared backoff countdown.
 							console.error(
 								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry: ${streamingFailedMessage}`,
 							)
 
-							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
-							const stateForBackoff = await this.providerRef.deref()?.getState()
-							if (stateForBackoff?.autoApprovalEnabled) {
-								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
+							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
+
+							if (midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES) {
+								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
 								// Check if task was aborted during the backoff
 								if (this.abort) {
@@ -3666,17 +3677,77 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									await this.abortTask()
 									break
 								}
+
+								// Push the same content back onto the stack to retry, incrementing the retry attempt counter
+								stack.push({
+									userContent: currentUserContent,
+									includeFileDetails: false,
+									retryAttempt: midStreamRetryAttempt + 1,
+								})
+
+								// Continue to retry the request
+								continue
 							}
 
-							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
-							stack.push({
-								userContent: currentUserContent,
-								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							})
+							// Automatic retry budget exhausted - surface the failure.
+							// Remove this turn's user message so a user-approved retry
+							// (which resets retryAttempt to 0 and therefore re-adds the
+							// message) does not duplicate it in history.
+							let removedMidStreamUserMessage = false
+							if (currentUserContent.length > 0 && this.apiConversationHistory.length > 0) {
+								const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
+								if (lastMessage.role === "user") {
+									this.apiConversationHistory.pop()
+									this.messageCounts.user--
+									removedMidStreamUserMessage = true
+								}
+							}
 
-							// Continue to retry the request
-							continue
+							const { response } = await this.ask(
+								"api_req_failed",
+								`The API stream failed ${MAX_AUTOMATIC_API_RETRIES + 1} times mid-response. ${streamingFailedMessage}`,
+							)
+
+							if (response === "yesButtonClicked") {
+								await this.say("api_req_retried")
+
+								// Reset the automatic retry budget; the user message is
+								// re-added exactly once on the next iteration.
+								stack.push({
+									userContent: currentUserContent,
+									includeFileDetails: false,
+									retryAttempt: 0,
+									userMessageWasRemoved: removedMidStreamUserMessage,
+								})
+
+								continue
+							}
+
+							// User declined to retry: restore the user message, surface
+							// the error, record the failure, and stop the loop.
+							if (removedMidStreamUserMessage) {
+								await this.addToApiConversationHistory({
+									role: "user",
+									content: currentUserContent,
+								})
+								this.messageCounts.user++
+							}
+
+							await this.say(
+								"error",
+								`The API stream failed mid-response and was not retried. ${streamingFailedMessage}`,
+							)
+
+							// Synthetic assistant message recording the failure -- increment
+							// messageCounts.assistant to match, same as the normal
+							// assistant-message-saved path.
+							await this.addToApiConversationHistory({
+								role: "assistant",
+								content: [{ type: "text", text: "Failure: the API stream failed mid-response." }],
+							})
+							this.messageCounts.assistant++
+
+							return false
 						}
 					}
 				} finally {
@@ -4054,9 +4125,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 					}
 
-					// Check if we should auto-retry or prompt the user
+					// A max_tokens stop reason with no usable content means the model
+					// burned its whole output budget (typically on reasoning) before
+					// producing anything. Retrying the identical request would fail
+					// the same way while re-billing the full context each time, so
+					// surface it and stop instead of retrying.
+					if (lastStopReason === "max_tokens") {
+						if (removedCurrentUserMessage) {
+							await this.addToApiConversationHistory({
+								role: "user",
+								content: currentUserContent,
+							})
+							this.messageCounts.user++
+						}
+
+						await this.say(
+							"error",
+							"The model hit its maximum output token limit (stop_reason: max_tokens) without producing any visible output - it likely spent the entire budget on reasoning. Increase the max output tokens (or lower the thinking budget) for this API profile, then retry.",
+						)
+
+						// Synthetic assistant message recording the failure -- increment
+						// messageCounts.assistant to match, same as the normal
+						// assistant-message-saved path.
+						await this.addToApiConversationHistory({
+							role: "assistant",
+							content: [
+								{
+									type: "text",
+									text: "Failure: response hit the max output token limit before producing any visible content.",
+								},
+							],
+						})
+						this.messageCounts.assistant++
+
+						return false
+					}
+
+					// Check if we should auto-retry or prompt the user.
+					// Automatic retries are bounded: once the budget is exhausted the
+					// user is asked, so a persistently empty response cannot loop
+					// (and bill) forever without visibility.
 					// Reuse the state variable from above
-					if (state?.autoApprovalEnabled) {
+					if (state?.autoApprovalEnabled && (currentItem.retryAttempt ?? 0) < MAX_AUTOMATIC_API_RETRIES) {
 						// Auto-retry with backoff - don't persist failure message when retrying
 						await this.backoffAndAnnounce(
 							currentItem.retryAttempt ?? 0,
@@ -4089,7 +4199,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Prompt the user for retry decision
 						const { response } = await this.ask(
 							"api_req_failed",
-							"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
+							`The model returned no assistant messages. This may indicate an issue with the API or the model's output.${
+								state?.autoApprovalEnabled
+									? ` Automatic retries were attempted ${MAX_AUTOMATIC_API_RETRIES} times without success.`
+									: ""
+							}`,
 						)
 
 						if (response === "yesButtonClicked") {

@@ -43,6 +43,20 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 	private options: ApiHandlerOptions
 	private client: Anthropic
 	private readonly providerName = "Anthropic"
+	/**
+	 * Signature of the most recently completed thinking block, captured from
+	 * `signature_delta` stream events. Round-tripped into API history via
+	 * `getThoughtSignature()` so signed thinking blocks survive tool-use
+	 * continuations (Anthropic rejects unsigned replays of thinking blocks).
+	 */
+	private lastThinkingSignature: string | undefined
+	/**
+	 * Completed thinking blocks from the current/last response, each with its
+	 * own text and verification signature. Signatures only validate against
+	 * their exact block text, so blocks must be replayed individually rather
+	 * than combined under one signature.
+	 */
+	private completedThinkingBlocks: { thinking: string; signature: string }[] = []
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -261,6 +275,16 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		let cacheWriteTokens = 0
 		let cacheReadTokens = 0
 
+		// Thinking-block signature capture state. Anthropic streams the
+		// verification signature as `signature_delta` deltas on the thinking
+		// block; it must be replayed unchanged when the conversation continues
+		// after tool use.
+		this.lastThinkingSignature = undefined
+		this.completedThinkingBlocks = []
+		let thinkingBlockIndex: number | undefined
+		let pendingThinkingSignature = ""
+		let pendingThinkingText = ""
+
 		for await (const chunk of stream) {
 			switch (chunk.type) {
 				case "message_start": {
@@ -294,6 +318,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						type: "usage",
 						inputTokens: 0,
 						outputTokens: chunk.usage.output_tokens || 0,
+						stopReason: chunk.delta.stop_reason,
 					}
 
 					break
@@ -303,6 +328,13 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				case "content_block_start":
 					switch (chunk.content_block.type) {
 						case "thinking":
+							// Start tracking this block's text and signature, streamed
+							// via thinking_delta/signature_delta events until
+							// content_block_stop.
+							thinkingBlockIndex = chunk.index
+							pendingThinkingSignature = chunk.content_block.signature
+							pendingThinkingText = chunk.content_block.thinking
+
 							// We may receive multiple text blocks, in which
 							// case just insert a line break between them.
 							if (chunk.index > 0) {
@@ -336,7 +368,15 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				case "content_block_delta":
 					switch (chunk.delta.type) {
 						case "thinking_delta":
+							if (chunk.index === thinkingBlockIndex) {
+								pendingThinkingText += chunk.delta.thinking
+							}
 							yield { type: "reasoning", text: chunk.delta.thinking }
+							break
+						case "signature_delta":
+							// Accumulate the verification signature for the open
+							// thinking block (see content_block_start/content_block_stop).
+							pendingThinkingSignature += chunk.delta.signature
 							break
 						case "text_delta":
 							yield { type: "text", text: chunk.delta.text }
@@ -356,10 +396,23 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 
 					break
 				case "content_block_stop":
-					// Block complete - no action needed for now.
-					// NativeToolCallParser handles tool call completion
-					// Note: Signature for multi-turn thinking would require using stream.finalMessage()
-					// after iteration completes, which requires restructuring the streaming approach.
+					// Block complete - no action needed for tool calls;
+					// NativeToolCallParser handles tool call completion.
+					// A completed thinking block with a signature is recorded so the
+					// signed thinking block can be replayed on tool-use continuations.
+					if (chunk.index === thinkingBlockIndex) {
+						thinkingBlockIndex = undefined
+						if (pendingThinkingSignature) {
+							this.lastThinkingSignature = pendingThinkingSignature
+							this.completedThinkingBlocks.push({
+								thinking: pendingThinkingText,
+								signature: pendingThinkingSignature,
+							})
+							yield { type: "thinking_complete", signature: pendingThinkingSignature }
+						}
+						pendingThinkingSignature = ""
+						pendingThinkingText = ""
+					}
 					break
 			}
 		}
@@ -380,6 +433,22 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				totalCost,
 			}
 		}
+	}
+
+	/**
+	 * Returns the signature of the last completed thinking block so it can be
+	 * persisted into API history and replayed on tool-use continuations.
+	 */
+	public getThoughtSignature(): string | undefined {
+		return this.lastThinkingSignature
+	}
+
+	/**
+	 * Returns every completed thinking block (text + signature, in order) so
+	 * each signed block can be replayed unchanged on tool-use continuations.
+	 */
+	public getThinkingBlocks(): { thinking: string; signature: string }[] | undefined {
+		return this.completedThinkingBlocks.length > 0 ? [...this.completedThinkingBlocks] : undefined
 	}
 
 	// Guesses capabilities for an unrecognized model ID via known-family substring match.
