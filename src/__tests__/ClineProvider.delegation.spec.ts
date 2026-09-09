@@ -265,6 +265,60 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(handleModeSwitch).not.toHaveBeenCalled()
 	})
 
+	it("uses an explicitly saved different-mode profile without reading shared current identity", async () => {
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-ask", run: vi.fn().mockResolvedValue(undefined) }
+		const createTask = vi.fn().mockResolvedValue(child)
+		const providerSettingsManager = {
+			getModeConfigId: vi.fn().mockResolvedValue("ask-profile-id"),
+			getProfile: vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-profile-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			}),
+			getCurrentProfileName: vi.fn(),
+		}
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: makeStoreStub(),
+			providerSettingsManager,
+			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Ask child",
+			initialTodos: [],
+			mode: "ask",
+		})
+
+		expect(providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("ask")
+		expect(providerSettingsManager.getProfile).toHaveBeenCalledWith({ id: "ask-profile-id" })
+		expect(providerSettingsManager.getCurrentProfileName).not.toHaveBeenCalled()
+		expect(createTask).toHaveBeenCalledWith(
+			"Ask child",
+			undefined,
+			parentTask,
+			expect.objectContaining({
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "ask-profile",
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4.1-mini",
+					},
+				},
+			}),
+		)
+	})
+
 	it("posts taskHistoryItemUpdated to the webview when isViewLaunched is true", async () => {
 		const updatedParent = { ...parentHistoryItem, status: "delegated" } as HistoryItem
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
