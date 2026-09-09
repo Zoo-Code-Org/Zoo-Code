@@ -4334,14 +4334,19 @@ export class ClineProvider
 				// The completing child still owns the scheduler permit. Queue the
 				// parent continuation and return so that permit can be released
 				// before the parent delegates again.
-				scheduleTask(this.taskScheduler, parentInstance, "reopenParentFromDelegation", async () => {
-					try {
-						this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-					} catch {
-						// non-fatal
-					}
-					await parentInstance.resumeAfterDelegation()
-				})
+				scheduleTask(
+					this.taskScheduler,
+					parentInstance,
+					ClineProvider.prototype.reopenParentFromDelegation.name,
+					async () => {
+						try {
+							this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+						} catch {
+							// non-fatal
+						}
+						await parentInstance.resumeAfterDelegation()
+					},
+				)
 			}
 
 			this.cancelledDelegationChildIds.delete(childTaskId)
