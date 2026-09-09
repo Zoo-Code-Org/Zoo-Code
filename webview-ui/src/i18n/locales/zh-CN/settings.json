@@ -308,6 +308,20 @@
 				"description": "允许 Zoo 创建和编辑受保护的文件（如 .rooignore 和 .roo/ 配置文件），无需批准。"
 			}
 		},
+		"allowlists": {
+			"label": "允许列表",
+			"description": "为单个文件授予访问权限，而不自动批准整类操作。每行一个模式，采用受 .gitignore 启发的语法：\"notes.md\" 匹配工作区中任意目录下的该文件，\"docs/scratch/**\" 匹配该目录下的所有内容，\"*.md\" 匹配任意 Markdown 文件。模式始终指向文件，而不是目录：\"docs\" 只授予名为 \"docs\" 的文件；若要包含某个目录下的内容，请写 \"docs/**\"。开头的 \"./\" 表示工作区根目录，而开头的 \"/\" 表示文件系统根目录，因此 \"/tmp/notes.md\" 可以指向工作区之外，\"~/notes.md\" 也是如此，其中开头的 \"~/\" 表示你的主目录。在模式前加 \"!\" 可排除前面某行已匹配的内容；与 .gitignore 一样，最后匹配的行生效，因此顺序很重要。未打开任何文件夹时，相对于工作区的模式将被忽略。区分大小写（Windows 除外）。上面的“自动批准”关闭时，任何操作都不会被自动批准。",
+			"readFiles": {
+				"label": "读取允许列表模式",
+				"description": "即使上面的\"读取\"已关闭，Zoo 也可以无需批准即读取的文件。下面写入允许列表中的文件始终也可读取，因此无需重复添加。目录列表和搜索始终遵循\"读取\"设置。被 .rooignore 排除的文件无论如何都不可读取。",
+				"placeholder": "每行一个模式，例如 notes.md"
+			},
+			"writeFiles": {
+				"label": "写入允许列表模式",
+				"description": "即使上面的\"写入\"已关闭，Zoo 也可以无需批准即创建和编辑的文件。除非启用\"包含受保护的文件\"（在\"写入\"自动批准的设置中），受保护的文件仍需批准。被 .rooignore 排除的文件无论如何都不可写入。",
+				"placeholder": "每行一个模式，例如 notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "允许自动调用MCP服务而无需批准"
@@ -388,6 +402,25 @@
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"kenariApiKey": "Kenari API 密钥",
 		"getKenariApiKey": "获取 Kenari API 密钥",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API 密钥",
+			"getApiKey": "获取 NanoGPT API 密钥",
+			"model": "模型",
+			"routingPreference": "路由偏好",
+			"routingOptions": {
+				"automatic": "自动",
+				"fastest": "最快",
+				"cheapest": "最便宜",
+				"lowestLatency": "最低延迟",
+				"highestThroughput": "最高吞吐量",
+				"toolCapable": "支持工具",
+				"cacheCapable": "支持缓存"
+			},
+			"automaticExplanation": "自动模式不应用路由后缀。",
+			"billingWarning": "高级路由偏好可能使用按用量付费路由，并且根据 NanoGPT 当前的计费规则，可能不在订阅范围内。",
+			"routingDocs": "查看 NanoGPT 路由和计费详情"
+		},
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -427,6 +460,8 @@
 		"headerName": "标头名称",
 		"headerValue": "标头值",
 		"noCustomHeaders": "暂无自定义标头。点击 + 按钮添加。",
+		"extraBody": "附加请求体",
+		"extraBodyDescription": "合并到 API 请求体中的可选 JSON 对象。无法覆盖由 Zoo Code 管理的字段，例如 model、messages、tools 和 stream。请勿包含密钥。",
 		"unboundApiKey": "Unbound API 密钥",
 		"getUnboundApiKey": "获取 Unbound API 密钥",
 		"requestyApiKey": "Requesty API 密钥",
@@ -495,6 +530,9 @@
 		"openAiApiKey": "OpenAI API 密钥",
 		"apiKey": "API 密钥",
 		"openAiBaseUrl": "OpenAI 基础 URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure 部署名称",
+		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",
 		"getOpenAiApiKey": "获取 OpenAI API 密钥",
 		"mistralApiKey": "Mistral API 密钥",
 		"getMistralApiKey": "获取 Mistral / Codestral API 密钥",
@@ -980,8 +1018,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "允许匿名数据收集",
-			"description": "通过发送匿名使用数据和错误报告来帮助改进 Zoo Code。此遥测不会收集代码、提示 或个人信息。详细信息请参阅我们的<privacyLink>隐私政策</privacyLink>。您可以随时关闭此功能。"
+			"label": "允许发送错误和使用情况报告",
+			"description": "通过发送与安装标识符（而非您的姓名或帐户）关联的使用数据和错误报告来帮助改进 Zoo Code。此遥测不会收集您的代码或提示词。详细信息请参阅我们的<privacyLink>隐私政策</privacyLink>。您可以随时关闭此功能。"
 		},
 		"settings": {
 			"import": "导入",
@@ -1000,6 +1038,11 @@
 		"modelId": "您必须提供有效的模型 ID。",
 		"modelSelector": "您必须提供有效的模型选择器。",
 		"openAi": "您必须提供有效的基础 URL、API 密钥和模型 ID。",
+		"openAiExtraBody": {
+			"invalidJson": "附加请求体必须包含有效的 JSON。",
+			"objectRequired": "附加请求体必须是 JSON 对象。",
+			"reservedKeys": "附加请求体无法覆盖由 Zoo Code 管理的字段：{{keys}}。"
+		},
 		"arn": {
 			"invalidFormat": "ARN 格式无效。请检查格式要求。",
 			"regionMismatch": "警告：您的 ARN 中的区域 ({{arnRegion}}) 与您选择的区域 ({{region}}) 不匹配。这可能会导致访问问题。提供程序将使用 ARN 中的区域。"

@@ -47,13 +47,11 @@ Zoo Code parte de los cimientos creados por Roo Code y continúa ampliándolos c
 - **Flujos de terminal y edición más fiables** — correcciones para la finalización prematura del terminal, las condiciones de carrera del estado de las tareas, la gestión del contexto, la edición de diff y el uso de herramientas específicas de cada proveedor.
 - **Más control sobre tu espacio de trabajo** — gestión de reglas, restricciones de MCP por modo, controles de rutas multirraíz, opciones de razonamiento de modelos y acciones para revisar los cambios al completar una tarea.
 
-## Novedades de la v3.76.0
+## Novedades de la v3.82.0
 
-- **Ejecuta tareas más largas y sin interrupciones con Destructive Command Guard (DCG)** — DCG bloquea los comandos peligrosos mientras permite que Zoo siga trabajando sin que tengas que pulsar continuamente botones de aprobación, con descargas e instalación reforzadas del binario administrado.
-- **Mejores controles y fiabilidad de los proveedores** — elige la velocidad de respuesta de OpenAI Codex, utiliza configuraciones actualizadas de DeepSeek y benefíciate de un aislamiento más sólido entre los cambios de perfiles de proveedor y las tareas en ejecución.
-- **Corrección crítica de la ejecución en el terminal** — Zoo ahora espera a que los comandos del terminal terminen antes de iniciar el siguiente paso, lo que evita el trabajo superpuesto y que el modelo continúe antes de tiempo.
-- La agrupación más inteligente reúne las aprobaciones de herramientas relacionadas y mantiene separadas las solicitudes que no tienen relación.
-- La entrega de telemetría y la obtención de la caché de modelos son más resistentes ante fallos y solicitudes simultáneas.
+- 🔑 **Usa tu clave API de Zoo Gateway en cualquier lugar** — llévala a cualquier cliente o flujo de trabajo compatible con OpenAI: https://zoocode.dev/models
+- 🎁 **Acceso gratis al modelo por tiempo limitado** — obtén acceso gratis a MiniMax-M3 mediante Zoo Gateway.
+- ✨ **Modelos completamente nuevos** — GPT-6 Astra y Claude Fable 5.1 ya están disponibles.
 
 ## ¿Qué puede hacer Zoo Code por TI?
 

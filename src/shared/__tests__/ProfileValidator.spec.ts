@@ -79,7 +79,7 @@ describe("ProfileValidator", () => {
 				providers: {},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -107,7 +107,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -122,7 +122,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "any-model-id",
 			}
 
@@ -137,7 +137,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(false)
@@ -151,7 +151,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -166,7 +166,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -181,7 +181,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -196,7 +196,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -211,7 +211,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiModelId: "claude-3-opus",
 			}
 
@@ -226,7 +226,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "ollama",
+				apiProvider: providerIdentifiers.ollama,
 				ollamaModelId: "llama3",
 			}
 
@@ -304,7 +304,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "lmstudio",
+				apiProvider: providerIdentifiers.lmstudio,
 				lmStudioModelId: "lmstudio-model",
 			}
 
@@ -319,7 +319,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter-model",
 			}
 
@@ -334,7 +334,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "requesty",
+				apiProvider: providerIdentifiers.requesty,
 				requestyModelId: "requesty-model",
 			}
 
@@ -361,7 +361,7 @@ describe("ProfileValidator", () => {
 				providers: {},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 

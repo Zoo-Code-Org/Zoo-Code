@@ -42,8 +42,15 @@ describe("Destructive Command Guard manager", () => {
 	})
 
 	it("maps all supported platform and architecture combinations", () => {
-		expect(Object.keys(DCG_ARCHIVES).sort()).toEqual(["darwin-arm64", "linux-arm64", "linux-x64", "win32-x64"])
+		expect(Object.keys(DCG_ARCHIVES).sort()).toEqual([
+			"darwin-arm64",
+			"darwin-x64",
+			"linux-arm64",
+			"linux-x64",
+			"win32-x64",
+		])
 		expect(getDcgArchiveInfo("darwin", "arm64")?.archive).toBe("dcg-aarch64-apple-darwin.tar.xz")
+		expect(getDcgArchiveInfo("darwin", "x64")?.archive).toBe("dcg-x86_64-apple-darwin.tar.xz")
 		expect(getDcgArchiveInfo("win32", "x64")?.binary).toBe("dcg.exe")
 	})
 

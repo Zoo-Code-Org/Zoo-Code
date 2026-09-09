@@ -7,6 +7,8 @@ import {
 	type KimiCodeAuthMethod,
 	type ModelRecord,
 	type ProviderSettings,
+	providerIdentifiers,
+	RouterModelsMessageType,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -37,10 +39,10 @@ export const KimiCode = ({
 	const { t } = useAppTranslation()
 	const authMethod = apiConfiguration.kimiCodeAuthMethod ?? "oauth"
 	const { data, refetch, isFetching } = useRouterModels({
-		provider: "kimi-code",
+		provider: providerIdentifiers.kimiCode,
 		enabled: authMethod === "oauth" ? kimiCodeIsAuthenticated : !!apiConfiguration.kimiCodeApiKey,
 	})
-	const discoveredModels = data?.["kimi-code"]
+	const discoveredModels = data?.[providerIdentifiers.kimiCode]
 	const models: ModelRecord =
 		discoveredModels && Object.keys(discoveredModels).length > 0 ? discoveredModels : kimiCodeModels
 
@@ -50,9 +52,9 @@ export const KimiCode = ({
 
 	const refreshModels = () => {
 		vscode.postMessage({
-			type: "requestRouterModels",
+			type: RouterModelsMessageType.requestRouterModels,
 			values: {
-				provider: "kimi-code",
+				provider: providerIdentifiers.kimiCode,
 				refresh: true,
 				kimiCodeAuthMethod: authMethod,
 				kimiCodeApiKey: apiConfiguration.kimiCodeApiKey,

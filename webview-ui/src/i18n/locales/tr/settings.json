@@ -308,6 +308,20 @@
 				"description": "Zoo'nun korumalı dosyaları (.rooignore ve .roo/ yapılandırma dosyaları gibi) onay gerektirmeden oluşturmasına ve düzenlemesine izin ver."
 			}
 		},
+		"allowlists": {
+			"label": "İzin listeleri",
+			"description": "Bütün bir işlem kategorisini otomatik onaylamadan, tek tek dosyalara erişim ver. Her satıra bir desen, .gitignore'dan esinlenen sözdizimiyle: \"notes.md\" çalışma alanındaki herhangi bir dizinde o dosyayla eşleşir, \"docs/scratch/**\" o dizinin altındaki her şeyle ve \"*.md\" herhangi bir Markdown dosyasıyla eşleşir. Bir desen her zaman dosyaları adlandırır, dizinleri asla: \"docs\" yalnızca \"docs\" adlı bir dosyaya izin verir; bir dizinin içeriği için \"docs/**\" yaz. Baştaki \"./\" çalışma alanı kökünü, baştaki \"/\" ise dosya sisteminin kökünü belirtir; böylece \"/tmp/notes.md\" çalışma alanının dışına uzanır; \"~/notes.md\" de öyle, burada baştaki \"~/\" ev dizinini belirtir. Bir desenin önüne \"!\" koyarak önceki bir satırın eşleştirdiğini dışarıda bırak; .gitignore'da olduğu gibi eşleşen son satır kazanır, yani sıra önemlidir. Hiçbir klasör açık değilken çalışma alanına göreli desenler yok sayılır. Büyük ve küçük harf ayırt edilir, Windows dışında. Yukarıdaki \"Otomatik Onay\" kapalıyken hiçbir şey otomatik onaylanmaz.",
+			"readFiles": {
+				"label": "Okuma izin listesi desenleri",
+				"description": "Yukarıdaki \"Okuma\" kapalı olsa bile Zoo'nun onay almadan okuyabileceği dosyalar. Aşağıdaki yazma izin listesindeki dosyalar her zaman okunabilir de, bu yüzden iki kez eklenmeleri gerekmez. Dizin listelemeleri ve aramalar her zaman \"Okuma\" ayarını izler. .rooignore ile dışlanan dosyalar yine de okunamaz.",
+				"placeholder": "Her satıra bir desen, örn. notes.md"
+			},
+			"writeFiles": {
+				"label": "Yazma izin listesi desenleri",
+				"description": "Yukarıdaki \"Yazma\" kapalı olsa bile Zoo'nun onay almadan oluşturup düzenleyebileceği dosyalar. \"Korumalı dosyaları dahil et\" etkinleştirilmediği sürece (\"Yazma\" otomatik onayının ayarlarında) korumalı dosyalar yine onay gerektirir. .rooignore ile dışlanan dosyalar yine de yazılamaz.",
+				"placeholder": "Her satıra bir desen, örn. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "MCP Sunucuları görünümünde bireysel MCP araçlarının otomatik onayını etkinleştir (hem bu ayar hem de aracın \"Her zaman izin ver\" onay kutusu gerekir)"
@@ -388,6 +402,25 @@
 		"getOpencodeGoApiKey": "Opencode Go API Anahtarı Al",
 		"kenariApiKey": "Kenari API Anahtarı",
 		"getKenariApiKey": "Kenari API Anahtarı Al",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Anahtarı",
+			"getApiKey": "NanoGPT API Anahtarı Al",
+			"model": "Model",
+			"routingPreference": "Yönlendirme Tercihi",
+			"routingOptions": {
+				"automatic": "Otomatik",
+				"fastest": "En hızlı",
+				"cheapest": "En ucuz",
+				"lowestLatency": "En düşük gecikme",
+				"highestThroughput": "En yüksek verim",
+				"toolCapable": "Araç destekli",
+				"cacheCapable": "Önbellek destekli"
+			},
+			"automaticExplanation": "Otomatik, yönlendirme son eki uygulamaz.",
+			"billingWarning": "Gelişmiş yönlendirme tercihleri kullanıma göre ödeme yönlendirmesini kullanabilir ve NanoGPT'nin güncel faturalandırma kurallarına bağlı olarak abonelik kapsamını atlayabilir.",
+			"routingDocs": "NanoGPT yönlendirme ve faturalandırma ayrıntılarını görüntüle"
+		},
 		"apiKeyStorageNotice": "API anahtarları VSCode'un Gizli Depolamasında güvenli bir şekilde saklanır",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -427,6 +460,8 @@
 		"headerName": "Başlık adı",
 		"headerValue": "Başlık değeri",
 		"noCustomHeaders": "Tanımlanmış özel başlık yok. Eklemek için + düğmesine tıklayın.",
+		"extraBody": "Ek Gövde",
+		"extraBodyDescription": "API istek gövdeleriyle birleştirilen isteğe bağlı JSON nesnesi. model, messages, tools ve stream gibi Zoo Code tarafından yönetilen alanlar geçersiz kılınamaz. Gizli bilgiler eklemeyin.",
 		"unboundApiKey": "Unbound API Anahtarı",
 		"getUnboundApiKey": "Unbound API Anahtarı Al",
 		"requestyApiKey": "Requesty API Anahtarı",
@@ -495,6 +530,9 @@
 		"openAiApiKey": "OpenAI API Anahtarı",
 		"apiKey": "API Anahtarı",
 		"openAiBaseUrl": "Temel URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure dağıtım adı",
+		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
 		"getOpenAiApiKey": "OpenAI API Anahtarı Al",
 		"mistralApiKey": "Mistral API Anahtarı",
 		"getMistralApiKey": "Mistral / Codestral API Anahtarı Al",
@@ -980,8 +1018,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Anonim hata ve kullanım raporlamaya izin ver",
-			"description": "Anonim kullanım verileri ve hata raporları göndererek Zoo Code'u geliştirmeye yardım edin. Bu telemetri kod, prompt veya kişisel bilgi toplamaz. Daha fazla ayrıntı için <privacyLink>gizlilik politikamıza</privacyLink> bakın. Bunu istediğiniz zaman kapatabilirsiniz."
+			"label": "Hata ve kullanım raporlamasına izin ver",
+			"description": "Adınız veya hesabınız yerine kuruluma bağlı bir tanımlayıcıyla ilişkilendirilmiş kullanım verileri ve hata raporları göndererek Zoo Code'u geliştirmeye yardım edin. Bu telemetri kodunuzu veya istemlerinizi toplamaz. Daha fazla ayrıntı için <privacyLink>gizlilik politikamıza</privacyLink> bakın. Bunu istediğiniz zaman kapatabilirsiniz."
 		},
 		"settings": {
 			"import": "İçe Aktar",
@@ -1000,6 +1038,11 @@
 		"modelId": "Geçerli bir model kimliği sağlamalısınız.",
 		"modelSelector": "Geçerli bir model seçici sağlamalısınız.",
 		"openAi": "Geçerli bir temel URL, API anahtarı ve model kimliği sağlamalısınız.",
+		"openAiExtraBody": {
+			"invalidJson": "Ek Gövde geçerli JSON içermelidir.",
+			"objectRequired": "Ek Gövde bir JSON nesnesi olmalıdır.",
+			"reservedKeys": "Ek Gövde, Zoo Code tarafından yönetilen alanları geçersiz kılamaz: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Geçersiz ARN formatı. Lütfen format gereksinimlerini kontrol edin.",
 			"regionMismatch": "Uyarı: ARN'nizdeki bölge ({{arnRegion}}) seçtiğiniz bölge ({{region}}) ile eşleşmiyor. Bu erişim sorunlarına neden olabilir. Sağlayıcı, ARN'deki bölgeyi kullanacak."

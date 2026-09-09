@@ -7,4 +7,5 @@ export const EXTERNAL_LINKS = {
 	SECURITY_POLICY: "https://github.com/Zoo-Code-Org/Zoo-Code/security/policy",
 	REDDIT: "https://www.reddit.com/r/ZooCode/",
 	DISCORD: "https://discord.gg/VxfP4Vx3gX",
+	MODELS: "https://zoocode.dev/models",
 } as const

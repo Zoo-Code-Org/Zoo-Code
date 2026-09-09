@@ -11,6 +11,7 @@ import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { PopoverTrigger, StandardTooltip, Button } from "@src/components/ui"
 
 import { CodeIndexPopover } from "./CodeIndexPopover"
+import { enabledChatControlClassName } from "./chatControlStyles"
 
 interface IndexingStatusBadgeProps {
 	className?: string
@@ -96,7 +97,7 @@ export const IndexingStatusBadge: React.FC<IndexingStatusBadgeProps> = ({ classN
 						className={cn(
 							"relative h-5 w-5 p-0",
 							"text-vscode-foreground opacity-85",
-							"hover:opacity-100 hover:bg-[rgba(255,255,255,0.03)]",
+							enabledChatControlClassName,
 							"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
 							className,
 						)}>

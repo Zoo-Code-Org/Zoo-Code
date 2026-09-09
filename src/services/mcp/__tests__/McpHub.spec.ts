@@ -10,6 +10,10 @@ import { ServerConfigSchema, McpHub } from "../McpHub"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 import { t } from "../../../i18n"
 
+type McpHubPrivate = {
+	watchMcpSettingsFile: () => Promise<void>
+}
+
 // Mock fs/promises before importing anything that uses it.
 // Named exports and the default export must share the same vi.fn() instances so that
 // `import * as fs` (used by McpHub.ts) and `import fs` (default) both see the same mocks.
@@ -190,6 +194,22 @@ describe("McpHub", () => {
 		if (originalPlatform) {
 			Object.defineProperty(process, "platform", originalPlatform)
 		}
+	})
+
+	it("should log settings watcher startup failures", async () => {
+		const watcherError = new Error("watcher startup failed")
+		const watchSpy = vi
+			.spyOn(McpHub.prototype as unknown as McpHubPrivate, "watchMcpSettingsFile")
+			.mockRejectedValueOnce(watcherError)
+		vi.mocked(console.error).mockClear()
+
+		const failingHub = new McpHub(mockProvider as ClineProvider)
+		await failingHub.waitUntilReady()
+		await Promise.resolve()
+
+		expect(console.error).toHaveBeenCalledWith("[McpHub] Failed to watch MCP settings file:", watcherError)
+		await failingHub.dispose()
+		watchSpy.mockRestore()
 	})
 
 	describe("Discriminated union type handling", () => {
@@ -2526,7 +2546,7 @@ describe("McpHub", () => {
 			})
 
 			mockSecretStorage.onDidChange.mockImplementation((_key: string, cb: () => void) => {
-				Promise.resolve().then(() => {
+				queueMicrotask(() => {
 					mockSecretStorage.getOAuthData.mockResolvedValue({
 						expires_at: Date.now() + 10 * 60 * 1000,
 					})
@@ -2811,7 +2831,7 @@ describe("McpHub", () => {
 			})
 
 			mockSecretStorage.onDidChange.mockImplementation((_key: string, cb: () => void) => {
-				Promise.resolve().then(() => {
+				queueMicrotask(() => {
 					// Dispose the hub before the token callback runs
 					;(mcpHub as any).isDisposed = true
 					mockSecretStorage.getOAuthData.mockResolvedValue({

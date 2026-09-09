@@ -1,6 +1,7 @@
 import { type ModelInfo, type ProviderSettings, ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
 
 import { getModelMaxOutputTokens, shouldUseReasoningBudget, shouldUseReasoningEffort } from "../api"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("getModelMaxOutputTokens", () => {
 	const mockModel: ModelInfo = {
@@ -11,7 +12,7 @@ describe("getModelMaxOutputTokens", () => {
 
 	test("should return model maxTokens when maxTokens is within 20% of context window", () => {
 		const settings: ProviderSettings = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 		}
 
 		// mockModel has maxTokens: 8192 and contextWindow: 200000
@@ -33,7 +34,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			enableReasoningEffort: true,
 			modelMaxTokens: 32000,
 		}
@@ -72,7 +73,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			enableReasoningEffort: false, // Not using reasoning
 		}
 
@@ -93,7 +94,7 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-opus-4-7",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: false },
+				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
 			}),
 		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
 
@@ -101,7 +102,11 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-opus-4-7",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: true, modelMaxTokens: 32_768 },
+				settings: {
+					apiProvider: providerIdentifiers.anthropic,
+					enableReasoningEffort: true,
+					modelMaxTokens: 32_768,
+				},
 			}),
 		).toBe(32_768)
 	})
@@ -122,7 +127,7 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-opus-4-8",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: false },
+				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
 			}),
 		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
 
@@ -130,7 +135,11 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-opus-4-8",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: true, modelMaxTokens: 32_768 },
+				settings: {
+					apiProvider: providerIdentifiers.anthropic,
+					enableReasoningEffort: true,
+					modelMaxTokens: 32_768,
+				},
 			}),
 		).toBe(32_768)
 	})
@@ -149,7 +158,7 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-fable-5",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: false },
+				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
 			}),
 		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
 
@@ -157,7 +166,11 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-fable-5",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: true, modelMaxTokens: 32_768 },
+				settings: {
+					apiProvider: providerIdentifiers.anthropic,
+					enableReasoningEffort: true,
+					modelMaxTokens: 32_768,
+				},
 			}),
 		).toBe(32_768)
 	})
@@ -176,7 +189,7 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-sonnet-5",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: false },
+				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
 			}),
 		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
 
@@ -184,7 +197,11 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-sonnet-5",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: true, modelMaxTokens: 32_768 },
+				settings: {
+					apiProvider: providerIdentifiers.anthropic,
+					enableReasoningEffort: true,
+					modelMaxTokens: 32_768,
+				},
 			}),
 		).toBe(32_768)
 	})
@@ -203,7 +220,7 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-opus-5",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: false },
+				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
 			}),
 		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
 
@@ -211,7 +228,11 @@ describe("getModelMaxOutputTokens", () => {
 			getModelMaxOutputTokens({
 				modelId: "claude-opus-5",
 				model,
-				settings: { apiProvider: "anthropic", enableReasoningEffort: true, modelMaxTokens: 32_768 },
+				settings: {
+					apiProvider: providerIdentifiers.anthropic,
+					enableReasoningEffort: true,
+					modelMaxTokens: 32_768,
+				},
 			}),
 		).toBe(32_768)
 	})
@@ -226,7 +247,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "gemini",
+			apiProvider: providerIdentifiers.gemini,
 			enableReasoningEffort: false, // Not using reasoning
 		}
 
@@ -242,7 +263,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 		}
 
 		const result = getModelMaxOutputTokens({
@@ -263,7 +284,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 		}
 
 		const result = getModelMaxOutputTokens({
@@ -283,7 +304,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 		}
 
 		const result = getModelMaxOutputTokens({
@@ -303,7 +324,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 		}
 
 		// Test various GPT-5 model IDs
@@ -330,7 +351,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "zai",
+			apiProvider: providerIdentifiers.zai,
 			modelMaxTokens: 64_000, // user override, above 20% of the context window (40k)
 		}
 
@@ -348,7 +369,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "zai",
+			apiProvider: providerIdentifiers.zai,
 			modelMaxTokens: 999_999, // beyond the model ceiling
 		}
 
@@ -364,7 +385,7 @@ describe("getModelMaxOutputTokens", () => {
 		}
 
 		const settings: ProviderSettings = {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 		}
 
 		// Test non-GPT-5 model IDs
@@ -411,7 +432,7 @@ describe("getModelMaxOutputTokens", () => {
 			const result = getModelMaxOutputTokens({
 				modelId: "gpt-5-turbo",
 				model,
-				settings: { apiProvider: "openai" },
+				settings: { apiProvider: providerIdentifiers.openai },
 				format: "openai",
 			})
 
@@ -430,7 +451,7 @@ describe("getModelMaxOutputTokens", () => {
 		const result = getModelMaxOutputTokens({
 			modelId: "glm-5.1",
 			model,
-			settings: { apiProvider: "zai" },
+			settings: { apiProvider: providerIdentifiers.zai },
 			format: "openai",
 		})
 
@@ -447,7 +468,7 @@ describe("getModelMaxOutputTokens", () => {
 		const result = getModelMaxOutputTokens({
 			modelId: "glm-5.1",
 			model,
-			settings: { apiProvider: "openai" },
+			settings: { apiProvider: providerIdentifiers.openai },
 			format: "openai",
 		})
 

@@ -344,9 +344,9 @@
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
 			"heading": "नया क्या है:",
-			"highlight1": "Destructive Command Guard (DCG) के साथ लंबे, बिना रुकावट वाले tasks चलाएँ — DCG खतरनाक commands को block करता है और Zoo को लगातार approval buttons दबाए बिना काम करते रहने देता है।",
-			"highlight2": "बेहतर provider controls और reliability — OpenAI Codex response speed चुनें, updated DeepSeek configurations उपयोग करें और चल रहे tasks को profile changes से अलग रखें।",
-			"highlight3": "Critical terminal execution fix — Zoo अब अगला step शुरू करने से पहले terminal commands के पूरा होने का इंतज़ार करता है।"
+			"highlight1": "🔑 अपनी Zoo Gateway API key कहीं भी इस्तेमाल करें—इसे किसी भी OpenAI-compatible client या workflow में जोड़ें: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 सीमित समय के लिए Zoo Gateway के ज़रिए MiniMax-M3 का FREE access पाएं।",
+			"highlight3": "✨ अब उपलब्ध: बिल्कुल नए GPT-6 Astra और Claude Fable 5.1 models।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

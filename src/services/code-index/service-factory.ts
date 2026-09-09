@@ -26,6 +26,7 @@ import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 import { BATCH_SEGMENT_THRESHOLD } from "./constants"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
@@ -55,7 +56,7 @@ export class CodeIndexServiceFactory {
 			)
 		}
 
-		if (provider === "openai") {
+		if (provider === providerIdentifiers.openai) {
 			const apiKey = config.openAiOptions?.openAiNativeApiKey
 
 			if (!apiKey) {
@@ -65,7 +66,7 @@ export class CodeIndexServiceFactory {
 				...config.openAiOptions,
 				openAiEmbeddingModelId: config.modelId,
 			})
-		} else if (provider === "ollama") {
+		} else if (provider === providerIdentifiers.ollama) {
 			if (!config.ollamaOptions?.ollamaBaseUrl) {
 				throw new Error(t("embeddings:serviceFactory.ollamaConfigMissing"))
 			}
@@ -82,28 +83,28 @@ export class CodeIndexServiceFactory {
 				config.openAiCompatibleOptions.apiKey,
 				config.modelId,
 			)
-		} else if (provider === "gemini") {
+		} else if (provider === providerIdentifiers.gemini) {
 			if (!config.geminiOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.geminiConfigMissing"))
 			}
 			return new GeminiEmbedder(config.geminiOptions.apiKey, config.modelId)
-		} else if (provider === "mistral") {
+		} else if (provider === providerIdentifiers.mistral) {
 			if (!config.mistralOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.mistralConfigMissing"))
 			}
 			return new MistralEmbedder(config.mistralOptions.apiKey, config.modelId)
-		} else if (provider === "vercel-ai-gateway") {
+		} else if (provider === providerIdentifiers.vercelAiGateway) {
 			if (!config.vercelAiGatewayOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.vercelAiGatewayConfigMissing"))
 			}
 			return new VercelAiGatewayEmbedder(config.vercelAiGatewayOptions.apiKey, config.modelId)
-		} else if (provider === "bedrock") {
+		} else if (provider === providerIdentifiers.bedrock) {
 			// Only region is required for Bedrock (profile is optional)
 			if (!config.bedrockOptions?.region) {
 				throw new Error(t("embeddings:serviceFactory.bedrockConfigMissing"))
 			}
 			return new BedrockEmbedder(config.bedrockOptions.region, config.bedrockOptions.profile, config.modelId)
-		} else if (provider === "openrouter") {
+		} else if (provider === providerIdentifiers.openrouter) {
 			if (!config.openRouterOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.openRouterConfigMissing"))
 			}

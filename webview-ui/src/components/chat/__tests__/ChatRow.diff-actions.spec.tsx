@@ -1,8 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { fireEvent, renderWithExtensionState, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { ChatRowContent } from "../ChatRow"
 
 const mockPostMessage = vi.fn()
@@ -35,8 +33,6 @@ vi.mock("@src/components/common/CodeBlock", () => ({
 	default: () => null,
 }))
 
-const queryClient = new QueryClient()
-
 function createToolAskMessage(toolPayload: Record<string, unknown>): ClineMessage {
 	return {
 		type: "ask",
@@ -48,22 +44,18 @@ function createToolAskMessage(toolPayload: Record<string, unknown>): ClineMessag
 }
 
 function renderChatRow(message: ClineMessage, isExpanded = false) {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatRowContent
-					message={message}
-					isExpanded={isExpanded}
-					isLast={false}
-					isStreaming={false}
-					onToggleExpand={() => {}}
-					onSuggestionClick={() => {}}
-					onBatchFileResponse={() => {}}
-					onFollowUpUnmount={() => {}}
-					isFollowUpAnswered={false}
-				/>
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
+	return renderWithExtensionState(
+		<ChatRowContent
+			message={message}
+			isExpanded={isExpanded}
+			isLast={false}
+			isStreaming={false}
+			onToggleExpand={() => {}}
+			onSuggestionClick={() => {}}
+			onBatchFileResponse={() => {}}
+			onFollowUpUnmount={() => {}}
+			isFollowUpAnswered={false}
+		/>,
 	)
 }
 

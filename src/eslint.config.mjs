@@ -1,8 +1,11 @@
 import { config } from "@roo-code/config-eslint/base"
+import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /** @type {import("eslint").Linter.Config} */
 export default [
 	...config,
+	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
 	{
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
@@ -34,7 +37,16 @@ export default [
 	{
 		// Ratchet: enforce no-floating-promises directory by directory. Each
 		// directory is added here once its floating promises are resolved.
-		files: ["activate/**/*.ts", "core/task/**/*.ts", "core/webview/**/*.ts"],
+		files: [
+			"activate/**/*.ts",
+			"core/config/**/*.ts",
+			"core/task/**/*.ts",
+			"core/tools/**/*.ts",
+			"core/webview/**/*.ts",
+			"extension.ts",
+			"integrations/**/*.ts",
+			"services/**/*.ts",
+		],
 		languageOptions: {
 			parserOptions: {
 				project: true,
@@ -46,6 +58,6 @@ export default [
 		},
 	},
 	{
-		ignores: ["webview-ui", "out"],
+		ignores: [".stryker-tmp", "webview-ui", "out"],
 	},
 ]

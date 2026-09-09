@@ -41,6 +41,8 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 
 				if (!modelName || !modelInfo || !litellmModelName) continue
 
+				const isGpt6Astra = litellmModelName === "openai/responses/gpt-6-astra"
+
 				// LiteLLM's /v1/model/info never reports reasoning capability flags, so infer
 				// preserveReasoning from explicit model ids in either the alias or routed model name.
 				const preservesReasoning =
@@ -61,6 +63,21 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 					cacheReadsPrice: modelInfo.cache_read_input_token_cost
 						? modelInfo.cache_read_input_token_cost * 1000000
 						: undefined,
+					...(isGpt6Astra && {
+						contextWindow: 1_050_000,
+						supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+						requiredReasoningEffort: true,
+						reasoningEffort: "medium",
+						supportsTemperature: false,
+						requiresResponsesApi: true,
+						longContextPricing: {
+							thresholdTokens: 272_000,
+							inputPriceMultiplier: 2,
+							outputPriceMultiplier: 1.5,
+							cacheWritesPriceMultiplier: 2,
+							cacheReadsPriceMultiplier: 2,
+						},
+					}),
 					...(preservesReasoning && { preserveReasoning: true }),
 					description: `${modelName} via LiteLLM proxy`,
 				}

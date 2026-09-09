@@ -12,6 +12,8 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 		id: "gpt-5.4",
 		info: openAiNativeModels["gpt-5.4"],
 	}
+	const getGpt6AstraModel = () =>
+		new OpenAiNativeHandler({ openAiNativeApiKey: "test-key", apiModelId: "gpt-6-astra" }).getModel()
 
 	beforeEach(() => {
 		handler = new OpenAiNativeHandler({
@@ -103,6 +105,45 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 				cacheReadTokens: 30,
 				cacheWriteTokens: 20, // Actual cache writes from cache_creation_input_tokens
 			})
+		})
+
+		it("should bill nested cache write tokens at the Astra rate", () => {
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 1_000,
+				input_tokens_details: {
+					cached_tokens: 20_000,
+					cache_write_tokens: 30_000,
+					cache_miss_tokens: 50_000,
+				},
+			}
+
+			const result = handler["normalizeUsage"](usage, getGpt6AstraModel())
+
+			expect(result).toMatchObject({
+				inputTokens: 100_000,
+				outputTokens: 1_000,
+				cacheReadTokens: 20_000,
+				cacheWriteTokens: 30_000,
+			})
+			if (!result) throw new Error("Expected usage")
+			expect(result.totalCost).toBeCloseTo(0.945, 6)
+		})
+
+		it("should derive totals from nested Astra cache details", () => {
+			const result = handler["normalizeUsage"](
+				{
+					output_tokens: 0,
+					input_tokens_details: {
+						cached_tokens: 20,
+						cache_write_tokens: 30,
+						cache_miss_tokens: 50,
+					},
+				},
+				getGpt6AstraModel(),
+			)
+
+			expect(result).toMatchObject({ inputTokens: 100, cacheReadTokens: 20, cacheWriteTokens: 30 })
 		})
 
 		it("should handle reasoning tokens in output details", () => {
@@ -400,6 +441,28 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 	})
 
 	describe("cost calculation", () => {
+		it.each([
+			{ tier: OpenAiServiceTier.Default, expectedCost: 4.525 },
+			{ tier: OpenAiServiceTier.Flex, expectedCost: 2.2625 },
+			{ tier: OpenAiServiceTier.Priority, expectedCost: 9.05 },
+		])("applies Astra long-context cache pricing for the $tier tier", ({ tier, expectedCost }) => {
+			handler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+				openAiNativeServiceTier: tier,
+			})
+			const result = handler["normalizeUsage"](
+				{
+					input_tokens: 300_000,
+					output_tokens: 1_000,
+					input_tokens_details: { cached_tokens: 100_000, cache_write_tokens: 50_000 },
+				},
+				getGpt6AstraModel(),
+			)
+
+			if (!result) throw new Error("Expected usage")
+			expect(result.totalCost).toBeCloseTo(expectedCost, 6)
+		})
+
 		it("should pass total input tokens to calculateApiCostOpenAI", () => {
 			const usage = {
 				input_tokens: 100,

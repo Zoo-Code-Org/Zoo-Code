@@ -12,7 +12,11 @@ import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList,
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
 import type { GitCommit } from "./git.js"
 import type { McpServer } from "./mcp.js"
-import type { ModelRecord, RouterModels } from "./model.js"
+import { RouterModelsMessageType, type ModelRecord, type RouterModels } from "./model.js"
+import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
+import { OllamaModelsMessageType } from "./providers/ollama.js"
+import { OpenAiModelsMessageType } from "./providers/openai.js"
+import { VsCodeLmModelsMessageType } from "./providers/vscode-llm.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
 import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
@@ -38,12 +42,12 @@ export interface ExtensionMessage {
 		| "enhancedPrompt"
 		| "commitSearchResults"
 		| "listApiConfig"
-		| "routerModels"
+		| typeof RouterModelsMessageType.routerModels
 		| "zooGatewayCredentialsReady"
-		| "openAiModels"
-		| "ollamaModels"
-		| "lmStudioModels"
-		| "vsCodeLmModels"
+		| typeof OpenAiModelsMessageType.openAiModels
+		| typeof OllamaModelsMessageType.ollamaModels
+		| typeof LmStudioModelsMessageType.lmStudioModels
+		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -69,7 +73,7 @@ export interface ExtensionMessage {
 		| "authenticatedUser"
 		| "condenseTaskContextStarted"
 		| "condenseTaskContextResponse"
-		| "singleRouterModelFetchResponse"
+		| typeof RouterModelsMessageType.singleRouterModelFetchResponse
 		| "indexingStatusUpdate"
 		| "indexCleared"
 		| "codebaseIndexConfig"
@@ -103,6 +107,7 @@ export interface ExtensionMessage {
 		| "rules"
 		| "fileContent"
 		| "rooHistoryImportProgress"
+		| "themeFixtureProbeRequest"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -150,6 +155,7 @@ export interface ExtensionMessage {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	values?: Record<string, any>
 	requestId?: string
+	themeFixture?: WebviewThemeFixture
 	promptText?: string
 	results?:
 		| { path: string; type: "file" | "folder"; label?: string }[]
@@ -266,9 +272,11 @@ export type ExtensionState = Pick<
 	| "autoApprovalEnabled"
 	| "alwaysAllowReadOnly"
 	| "alwaysAllowReadOnlyOutsideWorkspace"
+	| "allowedReadFiles"
 	| "alwaysAllowWrite"
 	| "alwaysAllowWriteOutsideWorkspace"
 	| "alwaysAllowWriteProtected"
+	| "allowedWriteFiles"
 	| "alwaysAllowMcp"
 	| "alwaysAllowModeSwitch"
 	| "alwaysAllowSubtasks"
@@ -360,6 +368,11 @@ export type ExtensionState = Pick<
 	telemetrySetting: TelemetrySetting
 	telemetryKey?: string
 	machineId?: string
+	// Live vscode.env.isTelemetryEnabled, so the webview's own PostHog client can respect
+	// the VS Code global telemetry toggle the same way the extension-side gate does --
+	// without this, an explicit user Accept can still send events while VS Code's global
+	// telemetry is disabled.
+	vscodeTelemetryEnabled?: boolean
 
 	renderContext: "sidebar" | "editor"
 	settingsImportedAt?: number
@@ -474,13 +487,13 @@ export interface WebviewMessage {
 		| "importSettings"
 		| "exportSettings"
 		| "resetState"
-		| "flushRouterModels"
-		| "requestRouterModels"
-		| "requestOpenAiModels"
-		| "requestOllamaModels"
-		| "requestLmStudioModels"
+		| typeof RouterModelsMessageType.flushRouterModels
+		| typeof RouterModelsMessageType.requestRouterModels
+		| typeof OpenAiModelsMessageType.requestOpenAiModels
+		| typeof OllamaModelsMessageType.requestOllamaModels
+		| typeof LmStudioModelsMessageType.requestLmStudioModels
 		| "requestRooModels"
-		| "requestVsCodeLmModels"
+		| typeof VsCodeLmModelsMessageType.requestVsCodeLmModels
 		| "openImage"
 		| "saveImage"
 		| "openFile"
@@ -632,6 +645,7 @@ export interface WebviewMessage {
 		| "deleteRule"
 		| "openRuleFile"
 		| "openRulesDirectory"
+		| "themeFixtureProbeResponse"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -678,6 +692,7 @@ export interface WebviewMessage {
 	/** Target mode slugs for updateSkillModes */
 	newSkillModeSlugs?: string[] // For updateSkillModes (new mode restrictions)
 	requestId?: string
+	themeFixture?: WebviewThemeFixture
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
@@ -742,6 +757,12 @@ export interface WebviewMessage {
 	worktreeForce?: boolean
 	worktreeNewWindow?: boolean
 	worktreeIncludeContent?: string
+}
+
+export interface WebviewThemeFixture {
+	themeId: string
+	bodyClass: string
+	variables: Record<string, string>
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {

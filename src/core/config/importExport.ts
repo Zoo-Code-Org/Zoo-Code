@@ -232,16 +232,16 @@ export async function importSettingsFromPath(
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
 		const currentProvider = providerProfiles.apiConfigs[currentProviderName]
-		contextProxy.setValue("currentApiConfigName", currentProviderName)
+		await contextProxy.setValue("currentApiConfigName", currentProviderName)
 
 		// TODO: It seems like we don't need to have the provider settings in
 		// the proxy; we can just use providerSettingsManager as the source of
 		// truth.
 		if (currentProvider) {
-			contextProxy.setProviderSettings(currentProvider)
+			await contextProxy.setProviderSettings(currentProvider)
 		}
 
-		contextProxy.setValue("listApiConfigMeta", await providerSettingsManager.listConfig())
+		await contextProxy.setValue("listApiConfigMeta", await providerSettingsManager.listConfig())
 
 		return {
 			providerProfiles,
@@ -270,7 +270,7 @@ export async function importSettingsFromPath(
  */
 export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
 	// Use the last export path as a sensible default, falling back to Downloads
-	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "roo-code-settings.json", {
+	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
 		fallbackDir: path.join(os.homedir(), "Downloads"),
 	})
@@ -310,7 +310,7 @@ export const importSettingsFromFile = async (
 }
 
 export const exportSettings = async ({ providerSettingsManager, contextProxy }: ExportOptions) => {
-	const defaultUri = await resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "roo-code-settings.json", {
+	const defaultUri = await resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
 		fallbackDir: path.join(os.homedir(), "Downloads"),
 	})

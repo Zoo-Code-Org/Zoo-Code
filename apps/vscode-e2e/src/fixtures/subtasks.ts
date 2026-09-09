@@ -11,6 +11,8 @@ export const SUBTASK_API_HANG_PARENT_MARKER = "SUBTASK_PARENT_API_HANG_INTERRUPT
 export const SUBTASK_API_HANG_CHILD_MARKER = "SUBTASK_CHILD_API_HANG_INTERRUPT_RESUME"
 const SUBTASK_FAST_PARENT_MARKER = "SUBTASK_PARENT_IMMEDIATE_COMPLETION"
 const SUBTASK_FAST_CHILD_MARKER = "SUBTASK_CHILD_IMMEDIATE_COMPLETION"
+const SUBTASK_APPROVAL_RESTORE_PARENT_MARKER = "SUBTASK_PARENT_APPROVAL_RESTORE"
+const SUBTASK_APPROVAL_RESTORE_CHILD_MARKER = "SUBTASK_CHILD_APPROVAL_RESTORE"
 const SUBTASK_XPROFILE_PARENT_MARKER = "SUBTASK_PARENT_CROSS_PROFILE"
 const SUBTASK_XPROFILE_SAME_CHILD_MARKER = "SUBTASK_CHILD_SAME_PROFILE"
 const SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER = "SUBTASK_CHILD_DIFFERENT_PROFILE"
@@ -21,6 +23,9 @@ export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
 export const SUBTASK_FAST_CHILD_RESULT = "Fast child completed"
 const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "${SUBTASK_FAST_CHILD_RESULT}".`
 export const SUBTASK_FAST_PARENT_PROMPT = `${SUBTASK_FAST_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_FAST_CHILD_PROMPT}" Do not answer directly.`
+export const SUBTASK_APPROVAL_RESTORE_CHILD_RESULT = "Restored child completed"
+const SUBTASK_APPROVAL_RESTORE_CHILD_PROMPT = `${SUBTASK_APPROVAL_RESTORE_CHILD_MARKER}: Complete immediately with the exact result "${SUBTASK_APPROVAL_RESTORE_CHILD_RESULT}".`
+export const SUBTASK_APPROVAL_RESTORE_PARENT_PROMPT = `${SUBTASK_APPROVAL_RESTORE_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_APPROVAL_RESTORE_CHILD_PROMPT}" Do not answer directly.`
 
 const SUBTASK_INTERRUPT_CHILD_PROMPT = `${SUBTASK_INTERRUPT_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_INTERRUPT_PARENT_PROMPT = `${SUBTASK_INTERRUPT_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_INTERRUPT_CHILD_PROMPT}" Do not answer directly. When the subtask returns, complete with the exact result "Interrupted parent resumed".`
@@ -122,6 +127,58 @@ const completionAfterAnswer = (followupId: string, completionId: string) => ({
 })
 
 export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_APPROVAL_RESTORE_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: SUBTASK_APPROVAL_RESTORE_CHILD_PROMPT,
+					}),
+					id: "call_subtasks_approval_restore_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_APPROVAL_RESTORE_CHILD_MARKER) &&
+				!requestContains(req, [SUBTASK_APPROVAL_RESTORE_PARENT_MARKER]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_APPROVAL_RESTORE_CHILD_RESULT }),
+					id: "call_subtasks_approval_restore_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_APPROVAL_RESTORE_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: "Restored parent resumed" }),
+					id: "call_subtasks_approval_restore_parent_completion_003",
+				},
+			],
+		},
+	})
+
 	mock.addFixture({
 		match: {
 			userMessage: new RegExp(SUBTASK_FAST_PARENT_MARKER),

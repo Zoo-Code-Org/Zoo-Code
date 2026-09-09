@@ -1,8 +1,6 @@
 import React from "react"
 
-import { render, screen } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
+import { renderWithExtensionState, screen } from "@/utils/test-utils"
 import { ChatRowContent } from "../ChatRow"
 
 // Mock i18n
@@ -26,25 +24,19 @@ vi.mock("react-i18next", () => ({
 	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
-const queryClient = new QueryClient()
-
 function renderChatRow(message: any) {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatRowContent
-					message={message}
-					isExpanded={false}
-					isLast={false}
-					isStreaming={false}
-					onToggleExpand={() => {}}
-					onSuggestionClick={() => {}}
-					onBatchFileResponse={() => {}}
-					onFollowUpUnmount={() => {}}
-					isFollowUpAnswered={false}
-				/>
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
+	return renderWithExtensionState(
+		<ChatRowContent
+			message={message}
+			isExpanded={false}
+			isLast={false}
+			isStreaming={false}
+			onToggleExpand={() => {}}
+			onSuggestionClick={() => {}}
+			onBatchFileResponse={() => {}}
+			onFollowUpUnmount={() => {}}
+			isFollowUpAnswered={false}
+		/>,
 	)
 }
 

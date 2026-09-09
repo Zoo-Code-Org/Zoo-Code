@@ -29,6 +29,8 @@ export const makeExtensionState = (overrides: Partial<ExtensionState> = {}): Par
 	shouldShowAnnouncement: false,
 	allowedCommands: [],
 	deniedCommands: [],
+	allowedReadFiles: [],
+	allowedWriteFiles: [],
 	alwaysAllowExecute: false,
 	cloudIsAuthenticated: false,
 	telemetrySetting: "enabled",

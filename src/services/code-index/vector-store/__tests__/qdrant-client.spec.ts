@@ -5,6 +5,8 @@ import { QdrantVectorStore } from "../qdrant-client"
 import { getWorkspacePath } from "../../../../utils/path"
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_SEARCH_MIN_SCORE } from "../../constants"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mocks
 vitest.mock("@qdrant/js-client-rest")
 vitest.mock("crypto")
@@ -55,7 +57,7 @@ describe("QdrantVectorStore", () => {
 	const expectedCollectionName = `ws-${mockHashedPath.substring(0, 16)}`
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 
 		// Mock QdrantClient constructor
 		;(QdrantClient as any).mockImplementation(function () {

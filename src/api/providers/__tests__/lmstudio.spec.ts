@@ -112,6 +112,89 @@ describe("LmStudioHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
+		it("streams reasoning chunks from delta.reasoning_content", async () => {
+			// Regression: Qwen3 / DeepSeek-R1 style models served by LM Studio emit
+			// thinking via reasoning_content, not <think> tags inside content.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
+			expect(chunks).toContainEqual({ type: "text", text: "answer" })
+		})
+
+		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
+		})
+
+		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
+			// When both reasoning_content and reasoning are set, only reasoning_content
+			// should be emitted as a reasoning chunk (not both).
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									reasoning_content: "primary thought",
+									reasoning: "fallback thought",
+								},
+								index: 0,
+							},
+						],
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
+
+			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
+		})
+
+		it("still parses <think> tags embedded in content", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "<think>tagged thought</think>visible" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "tagged thought" })
+			expect(chunks).toContainEqual({ type: "text", text: "visible" })
+		})
+
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 

@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -5,7 +6,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
-import { waitUntilCompleted, sleep } from "../utils"
+import { isCompletedAsk, waitUntilCompleted, sleep } from "../utils"
 import { setDefaultSuiteTimeout } from "../test-utils"
 
 const TEST_DIR_NAME = "write-to-file-tool-fixture"
@@ -25,7 +26,7 @@ suite("Roo Code write_to_file Tool", function () {
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "anthropic/claude-sonnet-4.5",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -51,7 +52,7 @@ suite("Roo Code write_to_file Tool", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -120,7 +121,7 @@ suite("Roo Code write_to_file Tool", function () {
 
 			const toolApprovalMessage = messages.find(
 				(message) =>
-					message.type === "ask" &&
+					isCompletedAsk(message) &&
 					message.ask === "tool" &&
 					message.text?.includes("write-to-file-smoke.txt"),
 			)
@@ -168,7 +169,7 @@ suite("Roo Code write_to_file Tool", function () {
 
 			const toolApprovalMessage = messages.find(
 				(message) =>
-					message.type === "ask" &&
+					isCompletedAsk(message) &&
 					message.ask === "tool" &&
 					message.text?.includes("write-to-file-nested-smoke.txt"),
 			)

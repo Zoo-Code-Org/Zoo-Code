@@ -9,6 +9,8 @@ import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
 import { FriendliHandler } from "../friendli"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -30,7 +32,7 @@ describe("FriendliHandler", () => {
 	let handler: FriendliHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([
@@ -323,7 +325,7 @@ describe("FriendliHandler", () => {
 
 describe("buildApiHandler friendli wiring", () => {
 	it("returns a FriendliHandler for apiProvider='friendli'", () => {
-		const handler = buildApiHandler({ apiProvider: "friendli", friendliApiKey: "test-key" })
+		const handler = buildApiHandler({ apiProvider: providerIdentifiers.friendli, friendliApiKey: "test-key" })
 		expect(handler).toBeInstanceOf(FriendliHandler)
 	})
 })
@@ -334,7 +336,7 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 		const result = getModelMaxOutputTokens({
 			modelId: "zai-org/GLM-5.2",
 			model,
-			settings: { apiProvider: "friendli" },
+			settings: { apiProvider: providerIdentifiers.friendli },
 			format: "openai",
 		})
 		// 1_000_000 * 0.2 = 200_000 > 131_072 → no clamping
@@ -346,7 +348,7 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 		const result = getModelMaxOutputTokens({
 			modelId: "zai-org/GLM-5.1",
 			model,
-			settings: { apiProvider: "friendli" },
+			settings: { apiProvider: providerIdentifiers.friendli },
 			format: "openai",
 		})
 		// 200_000 * 0.2 = 40_000 < 131_072 → clamped to 40_000
@@ -358,7 +360,7 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 		const result = getModelMaxOutputTokens({
 			modelId: "zai-org/GLM-5.1",
 			model,
-			settings: { apiProvider: "friendli", modelMaxTokens: 80_000 },
+			settings: { apiProvider: providerIdentifiers.friendli, modelMaxTokens: 80_000 },
 			format: "openai",
 		})
 		// supportsMaxTokens=true, user set 80k, model ceiling 131072 → min(80000, 131072) = 80000
@@ -368,7 +370,7 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 
 describe("FriendliHandler — Friendli-specific reasoning params", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("should include reasoning_effort, chat_template_kwargs, parse_reasoning for GLM-5.2 with reasoning enabled", async () => {

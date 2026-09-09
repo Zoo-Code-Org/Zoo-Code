@@ -4,12 +4,15 @@ import {
 	opencodeGoModels,
 	OPENCODE_GO_DEFAULT_TEMPERATURE,
 	OPENCODE_GO_ANTHROPIC_FORMAT_MODELS,
+	OPENCODE_GO_RESPONSES_FORMAT_MODELS,
 	isOpencodeGoAnthropicFormatModel,
+	isOpencodeGoResponsesFormatModel,
 	getOpencodeGoModelInfo,
 } from "../providers/opencode-go.js"
 
 describe("opencode-go registry", () => {
 	const anthropicFormatModels = [
+		"qwen3.8-max",
 		"qwen3.7-max",
 		"qwen3.7-plus",
 		"qwen3.6-plus",
@@ -21,6 +24,7 @@ describe("opencode-go registry", () => {
 		"glm-5",
 		"glm-5.1",
 		"glm-5.2",
+		"glm-5.3",
 		"kimi-k3",
 		"kimi-k2.5",
 		"kimi-k2.6",
@@ -78,6 +82,38 @@ describe("opencode-go registry", () => {
 			expect(info?.outputPrice).toBe(15.0)
 			expect(info?.cacheReadsPrice).toBe(0.3)
 		})
+
+		it("exposes current Qwen3.8 Max capabilities and Go pricing", () => {
+			const info = getOpencodeGoModelInfo("qwen3.8-max")
+			expect(info).toMatchObject({
+				maxTokens: 131_072,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				inputPrice: 2.0,
+				outputPrice: 6.0,
+				cacheReadsPrice: 0.25,
+				cacheWritesPrice: 2.5,
+			})
+			expect(info?.preserveReasoning).toBeUndefined()
+		})
+
+		it("glm-5.3 exposes its native context, pricing, and always-on reasoning levels", () => {
+			const info = getOpencodeGoModelInfo("glm-5.3")
+			expect(info).toBeDefined()
+			expect(info?.maxTokens).toBe(131_072)
+			expect(info?.contextWindow).toBe(1_000_000)
+			expect(info?.supportsImages).toBe(false)
+			expect(info?.supportsPromptCache).toBe(true)
+			expect(info?.supportsMaxTokens).toBe(true)
+			expect(info?.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(info?.reasoningEffort).toBe("max")
+			expect(info?.preserveReasoning).toBe(true)
+			expect(info?.inputPrice).toBe(1.4)
+			expect(info?.outputPrice).toBe(4.4)
+			expect(info?.cacheReadsPrice).toBe(0.26)
+		})
 	})
 
 	describe("OPENCODE_GO_ANTHROPIC_FORMAT_MODELS", () => {
@@ -91,6 +127,58 @@ describe("opencode-go registry", () => {
 		it("every Anthropic-format model has a native registry entry", () => {
 			for (const id of OPENCODE_GO_ANTHROPIC_FORMAT_MODELS) {
 				expect(opencodeGoModels[id]).toBeDefined()
+			}
+		})
+	})
+
+	describe("OPENCODE_GO_RESPONSES_FORMAT_MODELS", () => {
+		it("contains exactly the Responses-only models", () => {
+			expect([...OPENCODE_GO_RESPONSES_FORMAT_MODELS].sort()).toEqual(["gpt-5.6-luna"])
+		})
+
+		it("classifies gpt-5.6-luna as Responses-format", () => {
+			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+		})
+
+		it("classifies Anthropic-format and OpenAI-compatible models as non-Responses-format", () => {
+			for (const id of anthropicFormatModels) {
+				expect(isOpencodeGoResponsesFormatModel(id)).toBe(false)
+			}
+			for (const id of openaiFormatModels) {
+				expect(isOpencodeGoResponsesFormatModel(id)).toBe(false)
+			}
+		})
+
+		it("defaults unknown model IDs to the OpenAI-compatible format", () => {
+			expect(isOpencodeGoResponsesFormatModel("some-future-model")).toBe(false)
+			expect(isOpencodeGoResponsesFormatModel("")).toBe(false)
+		})
+
+		it("curates gpt-5.6-luna with its Go Responses capabilities", () => {
+			expect(getOpencodeGoModelInfo("gpt-5.6-luna")).toMatchObject({
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+				inputPrice: 0.2,
+				outputPrice: 1.2,
+				cacheWritesPrice: 0.25,
+				cacheReadsPrice: 0.02,
+				longContextPricing: {
+					thresholdTokens: 272_000,
+					inputPriceMultiplier: 2,
+					outputPriceMultiplier: 1.5,
+					cacheWritesPriceMultiplier: 2,
+					cacheReadsPriceMultiplier: 2,
+				},
+			})
+		})
+
+		it("is disjoint from the Anthropic-format set", () => {
+			for (const id of OPENCODE_GO_RESPONSES_FORMAT_MODELS) {
+				expect(OPENCODE_GO_ANTHROPIC_FORMAT_MODELS.has(id)).toBe(false)
 			}
 		})
 	})

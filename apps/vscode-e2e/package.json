@@ -9,9 +9,16 @@
 		"test:ci:mock": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && USE_MOCK=true pnpm test:run",
 		"test:record": "AIMOCK_RECORD=true pnpm test:ci",
 		"test:run": "rimraf out && tsc -p tsconfig.json && dotenv -e .env.local -- node ./out/runTest.js",
+		"themes:build": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && rimraf out && tsc -p tsconfig.json",
+		"themes:update": "pnpm themes:build && node ./out/theme-fixtures/generate.js update",
+		"themes:check": "pnpm themes:build && node ./out/theme-fixtures/generate.js check",
+		"themes:test": "pnpm --filter @roo-code/types build && rimraf out && tsc -p tsconfig.json && node --test ./out/theme-fixtures/fixtures.test.js",
+		"visual:build": "pnpm themes:build",
+		"test:visual:electron": "pnpm visual:build && playwright test -c playwright-electron.config.ts",
 		"clean": "rimraf out .turbo"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.62.1",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@roo-code/types": "workspace:^",

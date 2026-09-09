@@ -156,11 +156,11 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							/>
 						)}
 					</VSCodeTextField>
-					<div className="flex gap-2">
+					<div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2">
 						<Select
 							value={showAllWorkspaces ? "all" : "current"}
 							onValueChange={(value) => setShowAllWorkspaces(value === "all")}>
-							<SelectTrigger className="flex-1">
+							<SelectTrigger className="w-full min-w-0">
 								<SelectValue>
 									{t("history:workspace.prefix")}{" "}
 									{t(`history:workspace.${showAllWorkspaces ? "all" : "current"}`)}
@@ -182,7 +182,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 							</SelectContent>
 						</Select>
 						<Select value={sortOption} onValueChange={(value) => setSortOption(value as SortOption)}>
-							<SelectTrigger className="flex-1">
+							<SelectTrigger className="w-full min-w-0">
 								<SelectValue>
 									{t("history:sort.prefix")} {t(`history:sort.${sortOption}`)}
 								</SelectValue>

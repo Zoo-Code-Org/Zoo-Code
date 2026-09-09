@@ -1,4 +1,6 @@
-import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
+import { RooCodeEventName, type ClineMessage, type RooCodeAPI } from "@roo-code/types"
+
+export const isCompletedAsk = (message: ClineMessage) => message.type === "ask" && message.partial !== true
 
 type WaitForOptions = {
 	timeout?: number
@@ -9,34 +11,41 @@ export const waitFor = (
 	condition: (() => Promise<boolean>) | (() => boolean),
 	{ timeout = 30_000, interval = 250 }: WaitForOptions = {},
 ) => {
-	let timeoutId: NodeJS.Timeout | undefined = undefined
+	return new Promise<void>((resolve, reject) => {
+		let settled = false
+		let intervalId: NodeJS.Timeout | undefined
+		const timeoutId = setTimeout(() => {
+			settled = true
+			if (intervalId) clearTimeout(intervalId)
+			reject(new Error(`Timeout after ${Math.floor(timeout / 1000)}s`))
+		}, timeout)
 
-	return Promise.race([
-		new Promise<void>((resolve) => {
-			const check = async () => {
-				const result = condition()
-				const isSatisfied = result instanceof Promise ? await result : result
+		const cleanup = () => {
+			clearTimeout(timeoutId)
+			if (intervalId) clearTimeout(intervalId)
+		}
+		const check = async () => {
+			try {
+				const isSatisfied = await condition()
+				if (settled) return
 
 				if (isSatisfied) {
-					if (timeoutId) {
-						clearTimeout(timeoutId)
-						timeoutId = undefined
-					}
-
+					settled = true
+					cleanup()
 					resolve()
 				} else {
-					setTimeout(check, interval)
+					intervalId = setTimeout(() => void check(), interval)
 				}
+			} catch (error) {
+				if (settled) return
+				settled = true
+				cleanup()
+				reject(error)
 			}
+		}
 
-			check()
-		}),
-		new Promise((_, reject) => {
-			timeoutId = setTimeout(() => {
-				reject(new Error(`Timeout after ${Math.floor(timeout / 1000)}s`))
-			}, timeout)
-		}),
-	])
+		void check()
+	})
 }
 
 type WaitUntilAbortedOptions = WaitForOptions & {

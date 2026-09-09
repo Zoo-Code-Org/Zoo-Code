@@ -54,19 +54,22 @@ vi.mock("../ChatRow", () => ({
 	default: function MockChatRow({
 		message,
 		onSuggestionClick,
+		isFollowUpAnswered,
 	}: {
 		message: ClineMessage
 		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
+		isFollowUpAnswered?: boolean
 	}) {
 		if (message.type === "ask" && message.ask === "followup" && message.text) {
 			try {
 				const followUp = JSON.parse(message.text) as { suggest?: SuggestionItem[] }
 				return (
-					<div data-testid="chat-row">
+					<div data-testid="chat-row" data-answered={isFollowUpAnswered === true ? "true" : "false"}>
 						{followUp.suggest?.map((suggestion) => (
 							<button
 								key={suggestion.answer}
 								type="button"
+								data-testid="followup-suggestion"
 								onClick={(event) => onSuggestionClick?.(suggestion, event)}>
 								{suggestion.answer}
 							</button>
@@ -79,6 +82,25 @@ vi.mock("../ChatRow", () => ({
 		}
 
 		return <div data-testid="chat-row">{JSON.stringify(message)}</div>
+	},
+}))
+
+const mockTaskHeaderState = vi.hoisted(() => ({
+	renders: [] as Array<{ taskId?: string; aggregatedCost?: number }>,
+}))
+
+vi.mock("../TaskHeader", () => ({
+	default: function MockTaskHeader({ task, aggregatedCost }: { task: ClineMessage; aggregatedCost?: number }) {
+		mockTaskHeaderState.renders.push({ taskId: task.text, aggregatedCost })
+
+		return (
+			<div
+				data-aggregated-cost={aggregatedCost ?? ""}
+				data-task-id={task.text}
+				data-task-ts={task.ts}
+				data-testid="task-header"
+			/>
+		)
 	},
 }))
 
@@ -339,6 +361,51 @@ const mockPostMessage = (state: Record<string, unknown>) => {
 	)
 }
 
+const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
+	await act(async () => {
+		window.dispatchEvent(new MessageEvent("message", { data }))
+	})
+}
+
+const dispatchTaskState = async (id: string, taskTs: number, childIds: string[] = []) => {
+	await dispatchExtensionMessage({
+		type: "state",
+		state: makeExtensionState({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: taskTs,
+					text: id,
+				},
+			],
+			currentTaskId: id,
+			currentTaskItem: {
+				id,
+				number: 1,
+				ts: taskTs,
+				task: id,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				childIds,
+			},
+		}),
+	})
+}
+
+const dispatchAggregatedCosts = async (taskId: string, totalCost: number) => {
+	await dispatchExtensionMessage({
+		type: "taskWithAggregatedCosts",
+		text: taskId,
+		aggregatedCosts: {
+			totalCost,
+			ownCost: 1,
+			childrenCost: totalCost - 1,
+		},
+	})
+}
+
 const defaultProps: ChatViewProps = {
 	isHidden: false,
 	showAnnouncement: false,
@@ -395,6 +462,65 @@ describe("ChatView - Tool Batching Tests", () => {
 			expect(toolRow?.text).toContain('"path":"a.ts"')
 			expect(toolRow?.text).toContain('"path":"b.ts"')
 		})
+	})
+})
+
+describe("ChatView - Aggregated Costs Lifecycle", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockTaskHeaderState.renders.length = 0
+	})
+
+	it("clears cached aggregated costs when switching tasks", async () => {
+		const { getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 1_000, ["child-a"])
+		await dispatchAggregatedCosts("task-a", 9)
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "9")
+		})
+
+		// Use the same message timestamp to prove task identity, rather than task.ts,
+		// drives the reset.
+		await dispatchTaskState("task-b", 1_000)
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-b")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		await dispatchTaskState("task-a", 1_000, ["child-a"])
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+	})
+
+	it("rejects a delayed aggregated-cost response from the previous task", async () => {
+		const { getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 1_001, ["child-a"])
+		await dispatchTaskState("task-b", 2_001)
+		await dispatchAggregatedCosts("task-a", 13)
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-b")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		mockTaskHeaderState.renders.length = 0
+		await dispatchTaskState("task-a", 1_001, ["child-a"])
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		expect(
+			mockTaskHeaderState.renders.some(
+				({ taskId, aggregatedCost }) => taskId === "task-a" && aggregatedCost === 13,
+			),
+		).toBe(false)
 	})
 })
 
@@ -1336,6 +1462,158 @@ describe("ChatView - Follow-up Suggestions", () => {
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
+	})
+
+	it("ignores a blank or missing suggestion answer instead of crashing (issue #1226)", async () => {
+		const { getAllByTestId } = renderChatView()
+
+		// JSON.stringify drops `answer: undefined`, mirroring how the extension
+		// delivers a malformed follow-up suggestion (no `answer` property).
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Pick one?",
+						suggest: [{ answer: undefined }, { answer: "Valid answer" }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestionButtons = await waitFor(() => {
+			const buttons = getAllByTestId("followup-suggestion")
+			if (buttons.length !== 2) {
+				throw new Error(`expected 2 suggestion buttons, got ${buttons.length}`)
+			}
+			return buttons
+		})
+		vscodePostMessageMock.cleanup()
+
+		// Clicking the blank suggestion must be ignored: no response is sent and
+		// no undefined value is pushed into the input state.
+		fireEvent.click(suggestionButtons[0])
+
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
+		// The ignored click must not mark the follow-up as answered either.
+		expect(suggestionButtons[0].closest('[data-testid="chat-row"]')?.getAttribute("data-answered")).toBe("false")
+
+		// The valid suggestion still sends its answer.
+		fireEvent.click(suggestionButtons[1])
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "askResponse",
+				askResponse: "messageResponse",
+				text: "Valid answer",
+				images: [],
+			})
+		})
+	})
+
+	it("appends a valid suggestion to the input on shift-click without sending it (issue #1226)", async () => {
+		const { getByTestId, getByRole } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Pick one?",
+						suggest: [{ answer: undefined }, { answer: "Copy me" }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Copy me" }))
+		vscodePostMessageMock.cleanup()
+
+		// Pre-fill the draft, then shift-click ("Copy to input") the valid suggestion.
+		const input = getByTestId("chat-textarea").querySelector("input")
+		if (!input) {
+			throw new Error("expected the chat input to be rendered")
+		}
+
+		fireEvent.change(input, { target: { value: "Draft text" } })
+
+		fireEvent.click(suggestion, { shiftKey: true })
+
+		// The answer is appended to the existing draft instead of being sent.
+		// JSDOM strips line breaks from <input> values (HTML spec "strip newlines"),
+		// so the appended "\n" is absent from the DOM value.
+		await waitFor(() => expect(input.value).toBe("Draft text Copy me"))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+
+		// With an empty draft the answer is set as-is (no dangling "\n" prefix).
+		fireEvent.change(input, { target: { value: "" } })
+		fireEvent.click(suggestion, { shiftKey: true })
+		await waitFor(() => expect(input.value).toBe("Copy me"))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+	})
+
+	it("trims a padded suggestion answer before appending it on shift-click (issue #1226)", async () => {
+		const { getByTestId, getByRole } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Pick one?",
+						suggest: [{ answer: "  Padded  " }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Padded" }))
+		vscodePostMessageMock.cleanup()
+
+		const input = getByTestId("chat-textarea").querySelector("input")
+		if (!input) {
+			throw new Error("expected the chat input to be rendered")
+		}
+
+		// The padded answer reaches the input trimmed (issue #1226).
+		fireEvent.click(suggestion, { shiftKey: true })
+
+		await waitFor(() => expect(input.value).toBe("Padded"))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
 	})
 })
 

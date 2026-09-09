@@ -10,10 +10,9 @@ import {
 	OPENROUTER_DEFAULT_PROVIDER_NAME,
 	OPEN_ROUTER_PROMPT_CACHING_MODELS,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
-
-import { NativeToolCallParser } from "../../core/assistant-message/NativeToolCallParser"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 
@@ -33,7 +32,7 @@ import { getModelParams } from "../transform/model-params"
 import { getModels } from "./fetchers/modelCache"
 import { getModelEndpoints } from "./fetchers/modelEndpointCache"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -151,7 +150,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		this.options = options
 
 		const baseURL = this.options.openRouterBaseUrl || "https://openrouter.ai/api/v1"
-		const apiKey = this.options.openRouterApiKey ?? "not-provided"
+		const apiKey = this.options.openRouterApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({ baseURL, apiKey, defaultHeaders: DEFAULT_HEADERS, timeout: this.timeoutMs })
 
@@ -164,9 +163,9 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	private async loadDynamicModels(): Promise<void> {
 		try {
 			const [models, endpoints] = await Promise.all([
-				getModels({ provider: "openrouter" }),
+				getModels({ provider: providerIdentifiers.openrouter }),
 				getModelEndpoints({
-					router: "openrouter",
+					router: providerIdentifiers.openrouter,
 					modelId: this.options.openRouterModelId,
 					endpoint: this.options.openRouterSpecificProvider,
 				}),
@@ -197,7 +196,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		const rawErrorMessage = parsedError || error?.message || "Unknown error"
 
 		const apiError = Object.assign(
-			new ApiProviderError(rawErrorMessage, this.providerName, modelId, operation, error?.code),
+			new ApiProviderError(rawErrorMessage, providerIdentifiers.openrouter, modelId, operation, error?.code),
 			{ status: error?.code, error },
 		)
 
@@ -352,7 +351,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				const apiError = Object.assign(
 					new ApiProviderError(
 						rawErrorMessage,
-						this.providerName,
+						providerIdentifiers.openrouter,
 						modelId,
 						"createMessage",
 						openRouterError.error?.code,
@@ -368,7 +367,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			} else {
 				// Fallback for non-OpenRouter errors
 				const errorMessage = error instanceof Error ? error.message : String(error)
-				const apiError = new ApiProviderError(errorMessage, this.providerName, modelId, "createMessage")
+				const apiError = new ApiProviderError(
+					errorMessage,
+					providerIdentifiers.openrouter,
+					modelId,
+					"createMessage",
+				)
 				TelemetryService.instance.captureException(apiError)
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -395,6 +399,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// When reasoning_details has displayable content (reasoning.text or reasoning.summary),
 		// we skip yielding the top-level reasoning field to avoid duplicate display.
 		let hasYieldedReasoningFromDetails = false
+		const activeToolCallIds = new Set<string>()
 
 		for await (const chunk of stream) {
 			// OpenRouter returns an error object instead of the OpenAI SDK throwing an error.
@@ -485,6 +490,9 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// Emit raw tool call chunks - NativeToolCallParser handles state management
 				if ("tool_calls" in delta && Array.isArray(delta.tool_calls)) {
 					for (const toolCall of delta.tool_calls) {
+						if (toolCall.id) {
+							activeToolCallIds.add(toolCall.id)
+						}
 						yield {
 							type: "tool_call_partial",
 							index: toolCall.index,
@@ -502,11 +510,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 			// Process finish_reason to emit tool_call_end events
 			// This ensures tool calls are finalized even if the stream doesn't properly close
-			if (finishReason) {
-				const endEvents = NativeToolCallParser.processFinishReason(finishReason)
-				for (const event of endEvents) {
-					yield event
+			if (finishReason === "tool_calls") {
+				for (const id of activeToolCallIds) {
+					yield { type: "tool_call_end", id }
 				}
+				activeToolCallIds.clear()
 			}
 
 			if (chunk.usage) {
@@ -535,9 +543,9 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	public async fetchModel() {
 		const [models, endpoints] = await Promise.all([
-			getModels({ provider: "openrouter" }),
+			getModels({ provider: providerIdentifiers.openrouter }),
 			getModelEndpoints({
-				router: "openrouter",
+				router: providerIdentifiers.openrouter,
 				modelId: this.options.openRouterModelId,
 				endpoint: this.options.openRouterSpecificProvider,
 			}),
@@ -617,7 +625,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				const apiError = Object.assign(
 					new ApiProviderError(
 						rawErrorMessage,
-						this.providerName,
+						providerIdentifiers.openrouter,
 						modelId,
 						"completePrompt",
 						openRouterError.error?.code,
@@ -633,7 +641,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			} else {
 				// Fallback for non-OpenRouter errors
 				const errorMessage = error instanceof Error ? error.message : String(error)
-				const apiError = new ApiProviderError(errorMessage, this.providerName, modelId, "completePrompt")
+				const apiError = new ApiProviderError(
+					errorMessage,
+					providerIdentifiers.openrouter,
+					modelId,
+					"completePrompt",
+				)
 				TelemetryService.instance.captureException(apiError)
 				throw handleOpenAIError(error, this.providerName)
 			}

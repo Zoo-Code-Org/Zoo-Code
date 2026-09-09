@@ -47,13 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.76.0'daki Yenilikler
+## v3.82.0'daki Yenilikler
 
-- **Destructive Command Guard (DCG) ile daha uzun ve kesintisiz görevler çalıştır** — DCG tehlikeli komutları engellerken Zoo'nun sürekli onay düğmelerine basmana gerek kalmadan çalışmayı sürdürmesini sağlar; yönetilen ikili dosyanın indirilmesi ve kurulumu da güçlendirildi.
-- **Daha iyi sağlayıcı denetimleri ve güvenilirlik** — OpenAI Codex yanıt hızını seç, güncellenmiş DeepSeek yapılandırmalarını kullan ve sağlayıcı profili değişiklikleriyle çalışan görevler arasındaki daha güçlü yalıtımdan yararlan.
-- **Kritik terminal yürütme düzeltmesi** — Zoo artık sonraki adıma başlamadan önce terminal komutlarının bitmesini bekliyor; böylece işler çakışmıyor ve model erken devam etmiyor.
-- Daha akıllı gruplama, ilişkili araç onaylarını bir araya getirirken ilgisiz istekleri ayrı tutuyor.
-- Telemetri teslimi ve model önbelleğini getirme işlemleri, hatalar ve eş zamanlı istekler karşısında daha dayanıklı.
+- 🔑 **Zoo Gateway API anahtarını her yerde kullan** — anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: https://zoocode.dev/models
+- 🎁 **Sınırlı süreli ücretsiz model erişimi** — Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.
+- ✨ **Yepyeni modeller** — GPT-6 Astra ve Claude Fable 5.1 artık kullanılabilir.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

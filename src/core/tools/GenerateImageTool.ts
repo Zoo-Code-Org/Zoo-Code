@@ -6,6 +6,7 @@ import {
 	IMAGE_GENERATION_MODEL_IDS,
 	IMAGE_GENERATION_MODELS,
 	getImageGenerationProvider,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -155,7 +156,7 @@ export class GenerateImageTool extends BaseTool<"generate_image"> {
 		// Validate API key for OpenRouter
 		const openRouterApiKey = state?.openRouterImageApiKey
 
-		if (imageProvider === "openrouter" && !openRouterApiKey) {
+		if (imageProvider === providerIdentifiers.openrouter && !openRouterApiKey) {
 			const errorMessage = t("tools:generateImage.openRouterApiKeyRequired")
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
@@ -241,8 +242,6 @@ export class GenerateImageTool extends BaseTool<"generate_image"> {
 			}
 
 			task.didEditFile = true
-
-			task.recordToolUsage("generate_image")
 
 			const fullImagePath = path.join(task.cwd, finalPath)
 

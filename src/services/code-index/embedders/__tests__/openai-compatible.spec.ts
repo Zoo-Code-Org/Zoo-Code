@@ -2,6 +2,7 @@ import type { MockedClass, MockedFunction } from "vitest"
 import { OpenAI } from "openai"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
 import { MAX_ITEM_TOKENS, INITIAL_RETRY_DELAY_MS } from "../../constants"
+import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK
 vitest.mock("openai")
@@ -62,7 +63,7 @@ describe("OpenAICompatibleEmbedder", () => {
 	const testModelId = "text-embedding-3-small"
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		vitest.spyOn(console, "warn").mockImplementation(function () {})
 		vitest.spyOn(console, "error").mockImplementation(function () {})
 
@@ -90,7 +91,7 @@ describe("OpenAICompatibleEmbedder", () => {
 	})
 
 	afterEach(() => {
-		vitest.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	describe("constructor", () => {
@@ -706,7 +707,7 @@ describe("OpenAICompatibleEmbedder", () => {
 			}
 
 			beforeEach(() => {
-				vitest.clearAllMocks()
+				clearAllMocks()
 				;(global.fetch as MockedFunction<typeof fetch>).mockReset()
 			})
 
@@ -802,7 +803,7 @@ describe("OpenAICompatibleEmbedder", () => {
 					expectEmbeddingValues(azureResult.embeddings[0], [0.1, 0.2, 0.3])
 
 					// Reset and test base URL (SDK)
-					vitest.clearAllMocks()
+					clearAllMocks()
 					const baseEmbedder = new OpenAICompatibleEmbedder(baseUrl, testApiKey, testModelId)
 					mockEmbeddingsCreate.mockResolvedValue({
 						data: [{ embedding: [0.4, 0.5, 0.6] }],
@@ -961,7 +962,7 @@ describe("OpenAICompatibleEmbedder", () => {
 		let mockFetch: MockedFunction<typeof fetch>
 
 		beforeEach(() => {
-			vitest.clearAllMocks()
+			clearAllMocks()
 			// Reset and re-assign the global fetch mock
 			global.fetch = vitest.fn()
 			mockFetch = global.fetch as MockedFunction<typeof fetch>

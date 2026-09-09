@@ -15,7 +15,7 @@ const checkboxVariants = cva(
 				default:
 					"border-vscode-foreground data-[state=checked]:bg-primary data-[state=checked]:text-foreground",
 				description:
-					"border-vscode-descriptionForeground data-[state=checked]:bg-vscode-descriptionForeground data-[state=checked]:text-white",
+					"border-vscode-descriptionForeground data-[state=checked]:bg-vscode-descriptionForeground data-[state=checked]:text-vscode-editor-background",
 			},
 		},
 		defaultVariants: {
@@ -25,14 +25,13 @@ const checkboxVariants = cva(
 )
 
 export interface CheckboxProps
-	extends React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>,
-		VariantProps<typeof checkboxVariants> {}
+	extends React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>, VariantProps<typeof checkboxVariants> {}
 
 const Checkbox = React.forwardRef<React.ElementRef<typeof CheckboxPrimitive.Root>, CheckboxProps>(
 	({ className, variant, ...props }, ref) => (
 		<CheckboxPrimitive.Root ref={ref} className={cn(checkboxVariants({ variant, className }))} {...props}>
 			<CheckboxPrimitive.Indicator className={cn("flex items-center justify-center text-current")}>
-				<Check className="h-4 w-4 text-vscode-background" />
+				<Check className="h-4 w-4" />
 			</CheckboxPrimitive.Indicator>
 		</CheckboxPrimitive.Root>
 	),

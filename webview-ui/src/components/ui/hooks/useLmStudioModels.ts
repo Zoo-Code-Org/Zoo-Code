@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { type ModelRecord, type ExtensionMessage } from "@roo-code/types"
+import { type ModelRecord, type ExtensionMessage, LmStudioModelsMessageType } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 
 export const requestLmStudioModels = (baseUrl?: string) =>
 	vscode.postMessage({
-		type: "requestLmStudioModels",
+		type: LmStudioModelsMessageType.requestLmStudioModels,
 		values: typeof baseUrl === "string" ? { baseUrl } : undefined,
 	})
 
@@ -24,7 +24,7 @@ const getLmStudioModels = async (baseUrl?: string) =>
 		const handler = (event: MessageEvent) => {
 			const message: ExtensionMessage = event.data
 
-			if (message.type === "lmStudioModels") {
+			if (message.type === LmStudioModelsMessageType.lmStudioModels) {
 				clearTimeout(timeout)
 				cleanup()
 

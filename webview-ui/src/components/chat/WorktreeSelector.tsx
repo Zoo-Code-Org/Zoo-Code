@@ -11,6 +11,7 @@ import { vscode } from "@/utils/vscode"
 
 import { CreateWorktreeModal } from "../worktrees/CreateWorktreeModal"
 import { IconButton } from "./IconButton"
+import { enabledChatControlClassName } from "./chatControlStyles"
 
 interface WorktreeSelectorProps {
 	disabled?: boolean
@@ -95,7 +96,7 @@ export const WorktreeSelector = ({ disabled = false }: WorktreeSelectorProps) =>
 						"transition-all duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder focus-visible:ring-inset",
 						disabled
 							? "opacity-50 cursor-not-allowed"
-							: "opacity-90 hover:opacity-100 hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)] cursor-pointer",
+							: cn("opacity-90 cursor-pointer", enabledChatControlClassName),
 					)}>
 					<span className="font-semibold mr-2">{t("worktrees:selector.worktree")}:</span>
 					<GitBranch className="w-3 h-3" />

@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import type { ProviderSettings } from "@roo-code/types"
@@ -31,7 +32,7 @@ describe("Friendli provider settings", () => {
 	it("renders the 'Get Friendli API Key' link when no key is set", () => {
 		render(
 			<Friendli
-				apiConfiguration={{ apiProvider: "friendli" } as ProviderSettings}
+				apiConfiguration={{ apiProvider: providerIdentifiers.friendli } as ProviderSettings}
 				setApiConfigurationField={vi.fn()}
 			/>,
 		)
@@ -41,7 +42,9 @@ describe("Friendli provider settings", () => {
 	it("hides the 'Get Friendli API Key' link once a key is set", () => {
 		render(
 			<Friendli
-				apiConfiguration={{ apiProvider: "friendli", friendliApiKey: "stored-key" } as ProviderSettings}
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.friendli, friendliApiKey: "stored-key" } as ProviderSettings
+				}
 				setApiConfigurationField={vi.fn()}
 			/>,
 		)
@@ -53,7 +56,7 @@ describe("Friendli provider settings", () => {
 		const mockSetApiConfigurationField = vi.fn()
 		render(
 			<Friendli
-				apiConfiguration={{ apiProvider: "friendli" } as ProviderSettings}
+				apiConfiguration={{ apiProvider: providerIdentifiers.friendli } as ProviderSettings}
 				setApiConfigurationField={mockSetApiConfigurationField}
 			/>,
 		)

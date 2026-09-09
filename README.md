@@ -46,13 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.76.0
+## What's New in v3.82.0
 
-- **Run longer, uninterrupted tasks with Destructive Command Guard (DCG)** — DCG blocks dangerous commands while letting Zoo keep working without you continuously pressing approval buttons, backed by hardened managed-binary downloads and installation.
-- **Better provider controls and reliability** — choose OpenAI Codex response speed, use updated DeepSeek configurations, and benefit from stronger isolation between provider-profile changes and running tasks.
-- **Critical terminal execution fix** — Zoo now waits for terminal commands to finish before starting the next step, preventing overlapping work and premature model continuation.
-- Smarter batching groups related tool approvals while keeping unrelated requests separate.
-- Telemetry delivery and model-cache fetching are more resilient under failures and concurrent requests.
+- 🔑 **Use your Zoo Gateway API key anywhere** — bring it to any OpenAI-compatible client or workflow: https://zoocode.dev/models
+- 🎁 **Free model access for a limited time** — get free access to MiniMax-M3 through Zoo Gateway.
+- ✨ **Brand-new models** — GPT-6 Astra and Claude Fable 5.1 are now available.
 
 <details>
   <summary>🌐 Available languages</summary>

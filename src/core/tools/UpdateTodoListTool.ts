@@ -64,13 +64,18 @@ export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 				approvedTodoList !== undefined && JSON.stringify(normalizedTodos) !== JSON.stringify(approvedTodoList)
 			if (isTodoListChanged) {
 				normalizedTodos = approvedTodoList ?? []
-				task.say(
-					"user_edit_todos",
-					JSON.stringify({
-						tool: "updateTodoList",
-						todos: normalizedTodos,
-					}),
-				)
+				// Non-blocking: a failed notification must not abort persisting the edited list.
+				void task
+					.say(
+						"user_edit_todos",
+						JSON.stringify({
+							tool: "updateTodoList",
+							todos: normalizedTodos,
+						}),
+					)
+					.catch((error) => {
+						console.error("[UpdateTodoListTool] Failed to post user_edit_todos:", error)
+					})
 			}
 
 			await setTodoListForTask(task, normalizedTodos)

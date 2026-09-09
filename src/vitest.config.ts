@@ -19,7 +19,7 @@ export default defineConfig({
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "lcov"],
-			include: ["src/**/*.ts", "src/**/*.tsx"],
+			include: ["src/**/*.ts", "src/**/*.tsx", "eslint-rules/**/*.mjs"],
 			exclude: [
 				"**/*.test.ts",
 				"**/*.test.tsx",

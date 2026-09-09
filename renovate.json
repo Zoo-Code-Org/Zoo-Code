@@ -5,7 +5,7 @@
 	"timezone": "America/Los_Angeles",
 	"postUpdateOptions": ["pnpmDedupe"],
 	"prConcurrentLimit": 5,
-	"prCreation": "not-pending",
+	"prCreation": "immediate",
 	"ignoreDeps": ["@vscode/vsce"],
 	"packageRules": [
 		{

@@ -345,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Destructive Command Guard (DCG) ile daha uzun görevleri kesintisiz çalıştır — DCG tehlikeli komutları engellerken Zoo'nun sürekli onay düğmelerine basmana gerek kalmadan çalışmasını sağlar.",
-			"highlight2": "Daha iyi provider denetimleri ve güvenilirlik — OpenAI Codex yanıt hızını seç, güncellenmiş DeepSeek yapılandırmalarını kullan ve çalışan görevleri profil değişikliklerinden yalıt.",
-			"highlight3": "Kritik terminal yürütme düzeltmesi — Zoo artık bir sonraki adıma başlamadan önce terminal komutlarının bitmesini bekliyor."
+			"highlight1": "🔑 Zoo Gateway API anahtarını her yerde kullan—anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Sınırlı bir süre için Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.",
+			"highlight3": "✨ Şimdi kullanıma sunuldu: yepyeni GPT-6 Astra ve Claude Fable 5.1 modelleri."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

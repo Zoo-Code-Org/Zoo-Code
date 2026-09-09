@@ -7,6 +7,7 @@ import { type SambaNovaModelId, sambaNovaDefaultModelId, sambaNovaModels } from 
 
 import { SambaNovaHandler } from "../sambanova"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -22,7 +23,7 @@ describe("SambaNovaHandler", () => {
 	let mockCreate: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate = (OpenAI as unknown as any)().chat.completions.create
 		handler = new SambaNovaHandler({ sambaNovaApiKey: "test-sambanova-api-key" })
 	})

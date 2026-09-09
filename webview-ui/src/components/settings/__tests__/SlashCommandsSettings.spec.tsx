@@ -1,9 +1,7 @@
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent, waitFor } from "@/utils/test-utils"
 
 import type { Command } from "@roo-code/types"
 
-import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { vscode } from "@/utils/vscode"
 
 import { SlashCommandsSettings } from "../SlashCommandsSettings"
@@ -154,26 +152,13 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 
 const renderSlashCommandsSettings = (commands: Command[] = mockCommands, cwd?: string) => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: { retry: false },
-			mutations: { retry: false },
-		},
-	})
-
 	// Update the mock state before rendering
 	mockExtensionState = {
 		commands,
 		cwd: cwd !== undefined ? cwd : "/workspace",
 	}
 
-	return render(
-		<QueryClientProvider client={queryClient}>
-			<ExtensionStateContextProvider>
-				<SlashCommandsSettings />
-			</ExtensionStateContextProvider>
-		</QueryClientProvider>,
-	)
+	return renderWithExtensionState(<SlashCommandsSettings />)
 }
 
 describe("SlashCommandsSettings", () => {

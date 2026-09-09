@@ -42,6 +42,7 @@ import {
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
 	KenariHandler,
+	NanoGptHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
 	MimoHandler,
@@ -224,6 +225,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new OpencodeGoHandler(options)
 		case providerIdentifiers.kenari:
 			return new KenariHandler(options)
+		case providerIdentifiers.nanogpt:
+			return new NanoGptHandler(options)
 		case providerIdentifiers.zooGateway:
 			return new ZooGatewayHandler(options)
 		case providerIdentifiers.minimax:
@@ -232,6 +235,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new BasetenHandler(options)
 		case providerIdentifiers.poe:
 			return new PoeHandler(options)
+		case providerIdentifiers.geminiCli:
+		// Intentionally falls through to the Anthropic handler pending a dedicated Gemini CLI handler implementation.
 		default:
 			return new AnthropicHandler(options)
 	}

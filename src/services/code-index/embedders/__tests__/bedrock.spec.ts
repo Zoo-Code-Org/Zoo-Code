@@ -4,6 +4,8 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 import { BedrockEmbedder } from "../bedrock"
 import { MAX_ITEM_TOKENS, INITIAL_RETRY_DELAY_MS } from "../../constants"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock the AWS SDK
 vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
 	return {
@@ -68,7 +70,7 @@ describe("BedrockEmbedder", () => {
 	let mockSend: MockedFunction<any>
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		consoleMocks.error.mockClear()
 		consoleMocks.warn.mockClear()
 
@@ -86,7 +88,7 @@ describe("BedrockEmbedder", () => {
 	})
 
 	afterEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

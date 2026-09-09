@@ -1,0 +1,79 @@
+name: Changed-code mutation testing
+
+on:
+    pull_request:
+        types: [edited, opened, reopened, ready_for_review, synchronize]
+    merge_group:
+        types: [checks_requested]
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    mutation-diff:
+        name: mutation-diff
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - name: Record merge-queue enforcement
+              if: github.event_name == 'merge_group'
+              run: |
+                  echo "## Changed-code mutation testing" >> "$GITHUB_STEP_SUMMARY"
+                  echo "Mutation testing was enforced on each pull request before it entered the merge queue." >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Checkout pull request merge result
+              if: github.event_name == 'pull_request'
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ github.sha }}
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Fetch pull request base
+              if: github.event_name == 'pull_request'
+              env:
+                  BASE_REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+              run: git fetch --no-tags "$BASE_REPOSITORY_URL" "$BASE_SHA"
+
+            - name: Setup Node.js and pnpm
+              if: github.event_name == 'pull_request'
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+
+            - name: Test mutation gate logic
+              if: github.event_name == 'pull_request'
+              run: pnpm test:mutation-ci
+
+            - name: Mutate changed executable lines
+              if: github.event_name == 'pull_request'
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  HEAD_SHA: ${{ github.sha }}
+              run: node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
+
+            - name: Upload mutation reports
+              id: mutation_report
+              if: always() && github.event_name == 'pull_request'
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: changed-code-mutation-report
+                  path: reports/mutation/
+                  if-no-files-found: ignore
+                  retention-days: 7
+
+            - name: Link mutation report artifact
+              if: always() && github.event_name == 'pull_request' && steps.mutation_report.outputs.artifact-url != ''
+              env:
+                  ARTIFACT_URL: ${{ steps.mutation_report.outputs.artifact-url }}
+              run: |
+                  {
+                      echo ""
+                      echo "### Download mutation reports"
+                      echo "[Open the changed-code-mutation-report artifact]($ARTIFACT_URL), then open the package's mutation.html file."
+                  } >> "$GITHUB_STEP_SUMMARY"

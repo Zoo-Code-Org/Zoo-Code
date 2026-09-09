@@ -7,6 +7,7 @@ import { type FireworksModelId, fireworksDefaultModelId, fireworksModels } from 
 
 import { FireworksHandler } from "../fireworks"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -28,7 +29,7 @@ describe("FireworksHandler", () => {
 	let handler: FireworksHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([
@@ -117,7 +118,21 @@ describe("FireworksHandler", () => {
 			contextWindow: 1048576,
 			inputPrice: 1.74,
 			outputPrice: 3.48,
-			cacheReadsPrice: 0.14,
+			cacheReadsPrice: 0.145,
+		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-pro-0813" as const,
+			contextWindow: 1_000_000,
+			inputPrice: 1.32,
+			outputPrice: 3.96,
+			cacheReadsPrice: 0.044,
+		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-flash-vision-exp" as const,
+			contextWindow: 1_048_576,
+			inputPrice: 0.22,
+			outputPrice: 0.66,
+			cacheReadsPrice: 0.007,
 		},
 	])(
 		"should expose newly added model $modelId",
@@ -138,6 +153,16 @@ describe("FireworksHandler", () => {
 			expect(handlerWithModel.getModel().id).toBe(modelId)
 		},
 	)
+
+	it("should expose vision support for DeepSeek V4 Flash Vision Exp", () => {
+		const model = fireworksModels["accounts/fireworks/models/deepseek-v4-flash-vision-exp"]
+
+		expect(model).toMatchObject({
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsMaxTokens: true,
+		})
+	})
 
 	it("should return Kimi K2 Instruct model with correct configuration", () => {
 		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"

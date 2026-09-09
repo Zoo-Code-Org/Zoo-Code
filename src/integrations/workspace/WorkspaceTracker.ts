@@ -91,22 +91,28 @@ class WorkspaceTracker {
 		)
 	}
 
-	private async workspaceDidReset() {
+	private workspaceDidReset() {
 		if (this.resetTimer) {
 			clearTimeout(this.resetTimer)
 		}
-		this.resetTimer = setTimeout(async () => {
-			if (this.prevWorkSpacePath !== this.cwd) {
-				await this.providerRef.deref()?.postMessageToWebview({
-					type: "workspaceUpdated",
-					filePaths: [],
-					openedTabs: this.getOpenedTabsInfo(),
-				})
-				this.filePaths.clear()
-				this.prevWorkSpacePath = this.cwd
-				this.initializeFilePaths()
-			}
+		this.resetTimer = setTimeout(() => {
+			void this.resetWorkspace().catch((error) => {
+				console.error("[WorkspaceTracker] Failed to reset workspace:", error)
+			})
 		}, 300) // Debounce for 300ms
+	}
+
+	private async resetWorkspace() {
+		if (this.prevWorkSpacePath !== this.cwd) {
+			await this.providerRef.deref()?.postMessageToWebview({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: this.getOpenedTabsInfo(),
+			})
+			this.filePaths.clear()
+			this.prevWorkSpacePath = this.cwd
+			await this.initializeFilePaths()
+		}
 	}
 
 	private workspaceDidUpdate() {
@@ -119,7 +125,7 @@ class WorkspaceTracker {
 			}
 
 			const relativeFilePaths = Array.from(this.filePaths).map((file) => toRelativePath(file, this.cwd))
-			this.providerRef.deref()?.postMessageToWebview({
+			void this.providerRef.deref()?.postMessageToWebview({
 				type: "workspaceUpdated",
 				filePaths: relativeFilePaths,
 				openedTabs: this.getOpenedTabsInfo(),

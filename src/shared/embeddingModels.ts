@@ -3,6 +3,7 @@
  */
 
 import type { EmbedderProvider, EmbeddingModelProfiles } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Example profiles - expand this list as needed
 export const EMBEDDING_MODEL_PROFILES: EmbeddingModelProfiles = {
@@ -157,11 +158,11 @@ export function getModelQueryPrefix(provider: EmbedderProvider, modelId: string)
  */
 export function getDefaultModelId(provider: EmbedderProvider): string {
 	switch (provider) {
-		case "openai":
+		case providerIdentifiers.openai:
 		case "openai-compatible":
 			return "text-embedding-3-small"
 
-		case "ollama": {
+		case providerIdentifiers.ollama: {
 			// Choose a sensible default for Ollama, e.g., the first one listed or a specific one
 			const ollamaModels = EMBEDDING_MODEL_PROFILES.ollama
 			const defaultOllamaModel = ollamaModels && Object.keys(ollamaModels)[0]
@@ -174,18 +175,18 @@ export function getDefaultModelId(provider: EmbedderProvider): string {
 			return "unknown-default" // Placeholder specific model ID
 		}
 
-		case "gemini":
+		case providerIdentifiers.gemini:
 			return "gemini-embedding-001"
 
-		case "mistral":
+		case providerIdentifiers.mistral:
 			return "codestral-embed-2505"
 
-		case "vercel-ai-gateway":
+		case providerIdentifiers.vercelAiGateway:
 			return "openai/text-embedding-3-large"
 
-		case "bedrock":
+		case providerIdentifiers.bedrock:
 			return "amazon.titan-embed-text-v2:0"
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			return "openai/text-embedding-3-large"
 
 		case "semble":

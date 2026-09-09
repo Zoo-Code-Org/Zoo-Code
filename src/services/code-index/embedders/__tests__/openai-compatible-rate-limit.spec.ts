@@ -2,6 +2,7 @@ import type { MockedClass, MockedFunction } from "vitest"
 import { OpenAI } from "openai"
 
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
+import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK
 vi.mock("openai")
@@ -39,7 +40,7 @@ describe("OpenAICompatibleEmbedder - Global Rate Limiting", () => {
 	const testModelId = "text-embedding-3-small"
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.useFakeTimers()
 		vi.spyOn(console, "warn").mockImplementation(function () {})
 		vi.spyOn(console, "error").mockImplementation(function () {})
@@ -69,7 +70,7 @@ describe("OpenAICompatibleEmbedder - Global Rate Limiting", () => {
 
 	afterEach(() => {
 		vi.useRealTimers()
-		vi.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	it("should apply global rate limiting across multiple batch requests", async () => {

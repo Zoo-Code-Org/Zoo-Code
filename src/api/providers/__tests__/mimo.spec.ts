@@ -1,5 +1,6 @@
 const mockCreate = vi.fn()
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -49,7 +50,7 @@ describe("MimoHandler", () => {
 			mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 		}
 		handler = new MimoHandler(mockOptions)
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

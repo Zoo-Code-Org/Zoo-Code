@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
@@ -344,11 +345,13 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			const getModeConfigIdSpy = vi
 				.spyOn(provider.providerSettingsManager, "getModeConfigId")
 				.mockResolvedValue("architect-profile-id")
-			const listConfigSpy = vi
-				.spyOn(provider.providerSettingsManager, "listConfig")
-				.mockResolvedValue([
-					{ name: "architect-profile", id: "architect-profile-id", apiProvider: "anthropic" },
-				])
+			const listConfigSpy = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{
+					name: "architect-profile",
+					id: "architect-profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+				},
+			])
 			const activateProviderProfileSpy = vi
 				.spyOn(provider, "activateProviderProfile")
 				.mockResolvedValue(undefined)
@@ -367,16 +370,16 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 				.spyOn(provider.providerSettingsManager, "getModeConfigId")
 				.mockResolvedValue("architect-profile-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "architect-profile", id: "architect-profile-id", apiProvider: "anthropic" },
+				{ name: "architect-profile", id: "architect-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
 				name: "architect-profile",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 
 			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "architect-profile",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 
 			await provider.handleModeSwitch("architect")

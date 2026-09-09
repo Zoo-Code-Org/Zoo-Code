@@ -2,6 +2,8 @@ import type { MockedFunction } from "vitest"
 
 import { CodeIndexOllamaEmbedder } from "../ollama"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock fetch
 global.fetch = vitest.fn() as MockedFunction<typeof fetch>
 
@@ -56,7 +58,7 @@ describe("CodeIndexOllamaEmbedder", () => {
 	let mockFetch: MockedFunction<typeof fetch>
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		consoleMocks.error.mockClear()
 
 		mockFetch = global.fetch as MockedFunction<typeof fetch>
@@ -68,7 +70,7 @@ describe("CodeIndexOllamaEmbedder", () => {
 	})
 
 	afterEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

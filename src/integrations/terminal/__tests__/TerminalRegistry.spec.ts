@@ -1,6 +1,8 @@
 // npx vitest run src/integrations/terminal/__tests__/TerminalRegistry.spec.ts
 
 import * as vscode from "vscode"
+
+import { restoreGlobals } from "../../../test-utils/reset"
 import { ExecaTerminal } from "../ExecaTerminal"
 import { ShellIntegrationManager } from "../ShellIntegrationManager"
 import { Terminal } from "../Terminal"
@@ -44,7 +46,7 @@ describe("TerminalRegistry", () => {
 	afterEach(() => {
 		TerminalRegistry["terminals"] = []
 		Terminal.setTerminalProfile(undefined)
-		vi.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	describe("createTerminal", () => {

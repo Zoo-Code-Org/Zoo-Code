@@ -468,4 +468,78 @@ describe("safeWriteJson", () => {
 
 		consoleErrorSpy.mockRestore()
 	})
+
+	// Merge option tests
+	test("should merge incoming data with existing file content when merge callback is provided", async () => {
+		const initial = { a: 1, b: 2 }
+		await safeWriteJson(currentTestFilePath, initial)
+
+		const incoming = { b: 3, c: 4 }
+		await safeWriteJson(currentTestFilePath, incoming, {
+			merge: (existing, data) => ({
+				...(existing as Record<string, unknown>),
+				...(data as Record<string, unknown>),
+			}),
+		})
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ a: 1, b: 3, c: 4 })
+	})
+
+	test("should pass null to merge callback when file does not exist", async () => {
+		const newFilePath = path.join(tempDir, "nonexistent.json")
+		const mergeFn = vi.fn((existing, incoming) => incoming)
+
+		await safeWriteJson(newFilePath, { value: 42 }, { merge: mergeFn })
+
+		expect(mergeFn).toHaveBeenCalledWith(null, { value: 42 })
+		const content = await readFileContent(newFilePath)
+		expect(content).toEqual({ value: 42 })
+	})
+
+	test("should propagate non-ENOENT read errors during merge instead of silently losing data", async () => {
+		const initial = { a: 1, b: 2 }
+		await safeWriteJson(currentTestFilePath, initial)
+
+		const eio = Object.assign(new Error("I/O error"), { code: "EIO" })
+		vi.mocked(fs.readFile).mockRejectedValueOnce(eio)
+
+		await expect(
+			safeWriteJson(
+				currentTestFilePath,
+				{ b: 99 },
+				{
+					merge: (existing, incoming) => ({
+						...(existing as Record<string, unknown>),
+						...(incoming as Record<string, unknown>),
+					}),
+				},
+			),
+		).rejects.toThrow("I/O error")
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ a: 1, b: 2 })
+	})
+
+	test("should treat corrupt JSON as null during merge", async () => {
+		await fs.writeFile(currentTestFilePath, "not valid json", "utf8")
+
+		const mergeFn = vi.fn((_existing, incoming) => incoming)
+		await safeWriteJson(currentTestFilePath, { value: 1 }, { merge: mergeFn })
+
+		expect(mergeFn).toHaveBeenCalledWith(null, { value: 1 })
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ value: 1 })
+	})
+
+	test("should write incoming data directly when no merge callback is provided", async () => {
+		const initial = { a: 1, b: 2 }
+		await safeWriteJson(currentTestFilePath, initial)
+
+		const replacement = { c: 3 }
+		await safeWriteJson(currentTestFilePath, replacement)
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ c: 3 })
+	})
 })

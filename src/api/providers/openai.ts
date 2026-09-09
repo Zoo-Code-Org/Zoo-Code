@@ -5,9 +5,12 @@ import axios from "axios"
 import {
 	type ModelInfo,
 	azureOpenAiDefaultApiVersion,
+	isAzureAiInferenceBaseUrl,
+	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
+	parseOpenAiExtraBody,
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -19,7 +22,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -32,16 +35,17 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected options: ApiHandlerOptions
 	protected client: OpenAI
 	private readonly providerName = "OpenAI"
+	private readonly extraBody: Record<string, unknown>
 
 	constructor(options: ApiHandlerOptions) {
 		super()
 		this.options = options
+		this.extraBody = parseOpenAiExtraBody(options.openAiExtraBody).data
 
 		const baseURL = this.options.openAiBaseUrl || "https://api.openai.com/v1"
-		const apiKey = this.options.openAiApiKey ?? "not-provided"
+		const apiKey = this.options.openAiApiKey ?? NOT_PROVIDED
 		const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
-		const urlHost = this._getUrlHost(this.options.openAiBaseUrl)
-		const isAzureOpenAi = urlHost === "azure.com" || urlHost.endsWith(".azure.com") || options.openAiUseAzure
+		const isAzureOpenAi = isAzureOpenAiBaseUrl(this.options.openAiBaseUrl, options.openAiUseAzure)
 
 		const headers = {
 			...DEFAULT_HEADERS,
@@ -60,8 +64,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		} else if (isAzureOpenAi) {
 			// Azure API shape slightly differs from the core API shape:
 			// https://github.com/openai/openai-node?tab=readme-ov-file#microsoft-azure-openai
+			const azureBaseURL = `${baseURL.replace(/\/openai\/?$/i, "").replace(/\/$/, "")}/openai`
 			this.client = new AzureOpenAI({
-				baseURL,
+				baseURL: azureBaseURL,
 				apiKey,
 				apiVersion: this.options.azureApiVersion || azureOpenAiDefaultApiVersion,
 				defaultHeaders: headers,
@@ -150,7 +155,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
 
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
 				// Some OpenAI-Compatible models (e.g. claude-opus-4-7, claude-opus-4-8) reject
 				// `temperature` as deprecated/unsupported, so honor the model's `supportsTemperature`
@@ -172,6 +177,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let stream
 			try {
@@ -199,15 +205,15 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				const delta = chunk.choices?.[0]?.delta ?? {}
 				const finishReason = chunk.choices?.[0]?.finish_reason
 
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
 				if (delta.content) {
 					for (const chunk of matcher.update(delta.content)) {
 						yield chunk
 					}
-				}
-
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
 				}
 
 				yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
@@ -225,7 +231,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				yield this.processUsageMetrics(lastUsage, modelInfo)
 			}
 		} else {
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: deepseekReasoner
 					? convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
@@ -238,6 +244,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
 			try {
@@ -302,13 +309,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			const model = this.getModel()
 			const modelInfo = model.info
 
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: model.id,
 				messages: [{ role: "user", content: prompt }],
 			}
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
 			try {
@@ -348,7 +356,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
 
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
 				messages: [
 					{
@@ -371,6 +379,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			// but they do support max_completion_tokens (the modern OpenAI parameter)
 			// This allows O3 models to limit response length when includeMaxTokens is enabled
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let stream
 			try {
@@ -384,7 +393,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			yield* this.handleStreamResponse(stream)
 		} else {
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: [
 					{
@@ -405,6 +414,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			// but they do support max_completion_tokens (the modern OpenAI parameter)
 			// This allows O3 models to limit response length when includeMaxTokens is enabled
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
 			try {
@@ -520,8 +530,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	protected _isAzureAiInference(baseUrl?: string): boolean {
-		const urlHost = this._getUrlHost(baseUrl)
-		return urlHost.endsWith(".services.ai.azure.com")
+		return isAzureAiInferenceBaseUrl(baseUrl)
 	}
 
 	/**
@@ -541,6 +550,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			// Using max_completion_tokens as max_tokens is deprecated
 			requestOptions.max_completion_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
 		}
+	}
+
+	private withExtraBody<T extends object>(requestOptions: T): T {
+		return { ...this.extraBody, ...requestOptions }
 	}
 }
 

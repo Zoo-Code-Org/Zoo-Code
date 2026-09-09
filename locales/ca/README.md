@@ -47,13 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.76.0
+## Novetats a la v3.82.0
 
-- **Executa tasques més llargues i sense interrupcions amb Destructive Command Guard (DCG)** — DCG bloqueja les ordres perilloses mentre permet que Zoo continuï treballant sense que hagis de prémer contínuament botons d'aprovació, amb baixades i instal·lació reforçades del binari gestionat.
-- **Millors controls i més fiabilitat dels proveïdors** — tria la velocitat de resposta d'OpenAI Codex, utilitza configuracions actualitzades de DeepSeek i gaudeix d'un aïllament més sòlid entre els canvis de perfil de proveïdor i les tasques en execució.
-- **Correcció crítica de l'execució al terminal** — Zoo ara espera que les ordres del terminal acabin abans de començar el pas següent, cosa que evita treballs superposats i que el model continuï abans d'hora.
-- L'agrupació més intel·ligent reuneix les aprovacions d'eines relacionades i manté separades les sol·licituds que no hi tenen relació.
-- El lliurament de telemetria i l'obtenció de la memòria cau de models són més resistents davant d'errors i sol·licituds simultànies.
+- 🔑 **Utilitza la teva clau API de Zoo Gateway a qualsevol lloc** — porta-la a qualsevol client o flux de treball compatible amb OpenAI: https://zoocode.dev/models
+- 🎁 **Accés gratuït al model durant un temps limitat** — obtén accés gratuït a MiniMax-M3 mitjançant Zoo Gateway.
+- ✨ **Models totalment nous** — GPT-6 Astra i Claude Fable 5.1 ja estan disponibles.
 
 ## Què pot fer Zoo Code per TU?
 
