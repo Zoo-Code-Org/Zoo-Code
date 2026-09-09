@@ -2,10 +2,11 @@
 
 import * as vscode from "vscode"
 import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
-import { RooCodeEventName } from "@roo-code/types"
+import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
+import type { Task } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
 
 // Mock setup
@@ -640,6 +641,39 @@ describe("ClineProvider Task History Synchronization", () => {
 	})
 
 	describe("task history includes all workspaces", () => {
+		it("projects the active task's local mode and provider profile", async () => {
+			const activeTask = {
+				taskId: "task-local-context",
+				taskMode: "ask",
+				taskApiConfigName: undefined,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "task-local-model",
+				},
+				clineMessages: [],
+				todoList: [],
+				messageQueueService: { messages: [] },
+			}
+			// The module-level Task mock intentionally implements only the fields this provider-state test reads.
+			provider["taskRegistry"].push(activeTask as unknown as Task)
+			await provider.updateTaskHistory(
+				createHistoryItem({
+					id: activeTask.taskId,
+					task: "Task-local context",
+					mode: "ask",
+					apiConfigName: undefined,
+				}),
+				{ broadcast: false },
+			)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.mode).toBe("ask")
+			expect(state.currentApiConfigName).toBeUndefined()
+			expect(state.apiConfiguration).toEqual(activeTask.apiConfiguration)
+			expect(state.currentTaskId).toBe(activeTask.taskId)
+		})
+
 		it("getStateToPostToWebview returns tasks from all workspaces", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 

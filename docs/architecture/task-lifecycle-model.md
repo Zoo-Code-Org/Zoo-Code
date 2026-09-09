@@ -6,13 +6,14 @@ Zoo Code checks task lifecycle protocols through one compositional verification 
 pnpm lifecycle:model-check
 ```
 
-The command runs five independent bounded submodels in sequence:
+The command runs six independent bounded submodels in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
-3. the task cleanup protocol;
-4. request-stream parser scoping; and
-5. completion persistence.
+3. production-backed provider handoff and scheduler ordering;
+4. the task cleanup protocol;
+5. request-stream parser scoping; and
+6. completion persistence.
 
 This umbrella command is the single model-check entry point in the `compile` CI job after type checking. Command-level composition does not merge the submodels' state spaces: each checker retains its own bounds, transitions, invariant ownership, reachability requirements, and counterexample format. In particular, parser state is not part of the persisted lifecycle graph. The focused parser checker remains directly runnable with `pnpm parser-scope:model-check` for debugging.
 
@@ -78,6 +79,14 @@ The known-unsafe witnesses currently compare exact shortest action sequences. Th
 ## Task cleanup protocol model
 
 The umbrella command also runs a separate bounded child model for in-memory abort, disposal, and provider-shutdown ordering. It models cleanup settlement and rejection as environment transitions and makes no filesystem, editor Promise, fairness, or timing-liveness claim. See [Task cleanup protocol model check](./task-cleanup-protocol-model.md).
+
+## Provider handoff and scheduler model
+
+`scripts/check-provider-handoff-scheduler.ts` is a separate bounded adapter model for the runtime boundary that the persisted lifecycle graph does not represent. Its breadth-first explorer normalizes provider-keyed records and owner arrays before deduplicating canonical states, then exhaustively explores enabled action orderings through depth 14 with a 20,000-state budget. It imports `selectHandoffExecutionContext` and the existing `delegateTaskToChild` and `completeDelegatedChild` reducers. A direct saved, unsaved, locked, and stale-profile matrix verifies task-local configuration isolation. A stale provider lookup is caught before this pure selector and therefore intentionally enters it as `undefined`, matching the unsaved fallback; focused provider tests separately verify the failed lookup and contextual log. The protocol state then models two provider instances, their claims and parent snapshots, authoritative parent/child records, current task publication, commit/start ownership, the child scheduler permit, queued and resumed parent state, and one bounded redelegation generation.
+
+Provider locking, paused-child/current-task publication, and semaphore admission/release are explicit model abstractions rather than imported production code. Focused provider and `TaskScheduler` tests cover those concrete adapters. Lifecycle commits and completion use the real reducers. The fixed policy checks every successor for continuous publication, one child start and commit per generation, exact commit-before-start ownership, permit release before parent resume or redelegation, and consistent final child/parent publication. It also requires every action and named semantic landmark to remain reachable and fails if the depth boundary has an unseen successor.
+
+Four injected legacy transition policies must produce deterministic shortest counterexamples through the same explorer: start before commit, resume before permit release, empty current-task publication, and two stale provider commits from competing snapshots. The checker prints the distinct reachable-state count, complete scenario/action/landmark coverage, bounds, and each named counterexample trace. It deliberately does not add a WAL, global profile projection, or scheduler state to persisted `HistoryItem` records.
 
 ## Completion persistence model
 

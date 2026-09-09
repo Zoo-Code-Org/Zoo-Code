@@ -138,6 +138,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
+import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -194,11 +195,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	rateLimitClock?: RateLimitClock
 	diffFuzzyThreshold?: number
 	/** Explicit task-local execution context for a delegated child. */
-	handoffExecutionContext?: {
-		mode: string
-		apiConfigName: string | undefined
-		apiConfiguration: ProviderSettings
-	}
+	handoffExecutionContext?: TaskExecutionContext
 }
 
 type AssistantMessagePersistenceResult = boolean

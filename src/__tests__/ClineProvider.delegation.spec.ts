@@ -328,18 +328,27 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			savedConfigId: "empty-id",
 			savedProfile: { name: "empty", id: "empty-id" },
 		},
+		{
+			name: "has a stale saved mode profile",
+			savedConfigId: "stale-id",
+			savedProfile: new Error("profile not found"),
+		},
 	])("keeps the parent task-local profile when a different mode $name", async ({ savedConfigId, savedProfile }) => {
 		const parentTask = makeParentTask()
 		const child = { taskId: "child-fallback", run: vi.fn().mockResolvedValue(undefined) }
 		const createTask = vi.fn().mockResolvedValue(child)
-		const getProfile = vi.fn().mockResolvedValue(savedProfile)
+		const getProfile =
+			savedProfile instanceof Error
+				? vi.fn().mockRejectedValue(savedProfile)
+				: vi.fn().mockResolvedValue(savedProfile)
+		const log = vi.fn()
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 			createTask,
-			log: vi.fn(),
+			log,
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
 			providerSettingsManager: {
@@ -358,6 +367,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		if (savedConfigId) expect(getProfile).toHaveBeenCalledWith({ id: savedConfigId })
 		else expect(getProfile).not.toHaveBeenCalled()
+		if (savedProfile instanceof Error) {
+			expect(log).toHaveBeenCalledWith(expect.stringContaining("stale-id"))
+			expect(log).toHaveBeenCalledWith(expect.stringContaining("parent parent-1"))
+		}
 		expect(createTask).toHaveBeenCalledWith(
 			"Fallback child",
 			undefined,

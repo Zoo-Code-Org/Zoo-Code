@@ -1,6 +1,7 @@
 // npx vitest run __tests__/history-resume-delegation.spec.ts
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import * as vscode from "vscode"
 import { RooCodeEventName } from "@roo-code/types"
 import type { ClineMessage, HistoryItem } from "@roo-code/types"
 
@@ -841,6 +842,72 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const resumedIdx = emitSpy.mock.calls.findIndex((c) => c[0] === RooCodeEventName.TaskDelegationResumed)
 		expect(completedIdx).toBeGreaterThanOrEqual(0)
 		expect(resumedIdx).toBeGreaterThan(completedIdx)
+	})
+
+	it("keeps a failed scheduled parent resume visible and resumable without emitting resumed success", async () => {
+		const resumeError = new Error("provider stream failed")
+		const emitSpy = vi.fn()
+		const log = vi.fn()
+		const parentInstance = {
+			taskId: "parent-resume-failure",
+			resumeAfterDelegation: vi.fn().mockRejectedValue(resumeError),
+			overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+		}
+		const parentItem = {
+			id: "parent-resume-failure",
+			status: "delegated",
+			awaitingChildId: "child-resume-failure",
+			childIds: ["child-resume-failure"],
+			ts: 900,
+			task: "Parent resume failure",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-resume-failure", status: "active" }, parentItem)
+		let scheduled: Promise<void> | undefined
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			emit: emitSpy,
+			log,
+			getCurrentTask: vi.fn(() => parentInstance),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
+			taskScheduler: {
+				schedule: vi.fn((_task, run) => {
+					scheduled = run()
+					return scheduled
+				}),
+			},
+			taskHistoryStore,
+		})
+
+		vi.mocked(readTaskMessages).mockResolvedValue([])
+		vi.mocked(readApiMessages).mockResolvedValue([])
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(
+			ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-resume-failure",
+				childTaskId: "child-resume-failure",
+				completionResultSummary: "Child completed",
+			}),
+		).resolves.toBe(true)
+		await expect(scheduled).rejects.toThrow(resumeError)
+
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("provider stream failed"))
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			expect.stringContaining("Open the task from history to retry"),
+		)
+		expect(emitSpy).not.toHaveBeenCalledWith(
+			RooCodeEventName.TaskDelegationResumed,
+			"parent-resume-failure",
+			"child-resume-failure",
+		)
+		expect(parentInstance.taskId).toBe("parent-resume-failure")
+		consoleError.mockRestore()
 	})
 
 	it("reopenParentFromDelegation does NOT emit TaskPaused or TaskUnpaused (new flow only)", async () => {

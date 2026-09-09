@@ -60,6 +60,11 @@ import {
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
+import {
+	getEffectiveTaskApiConfiguration,
+	selectHandoffExecutionContext,
+	type TaskExecutionContext,
+} from "../task/providerHandoff"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
@@ -137,11 +142,7 @@ export type ClineProviderEvents = {
 	clineCreated: [cline: Task]
 }
 
-type DelegatedChildContext = {
-	mode: string
-	apiConfigName: string | undefined
-	apiConfiguration: ProviderSettings
-}
+type DelegatedChildContext = TaskExecutionContext
 
 function runDelegationTransition<T>(
 	locks: Map<string, Promise<void>>,
@@ -1359,7 +1360,6 @@ export class ClineProvider
 			taskSyncEnabled,
 			diffFuzzyThreshold,
 		} = await this.getState()
-
 		const task = new Task({
 			provider: this,
 			apiConfiguration,
@@ -2716,6 +2716,16 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		let currentTaskMode: string | undefined
+		try {
+			currentTaskMode = currentTask && "taskMode" in currentTask ? currentTask.taskMode : undefined
+		} catch {
+			// A just-created task may still be initializing its mode; retain the persisted projection for this post.
+		}
+		const hasTaskApiConfigName = currentTask ? "taskApiConfigName" in currentTask : false
+		const currentTaskApiConfigName = hasTaskApiConfigName ? currentTask?.taskApiConfigName : undefined
+		const currentTaskApiConfiguration =
+			currentTask && "apiConfiguration" in currentTask ? currentTask.apiConfiguration : undefined
 		let zooCodeState: {
 			zooCodeIsAuthenticated: boolean
 			zooCodeUserName: string | undefined
@@ -2750,7 +2760,7 @@ export class ClineProvider
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
-			apiConfiguration,
+			apiConfiguration: currentTaskApiConfiguration ?? apiConfiguration,
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,
@@ -2799,10 +2809,11 @@ export class ClineProvider
 			terminalZdotdir: terminalZdotdir ?? false,
 			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
-			currentApiConfigName: currentApiConfigName ?? "default",
+			currentApiConfigName:
+				currentTask && hasTaskApiConfigName ? currentTaskApiConfigName : (currentApiConfigName ?? "default"),
 			listApiConfigMeta: listApiConfigMeta ?? [],
 			pinnedApiConfigs: pinnedApiConfigs ?? {},
-			mode: mode ?? defaultModeSlug,
+			mode: currentTaskMode ?? mode ?? defaultModeSlug,
 			customModePrompts: customModePrompts ?? {},
 			customSupportPrompts: customSupportPrompts ?? {},
 			enhancementApiConfigId,
@@ -3480,6 +3491,10 @@ export class ClineProvider
 			organizationAllowList,
 			diffFuzzyThreshold,
 		} = await this.getState()
+		const effectiveApiConfiguration = getEffectiveTaskApiConfiguration(
+			apiConfiguration,
+			options.handoffExecutionContext,
+		)
 
 		// Single-open-task invariant: always enforce for user-initiated top-level tasks.
 		if (!parentTask) {
@@ -3488,7 +3503,7 @@ export class ClineProvider
 			})
 		}
 
-		if (!ProfileValidator.isProfileAllowed(apiConfiguration, organizationAllowList)) {
+		if (!ProfileValidator.isProfileAllowed(effectiveApiConfiguration, organizationAllowList)) {
 			throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
 		}
 
@@ -3497,7 +3512,7 @@ export class ClineProvider
 			apiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
-			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			consecutiveMistakeLimit: effectiveApiConfiguration.consecutiveMistakeLimit,
 			task: text,
 			images,
 			experiments,
@@ -3887,28 +3902,41 @@ export class ClineProvider
 			}
 		}
 
-		const handoffExecutionContext: DelegatedChildContext = {
+		const parentExecutionContext: DelegatedChildContext = {
 			mode,
 			apiConfigName: await parent.getTaskApiConfigName(),
 			apiConfiguration: structuredClone(parent.apiConfiguration),
 		}
 		const parentMode = await parent.getTaskMode()
-		if (mode !== parentMode && !this.context.workspaceState.get("lockApiConfigAcrossModes", false)) {
+		const lockApiConfigAcrossModes =
+			mode !== parentMode && this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+		let savedModeProfile: { name?: string; apiConfiguration: ProviderSettings } | undefined
+		if (mode !== parentMode && !lockApiConfigAcrossModes) {
 			const savedConfigId = await this.providerSettingsManager.getModeConfigId(mode as Mode)
 			if (savedConfigId) {
-				const {
-					name,
-					id: _id,
-					...savedConfiguration
-				} = await this.providerSettingsManager.getProfile({
-					id: savedConfigId,
-				})
-				if (savedConfiguration.apiProvider) {
-					handoffExecutionContext.apiConfigName = name
-					handoffExecutionContext.apiConfiguration = structuredClone(savedConfiguration)
+				try {
+					const {
+						name,
+						id: _id,
+						...savedConfiguration
+					} = await this.providerSettingsManager.getProfile({
+						id: savedConfigId,
+					})
+					savedModeProfile = { name, apiConfiguration: savedConfiguration }
+				} catch (error) {
+					this.log(
+						`[delegateParentAndOpenChild] Saved profile ${savedConfigId} for mode '${mode}' could not be loaded for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}. Using the parent task configuration.`,
+					)
 				}
 			}
 		}
+		const handoffExecutionContext = selectHandoffExecutionContext(
+			parentExecutionContext,
+			mode,
+			parentMode,
+			lockApiConfigAcrossModes,
+			savedModeProfile,
+		)
 		// 2) Flush pending tool results to API history BEFORE disposing the parent.
 		//    This is critical: when tools are called before new_task,
 		//    their tool_result blocks are in userMessageContent but not yet saved to API history.
@@ -4340,11 +4368,18 @@ export class ClineProvider
 					ClineProvider.prototype.reopenParentFromDelegation.name,
 					async () => {
 						try {
-							this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-						} catch {
-							// non-fatal
+							await parentInstance.resumeAfterDelegation()
+							try {
+								this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+							} catch {
+								// non-fatal
+							}
+						} catch (error) {
+							const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
+							this.log(`[reopenParentFromDelegation] ${message}`)
+							await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
+							throw error
 						}
-						await parentInstance.resumeAfterDelegation()
 					},
 				)
 			}
