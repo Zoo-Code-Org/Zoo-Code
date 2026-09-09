@@ -367,7 +367,19 @@ export class ClineProvider
 	private async drainProviderHandoffFinalizations(): Promise<void> {
 		const pending = Array.from(this.providerHandoffFinalizations ?? [])
 		if (pending.length === 0) return
-		await Promise.allSettled(pending)
+		let timeout: ReturnType<typeof setTimeout> | undefined
+		const drained = await Promise.race([
+			Promise.allSettled(pending).then(() => true),
+			new Promise<false>((resolve) => {
+				timeout = setTimeout(() => resolve(false), ClineProvider.PROFILE_MUTATION_DISPOSAL_DRAIN_TIMEOUT_MS)
+			}),
+		])
+		if (timeout) clearTimeout(timeout)
+		if (!drained) {
+			this.log(
+				`Provider disposal detached ${pending.length} still-running handoff finalization operation(s); late settlements are inert`,
+			)
+		}
 	}
 
 	/**
