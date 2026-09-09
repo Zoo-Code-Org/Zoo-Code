@@ -62,6 +62,10 @@ interface HarnessOptions {
 	requiredRunAppId?: number
 	requiredStatus?: "queued" | "in_progress" | "completed"
 	requiredConclusion?: "success" | "failure"
+	requiredRunStates?: Record<
+		string,
+		{ status: "queued" | "in_progress" | "completed"; conclusion: "success" | "failure" | null }
+	>
 	omitRequiredRuns?: boolean
 	commitStatuses?: Array<{ context: string; state: "pending" | "success" | "failure" | "error"; id?: number }>
 	gateStatuses?: Array<{
@@ -103,18 +107,20 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	const requiredContexts = options.requiredContexts ?? ["tests"]
 	const requiredRuns = (options.omitRequiredRuns ? [] : requiredContexts)
 		.filter((name) => name !== "Zoo Code / reconcile PR review state")
-		.map((name, index) => ({
-			id: index + 1,
-			name,
-			status: options.requiredStatus ?? "completed",
-			conclusion:
-				(options.requiredStatus ?? "completed") === "completed"
-					? (options.requiredConclusion ?? "success")
-					: null,
-			started_at: "2026-08-29T15:00:00Z",
-			completed_at: (options.requiredStatus ?? "completed") === "completed" ? "2026-08-29T15:01:00Z" : null,
-			app: { id: options.requiredRunAppId ?? 15368, slug: "github-actions" },
-		}))
+		.map((name, index) => {
+			const state = options.requiredRunStates?.[name]
+			const status = state?.status ?? options.requiredStatus ?? "completed"
+			return {
+				id: index + 1,
+				name,
+				status,
+				conclusion:
+					status === "completed" ? (state?.conclusion ?? options.requiredConclusion ?? "success") : null,
+				started_at: "2026-08-29T15:00:00Z",
+				completed_at: status === "completed" ? "2026-08-29T15:01:00Z" : null,
+				app: { id: options.requiredRunAppId ?? 15368, slug: "github-actions" },
+			}
+		})
 	const checkRuns = [
 		...requiredRuns,
 		...(options.additionalCheckRuns ?? []).map((run) => ({
@@ -608,6 +614,117 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 		expect(latestGuide(result)).toContain("a maintainer must restart it")
+	})
+
+	it("starts CodeRabbit once Ubuntu tests pass while Windows tests are still running", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+			requiredRunStates: {
+				"platform-unit-test (ubuntu-latest)": { status: "completed", conclusion: "success" },
+				"platform-unit-test (windows-latest)": { status: "in_progress", conclusion: null },
+			},
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA} -->`)
+	})
+
+	it("does not recycle an early CodeRabbit activation bound to the current head", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: SHA,
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+			requiredRunStates: {
+				"platform-unit-test (ubuntu-latest)": { status: "completed", conclusion: "success" },
+				"platform-unit-test (windows-latest)": { status: "in_progress", conclusion: null },
+			},
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(
+			expect.objectContaining({ name: "coderabbit-review-active" }),
+		)
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+	})
+
+	it("recycles an early CodeRabbit activation left over from an older head", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: OLD_SHA,
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+			requiredRunStates: {
+				"platform-unit-test (ubuntu-latest)": { status: "completed", conclusion: "success" },
+				"platform-unit-test (windows-latest)": { status: "in_progress", conclusion: null },
+			},
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("does not start CodeRabbit while Ubuntu tests are pending", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+			requiredRunStates: {
+				"platform-unit-test (ubuntu-latest)": { status: "in_progress", conclusion: null },
+				"platform-unit-test (windows-latest)": { status: "completed", conclusion: "success" },
+			},
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGuide(result)).not.toContain("coderabbit-review-label:")
+	})
+
+	it("does not start CodeRabbit when Ubuntu tests fail", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+			requiredRunStates: {
+				"platform-unit-test (ubuntu-latest)": { status: "completed", conclusion: "failure" },
+				"platform-unit-test (windows-latest)": { status: "in_progress", conclusion: null },
+			},
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("Fix the failing required CI checks")
+	})
+
+	it("does not start CodeRabbit when Windows tests fail", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+			requiredRunStates: {
+				"platform-unit-test (ubuntu-latest)": { status: "completed", conclusion: "success" },
+				"platform-unit-test (windows-latest)": { status: "completed", conclusion: "failure" },
+			},
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("Fix the failing required CI checks")
+	})
+
+	it("starts CodeRabbit when Ubuntu and Windows tests have both passed", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["platform-unit-test (ubuntu-latest)", "platform-unit-test (windows-latest)"],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
 
 	it("invalidates the gate before fallible metadata updates", async () => {
