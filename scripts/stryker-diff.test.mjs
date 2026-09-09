@@ -56,6 +56,81 @@ describe("mutation testing workflow", () => {
 	})
 })
 
+function createSyntheticPullRequestRepository() {
+	const repository = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-diff-revision-"))
+	const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+	const write = (filePath, contents) => {
+		fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+		fs.writeFileSync(path.join(repository, filePath), contents)
+	}
+
+	run("init", "--quiet", "--initial-branch", "main")
+	run("config", "user.email", "gate@example.com")
+	run("config", "user.name", "Gate")
+	run("config", "commit.gpgsign", "false")
+
+	write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
+	write("packages/core/src/feature.ts", "export const feature = () => 1\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "initial")
+	const eventBaseSha = run("rev-parse", "HEAD")
+
+	run("checkout", "--quiet", "-b", "pull-request")
+	write("packages/core/src/feature.ts", "export const feature = () => 2\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "pull request change")
+
+	// The upstream change lands after the pull_request event recorded its base SHA, which is what
+	// made the stale event base attribute unrelated main-only lines to the pull request.
+	run("checkout", "--quiet", "main")
+	write("packages/core/src/unrelated.ts", "export const unrelated = () => 99\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "unrelated upstream change")
+	const upstreamSha = run("rev-parse", "HEAD")
+
+	run("merge", "--quiet", "--no-ff", "-m", "merge pull request", "pull-request")
+	const mergeSha = run("rev-parse", "HEAD")
+
+	return { repository, eventBaseSha, upstreamSha, mergeSha }
+}
+
+describe("pull request revision selection", () => {
+	it("excludes unrelated upstream files by diffing from the merge commit's first parent", () => {
+		const { repository, eventBaseSha, upstreamSha, mergeSha } = createSyntheticPullRequestRepository()
+
+		const manifest = selectFromGit(repository, eventBaseSha, mergeSha)
+		const changedPaths = manifest.packages.flatMap((entry) => entry.files.map((file) => file.path))
+
+		assert.deepEqual(changedPaths, ["packages/core/src/feature.ts"])
+		assert.equal(manifest.baseSha, upstreamSha)
+		assert.equal(manifest.mergeBase, upstreamSha)
+
+		// Selectors must stay aligned with the checked-out head content.
+		assert.equal(manifest.headSha, mergeSha)
+		assert.deepEqual(
+			manifest.packages.flatMap((entry) => entry.selectors),
+			["src/feature.ts:1-1"],
+		)
+
+		fs.rmSync(repository, { recursive: true, force: true })
+	})
+
+	it("keeps the supplied base for non-merge heads such as manual runs", () => {
+		const { repository, eventBaseSha, upstreamSha } = createSyntheticPullRequestRepository()
+
+		const manifest = selectFromGit(repository, eventBaseSha, upstreamSha)
+
+		assert.equal(manifest.baseSha, eventBaseSha)
+		assert.equal(manifest.mergeBase, eventBaseSha)
+		assert.deepEqual(
+			manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+			["packages/core/src/unrelated.ts"],
+		)
+
+		fs.rmSync(repository, { recursive: true, force: true })
+	})
+})
+
 describe("parseNameStatus", () => {
 	it("parses added, modified, and renamed paths", () => {
 		assert.deepEqual(
@@ -248,7 +323,6 @@ describe("shouldUseVitestRelated", () => {
 		assert.equal(shouldUseVitestRelated({ testFiles: [] }), true)
 	})
 })
-
 
 describe("related-test discovery", () => {
 	it("keeps Stryker's temp directory relative to each run root", () => {
