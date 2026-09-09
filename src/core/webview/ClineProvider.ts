@@ -2723,7 +2723,7 @@ export class ClineProvider
 			// A just-created task may still be initializing its mode; retain the persisted projection for this post.
 		}
 		const hasTaskApiConfigName = currentTask ? "taskApiConfigName" in currentTask : false
-		const currentTaskApiConfigName = hasTaskApiConfigName ? currentTask?.taskApiConfigName : undefined
+		const currentTaskApiConfigName = currentTask && hasTaskApiConfigName ? currentTask.taskApiConfigName : undefined
 		const currentTaskApiConfiguration =
 			currentTask && "apiConfiguration" in currentTask ? currentTask.apiConfiguration : undefined
 		let zooCodeState: {

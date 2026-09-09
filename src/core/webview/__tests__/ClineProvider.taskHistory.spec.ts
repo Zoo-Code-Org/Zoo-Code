@@ -6,7 +6,8 @@ import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
-import type { Task } from "../../task/Task"
+import { Task } from "../../task/Task"
+import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
 
 // Mock setup
@@ -641,6 +642,15 @@ describe("ClineProvider Task History Synchronization", () => {
 	})
 
 	describe("task history includes all workspaces", () => {
+		it("uses the default profile name when no task is active and no profile is saved", async () => {
+			await provider["updateGlobalState"]("currentApiConfigName", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.currentTaskId).toBeUndefined()
+			expect(state.currentApiConfigName).toBe("default")
+		})
+
 		it("projects the active task's local mode and provider profile", async () => {
 			const activeTask = {
 				taskId: "task-local-context",
@@ -672,6 +682,49 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(state.currentApiConfigName).toBeUndefined()
 			expect(state.apiConfiguration).toEqual(activeTask.apiConfiguration)
 			expect(state.currentTaskId).toBe(activeTask.taskId)
+		})
+
+		it("validates and applies the delegated child's effective profile", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "allowed-child-model",
+				consecutiveMistakeLimit: 7,
+			}
+			const isProfileAllowed = vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(true)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await provider.createTask("child", undefined, parentTask, {
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "allowed-child",
+					apiConfiguration: effectiveConfiguration,
+				},
+			})
+
+			expect(isProfileAllowed).toHaveBeenCalledWith(effectiveConfiguration, expect.anything())
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(expect.objectContaining({ consecutiveMistakeLimit: 7 }))
+		})
+
+		it("rejects a delegated child when its effective profile is not allowed", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "blocked-child-model",
+			}
+			vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(false)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await expect(
+				provider.createTask("child", undefined, parentTask, {
+					startTask: false,
+					handoffExecutionContext: {
+						mode: "ask",
+						apiConfigName: "blocked-child",
+						apiConfiguration: effectiveConfiguration,
+					},
+				}),
+			).rejects.toThrow("errors.violated_organization_allowlist")
+			expect(vi.mocked(Task)).not.toHaveBeenCalled()
 		})
 
 		it("getStateToPostToWebview returns tasks from all workspaces", async () => {

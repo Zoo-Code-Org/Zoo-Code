@@ -45,4 +45,24 @@ describe("provider handoff decisions", () => {
 		expect(getEffectiveTaskApiConfiguration(parentConfiguration, handoff).consecutiveMistakeLimit).toBe(7)
 		expect(getEffectiveTaskApiConfiguration(parentConfiguration).consecutiveMistakeLimit).toBe(3)
 	})
+
+	it("keeps the parent configuration when a configured saved profile is locked", () => {
+		const selected = selectHandoffExecutionContext(parent, "ask", "code", true, {
+			name: "ask-profile",
+			apiConfiguration: savedConfiguration,
+		})
+
+		expect(selected.apiConfigName).toBeUndefined()
+		expect(selected.apiConfiguration).toEqual(parentConfiguration)
+	})
+
+	it("keeps the parent configuration when the requested mode is unchanged", () => {
+		const selected = selectHandoffExecutionContext(parent, "code", "code", false, {
+			name: "ask-profile",
+			apiConfiguration: savedConfiguration,
+		})
+
+		expect(selected.apiConfigName).toBeUndefined()
+		expect(selected.apiConfiguration).toEqual(parentConfiguration)
+	})
 })
