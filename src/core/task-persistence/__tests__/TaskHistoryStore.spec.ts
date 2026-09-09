@@ -961,6 +961,21 @@ describe("TaskHistoryStore", () => {
 			expect(store.get("task-noid")).toBeUndefined()
 		})
 
+		it("treats a matching-id record that fails the history schema as incompatible", async () => {
+			await store.initialize()
+			const tasksDir = path.join(tmpDir, "tasks")
+			await fs.mkdir(path.join(tasksDir, "task-invalid"), { recursive: true })
+			await fs.writeFile(
+				path.join(tasksDir, "task-invalid", GlobalFileNames.historyItem),
+				JSON.stringify({ id: "task-invalid" }),
+				"utf8",
+			)
+
+			const result = await store.readFresh("task-invalid")
+			expect(result).toMatchObject({ kind: "error", reason: "incompatible" })
+			expect(store.get("task-invalid")).toBeUndefined()
+		})
+
 		it("waits for a gated advisory-lock writer and sees the final durable record, never the rename gap", async () => {
 			await store.initialize()
 			const item = makeHistoryItem({ id: "task-lock" })

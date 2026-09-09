@@ -1082,6 +1082,7 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 	})
 
 	it("retains a child when the parent commits after the startup scan", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 		const child = makeItem({
 			id: "wal-race-child",
 			parentTaskId: "wal-race-parent",
@@ -1107,6 +1108,11 @@ describe("TaskHistoryStore pendingHandoff reconciliation", () => {
 
 		expect(await taskFileExists(child.id)).toBe(true)
 		expect(store.get(child.id)?.pendingHandoff).toEqual(child.pendingHandoff)
+		expect(consoleError).not.toHaveBeenCalledWith(
+			expect.stringContaining("Failed to remove orphaned handoff child"),
+			expect.anything(),
+		)
+		consoleError.mockRestore()
 	})
 
 	it("strips the marker from a committed child and recovers the delegation for resume", async () => {

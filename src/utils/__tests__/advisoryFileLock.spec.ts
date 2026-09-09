@@ -43,4 +43,35 @@ describe("withAdvisoryFileLock", () => {
 		).rejects.toBe(operationError)
 		expect(release).toHaveBeenCalledOnce()
 	})
+
+	it("preserves a successful operation result when lock release fails", async () => {
+		const releaseError = new Error("release failed")
+		const release = vi.fn().mockRejectedValue(releaseError)
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		lockMock.mockResolvedValue(release)
+
+		await expect(withAdvisoryFileLock("/tmp/advisory-lock-test/data.json", async () => "completed")).resolves.toBe(
+			"completed",
+		)
+		expect(release).toHaveBeenCalledOnce()
+		expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("Failed to release lock"), releaseError)
+		consoleError.mockRestore()
+	})
+
+	it("preserves the operation error when lock release also fails", async () => {
+		const operationError = new Error("operation failed")
+		const releaseError = new Error("release failed")
+		const release = vi.fn().mockRejectedValue(releaseError)
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		lockMock.mockResolvedValue(release)
+
+		await expect(
+			withAdvisoryFileLock("/tmp/advisory-lock-test/data.json", async () => {
+				throw operationError
+			}),
+		).rejects.toBe(operationError)
+		expect(release).toHaveBeenCalledOnce()
+		expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("Failed to release lock"), releaseError)
+		consoleError.mockRestore()
+	})
 })

@@ -647,6 +647,51 @@ describe("Cline", () => {
 	})
 
 	describe("handoff execution context", () => {
+		it("adopts changed handoff values and rebuilds the API handler", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const nextConfig: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			}
+			const updateApiConfiguration = vi.spyOn(task, "updateApiConfiguration")
+
+			task.adoptHandoffExecutionContext({
+				mode: "ask",
+				apiConfigName: "handoff-profile",
+				apiConfiguration: nextConfig,
+			})
+
+			await expect(task.getTaskMode()).resolves.toBe("ask")
+			await expect(task.getTaskApiConfigName()).resolves.toBe("handoff-profile")
+			expect(updateApiConfiguration).toHaveBeenCalledOnce()
+			expect(updateApiConfiguration).toHaveBeenCalledWith(nextConfig)
+		})
+
+		it("does not rebuild the API handler for a value-equal configuration", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const updateApiConfiguration = vi.spyOn(task, "updateApiConfiguration")
+
+			task.adoptHandoffExecutionContext({
+				mode: "ask",
+				apiConfigName: undefined,
+				apiConfiguration: structuredClone(mockApiConfig),
+			})
+
+			expect(task.taskMode).toBe("ask")
+			expect(task.taskApiConfigName).toBeUndefined()
+			expect(updateApiConfiguration).not.toHaveBeenCalled()
+		})
+
 		it("adopts a complete explicit execution context synchronously at construction", async () => {
 			const handoffConfig: ProviderSettings = {
 				apiProvider: providerIdentifiers.openrouter,

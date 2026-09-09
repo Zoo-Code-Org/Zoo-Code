@@ -4,7 +4,7 @@ import * as path from "path"
 import crypto from "crypto"
 
 import deepEqual from "fast-deep-equal"
-import type { HistoryItem } from "@roo-code/types"
+import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
@@ -666,14 +666,15 @@ export class TaskHistoryStore {
 	private async readTaskFileUnderAdvisoryLock(taskId: string, filePath: string): Promise<StrictTaskReadResult> {
 		try {
 			const parsed: unknown = JSON.parse(await fs.readFile(filePath, "utf8"))
-			if (typeof parsed !== "object" || parsed === null || (parsed as HistoryItem).id !== taskId) {
+			const validated = historyItemSchema.safeParse(parsed)
+			if (!validated.success || validated.data.id !== taskId) {
 				return {
 					kind: "error",
 					reason: "incompatible",
-					error: new Error(`[TaskHistoryStore] task ${taskId} record has a mismatched or missing id`),
+					error: new Error(`[TaskHistoryStore] task ${taskId} record is invalid or has a mismatched id`),
 				}
 			}
-			return { kind: "found", item: parsed as HistoryItem }
+			return { kind: "found", item: validated.data }
 		} catch (error) {
 			if (this.isFileNotFoundError(error)) return { kind: "missing" }
 			return { kind: "error", reason: error instanceof SyntaxError ? "parse" : "read", error }
@@ -993,15 +994,16 @@ export class TaskHistoryStore {
 			return { kind: "error", reason: "parse", error }
 		}
 
-		if (typeof parsed !== "object" || parsed === null || typeof (parsed as HistoryItem).id !== "string") {
+		const validated = historyItemSchema.safeParse(parsed)
+		if (!validated.success) {
 			return {
 				kind: "error",
 				reason: "incompatible",
-				error: new Error(`[TaskHistoryStore] readFresh: task ${taskId} record has no usable id`),
+				error: new Error(`[TaskHistoryStore] readFresh: task ${taskId} record failed schema validation`),
 			}
 		}
 
-		const item = parsed as HistoryItem
+		const item = validated.data
 
 		// Identity-strict: a record whose own id does not match the requested
 		// task id is incompatible with that key. It must never be cached under

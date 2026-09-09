@@ -361,6 +361,14 @@ export class ClineProvider
 	 * promise pending forever without affecting the delegation.
 	 */
 	private providerHandoffFinalizationCompletion?: Promise<void>
+	/** Every admitted child-WAL finalizer, retained until settlement for provider disposal. */
+	private providerHandoffFinalizations?: Set<Promise<void>>
+
+	private async drainProviderHandoffFinalizations(): Promise<void> {
+		const pending = Array.from(this.providerHandoffFinalizations ?? [])
+		if (pending.length === 0) return
+		await Promise.allSettled(pending)
+	}
 
 	/**
 	 * Protocol bookkeeping for the delegation in flight, advanced at semantic
@@ -1407,6 +1415,7 @@ export class ClineProvider
 		// run), started writes are awaited only to a bounded deadline, and
 		// post-dispose completions update no markers and emit no events.
 		await this.disposeProviderProfileMutationQueue()
+		await this.drainProviderHandoffFinalizations()
 		// Session-scoped explicit-clear markers, projection-target
 		// registrations, and stale markers do not survive the provider.
 		this.explicitProfileClearChildIds.clear()
@@ -5340,16 +5349,19 @@ export class ClineProvider
 		//    write-through callbacks, or a strip that never settles can never
 		//    block scheduling or this method's completion. A rejected strip is
 		//    logged and the marker is left for restart reconciliation.
-		const finalizeChildWal = () =>
-			this.taskHistoryStore
+		const finalizeChildWal = () => {
+			if (this._disposed) return Promise.resolve()
+			const finalization = this.taskHistoryStore
 				.atomicReadAndUpdate(child.taskId, (historyItem) => ({
 					...historyItem,
 					pendingHandoff: undefined,
 				}))
 				.then(() => {
+					if (this._disposed) return
 					handoffProtocol.advance({ type: "finalize-child-wal", ok: true })
 				})
 				.catch((finalizeError) => {
+					if (this._disposed) return
 					handoffProtocol.advance({ type: "finalize-child-wal", ok: false })
 					this.log(
 						`[delegateParentAndOpenChild] Pending handoff marker for child ${child.taskId} left for restart replay: ${
@@ -5357,6 +5369,11 @@ export class ClineProvider
 						}`,
 					)
 				})
+			const finalizations = (this.providerHandoffFinalizations ??= new Set())
+			finalizations.add(finalization)
+			void finalization.finally(() => finalizations.delete(finalization))
+			return finalization
+		}
 		if (prepared.profile.intent.kind !== "clear") {
 			const finalizeCompletion = finalizeChildWal()
 			this.providerHandoffFinalizationCompletion = finalizeCompletion
@@ -5377,7 +5394,7 @@ export class ClineProvider
 					boundary: outcome.boundary ?? "context-proxy",
 					ok: outcome.ok,
 				})
-				if (outcome.ok && prepared.profile.intent.kind === "clear") {
+				if (!this._disposed && outcome.ok && prepared.profile.intent.kind === "clear") {
 					await finalizeChildWal()
 				}
 				return outcome

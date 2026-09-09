@@ -413,6 +413,8 @@ describe("ProviderSettingsManager", () => {
 	describe("SaveConfig", () => {
 		it("serializes mutations from managers that share one secret store", async () => {
 			const secondManager = new ProviderSettingsManager(mockContext)
+			await Promise.all([providerSettingsManager.initialize(), secondManager.initialize()])
+			const initializationReadCount = mockSecrets.get.mock.calls.length
 			let storedProfiles: unknown = null
 			let releaseFirstRead: (() => void) | undefined
 			const firstReadStarted = new Promise<void>((resolve) => {
@@ -445,9 +447,12 @@ describe("ProviderSettingsManager", () => {
 				id: "second-id",
 				apiProvider: providerIdentifiers.openai,
 			})
+			await Promise.resolve()
+			const readCountBeforeRelease = mockSecrets.get.mock.calls.length
 			continueFirstRead?.()
 
 			await Promise.all([firstSave, secondSave])
+			expect(readCountBeforeRelease).toBe(initializationReadCount + 1)
 			expect(storedProfiles).toMatchObject({
 				apiConfigs: {
 					first: { id: "first-id" },
