@@ -2718,14 +2718,12 @@ export class ClineProvider
 		const currentTask = this.getCurrentTask()
 		let currentTaskMode: string | undefined
 		try {
-			currentTaskMode = currentTask && "taskMode" in currentTask ? currentTask.taskMode : undefined
+			currentTaskMode = currentTask?.taskMode
 		} catch {
 			// A just-created task may still be initializing its mode; retain the persisted projection for this post.
 		}
-		const hasTaskApiConfigName = currentTask ? "taskApiConfigName" in currentTask : false
-		const currentTaskApiConfigName = currentTask && hasTaskApiConfigName ? currentTask.taskApiConfigName : undefined
-		const currentTaskApiConfiguration =
-			currentTask && "apiConfiguration" in currentTask ? currentTask.apiConfiguration : undefined
+		const currentTaskApiConfigName = currentTask?.taskApiConfigName
+		const currentTaskApiConfiguration = currentTask?.apiConfiguration
 		let zooCodeState: {
 			zooCodeIsAuthenticated: boolean
 			zooCodeUserName: string | undefined
@@ -2809,7 +2807,7 @@ export class ClineProvider
 			terminalZdotdir: terminalZdotdir ?? false,
 			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
-			currentApiConfigName: currentTask && hasTaskApiConfigName ? currentTaskApiConfigName : currentApiConfigName,
+			currentApiConfigName: currentTask ? currentTaskApiConfigName : currentApiConfigName,
 			listApiConfigMeta: listApiConfigMeta ?? [],
 			pinnedApiConfigs: pinnedApiConfigs ?? {},
 			mode: currentTaskMode ?? mode ?? defaultModeSlug,
