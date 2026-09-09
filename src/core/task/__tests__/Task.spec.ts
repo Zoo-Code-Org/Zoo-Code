@@ -678,6 +678,7 @@ describe("Cline", () => {
 			const captureTaskRestarted = vi.spyOn(TelemetryService.instance, "captureTaskRestarted")
 			const historyItem = {
 				id: "history-task",
+				number: 1,
 				task: "history",
 				ts: Date.now(),
 				tokensIn: 0,
