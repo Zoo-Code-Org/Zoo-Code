@@ -7,6 +7,7 @@ type ProviderStubFields = {
 	cancelledDelegationChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
 	taskHistoryStore?: { get: (id: string) => unknown }
+	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
 	tasks?: Task[]
@@ -38,6 +39,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.cancelledDelegationChildIds ??= new Set()
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
+	s.taskScheduler ??= { schedule: async (_task, run) => run() }
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {

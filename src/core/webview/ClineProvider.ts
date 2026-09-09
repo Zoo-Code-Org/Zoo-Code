@@ -169,9 +169,14 @@ function runDelegationTransition<T>(
 	return current
 }
 
-function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): void {
+function scheduleTask(
+	scheduler: TaskScheduler,
+	task: Task,
+	source: string,
+	run: () => Promise<void> = () => task.run(),
+): void {
 	void scheduler
-		.schedule(task, () => task.run())
+		.schedule(task, run)
 		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 }
 
@@ -4326,15 +4331,17 @@ export class ClineProvider
 					// non-fatal
 				}
 
-				// Auto-resume parent without ask("resume_task")
-				await parentInstance.resumeAfterDelegation()
-			}
-
-			// 9) Emit TaskDelegationResumed (provider-level)
-			try {
-				this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-			} catch {
-				// non-fatal
+				// The completing child still owns the scheduler permit. Queue the
+				// parent continuation and return so that permit can be released
+				// before the parent delegates again.
+				scheduleTask(this.taskScheduler, parentInstance, "reopenParentFromDelegation", async () => {
+					try {
+						this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+					} catch {
+						// non-fatal
+					}
+					await parentInstance.resumeAfterDelegation()
+				})
 			}
 
 			this.cancelledDelegationChildIds.delete(childTaskId)
