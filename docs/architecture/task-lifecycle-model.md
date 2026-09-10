@@ -22,8 +22,6 @@ An individual checker fails if it finds an invariant violation, a modeled action
 
 Executable cross-model composition should be added only when a correctness claim genuinely spans two or more submodels and there is an explicit, production-grounded boundary mapping between their events or state. That composition must state a bounded joint exploration strategy and own cross-model invariants that cannot be proved within either child model alone. Shared command orchestration or conceptual adjacency is not sufficient reason to multiply independent state spaces.
 
-`pnpm lifecycle:model` runs the same seven checks directly; `lifecycle:model-check` is the CI-facing alias.
-
 ## Why an executable TypeScript model
 
 The models use small explicit-state explorers rather than adding Quint, TLA+/TLC, or Alloy. This is deliberate:
