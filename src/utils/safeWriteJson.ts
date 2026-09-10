@@ -188,14 +188,20 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	} catch (originalError) {
 		operationFailed = true
 		operationError = originalError
-		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
+		const compromiseError = releaseLock.getCompromiseError?.()
+		console.error(
+			compromiseError && actualTempBackupFilePath
+				? `Operation failed for ${absoluteFilePath}: [Original Error Caught]; [Catch] Retaining backup ${actualTempBackupFilePath} after lock compromise`
+				: `Operation failed for ${absoluteFilePath}: [Original Error Caught]`,
+			originalError,
+		)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
 
 		// Restore only while this operation still owns the lock. After compromise,
 		// another owner may already have replaced the target.
-		if (backupFileToRollbackOrCleanupWithinCatch && !releaseLock.getCompromiseError?.()) {
+		if (backupFileToRollbackOrCleanupWithinCatch && !compromiseError) {
 			try {
 				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
 				// Mark as handled, prevent later unlink of this path
@@ -222,22 +228,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		}
 
 		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			const compromiseError = releaseLock.getCompromiseError?.()
-			if (compromiseError) {
+		if (actualTempBackupFilePath && !releaseLock.getCompromiseError?.()) {
+			try {
+				await fs.unlink(actualTempBackupFilePath)
+			} catch (cleanupError) {
 				console.error(
-					`[Catch] Retaining backup ${actualTempBackupFilePath} after lock compromise for ${absoluteFilePath}:`,
-					compromiseError,
+					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
+					cleanupError,
 				)
-			} else {
-				try {
-					await fs.unlink(actualTempBackupFilePath)
-				} catch (cleanupError) {
-					console.error(
-						`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-						cleanupError,
-					)
-				}
 			}
 		}
 	} finally {
