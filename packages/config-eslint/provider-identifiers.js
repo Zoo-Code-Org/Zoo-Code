@@ -103,6 +103,10 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 			return node.elements.filter((element) => element !== null)
 		}
 
+		if (node?.type === "SpreadElement") {
+			return [node.argument]
+		}
+
 		return []
 	}
 
@@ -126,7 +130,16 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 			},
 		},
 		create(context) {
+			// Parent provider contexts and call visitors can reach the same expression.
+			const visitedExpressions = new WeakSet()
+
 			function reportIfRawProvider(node) {
+				node = unwrapExpression(node)
+				if (!node || visitedExpressions.has(node)) {
+					return
+				}
+				visitedExpressions.add(node)
+
 				for (const child of getProviderExpressionChildren(node)) {
 					reportIfRawProvider(child)
 				}

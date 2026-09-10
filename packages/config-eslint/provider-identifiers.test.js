@@ -76,10 +76,38 @@ ruleTester.run("no-raw-provider-identifiers provider-like values", rule, {
 		"const provider = configuredProvider || providerIdentifiers.openrouter",
 		"const apiProvider = useGemini ? providerIdentifiers.gemini : providerIdentifiers.openrouter",
 		"getProviderServiceConfig(providerIdentifiers.gemini)",
+		"const provider = getProvider(providerIdentifiers.openrouter)",
+		"const schema = { imageGenerationProvider: z.enum([...knownValues, ...[providerIdentifiers.openrouter]]) }",
 		'if (config?.protocol === "gemini") {}',
 		'const response = { protocol: "anthropic", format: "openrouter" }',
 	],
 	invalid: [
+		...[
+			'const provider = getProvider("openrouter")',
+			'const provider = getProvider(getProvider("openrouter"))',
+			'const provider = getProvider("openrouter" as const)',
+			'getProvider(...["openrouter"])',
+			'const config = { apiProvider: getProvider("openrouter") }',
+			'const schema = { imageGenerationProvider: z.enum([...["openrouter"]]) }',
+			'const schema = { imageGenerationProvider: z.enum([, ...[...["openrouter"]]]) }',
+		].map((code) => ({
+			code,
+			errors: [
+				{
+					messageId: "useCanonical",
+					data: { replacement: "providerIdentifiers.openrouter", value: "openrouter" },
+					type: "Literal",
+				},
+			],
+		})),
+		{
+			code: 'const provider = getProvider("openrouter", "openrouter")',
+			errors: Array.from({ length: 2 }, () => ({
+				messageId: "useCanonical",
+				data: { replacement: "providerIdentifiers.openrouter", value: "openrouter" },
+				type: "Literal",
+			})),
+		},
 		{
 			code: 'const apiProvider = "roo"',
 			errors: [
