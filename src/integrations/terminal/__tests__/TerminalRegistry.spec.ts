@@ -255,6 +255,7 @@ describe("TerminalRegistry", () => {
 		afterEach(() => {
 			// Reset so other test blocks aren't affected.
 			TerminalRegistry["isInitialized"] = false
+			vi.useRealTimers()
 		})
 
 		it("calls shellExecutionComplete when end event fires before running is set (race)", async () => {
@@ -541,14 +542,15 @@ describe("TerminalRegistry", () => {
 				onShellExecutionStarted: vi.fn(),
 				onShellExecutionComplete: completionSpy,
 			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
 			await settleWithin(result)
-			const completedProcess = completedSpy.mock.calls[0][1]
 
 			expect(executeCommand).not.toHaveBeenCalled()
 			expect(completionSpy).toHaveBeenCalledOnce()
-			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, completedProcess)
-			expect(completedSpy).toHaveBeenCalledWith("", completedProcess)
-			expect(completedProcess).toBeInstanceOf(TerminalProcess)
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
 			expect(terminal.busy).toBe(false)
 		})
 
@@ -628,7 +630,6 @@ describe("TerminalRegistry", () => {
 
 			expect(disposeSpy).toHaveBeenCalledOnce()
 			expect(vi.getTimerCount()).toBe(0)
-			vi.useRealTimers()
 		})
 
 		it("reports the configured timeout and releases wait resources", async () => {
@@ -648,7 +649,6 @@ describe("TerminalRegistry", () => {
 			expect(rejectedSpy.mock.calls[0][0]).toEqual(new Error("Shell integration did not activate within 1.5s"))
 			expect(disposeSpy).toHaveBeenCalledOnce()
 			expect(vi.getTimerCount()).toBe(0)
-			vi.useRealTimers()
 		})
 
 		it("cancels a pending shell-integration wait with the terminal-close reason", async () => {
@@ -671,7 +671,6 @@ describe("TerminalRegistry", () => {
 			)
 			expect(disposeSpy).toHaveBeenCalledOnce()
 			expect(vi.getTimerCount()).toBe(0)
-			vi.useRealTimers()
 		})
 
 		it("uses the native exit status to recognize closure before the close event is handled", () => {

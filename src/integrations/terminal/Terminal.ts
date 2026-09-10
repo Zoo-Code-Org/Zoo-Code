@@ -124,7 +124,8 @@ export class Terminal extends BaseTerminal {
 			})
 
 			if (this.isClosed()) {
-				process.handleTerminalClosed()
+				// Keep the newly created process observable to the caller until runCommand returns.
+				queueMicrotask(() => process.handleTerminalClosed())
 				return
 			}
 
