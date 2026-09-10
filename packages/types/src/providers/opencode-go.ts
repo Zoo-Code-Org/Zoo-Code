@@ -693,7 +693,6 @@ export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
 	// --- OpenAI ---
 	"gpt-5.6-luna",
 	// --- xAI ---
-	"grok-4.5",
 	"grok-4.6",
 	// --- Meta ---
 	"muse-spark-1.3-contributor",

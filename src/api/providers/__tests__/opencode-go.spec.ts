@@ -1364,7 +1364,7 @@ describe("OpencodeGoHandler", () => {
 
 		it("classifies documented Responses models as Responses-format and other models as not", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
-			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.2-contributor")).toBe(true)

@@ -34,10 +34,10 @@ describe("opencode-go registry", () => {
 		"deepseek-v4-pro",
 		"deepseek-v4-flash",
 		"omen-alpha",
+		"grok-4.5",
 	]
 	const responsesFormatModels = [
 		"gpt-5.6-luna",
-		"grok-4.5",
 		"grok-4.6",
 		"muse-spark-1.3-contributor",
 		"muse-spark-1.2-contributor",
