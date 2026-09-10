@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as vscode from "vscode"
-import { RooCodeEventName } from "@roo-code/types"
+import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import type { ClineMessage, HistoryItem } from "@roo-code/types"
 
 import type { ApiMessage } from "../core/task-persistence"
@@ -89,6 +89,37 @@ function makeTaskHistoryStoreStub(
 		atomicUpdatePair: overrides.atomicUpdatePair ?? atomicUpdatePair,
 		get: vi.fn((id: string) => itemMap.get(id)),
 		invalidate: vi.fn().mockResolvedValue(undefined),
+	}
+}
+
+function makeStatefulTaskHistoryStore(...items: HistoryItem[]) {
+	const itemMap = new Map(items.map((item) => [item.id, item]))
+
+	return {
+		get: vi.fn((id: string) => itemMap.get(id)),
+		invalidate: vi.fn().mockResolvedValue(undefined),
+		atomicUpdatePair: vi.fn(
+			async (
+				firstId: string,
+				secondId: string,
+				firstUpdater: (item: HistoryItem) => HistoryItem,
+				secondUpdater: (item: HistoryItem) => HistoryItem,
+			) => {
+				const first = itemMap.get(firstId)
+				const second = itemMap.get(secondId)
+				if (!first || !second) throw new Error(`Missing history item for atomic pair: ${firstId}, ${secondId}`)
+				itemMap.set(firstId, firstUpdater(first))
+				itemMap.set(secondId, secondUpdater(second))
+				return [itemMap.get(firstId), itemMap.get(secondId)]
+			},
+		),
+		atomicReadAndUpdate: vi.fn(async (id: string, updater: (item: HistoryItem) => HistoryItem) => {
+			const item = itemMap.get(id)
+			if (!item) throw new Error(`Missing history item: ${id}`)
+			const updated = updater(item)
+			itemMap.set(id, updated)
+			return [updated]
+		}),
 	}
 }
 
@@ -1110,12 +1141,16 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(parentInstance.resumeAfterDelegation).not.toHaveBeenCalled()
 	})
 
-	it("releases another provider's parent transition after resume invocation", async () => {
+	it("serializes real cross-provider completion and redelegation through resume invocation", async () => {
 		let releaseResume!: () => void
 		const resumeBlocked = new Promise<void>((resolve) => {
 			releaseResume = resolve
 		})
-		const parentInstance = {
+		let releaseChildRun!: () => void
+		const childRunBlocked = new Promise<void>((resolve) => {
+			releaseChildRun = resolve
+		})
+		const parentInstanceA = {
 			taskId: "parent-shared-transition",
 			abort: false,
 			abandoned: false,
@@ -1124,64 +1159,137 @@ describe("History resume delegation - parent metadata transitions", () => {
 			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 		}
 		const parentItem = {
-			id: parentInstance.taskId,
+			id: parentInstanceA.taskId,
 			status: "delegated",
 			awaitingChildId: "child-c1",
+			delegatedToId: "child-c1",
 			childIds: ["child-c1"],
 			ts: 1,
 			task: "Parent",
 			tokensIn: 0,
 			tokensOut: 0,
 			totalCost: 0,
-		}
-		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-c1", status: "active" }, parentItem)
-		let currentTask: object | undefined = { taskId: "child-c1" }
+			mode: "code",
+		} as HistoryItem
+		const taskHistoryStore = makeStatefulTaskHistoryStore(parentItem, {
+			id: "child-c1",
+			status: "active",
+			parentTaskId: parentItem.id,
+		} as HistoryItem)
+		let currentTaskA: object | undefined = { taskId: "child-c1" }
 		let runScheduledContinuation!: () => Promise<void>
+		let settleScheduledContinuation!: () => void
+		const scheduledContinuationSettled = new Promise<void>((resolve) => {
+			settleScheduledContinuation = resolve
+		})
+		let scheduledContinuation: Promise<void> | undefined
+		const emitA = vi.fn()
 		const providerA = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
-			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
-			emit: vi.fn(),
-			getCurrentTask: vi.fn(() => currentTask),
+			getTaskWithId: vi.fn(async (id: string) => ({ historyItem: taskHistoryStore.get(id)! })),
+			emit: emitA,
+			getCurrentTask: vi.fn(() => currentTaskA),
 			removeClineFromStack: vi.fn(async () => {
-				currentTask = undefined
+				currentTaskA = undefined
 			}),
-			createTaskWithHistoryItem: vi.fn(async () => (currentTask = parentInstance)),
+			createTaskWithHistoryItem: vi.fn(async () => (currentTaskA = parentInstanceA)),
 			taskScheduler: {
 				schedule: vi.fn((_task, run) => {
-					runScheduledContinuation = run
-					return new Promise<void>(() => {})
+					runScheduledContinuation = () => (scheduledContinuation ??= run())
+					return scheduledContinuationSettled
 				}),
 			},
 			taskHistoryStore,
 		})
-		const providerB = makeProviderStub({ taskHistoryStore })
-		const commitC2 = vi.fn()
+		const parentInstanceB = {
+			taskId: parentItem.id,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
+			getTaskMode: vi.fn().mockResolvedValue("code"),
+			getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
+			flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+			retrySaveApiConversationHistory: vi.fn(),
+		}
+		const childC2 = {
+			taskId: "child-c2",
+			run: vi.fn(async () => {
+				expect(taskHistoryStore.get(parentItem.id)).toMatchObject({
+					status: "delegated",
+					awaitingChildId: "child-c2",
+				})
+				await childRunBlocked
+			}),
+		}
+		let currentTaskB: object | undefined = parentInstanceB
+		let childRun: Promise<void> | undefined
+		const removeParentB = vi.fn(async () => {
+			currentTaskB = undefined
+		})
+		const createChildC2 = vi.fn(async () => {
+			currentTaskB = childC2
+			return childC2
+		})
+		const providerB = makeProviderStub({
+			taskHistoryStore,
+			getCurrentTask: vi.fn(() => currentTaskB),
+			removeClineFromStack: removeParentB,
+			createTask: createChildC2,
+			taskScheduler: {
+				schedule: vi.fn((_task, run) => (childRun = run())),
+			},
+			emit: vi.fn(),
+			log: vi.fn(),
+			isViewLaunched: false,
+		})
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
 		await ClineProvider.prototype.reopenParentFromDelegation.call(providerA, {
-			parentTaskId: parentInstance.taskId,
+			parentTaskId: parentItem.id,
 			childTaskId: "child-c1",
 			completionResultSummary: "C1 done",
 		})
-		const providerBTransition = (
-			ClineProvider.prototype as unknown as {
-				runDelegationTransition: (
-					this: ClineProvider,
-					parentTaskId: string,
-					fn: () => Promise<void>,
-				) => Promise<void>
-			}
-		).runDelegationTransition.call(providerB, parentInstance.taskId, async () => commitC2())
+		expect(taskHistoryStore.get("child-c1")).toMatchObject({ status: "completed" })
+		expect(taskHistoryStore.get(parentItem.id)).toMatchObject({
+			status: "active",
+			completedByChildId: "child-c1",
+			awaitingChildId: undefined,
+		})
+
+		const providerBTransition = ClineProvider.prototype.delegateParentAndOpenChild.call(providerB, {
+			parentTaskId: parentItem.id,
+			message: "Run C2",
+			initialTodos: [],
+			mode: "code",
+		})
 
 		await Promise.resolve()
-		expect(commitC2).not.toHaveBeenCalled()
-		const scheduledContinuation = runScheduledContinuation()
-		await vi.waitFor(() => expect(parentInstance.resumeAfterDelegation).toHaveBeenCalledTimes(1))
-		await vi.waitFor(() => expect(commitC2).toHaveBeenCalledTimes(1))
+		expect(removeParentB).not.toHaveBeenCalled()
+		expect(createChildC2).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
+
+		const continuationRun = runScheduledContinuation()
+		await vi.waitFor(() => expect(parentInstanceA.resumeAfterDelegation).toHaveBeenCalledTimes(1))
+		await expect(providerBTransition).resolves.toBe(childC2)
+		expect(removeParentB).toHaveBeenCalledTimes(1)
+		expect(createChildC2).toHaveBeenCalledTimes(1)
+		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		expect(taskHistoryStore.get(parentItem.id)).toMatchObject({
+			status: "delegated",
+			awaitingChildId: "child-c2",
+			delegatedToId: "child-c2",
+			childIds: ["child-c1", "child-c2"],
+		})
+		await vi.waitFor(() => expect(childC2.run).toHaveBeenCalledTimes(1))
+		expect(parentInstanceA.resumeAfterDelegation).toHaveBeenCalledTimes(1)
+		expect(emitA).not.toHaveBeenCalledWith(RooCodeEventName.TaskDelegationResumed, parentItem.id, "child-c1")
+
+		releaseChildRun()
+		await childRun
 		releaseResume()
-		await scheduledContinuation
-		await providerBTransition
+		await continuationRun
+		settleScheduledContinuation()
+		await scheduledContinuationSettled
+		expect(emitA).toHaveBeenCalledWith(RooCodeEventName.TaskDelegationResumed, parentItem.id, "child-c1")
 	})
 
 	it("allows resumed work to re-enter the same parent transition queue", async () => {
