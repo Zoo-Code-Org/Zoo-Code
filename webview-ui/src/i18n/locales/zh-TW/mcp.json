@@ -8,6 +8,10 @@
 		"title": "啟用 MCP 伺服器",
 		"description": "啟用此選項後，Zoo 將可使用已連線 MCP 伺服器所提供的工具，進一步提升功能。如果您暫無使用這些額外工具的需求，建議關閉此選項以協助降低 API Token 費用。"
 	},
+	"showDescriptions": {
+		"title": "顯示 MCP 說明",
+		"description": "顯示 MCP 伺服器為工具和資源提供的說明。"
+	},
 	"editGlobalMCP": "編輯全域 MCP",
 	"editProjectMCP": "編輯專案 MCP",
 	"refreshMCP": "重新整理 MCP 伺服器",

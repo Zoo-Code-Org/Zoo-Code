@@ -39,6 +39,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_SHOW_MCP_DESCRIPTIONS,
 	ImageGenerationProvider,
 } from "@roo-code/types"
 
@@ -179,6 +180,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		maxOpenTabsContext,
 		maxWorkspaceFiles,
 		mcpEnabled,
+		showMcpDescriptions,
 		soundEnabled,
 		ttsEnabled,
 		ttsSpeed,
@@ -423,6 +425,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					terminalProfile: terminalProfile ?? "", // "" clears a saved profile; undefined is dropped by JSON.stringify
 					terminalOutputPreviewSize: terminalOutputPreviewSize ?? "medium",
 					mcpEnabled,
+					showMcpDescriptions: showMcpDescriptions ?? DEFAULT_SHOW_MCP_DESCRIPTIONS,
 					maxOpenTabsContext: Math.min(Math.max(0, maxOpenTabsContext ?? 20), 500),
 					maxWorkspaceFiles: Math.min(Math.max(0, maxWorkspaceFiles ?? 200), 500),
 					showRooIgnoredFiles: showRooIgnoredFiles ?? true,
@@ -914,6 +917,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<McpView
 								mcpEnabled={mcpEnabled}
 								setMcpEnabled={(value) => setCachedStateField("mcpEnabled", value)}
+								showMcpDescriptions={showMcpDescriptions ?? DEFAULT_SHOW_MCP_DESCRIPTIONS}
+								setShowMcpDescriptions={(value) => setCachedStateField("showMcpDescriptions", value)}
 							/>
 						)}
 

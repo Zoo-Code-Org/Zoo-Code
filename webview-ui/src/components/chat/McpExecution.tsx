@@ -36,6 +36,7 @@ interface McpExecutionProps {
 	}
 	useMcpServer?: ClineAskUseMcpServer
 	alwaysAllowMcp?: boolean
+	showMcpDescriptions?: boolean
 }
 
 export const McpExecution = ({
@@ -47,6 +48,7 @@ export const McpExecution = ({
 	server,
 	useMcpServer,
 	alwaysAllowMcp = false,
+	showMcpDescriptions = true,
 }: McpExecutionProps) => {
 	const { t } = useTranslation("mcp")
 
@@ -251,6 +253,7 @@ export const McpExecution = ({
 							serverSource={server?.source}
 							alwaysAllowMcp={alwaysAllowMcp}
 							isInChatContext={true}
+							showDescription={showMcpDescriptions}
 						/>
 					</div>
 				)}
@@ -266,6 +269,7 @@ export const McpExecution = ({
 							serverSource={undefined}
 							alwaysAllowMcp={alwaysAllowMcp}
 							isInChatContext={true}
+							showDescription={showMcpDescriptions}
 						/>
 					</div>
 				)}

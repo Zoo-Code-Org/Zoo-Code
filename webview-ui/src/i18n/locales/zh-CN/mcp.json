@@ -8,6 +8,10 @@
 		"title": "启用 MCP 服务器",
 		"description": "开启后 Zoo 可用已连接 MCP 服务器的工具，能力更强。不用这些工具时建议关闭，节省 API Token 费用。"
 	},
+	"showDescriptions": {
+		"title": "显示 MCP 描述",
+		"description": "显示 MCP 服务器为工具和资源提供的描述。"
+	},
 	"editGlobalMCP": "编辑全局 MCP",
 	"editProjectMCP": "编辑项目 MCP",
 	"learnMoreEditingSettings": "了解如何编辑 MCP 设置文件",

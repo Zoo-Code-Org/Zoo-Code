@@ -1,8 +1,14 @@
 import React, { useState } from "react"
 import { Trans } from "react-i18next"
-import { VSCodeLink, VSCodePanels, VSCodePanelTab, VSCodePanelView } from "@vscode/webview-ui-toolkit/react"
+import {
+	VSCodeCheckbox,
+	VSCodeLink,
+	VSCodePanels,
+	VSCodePanelTab,
+	VSCodePanelView,
+} from "@vscode/webview-ui-toolkit/react"
 
-import type { McpServer } from "@roo-code/types"
+import { DEFAULT_SHOW_MCP_DESCRIPTIONS, type McpServer } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
@@ -31,14 +37,27 @@ import { McpErrorRow } from "./McpErrorRow"
 interface McpViewProps {
 	mcpEnabled?: boolean
 	setMcpEnabled?: (value: boolean) => void
+	showMcpDescriptions?: boolean
+	setShowMcpDescriptions?: (value: boolean) => void
 }
 
-const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = {}) => {
-	const { mcpServers: servers, alwaysAllowMcp, mcpEnabled: contextMcpEnabled } = useExtensionState()
+const McpView = ({
+	mcpEnabled: propsMcpEnabled,
+	setMcpEnabled,
+	showMcpDescriptions: propsShowMcpDescriptions,
+	setShowMcpDescriptions,
+}: McpViewProps = {}) => {
+	const {
+		mcpServers: servers,
+		alwaysAllowMcp,
+		mcpEnabled: contextMcpEnabled,
+		showMcpDescriptions: contextShowMcpDescriptions,
+	} = useExtensionState()
 
 	// When rendered inside SettingsView the value is buffered in `cachedState` and
 	// only persisted on Save. Fall back to live extension state when used uncontrolled.
 	const mcpEnabled = propsMcpEnabled ?? contextMcpEnabled
+	const showMcpDescriptions = propsShowMcpDescriptions ?? contextShowMcpDescriptions ?? DEFAULT_SHOW_MCP_DESCRIPTIONS
 
 	const { t } = useAppTranslation()
 	const { isOverThreshold, title, message } = useTooManyTools()
@@ -65,6 +84,27 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 				</div>
 
 				<McpEnabledToggle mcpEnabled={mcpEnabled} setMcpEnabled={setMcpEnabled} />
+
+				{mcpEnabled && (
+					<div style={{ marginBottom: "20px" }}>
+						<VSCodeCheckbox
+							checked={showMcpDescriptions}
+							onChange={(event) => {
+								const target = event.target as HTMLInputElement
+								setShowMcpDescriptions?.(target.checked)
+							}}>
+							<span style={{ fontWeight: "500" }}>{t("mcp:showDescriptions.title")}</span>
+						</VSCodeCheckbox>
+						<p
+							style={{
+								fontSize: "12px",
+								marginTop: "5px",
+								color: "var(--vscode-descriptionForeground)",
+							}}>
+							{t("mcp:showDescriptions.description")}
+						</p>
+					</div>
+				)}
 
 				{mcpEnabled && (
 					<>
@@ -101,6 +141,7 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 										key={`${server.name}-${server.source || "global"}`}
 										server={server}
 										alwaysAllowMcp={alwaysAllowMcp}
+										showMcpDescriptions={showMcpDescriptions}
 									/>
 								))}
 							</div>
@@ -183,7 +224,15 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 	)
 }
 
-const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowMcp?: boolean }) => {
+const ServerRow = ({
+	server,
+	alwaysAllowMcp,
+	showMcpDescriptions,
+}: {
+	server: McpServer
+	alwaysAllowMcp?: boolean
+	showMcpDescriptions: boolean
+}) => {
 	const { t } = useAppTranslation()
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -377,6 +426,7 @@ const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowM
 													serverName={server.name}
 													serverSource={server.source || "global"}
 													alwaysAllowMcp={alwaysAllowMcp}
+													showDescription={showMcpDescriptions}
 												/>
 											))}
 										</div>
@@ -403,6 +453,7 @@ const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowM
 													<McpResourceRow
 														key={"uriTemplate" in item ? item.uriTemplate : item.uri}
 														item={item}
+														showDescription={showMcpDescriptions}
 													/>
 												),
 											)}

@@ -8,6 +8,10 @@
 		"title": "Enable MCP Servers",
 		"description": "Turn this ON to let Zoo use tools from connected MCP servers. This gives Zoo more capabilities. If you don't plan to use these extra tools, turn it OFF to help reduce API token costs."
 	},
+	"showDescriptions": {
+		"title": "Show MCP descriptions",
+		"description": "Show descriptions supplied by MCP servers for tools and resources."
+	},
 	"editGlobalMCP": "Edit Global MCP",
 	"editProjectMCP": "Edit Project MCP",
 	"refreshMCP": "Refresh MCP Servers",

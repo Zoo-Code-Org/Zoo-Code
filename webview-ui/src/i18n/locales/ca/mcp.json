@@ -8,6 +8,10 @@
 		"title": "Activa els servidors MCP",
 		"description": "Activa-ho perquè Zoo pugui utilitzar eines dels servidors MCP connectats. Això dóna més capacitats a Zoo. Si no vols utilitzar aquestes eines addicionals, desactiva-ho per ajudar a reduir el cost dels tokens API."
 	},
+	"showDescriptions": {
+		"title": "Mostra les descripcions MCP",
+		"description": "Mostra les descripcions proporcionades pels servidors MCP per a eines i recursos."
+	},
 	"editGlobalMCP": "Edita MCP global",
 	"editProjectMCP": "Edita MCP del projecte",
 	"learnMoreEditingSettings": "Més informació sobre com editar fitxers de configuració MCP",

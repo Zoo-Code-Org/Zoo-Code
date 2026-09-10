@@ -8,6 +8,10 @@
 		"title": "MCP Sunucularını Etkinleştir",
 		"description": "Bunu AÇ, böylece Zoo bağlı MCP sunucularından araçlar kullanabilir. Zoo'ya daha fazla yetenek kazandırır. Ekstra araçları kullanmayacaksan, API token maliyetini azaltmak için bunu KAPAT."
 	},
+	"showDescriptions": {
+		"title": "MCP açıklamalarını göster",
+		"description": "MCP sunucularının araçlar ve kaynaklar için sağladığı açıklamaları göster."
+	},
 	"editGlobalMCP": "Global MCP'yi Düzenle",
 	"editProjectMCP": "Proje MCP'sini Düzenle",
 	"learnMoreEditingSettings": "MCP ayar dosyalarını düzenleme hakkında daha fazla bilgi",

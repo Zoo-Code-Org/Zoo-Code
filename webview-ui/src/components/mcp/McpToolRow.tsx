@@ -12,9 +12,17 @@ type McpToolRowProps = {
 	serverSource?: "global" | "project"
 	alwaysAllowMcp?: boolean
 	isInChatContext?: boolean
+	showDescription?: boolean
 }
 
-const McpToolRow = ({ tool, serverName, serverSource, alwaysAllowMcp, isInChatContext = false }: McpToolRowProps) => {
+const McpToolRow = ({
+	tool,
+	serverName,
+	serverSource,
+	alwaysAllowMcp,
+	isInChatContext = false,
+	showDescription = true,
+}: McpToolRowProps) => {
 	const { t } = useAppTranslation()
 	const isToolEnabled = tool.enabledForPrompt ?? true
 
@@ -95,7 +103,7 @@ const McpToolRow = ({ tool, serverName, serverSource, alwaysAllowMcp, isInChatCo
 					</div>
 				)}
 			</div>
-			{tool.description && (
+			{showDescription && tool.description && (
 				<div className="mt-1 text-xs text-vscode-descriptionForeground">{tool.description}</div>
 			)}
 			{isToolEnabled &&
