@@ -55,8 +55,8 @@ export const PACKAGE_CONFIGS = [
 		discoverRelatedTests: true,
 		testFilesBySource: {
 			"core/webview/ClineProvider.ts": [
-				"__tests__/history-resume-delegation.spec.ts",
-				"__tests__/provider-delegation.spec.ts",
+				"__tests__/ClineProvider.history-resume-delegation.spec.ts",
+				"__tests__/ClineProvider.delegation.spec.ts",
 			],
 		},
 		excludedPaths: ["src/esbuild.mjs", "src/eslint.config.mjs", "src/utils/vitest-verbosity.ts"],

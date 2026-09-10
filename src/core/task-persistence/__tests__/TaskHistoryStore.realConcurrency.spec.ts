@@ -91,8 +91,20 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		const store = new TaskHistoryStore(storagePath)
 		try {
 			const backupPath = await seedHistoryBackup(storagePath, "recent-task", TASK_HISTORY_BACKUP_RETENTION_MS / 2)
+			const taskDir = path.dirname(backupPath)
+			const recentTimestamp = path.join(taskDir, `.history_item.json.bak_${Date.now()}_timestamp.tmp`)
+			const recentMtime = path.join(
+				taskDir,
+				`.history_item.json.bak_${Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2}_mtime.tmp`,
+			)
+			await fs.writeFile(recentTimestamp, "recent timestamp")
+			await fs.writeFile(recentMtime, "recent mtime")
+			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			await fs.utimes(recentTimestamp, old, old)
 			await store.initialize()
-			await expect(fs.access(backupPath)).resolves.toBeUndefined()
+			for (const retained of [backupPath, recentTimestamp, recentMtime]) {
+				await expect(fs.access(retained)).resolves.toBeUndefined()
+			}
 		} finally {
 			store.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
@@ -104,8 +116,19 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		const store = new TaskHistoryStore(storagePath)
 		try {
 			const backupPath = await seedHistoryBackup(storagePath, "stale-task", TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			const taskDir = path.dirname(backupPath)
+			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			const lookalikes = [
+				path.join(taskDir, `${path.basename(backupPath)}.extra`),
+				path.join(taskDir, `prefix${path.basename(backupPath)}`),
+			]
+			for (const lookalike of lookalikes) {
+				await fs.writeFile(lookalike, "not a managed backup")
+				await fs.utimes(lookalike, old, old)
+			}
 			await store.initialize()
 			await expect(fs.access(backupPath)).rejects.toMatchObject({ code: "ENOENT" })
+			for (const lookalike of lookalikes) await expect(fs.access(lookalike)).resolves.toBeUndefined()
 		} finally {
 			store.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })

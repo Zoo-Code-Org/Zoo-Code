@@ -261,7 +261,7 @@ describe("preferDirectTestFiles", () => {
 		const extension = PACKAGE_CONFIGS.find(({ id }) => id === "extension")
 		const related = [
 			"core/webview/__tests__/ClineProvider.spec.ts",
-			"__tests__/history-resume-delegation.spec.ts",
+			"__tests__/ClineProvider.history-resume-delegation.spec.ts",
 			"__tests__/unrelated.spec.ts",
 		]
 
@@ -269,8 +269,8 @@ describe("preferDirectTestFiles", () => {
 			preferDirectTestFiles(related, ["core/webview/ClineProvider.ts"], extension.testFilesBySource),
 			[
 				"core/webview/__tests__/ClineProvider.spec.ts",
-				"__tests__/history-resume-delegation.spec.ts",
-				"__tests__/provider-delegation.spec.ts",
+				"__tests__/ClineProvider.history-resume-delegation.spec.ts",
+				"__tests__/ClineProvider.delegation.spec.ts",
 			],
 		)
 		assert.deepEqual(

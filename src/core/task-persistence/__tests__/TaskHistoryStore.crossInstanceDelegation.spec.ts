@@ -1056,6 +1056,45 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 		}
 	})
 
+	it("reconciles cache when compromise is reported while releasing a caller-held lock", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-release-compromise-"))
+		const store = new TaskHistoryStore(storage)
+		const compromised = new Error("release reported compromise")
+		let compromiseError: Error | undefined
+
+		try {
+			await store.initialize()
+			const original = makeHistoryItem("parent", { status: "active", tokensIn: 1 })
+			await store.upsert(original)
+			const taskFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const peer = { ...original, tokensIn: 7 }
+			const release = Object.assign(
+				vi.fn(async () => {
+					await fs.writeFile(taskFile, JSON.stringify(peer))
+					compromiseError = compromised
+					throw compromised
+				}),
+				{ getCompromiseError: () => compromiseError },
+			)
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+
+			await expect(
+				store.withTaskFileLock("parent", (fileLock) =>
+					store.atomicReadAndUpdate("parent", (current) => ({ ...current, tokensIn: 3 }), {
+						fileLock,
+						storeLockAcquired: true,
+					}),
+				),
+			).rejects.toBe(compromised)
+
+			expect(JSON.parse(await fs.readFile(taskFile, "utf8"))).toMatchObject({ tokensIn: 7 })
+			expect(store.get("parent")).toMatchObject({ tokensIn: 7 })
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
 	it.each([
 		["disappears", undefined],
 		["becomes a primitive", 42],

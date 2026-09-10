@@ -15,7 +15,7 @@ import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./ta
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 export { DeltaRejectedError } from "./taskStoreConcurrency"
 
-export const TASK_HISTORY_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000
+export const TASK_HISTORY_BACKUP_RETENTION_MS = 86_400_000
 
 /**
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
@@ -895,9 +895,7 @@ export class TaskHistoryStore {
 					}
 				})
 			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-					console.error(`[TaskHistoryStore] Failed to prune stale backups for ${taskId}:`, error)
-				}
+				console.error(`[TaskHistoryStore] Failed to prune stale backups for ${taskId}:`, error)
 			}
 		}
 	}
