@@ -58,10 +58,12 @@ export function normalizeSuppliedImages(
 		maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
 	}: NormalizeSuppliedImagesOptions = {},
 ): string[] {
+	if (!images?.length) return []
+
 	const normalized: string[] = []
 	let totalSize = 0
 
-	for (const image of images ?? []) {
+	for (const image of images) {
 		if (normalized.length >= MAX_IMAGES_PER_MESSAGE) break
 
 		const match = image.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/)
