@@ -42,6 +42,9 @@ type TaskTestAccess = {
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
+	// Private on Task; the provider-owned mode write (ClineProvider.handleModeSwitch)
+	// sets it, and tests mirror that write through this helper.
+	_taskMode: string | undefined
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -1412,6 +1415,7 @@ describe("Cline", () => {
 					getMcpHub: vi.fn().mockReturnValue(undefined),
 					getSkillsManager: vi.fn().mockReturnValue(undefined),
 					say: vi.fn(),
+					handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 					postStateToWebview: vi.fn().mockResolvedValue(undefined),
 					postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 					postStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
@@ -1967,7 +1971,13 @@ describe("Cline", () => {
 					mode: "ask",
 					mcpEnabled: false,
 				} as unknown as ProviderState)
-				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
+					// Mirror ClineProvider.handleModeSwitch: after validation and persistence
+					// the provider owns the task's mode write.
+					if (targetTask) {
+						getTaskTestAccess(targetTask)._taskMode = mode
+					}
+				})
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -1975,6 +1985,10 @@ describe("Cline", () => {
 					startTask: false,
 				})
 				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				// Let the task's initial mode ("ask", from provider state) settle first, so the
+				// mode selected with the user message is the task's final mode write.
+				await task.getTaskMode()
 
 				await task.submitUserMessage("switch modes", undefined, "code")
 				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
@@ -1988,8 +2002,72 @@ describe("Cline", () => {
 
 				await task.attemptApiRequest().next()
 
-				expect(mockProvider.setMode).toHaveBeenCalledWith("code")
+				expect(mockProvider.handleModeSwitch).toHaveBeenCalledWith("code", task)
 				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
+			})
+
+			it("still delivers the user message when the mode switch fails", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const switchError = new Error("task history write failed")
+				vi.spyOn(mockProvider, "handleModeSwitch").mockRejectedValue(switchError)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await task.submitUserMessage("still delivered", undefined, "code")
+
+				// The mode-switch rejection is caught and logged locally...
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					`[Task#submitUserMessage] Mode switch to code failed (taskId=${task.taskId}):`,
+					switchError,
+				)
+				// ...and the pending ask is still answered, so the submitted text is not lost.
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("keeps the selected mode when the deferred mode initialization settles after the submission", async () => {
+				// The constructor-started initializeTaskMode() is still awaiting the
+				// provider state. submitUserMessage must let that initialization settle
+				// before switching: without the await, the deferred read resolves after
+				// the switch and clobbers the selected mode with the pre-switch value.
+				// One shared pending promise: both the mode and api-config initializers
+				// await provider.getState(), and a per-call promise would leave the mode
+				// initializer's own read pending forever.
+				let releaseState: (state: ProviderState) => void = () => {}
+				const deferredState = new Promise<ProviderState>((resolve) => {
+					releaseState = resolve
+				})
+				vi.spyOn(mockProvider, "getState").mockImplementation(() => deferredState)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
+					if (targetTask) {
+						getTaskTestAccess(targetTask)._taskMode = mode
+					}
+				})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				const submitted = task.submitUserMessage("select while initializing", undefined, "architect")
+
+				// Resolve the pending provider state only after the submission has started,
+				// carrying the provider's pre-switch mode.
+				releaseState({ mode: "ask" } as unknown as ProviderState)
+
+				await submitted
+
+				expect(mockProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+				// The explicit selection survives: the deferred initialization ran before,
+				// not after, the mode write.
+				expect(await task.getTaskMode()).toBe("architect")
 			})
 
 			it("stores a provider profile selected through submitUserMessage", async () => {
