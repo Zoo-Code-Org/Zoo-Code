@@ -1110,7 +1110,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(parentInstance.resumeAfterDelegation).not.toHaveBeenCalled()
 	})
 
-	it("serializes another provider's delegation commit behind the admitted parent continuation", async () => {
+	it("releases another provider's parent transition after resume invocation", async () => {
 		let releaseResume!: () => void
 		const resumeBlocked = new Promise<void>((resolve) => {
 			releaseResume = resolve
@@ -1178,43 +1178,39 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(commitC2).not.toHaveBeenCalled()
 		const scheduledContinuation = runScheduledContinuation()
 		await vi.waitFor(() => expect(parentInstance.resumeAfterDelegation).toHaveBeenCalledTimes(1))
-		expect(commitC2).not.toHaveBeenCalled()
+		await vi.waitFor(() => expect(commitC2).toHaveBeenCalledTimes(1))
 		releaseResume()
 		await scheduledContinuation
 		await providerBTransition
-		expect(commitC2).toHaveBeenCalledTimes(1)
 	})
 
-	it("revalidates persisted completion ownership immediately before resume", async () => {
-		const emit = vi.fn()
-		const log = vi.fn()
+	it("allows resumed work to re-enter the same parent transition queue", async () => {
 		const parentInstance = {
-			taskId: "parent-stale-owner",
+			taskId: "parent-reentrant",
 			abort: false,
 			abandoned: false,
-			resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+			resumeAfterDelegation: vi.fn<() => Promise<void>>(),
 			overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
 			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 		}
 		const parentItem = {
 			id: parentInstance.taskId,
 			status: "delegated",
-			awaitingChildId: "child-c1",
-			childIds: ["child-c1"],
+			awaitingChildId: "child-reentrant",
+			childIds: ["child-reentrant"],
 			ts: 1,
 			task: "Parent",
 			tokensIn: 0,
 			tokensOut: 0,
 			totalCost: 0,
 		}
-		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-c1", status: "active" }, parentItem)
-		let currentTask: object | undefined = { taskId: "child-c1" }
+		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-reentrant", status: "active" }, parentItem)
+		let currentTask: object | undefined = { taskId: "child-reentrant" }
 		let runScheduledContinuation!: () => Promise<void>
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
-			emit,
-			log,
+			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => currentTask),
 			removeClineFromStack: vi.fn(async () => {
 				currentTask = undefined
@@ -1228,25 +1224,116 @@ describe("History resume delegation - parent metadata transitions", () => {
 			},
 			taskHistoryStore,
 		})
+		const reentrantTransition = vi.fn()
+		parentInstance.resumeAfterDelegation.mockImplementation(async () => {
+			await (
+				ClineProvider.prototype as unknown as {
+					runDelegationTransition: (
+						this: ClineProvider,
+						parentTaskId: string,
+						fn: () => Promise<void>,
+					) => Promise<void>
+				}
+			).runDelegationTransition.call(provider, parentInstance.taskId, async () => reentrantTransition())
+		})
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
 		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
 			parentTaskId: parentInstance.taskId,
-			childTaskId: "child-c1",
-			completionResultSummary: "C1 done",
+			childTaskId: "child-reentrant",
+			completionResultSummary: "done",
 		})
-		taskHistoryStore.get.mockImplementation((id: string) =>
-			id === parentInstance.taskId
-				? ({ ...parentItem, awaitingChildId: "child-c2", delegatedToId: "child-c2" } as HistoryItem)
-				: undefined,
-		)
-
 		await runScheduledContinuation()
-		expect(parentInstance.resumeAfterDelegation).not.toHaveBeenCalled()
-		expect(emit).not.toHaveBeenCalledWith(RooCodeEventName.TaskDelegationResumed, parentInstance.taskId, "child-c1")
-		expect(log).toHaveBeenCalledWith(expect.stringContaining("Skipping stale parent continuation"))
+
+		expect(parentInstance.resumeAfterDelegation).toHaveBeenCalledTimes(1)
+		expect(reentrantTransition).toHaveBeenCalledTimes(1)
 	})
+
+	it.each([
+		{ name: "cancelled child", cancelled: true },
+		{ name: "aborted parent instance", instance: { abort: true } },
+		{ name: "abandoned parent instance", instance: { abandoned: true } },
+		{ name: "current parent instance mismatch", currentMismatch: true },
+		{ name: "missing persisted parent", missingPersisted: true },
+		{ name: "non-active persisted parent", persisted: { status: "delegated" as const } },
+		{ name: "wrong completing child", persisted: { completedByChildId: "child-c2" } },
+		{ name: "new awaited child", persisted: { awaitingChildId: "child-c2" } },
+		{ name: "new delegated child", persisted: { delegatedToId: "child-c2" } },
+	])(
+		"skips resume for $name during ownership revalidation",
+		async ({ cancelled, instance, currentMismatch, missingPersisted, persisted }) => {
+			const emit = vi.fn()
+			const log = vi.fn()
+			const parentInstance = {
+				taskId: "parent-stale-owner",
+				abort: instance?.abort ?? false,
+				abandoned: instance?.abandoned ?? false,
+				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+				overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+			}
+			const parentItem = {
+				id: parentInstance.taskId,
+				status: "delegated",
+				awaitingChildId: "child-c1",
+				childIds: ["child-c1"],
+				ts: 1,
+				task: "Parent",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-c1", status: "active" }, parentItem)
+			let currentTask: object | undefined = { taskId: "child-c1" }
+			let runScheduledContinuation!: () => Promise<void>
+			const cancelledDelegationChildIds = new Set<string>()
+			const provider = makeProviderStub({
+				contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+				getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+				emit,
+				log,
+				getCurrentTask: vi.fn(() => currentTask),
+				removeClineFromStack: vi.fn(async () => {
+					currentTask = undefined
+				}),
+				createTaskWithHistoryItem: vi.fn(async () => (currentTask = parentInstance)),
+				taskScheduler: {
+					schedule: vi.fn((_task, run) => {
+						runScheduledContinuation = run
+						return new Promise<void>(() => {})
+					}),
+				},
+				taskHistoryStore,
+				cancelledDelegationChildIds,
+			})
+
+			vi.mocked(readTaskMessages).mockResolvedValue([])
+			vi.mocked(readApiMessages).mockResolvedValue([])
+			await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: parentInstance.taskId,
+				childTaskId: "child-c1",
+				completionResultSummary: "C1 done",
+			})
+			const completedParent = taskHistoryStore.get(parentInstance.taskId)
+			if (cancelled) cancelledDelegationChildIds.add("child-c1")
+			if (currentMismatch) currentTask = { taskId: "other-parent-instance" }
+			taskHistoryStore.get.mockImplementation((id: string) =>
+				id === parentInstance.taskId && !missingPersisted
+					? ({ ...completedParent, ...persisted } as HistoryItem)
+					: undefined,
+			)
+
+			await runScheduledContinuation()
+			expect(parentInstance.resumeAfterDelegation).not.toHaveBeenCalled()
+			expect(emit).not.toHaveBeenCalledWith(
+				RooCodeEventName.TaskDelegationResumed,
+				parentInstance.taskId,
+				"child-c1",
+			)
+			expect(log).toHaveBeenCalledWith(expect.stringContaining("Skipping stale parent continuation"))
+		},
+	)
 
 	it("reopenParentFromDelegation propagates atomicUpdatePair failure — parent not reopened (RPD-04)", async () => {
 		const parentItem = {

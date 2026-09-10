@@ -4364,7 +4364,7 @@ export class ClineProvider
 				// so the completing child can release its permit without deadlocking.
 				const continuation = this.runDelegationTransition(parentTaskId, async () => {
 					await continuationAdmitted
-					if (!schedulerAdmitted) return
+					if (!schedulerAdmitted) return {}
 					await this.taskHistoryStore.invalidate(parentTaskId)
 					const persistedParent = this.taskHistoryStore.get(parentTaskId)
 					const currentTask = this.getCurrentTask()
@@ -4381,28 +4381,32 @@ export class ClineProvider
 						this.log(
 							`[reopenParentFromDelegation] Skipping stale parent continuation for ${parentTaskId} after child ${childTaskId}`,
 						)
-						return
+						return {}
 					}
 
-					try {
-						await parentInstance.resumeAfterDelegation()
-						try {
-							this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-						} catch {
-							// non-fatal
-						}
-					} catch (error) {
-						const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
-						this.log(`[reopenParentFromDelegation] ${message}`)
-						await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
-						throw error
-					}
+					// Keep the run promise inside an object so the transition queue does not
+					// assimilate it and retain the parent key for the full resumed task loop.
+					return { runPromise: parentInstance.resumeAfterDelegation() }
 				})
 				void this.taskScheduler
 					.schedule(parentInstance, async () => {
 						schedulerAdmitted = true
 						admitContinuation()
-						await continuation
+						const { runPromise } = await continuation
+						if (!runPromise) return
+						try {
+							await runPromise
+							try {
+								this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+							} catch {
+								// non-fatal
+							}
+						} catch (error) {
+							const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
+							this.log(`[reopenParentFromDelegation] ${message}`)
+							await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
+							throw error
+						}
 					})
 					.then(admitContinuation, (error) => {
 						admitContinuation()

@@ -32,12 +32,15 @@ type ModelState = {
 	childPermit: "free" | "held" | "released"
 	parentQueued: boolean
 	parentPublished: boolean
+	parentResumeStarted: boolean
 	parentResumed: boolean
 	redelegationOpened: boolean
 	priorPermitReleased: boolean
 	parentTransitionOwner?: Generation
 	pendingParentContinuations: Generation[]
 	resumedContinuation?: Generation
+	resumeInvocationOwner?: Generation
+	resumeInvocationPermitReleased?: boolean
 	earlyRedelegation: boolean
 	continuationPublished: boolean
 	publishedTask?: PublishedTask
@@ -46,7 +49,7 @@ type ModelState = {
 type Transition = { name: string; kind: string; next: ModelState }
 type TraceStep = { action: string; state: ModelState }
 
-const MAX_DEPTH = 14
+const MAX_DEPTH = 15
 const MAX_STATES = 20_000
 const EXPECTED_ACTIONS = [
 	"claim",
@@ -57,6 +60,7 @@ const EXPECTED_ACTIONS = [
 	"publish-parent",
 	"release-permit",
 	"resume-parent",
+	"settle-parent",
 	"redelegate",
 ] as const
 const LANDMARKS = {
@@ -68,10 +72,14 @@ const LANDMARKS = {
 		state.startedProviders.length === 1 && state.childPermit === "held",
 	"completed-parent-queued": (state: ModelState) => state.parentQueued && !state.parentPublished,
 	"parent-published-before-release": (state: ModelState) => state.parentPublished && state.childPermit === "held",
-	"permit-released-before-resume": (state: ModelState) => state.childPermit === "released" && !state.parentResumed,
+	"permit-released-before-resume": (state: ModelState) =>
+		state.childPermit === "released" && !state.parentResumeStarted,
+	"parent-resume-started": (state: ModelState) => state.parentResumeStarted,
 	"parent-resumed": (state: ModelState) => state.parentResumed,
 	"bounded-redelegation": (state: ModelState) => state.generation === 1,
 	"second-generation-start": (state: ModelState) => state.generation === 1 && state.startedProviders.length === 1,
+	"resumed-run-with-new-transition": (state: ModelState) =>
+		state.resumedContinuation === 0 && state.parentTransitionOwner === 1,
 } satisfies Record<string, (state: ModelState) => boolean>
 
 const FIXED_POLICY: Policy = { name: "fixed" }
@@ -329,22 +337,33 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 	if (
 		pendingContinuation !== undefined &&
 		state.continuationPublished &&
-		!state.parentResumed &&
+		!state.parentResumeStarted &&
 		(state.childPermit === "released" || policy.resumeBeforePermitRelease)
 	) {
 		result.push(
 			action(`resume-parent(g${pendingContinuation})`, "resume-parent", state, (next) => {
-				next.parentResumed = true
+				next.parentResumeStarted = true
 				next.resumedContinuation = pendingContinuation
+				next.resumeInvocationOwner = state.parentTransitionOwner
+				next.resumeInvocationPermitReleased = state.childPermit === "released"
 				next.pendingParentContinuations = state.pendingParentContinuations.slice(1)
 				if (state.parentTransitionOwner === pendingContinuation) next.parentTransitionOwner = undefined
+			}),
+		)
+	}
+	if (state.resumedContinuation !== undefined) {
+		result.push(
+			action(`settle-parent(g${state.resumedContinuation})`, "settle-parent", state, (next) => {
+				next.parentResumed = true
+				next.resumedContinuation = undefined
+				next.resumeInvocationOwner = undefined
 			}),
 		)
 	}
 	if (
 		state.generation === 0 &&
 		!state.redelegationOpened &&
-		((state.parentResumed && state.childPermit === "released") ||
+		((state.parentResumeStarted && state.childPermit === "released") ||
 			(policy.releaseParentTransitionAfterPublication &&
 				state.parentPublished &&
 				state.parentTransitionOwner === undefined) ||
@@ -364,8 +383,6 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 				next.childPermit = policy.releaseParentTransitionAfterPublication ? state.childPermit : "free"
 				next.parentQueued = false
 				next.parentPublished = false
-				next.parentResumed = false
-				next.resumedContinuation = undefined
 				next.redelegationOpened = true
 				next.priorPermitReleased = state.childPermit === "released"
 				next.earlyRedelegation =
@@ -386,17 +403,13 @@ function invariantViolations(state: ModelState): string[] {
 			violations.push("child started without exact commit")
 		}
 	}
-	if (state.parentResumed && state.childPermit !== "released") {
+	if (state.parentResumeStarted && !state.resumeInvocationPermitReleased) {
 		violations.push("parent resumed before child permit release")
 	}
 	if (state.generation === 1 && !state.priorPermitReleased) {
 		if (!state.earlyRedelegation) violations.push("parent redelegated before child permit release")
 	}
-	if (
-		state.resumedContinuation !== undefined &&
-		state.parentTransitionOwner !== undefined &&
-		state.resumedContinuation !== state.parentTransitionOwner
-	) {
+	if (state.resumedContinuation !== undefined && state.resumedContinuation !== state.resumeInvocationOwner) {
 		violations.push("stale parent continuation crossed a newer transition")
 	}
 	if (state.parentPublished && state.publishedTask !== "parent") {
@@ -426,6 +439,7 @@ function initialState(): ModelState {
 		childPermit: "free",
 		parentQueued: false,
 		parentPublished: false,
+		parentResumeStarted: false,
 		parentResumed: false,
 		redelegationOpened: false,
 		priorPermitReleased: false,
