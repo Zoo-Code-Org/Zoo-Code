@@ -16,7 +16,10 @@
 			"preLaunchTask": "${defaultBuildTask}",
 			"env": {
 				"NODE_ENV": "development",
-				"VSCODE_DEBUG_MODE": "true"
+				"VSCODE_DEBUG_MODE": "true",
+				// Dev-only: registers the `zoo-code.openInBrowser` command (socket.io
+				// browser bridge for render debugging). See src/activate/registerCommands.ts.
+				"ROO_BROWSER_BRIDGE": "1"
 			},
 			"resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
 			"presentation": {
