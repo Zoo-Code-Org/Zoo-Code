@@ -258,7 +258,7 @@ describe("lockJsonFile", () => {
 			expect(files).toHaveLength(2)
 			expect(backupFile).toBeDefined()
 			expect(JSON.parse(await fs.readFile(path.join(tempDir, backupFile!), "utf8"))).toEqual(initial)
-			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[Catch] Retaining backup"), compromised)
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[Catch] Retaining backup"))
 		} finally {
 			consoleError.mockRestore()
 			await fs.rm(tempDir, { recursive: true, force: true })

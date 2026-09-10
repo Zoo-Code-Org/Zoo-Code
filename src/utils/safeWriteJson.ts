@@ -188,13 +188,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	} catch (originalError) {
 		operationFailed = true
 		operationError = originalError
+		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 		const compromiseError = releaseLock.getCompromiseError?.()
-		console.error(
-			compromiseError && actualTempBackupFilePath
-				? `Operation failed for ${absoluteFilePath}: [Original Error Caught]; [Catch] Retaining backup ${actualTempBackupFilePath} after lock compromise`
-				: `Operation failed for ${absoluteFilePath}: [Original Error Caught]`,
-			originalError,
-		)
+		if (compromiseError && actualTempBackupFilePath) {
+			console.error(`[Catch] Retaining backup ${actualTempBackupFilePath} after lock compromise`)
+		}
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
