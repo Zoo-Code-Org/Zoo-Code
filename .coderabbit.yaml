@@ -156,7 +156,7 @@ reviews:
         description:
             mode: warning
         issue_assessment:
-            mode: warning
+            mode: error
         custom_checks:
             - name: Regression evidence
               mode: error
