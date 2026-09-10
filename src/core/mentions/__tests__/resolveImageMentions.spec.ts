@@ -1,6 +1,6 @@
 import * as path from "path"
 
-import { resolveImageMentions } from "../resolveImageMentions"
+import { normalizeSuppliedImages, resolveImageMentions } from "../resolveImageMentions"
 
 vi.mock("../../tools/helpers/imageHelpers", () => ({
 	isSupportedImageFormat: vi.fn((ext: string) =>
@@ -191,5 +191,16 @@ describe("resolveImageMentions", () => {
 		})
 
 		expect(mockValidateImage).toHaveBeenCalledWith(expect.any(String), true, 10, 50, 0)
+	})
+})
+
+describe("normalizeSuppliedImages", () => {
+	it("should enforce per-image and total decoded size limits", () => {
+		const image = `data:image/png;base64,${Buffer.from("four bytes").toString("base64")}`
+		const secondImage = `data:image/png;base64,${Buffer.from("nine bytes").toString("base64")}`
+		const sizeInMB = Buffer.byteLength("four bytes") / (1024 * 1024)
+
+		expect(normalizeSuppliedImages([image], { maxImageFileSize: sizeInMB / 2 })).toEqual([])
+		expect(normalizeSuppliedImages([image, secondImage], { maxTotalImageSize: sizeInMB * 1.5 })).toEqual([image])
 	})
 })

@@ -12,8 +12,8 @@ describe("API - SendMessage Command", () => {
 	let api: API
 	let mockOutputChannel: vscode.OutputChannel
 	let mockProvider: ClineProvider
-	let mockPostMessageToWebview: ReturnType<typeof vi.fn<(...args: any[]) => any>>
-	let mockLog: ReturnType<typeof vi.fn<(...args: any[]) => void>>
+	let mockPostMessageToWebview: ReturnType<typeof vi.fn<ClineProvider["postMessageToWebview"]>>
+	let mockLog: ReturnType<typeof vi.fn<(message: string) => void>>
 
 	beforeEach(() => {
 		// Setup mocks
@@ -21,10 +21,11 @@ describe("API - SendMessage Command", () => {
 			appendLine: vi.fn(),
 		} as unknown as vscode.OutputChannel
 
-		mockPostMessageToWebview = vi.fn<(...args: any[]) => any>().mockResolvedValue(undefined)
+		mockPostMessageToWebview = vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined)
 
 		mockProvider = {
 			context: {} as vscode.ExtensionContext,
+			contextProxy: { getValues: vi.fn().mockReturnValue({}) },
 			postMessageToWebview: mockPostMessageToWebview,
 			on: vi.fn(),
 			getCurrentTaskStack: vi.fn().mockReturnValue([]),
@@ -32,12 +33,12 @@ describe("API - SendMessage Command", () => {
 			viewLaunched: true,
 		} as unknown as ClineProvider
 
-		mockLog = vi.fn<(...args: any[]) => void>()
+		mockLog = vi.fn<(message: string) => void>()
 
 		// Create API instance with logging enabled for testing
 		api = new API(mockOutputChannel, mockProvider, undefined, true)
 		// Override the log method to use our mock
-		;(api as any).log = mockLog
+		Object.defineProperty(api, "log", { value: mockLog })
 	})
 
 	it("should handle SendMessage command with text only", async () => {
@@ -59,7 +60,7 @@ describe("API - SendMessage Command", () => {
 	it("should enqueue directly when the current task is streaming", async () => {
 		const addMessage = vi.fn()
 		const messageText = "Use this before completing"
-		const images = ["data:image/png;base64,image1data"]
+		const images = ["data:image/png;base64,aW1hZ2Ux"]
 		const currentTask = {
 			isStreaming: true,
 			messageQueueService: { addMessage },
@@ -74,7 +75,7 @@ describe("API - SendMessage Command", () => {
 
 	it("should enqueue image-only input when the current task is streaming", async () => {
 		const addMessage = vi.fn()
-		const images = ["data:image/png;base64,image1data"]
+		const images = ["data:image/png;base64,aW1hZ2Ux"]
 		mockProvider.getCurrentTask = vi.fn().mockReturnValue({
 			isStreaming: true,
 			messageQueueService: { addMessage },
@@ -84,6 +85,34 @@ describe("API - SendMessage Command", () => {
 
 		expect(addMessage).toHaveBeenCalledWith("", images)
 		expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("should cap streaming input at 20 images before enqueueing", async () => {
+		const addMessage = vi.fn()
+		const images = Array.from(
+			{ length: 21 },
+			(_, index) => `data:image/png;base64,${Buffer.from(`image-${index}`).toString("base64")}`,
+		)
+		mockProvider.getCurrentTask = vi.fn().mockReturnValue({
+			isStreaming: true,
+			messageQueueService: { addMessage },
+		})
+
+		await api.sendMessage("Review these", images)
+
+		expect(addMessage).toHaveBeenCalledWith("Review these", images.slice(0, 20))
+	})
+
+	it("should discard malformed streaming image data before enqueueing", async () => {
+		const addMessage = vi.fn()
+		mockProvider.getCurrentTask = vi.fn().mockReturnValue({
+			isStreaming: true,
+			messageQueueService: { addMessage },
+		})
+
+		await api.sendMessage("Continue safely", ["not-an-image", "data:image/png;base64,%%%"])
+
+		expect(addMessage).toHaveBeenCalledWith("Continue safely", [])
 	})
 
 	it("should retain webview routing when the current task is not streaming", async () => {

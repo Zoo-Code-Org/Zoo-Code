@@ -26,6 +26,7 @@ import { IpcServer } from "@roo-code/ipc"
 import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import { normalizeSuppliedImages } from "../core/mentions/resolveImageMentions"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { openClineInNewTab } from "../activate/registerCommands"
@@ -277,7 +278,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// only relay this message back as queueMessage asynchronously, so enqueue
 		// it in the extension host instead of racing task completion.
 		if (currentTask?.isStreaming) {
-			currentTask.messageQueueService.addMessage(text ?? "", images)
+			const { maxImageFileSize, maxTotalImageSize } = this.sidebarProvider.contextProxy.getValues()
+			const normalizedImages = normalizeSuppliedImages(images, { maxImageFileSize, maxTotalImageSize })
+			currentTask.messageQueueService.addMessage(text ?? "", normalizedImages)
 			return
 		}
 

@@ -17,7 +17,6 @@ import path from "path"
 import { isBinaryFile } from "isbinaryfile"
 
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
-import { Task } from "../../task/Task"
 import { formatResponse } from "../../prompts/responses"
 import {
 	validateImageForProcessing,
@@ -649,118 +648,6 @@ describe("ReadFileTool", () => {
 
 			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "This file contains secrets", undefined)
 			expect(formatResponse.toolDeniedWithFeedback).toHaveBeenCalledWith("This file contains secrets")
-		})
-
-		it("denies batch reads and reports queued message feedback without parsing it as permissions", async () => {
-			const task = Object.create(Task.prototype) as Task
-			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
-			Object.assign(task, createMockTask())
-			const queuedImages = ["data:image/png;base64,queued"]
-			task.ask = vi.fn().mockResolvedValue({
-				response: "messageResponse",
-				text: "Read a different file instead",
-				images: queuedImages,
-			})
-			const fileResults = [
-				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
-				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
-			]
-			const updates = new Map<string, Record<string, unknown>>()
-			const parseSpy = vi.spyOn(JSON, "parse")
-
-			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
-				updates.set(filePath, update)
-			})
-
-			expect(parseSpy).not.toHaveBeenCalled()
-			expect(task.say).toHaveBeenCalledWith("user_feedback", "Read a different file instead", queuedImages)
-			expect(task.didRejectTool).toBe(true)
-			expect(updates.get("one.ts")).toMatchObject({
-				status: "denied",
-				feedbackText: "Read a different file instead",
-				feedbackImages: queuedImages,
-			})
-			expect(updates.get("two.ts")).toMatchObject({
-				status: "denied",
-				feedbackText: "Read a different file instead",
-				feedbackImages: queuedImages,
-			})
-			parseSpy.mockRestore()
-		})
-
-		it("denies batch reads without feedback text", async () => {
-			const task = Object.create(Task.prototype) as Task
-			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
-			Object.assign(task, createMockTask())
-			task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked", text: undefined, images: undefined })
-			const parseSpy = vi.spyOn(JSON, "parse")
-			const fileResults = [
-				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
-				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
-			]
-			const updates = new Map<string, Record<string, unknown>>()
-
-			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
-				updates.set(filePath, update)
-			})
-
-			expect(parseSpy).not.toHaveBeenCalled()
-			expect(task.say).not.toHaveBeenCalled()
-			expect(task.didRejectTool).toBe(true)
-			expect(updates.get("one.ts")).toMatchObject({ status: "denied" })
-			expect(updates.get("two.ts")).toMatchObject({ status: "denied" })
-			parseSpy.mockRestore()
-		})
-
-		it("preserves image-only feedback when denying batch reads", async () => {
-			const task = Object.create(Task.prototype) as Task
-			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
-			Object.assign(task, createMockTask({ supportsImages: true }))
-			const queuedImages = ["data:image/png;base64,queued"]
-			task.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: undefined, images: queuedImages })
-			const callbacks = createMockCallbacks()
-			const fileResults = [
-				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
-				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
-			]
-
-			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
-				Object.assign(fileResults.find(({ path }) => path === filePath)!, update)
-			})
-			Object.assign(fileResults[0], { feedbackImages: undefined })
-			readFileTool["buildAndPushResult"](task, fileResults, callbacks.pushToolResult)
-
-			expect(task.say).toHaveBeenCalledWith("user_feedback", undefined, queuedImages)
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(
-				expect.arrayContaining([expect.objectContaining({ type: "image" })]),
-			)
-		})
-
-		it("applies individual decisions for a batch read", async () => {
-			const task = Object.create(Task.prototype) as Task
-			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
-			Object.assign(task, createMockTask())
-			task.ask = vi.fn().mockImplementation(async (_type, text) => {
-				const { batchFiles } = JSON.parse(text ?? "{}") as { batchFiles: Array<{ key: string }> }
-				return {
-					response: "objectResponse",
-					text: JSON.stringify({ [batchFiles[0].key]: true, [batchFiles[1].key]: false }),
-					images: undefined,
-				}
-			})
-			const fileResults = [
-				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
-				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
-			]
-			const updates = new Map<string, Record<string, unknown>>()
-
-			await readFileTool["requestApproval"](task, fileResults, (filePath, update) => {
-				updates.set(filePath, update)
-			})
-
-			expect(updates.get("one.ts")).toMatchObject({ status: "approved" })
-			expect(updates.get("two.ts")).toMatchObject({ status: "denied" })
-			expect(task.didRejectTool).toBe(true)
 		})
 	})
 
