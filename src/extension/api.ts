@@ -8,11 +8,13 @@ import pWaitFor from "p-wait-for"
 
 import {
 	type RooCodeAPI,
+	type GlobalState,
 	type RooCodeSettings,
 	type RooCodeEvents,
 	type ProviderSettings,
 	type ProviderSettingsEntry,
 	type TaskEvent,
+	type TaskLike,
 	type CreateTaskOptions,
 	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
@@ -25,19 +27,32 @@ import {
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
-import type { Mode } from "../shared/modes"
+import { getAllModes, type Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import type { Task } from "../core/task/Task"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
-import { openClineInNewTab } from "../activate/registerCommands"
+import { createClineTabPanel } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
+
+type TaskAskController = {
+	approveAsk(): void
+	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
+}
+
+type RegisteredTask = {
+	task: TaskAskController
+	provider: ClineProvider
+}
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
+	private readonly tasksById = new Map<string, RegisteredTask>()
+	private readonly listenersRegisteredFor = new Set<ClineProvider>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -175,19 +190,24 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
-		configuration: RooCodeSettings
+		configuration?: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}) {
 		let provider: ClineProvider
 
 		if (newTab) {
-			await vscode.commands.executeCommand("workbench.action.files.revert")
-			await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			if (!preserveOpenTabs) {
+				await vscode.commands.executeCommand("workbench.action.files.revert")
+				await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			}
 
-			provider = await openClineInNewTab({ context: this.context, outputChannel: this.outputChannel })
+			// A fresh tab: reusing the tracked tab would evict the task it is already serving.
+			provider = await createClineTabPanel({ context: this.context, outputChannel: this.outputChannel })
 			this.registerListeners(provider)
 		} else {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
@@ -362,6 +382,69 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		this.sidebarProvider.getCurrentTask()?.approveAsk()
 	}
 
+	/**
+	 * Approves the pending ask for a specific task by its ID.
+	 *
+	 * @returns Whether a registered task with the given ID was found and approved.
+	 */
+	public async approveTaskAsk(taskId: string): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		entry.task.approveAsk()
+		return true
+	}
+
+	/**
+	 * Answers a task's pending ask with a follow-up suggestion, optionally switching that
+	 * task's provider to the suggestion's mode before responding.
+	 *
+	 * @returns Whether a registered task with the given ID was found and answered.
+	 */
+	public async selectTaskFollowupSuggestion({
+		taskId,
+		answer,
+		mode,
+	}: {
+		taskId: string
+		answer: string
+		mode?: string
+	}): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		if (mode) {
+			try {
+				const { customModes } = await entry.provider.getState()
+				const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
+
+				if (isValidMode) {
+					// entry.task is the registered Task instance (TaskAskController narrows it
+					// to the ask-response surface); pass it explicitly so the switch is scoped to
+					// this task rather than the provider's currently focused task.
+					await entry.provider.handleModeSwitch(mode, entry.task as Task)
+				} else {
+					this.log(`[API#selectTaskFollowupSuggestion] ignoring unknown mode "${mode}" for task ${taskId}`)
+				}
+			} catch (error) {
+				// A failed mode switch must not swallow the follow-up answer: the task's
+				// pending ask would otherwise stay unanswered.
+				this.log(
+					`[API#selectTaskFollowupSuggestion] mode switch failed for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
+
+		entry.task.handleWebviewAskResponse("messageResponse", answer)
+		return true
+	}
+
 	public isReady() {
 		return this.sidebarProvider.viewLaunched
 	}
@@ -388,7 +471,29 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	/**
+	 * Removes a task's registration only if the registered entry still belongs to this
+	 * task instance: a replaced instance reusing the same taskId must not be dropped by
+	 * the previous instance's teardown events.
+	 */
+	private removeRegisteredTask(task: TaskLike): void {
+		const entry = this.tasksById.get(task.taskId)
+
+		// The stored controller is this exact instance (registered above with a cast to
+		// the ask-response surface), so reference equality is the right identity check.
+		if (entry?.task === (task as unknown as TaskAskController)) {
+			this.tasksById.delete(task.taskId)
+		}
+	}
+
 	private registerListeners(provider: ClineProvider) {
+		// A duplicated registration would re-emit every task event once per copy of the
+		// handler, so each provider is wired exactly once.
+		if (this.listenersRegisteredFor.has(provider)) {
+			return
+		}
+		this.listenersRegisteredFor.add(provider)
+
 		provider.on(RooCodeEventName.TaskCompleted, async (taskId, tokenUsage, toolUsage) => {
 			const historyItem = provider.taskHistoryStore.get(taskId)
 			this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage, {
@@ -401,6 +506,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		})
 
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
+			this.tasksById.set(task.taskId, { task: task as unknown as TaskAskController, provider })
+
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -408,8 +515,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				await this.fileLog(`[${new Date().toISOString()}] taskStarted -> ${task.taskId}\n`)
 			})
 
+			// #1452 moved the TaskCompleted emit and file-log to the provider-level
+			// listener above. This per-task listener remains only for the reference-safe
+			// registry removal: the provider-level handler receives the taskId but not the
+			// task instance, so it cannot verify the entry still belongs to this instance.
+			task.on(RooCodeEventName.TaskCompleted, () => {
+				this.removeRegisteredTask(task)
+			})
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
+				this.removeRegisteredTask(task)
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
@@ -418,6 +533,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskUnfocused, () => {
 				this.emit(RooCodeEventName.TaskUnfocused, task.taskId)
+				this.removeRegisteredTask(task)
 			})
 
 			task.on(RooCodeEventName.TaskActive, () => {
@@ -559,13 +675,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	// Global Settings Management
 
 	public getConfiguration(): RooCodeSettings {
+		// getValues() merges view-local state, whose apiConfiguration is a nested object that
+		// can carry provider secrets (e.g. apiKey). Flatten the provider settings onto the top
+		// level (the pre-existing flat shape) so the secret filter removes them before return.
+		const values = this.sidebarProvider.getValues()
+		const { apiConfiguration, ...rest } = values
 		return Object.fromEntries(
-			Object.entries(this.sidebarProvider.getValues()).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries({ ...rest, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
 		)
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.contextProxy.setValues(values)
+		await this.sidebarProvider.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
 			await Promise.all(
@@ -575,6 +696,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			)
 		}
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
+		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
 	public setTerminalProfile(name: string | undefined): void {
