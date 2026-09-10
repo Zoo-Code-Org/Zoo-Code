@@ -302,9 +302,9 @@ describe("opencode-go registry", () => {
 					contextWindow: 1_000_000,
 					supportsImages: true,
 					supportsReasoningEffort: ["disable", "low", "high", "max"],
-					inputPrice: 0.22,
-					outputPrice: 0.66,
-					cacheReadsPrice: 0.007,
+					inputPrice: 0.44,
+					outputPrice: 1.32,
+					cacheReadsPrice: 0.014,
 				},
 			},
 			{

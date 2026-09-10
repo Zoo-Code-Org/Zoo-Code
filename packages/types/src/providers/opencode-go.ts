@@ -474,9 +474,10 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsReasoningEffort: ["disable", "low", "high", "max"],
 		reasoningEffort: "high",
 		preserveReasoning: true,
-		inputPrice: 0.22,
-		outputPrice: 0.66,
-		cacheReadsPrice: 0.007,
+		// Go has weekday peak/off-peak pricing; use peak rates until ModelInfo can express schedules.
+		inputPrice: 0.44,
+		outputPrice: 1.32,
+		cacheReadsPrice: 0.014,
 		description:
 			"DeepSeek V4 Flash Vision Experimental is a fast multimodal reasoning model with a 1M context window. Available via the Opencode Go plan.",
 	},
