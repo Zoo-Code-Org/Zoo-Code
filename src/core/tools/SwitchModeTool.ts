@@ -2,7 +2,7 @@ import delay from "delay"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
-import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
+import { getModeBySlug } from "../../shared/modes"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 
@@ -39,7 +39,9 @@ export class SwitchModeTool extends BaseTool<"switch_mode"> {
 			}
 
 			// Check if already in requested mode
-			const currentMode = (await task.providerRef.deref()?.getState())?.mode ?? defaultModeSlug
+			// the task's own mode (awaits taskModeReady and applies the default slug) instead of the provider
+			// state, which may be stale or focused on another task.
+			const currentMode = await task.getTaskMode()
 
 			if (currentMode === mode_slug) {
 				task.recordToolError("switch_mode")
@@ -55,8 +57,9 @@ export class SwitchModeTool extends BaseTool<"switch_mode"> {
 				return
 			}
 
-			// Switch the mode using shared handler
-			await task.providerRef.deref()?.handleModeSwitch(mode_slug)
+			// Switch the mode using shared handler. Pass this task explicitly so the
+			// switch is scoped to it rather than the provider's currently focused task.
+			await task.providerRef.deref()?.handleModeSwitch(mode_slug, task)
 
 			pushToolResult(
 				`Successfully switched from ${getModeBySlug(currentMode)?.name ?? currentMode} mode to ${
