@@ -225,7 +225,7 @@ describe("lockJsonFile", () => {
 		}
 	})
 
-	it("does not restore a backup over another owner's target after compromise", async () => {
+	it("retains the backup without restoring it over another owner's target after compromise", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
 		const initial = { owner: "original" }
@@ -253,7 +253,12 @@ describe("lockJsonFile", () => {
 			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual(replacement)
 			expect(renameMock).toHaveBeenCalledOnce()
 			expect(underlyingRelease).toHaveBeenCalledOnce()
-			expect(await fs.readdir(tempDir)).toEqual(["history_item.json"])
+			const files = await fs.readdir(tempDir)
+			const backupFile = files.find((file) => file.startsWith(".history_item.json.bak_"))
+			expect(files).toHaveLength(2)
+			expect(backupFile).toBeDefined()
+			expect(JSON.parse(await fs.readFile(path.join(tempDir, backupFile!), "utf8"))).toEqual(initial)
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[Catch] Retaining backup"), compromised)
 		} finally {
 			consoleError.mockRestore()
 			await fs.rm(tempDir, { recursive: true, force: true })

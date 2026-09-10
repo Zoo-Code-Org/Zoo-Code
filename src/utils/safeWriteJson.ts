@@ -223,13 +223,21 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
 		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
+			const compromiseError = releaseLock.getCompromiseError?.()
+			if (compromiseError) {
 				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
+					`[Catch] Retaining backup ${actualTempBackupFilePath} after lock compromise for ${absoluteFilePath}:`,
+					compromiseError,
 				)
+			} else {
+				try {
+					await fs.unlink(actualTempBackupFilePath)
+				} catch (cleanupError) {
+					console.error(
+						`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
+						cleanupError,
+					)
+				}
 			}
 		}
 	} finally {
