@@ -115,6 +115,19 @@ describe("API - SendMessage Command", () => {
 		expect(addMessage).toHaveBeenCalledWith("Continue safely", [])
 	})
 
+	it("should apply configured image size limits before streaming enqueue", async () => {
+		const addMessage = vi.fn()
+		mockProvider.contextProxy.getValues = vi.fn().mockReturnValue({ maxImageFileSize: 0 })
+		mockProvider.getCurrentTask = vi.fn().mockReturnValue({
+			isStreaming: true,
+			messageQueueService: { addMessage },
+		})
+
+		await api.sendMessage("Continue safely", ["data:image/png;base64,aW1hZ2U="])
+
+		expect(addMessage).toHaveBeenCalledWith("Continue safely", [])
+	})
+
 	it("should retain webview routing when the current task is not streaming", async () => {
 		const addMessage = vi.fn()
 		const messageText = "Answer the current ask"

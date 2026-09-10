@@ -195,12 +195,48 @@ describe("resolveImageMentions", () => {
 })
 
 describe("normalizeSuppliedImages", () => {
+	it("should accept supported image data URIs and reject malformed or unsupported values", () => {
+		const payload = Buffer.from("image").toString("base64")
+
+		expect(normalizeSuppliedImages()).toEqual([])
+		expect(
+			normalizeSuppliedImages([
+				`data:image/svg+xml;base64,${payload}`,
+				`data:image/x-icon;base64,${payload}`,
+				`data:image/png;base64,${payload}`,
+				`prefix-data:image/png;base64,${payload}`,
+				`data:image/png;base64,${payload}-suffix`,
+				"data:image/png;base64,YQ=",
+				`data:image/unsupported;base64,${payload}`,
+			]),
+		).toEqual([
+			`data:image/svg+xml;base64,${payload}`,
+			`data:image/x-icon;base64,${payload}`,
+			`data:image/png;base64,${payload}`,
+		])
+	})
+
 	it("should enforce per-image and total decoded size limits", () => {
 		const image = `data:image/png;base64,${Buffer.from("four bytes").toString("base64")}`
 		const secondImage = `data:image/png;base64,${Buffer.from("nine bytes").toString("base64")}`
 		const sizeInMB = Buffer.byteLength("four bytes") / (1024 * 1024)
 
 		expect(normalizeSuppliedImages([image], { maxImageFileSize: sizeInMB / 2 })).toEqual([])
+		expect(normalizeSuppliedImages([image], { maxImageFileSize: sizeInMB })).toEqual([image])
 		expect(normalizeSuppliedImages([image, secondImage], { maxTotalImageSize: sizeInMB * 1.5 })).toEqual([image])
+		expect(normalizeSuppliedImages([image], { maxTotalImageSize: sizeInMB })).toEqual([image])
+	})
+
+	it("should apply supplied-image limits through resolveImageMentions", async () => {
+		const image = `data:image/png;base64,${Buffer.from("image").toString("base64")}`
+
+		const result = await resolveImageMentions({
+			text: "No mentions",
+			images: [image],
+			cwd: "/workspace",
+			maxImageFileSize: 0,
+		})
+
+		expect(result.images).toEqual([])
 	})
 })
