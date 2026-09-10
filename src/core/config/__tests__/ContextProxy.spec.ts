@@ -721,4 +721,20 @@ Output only the summary of the conversation so far, without any additional comme
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
 	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
+		})
+	})
 })

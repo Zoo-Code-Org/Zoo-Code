@@ -332,6 +332,97 @@ describe("importExport", () => {
 			])
 		})
 
+		it("should not apply imported viewStates to the context proxy", async () => {
+			const fileContent = JSON.stringify({
+				providerProfiles: {
+					currentApiConfigName: "test",
+					apiConfigs: {
+						test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+					},
+				},
+				globalSettings: {
+					mode: "code",
+					viewStates: {
+						"stable-sidebar-view": {
+							mode: "architect",
+							currentApiConfigName: "profile-a",
+							updatedAt: 1,
+						},
+					},
+				},
+			})
+
+			;(fs.readFile as Mock).mockResolvedValue(fileContent)
+
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+				{ name: "default", id: "default-id", apiProvider: providerIdentifiers.anthropic },
+			])
+
+			// Stateful write-tracking proxy: every write path (setValues, setValue,
+			// setProviderSettings) is merged into `state` and recorded in `writes`,
+			// so the assertions below cover every payload rather than one call.
+			// Plain-function doubles cast once, matching the file-level mock pattern.
+			const makeStatefulProxy = (seed: Record<string, unknown>) => {
+				const state: Record<string, unknown> = { ...seed }
+				const writes: Record<string, unknown>[] = []
+				const record = (values: Record<string, unknown>) => {
+					writes.push(values)
+					Object.assign(state, values)
+				}
+				return {
+					state,
+					writes,
+					proxy: {
+						setValues: vi.fn(async (values: Record<string, unknown>) => record(values)),
+						setValue: vi.fn(async (key: string, value: unknown) => record({ [key]: value })),
+						setProviderSettings: vi.fn(async (settings: Record<string, unknown>) => record(settings)),
+					} as unknown as ReturnType<typeof vi.mocked<ContextProxy>>,
+				}
+			}
+
+			// This machine already has view state: it must survive the import untouched.
+			const existingViewStates = {
+				"existing-view": { mode: "code", currentApiConfigName: "default", updatedAt: 0 },
+			}
+			const seeded = makeStatefulProxy({ viewStates: existingViewStates })
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: seeded.proxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result.success).toBe(true)
+			// Per-view selection state is machine-local: importing settings must not
+			// apply another machine's view pins, while other settings round-trip.
+			expect(seeded.state.viewStates).toEqual(existingViewStates)
+			expect(seeded.state.mode).toBe("code")
+			expect(result).not.toHaveProperty("globalSettings.viewStates")
+
+			// A machine without view state must not gain any from the import.
+			const fresh = makeStatefulProxy({})
+			const freshResult = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: fresh.proxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(freshResult.success).toBe(true)
+			expect(fresh.state).not.toHaveProperty("viewStates")
+			expect(fresh.state.mode).toBe("code")
+			expect(freshResult).not.toHaveProperty("globalSettings.viewStates")
+
+			// No write path may carry the imported machine's view pins.
+			for (const payload of [...seeded.writes, ...fresh.writes]) {
+				expect(payload).not.toHaveProperty("viewStates")
+			}
+		})
+
 		it("should return success: false when file content is invalid", async () => {
 			;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
 
