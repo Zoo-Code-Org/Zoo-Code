@@ -222,7 +222,7 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | undefined>
 
 /** Non-string JSON Schema types a leaked parameter may be converted into. */
-const STRUCTURED_PARAM_TYPES = new Set(["object", "array", "number", "integer", "boolean"])
+const STRUCTURED_PARAM_TYPES = new Set(["object", "array", "number", "integer", "boolean", "null"])
 
 /**
  * Declared type of `paramName`, resolving a nullable `["T","null"]` union to `T` while reporting
@@ -236,13 +236,14 @@ function declaredParamType(
 	const property = properties?.[paramName] as Record<string, unknown> | undefined
 	const type = property?.["type"]
 	if (typeof type === "string") {
-		return { type, nullable: false }
+		return { type, nullable: type === "null" }
 	}
 	if (Array.isArray(type)) {
-		return {
-			type: type.find((entry): entry is string => typeof entry === "string" && entry !== "null"),
-			nullable: type.includes("null"),
-		}
+		const nullable = type.includes("null")
+		const nonNull = type.find((entry): entry is string => typeof entry === "string" && entry !== "null")
+		// A null-only union has no non-null member; keeping type undefined would fall back to the raw
+		// string "null", so declare the null type explicitly to force a JSON parse.
+		return { type: nonNull ?? (nullable ? "null" : undefined), nullable }
 	}
 	return { type: undefined, nullable: false }
 }
@@ -283,15 +284,17 @@ function convertLeakedParamValue(
 	}
 
 	const matchesDeclaredType =
-		declaredType === "object"
-			? typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-			: declaredType === "array"
-				? Array.isArray(parsed)
-				: declaredType === "boolean"
-					? typeof parsed === "boolean"
-					: declaredType === "integer"
-						? Number.isInteger(parsed)
-						: typeof parsed === "number" && Number.isFinite(parsed)
+		declaredType === "null"
+			? false
+			: declaredType === "object"
+				? typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+				: declaredType === "array"
+					? Array.isArray(parsed)
+					: declaredType === "boolean"
+						? typeof parsed === "boolean"
+						: declaredType === "integer"
+							? Number.isInteger(parsed)
+							: typeof parsed === "number" && Number.isFinite(parsed)
 
 	return matchesDeclaredType ? { value: parsed } : undefined
 }

@@ -531,6 +531,43 @@ describe("VsCodeLmHandler", () => {
 				])
 			})
 
+			it("recovers a null-only declared parameter as JSON null through createMessage", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart(
+							'<function_calls><invoke name="nuller"><parameter name="cursor">null</parameter></invoke></function_calls>',
+						)
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: {
+								name: "nuller",
+								description: "",
+								parameters: { type: "object", properties: { cursor: { type: "null" } } },
+							},
+						},
+					],
+				})
+				const chunks = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toMatchObject([
+					{ name: "nuller", arguments: JSON.stringify({ cursor: null }) },
+				])
+			})
+
 			it("keeps an invoke block for an unknown tool as literal text", async () => {
 				const block = '<invoke name="not_our_tool"><parameter name="a">1</parameter></invoke>'
 				const chunks = await collect([block])
@@ -1730,6 +1767,8 @@ describe("leaked tool-call recovery", () => {
 						ratio: { type: "number" },
 						recursive: { type: "boolean" },
 						optional: { type: ["object", "null"] },
+						nullScalar: { type: "null" },
+						nullUnion: { type: ["null"] },
 					},
 				},
 			],
@@ -1786,6 +1825,42 @@ describe("leaked tool-call recovery", () => {
 
 		it("fails closed when a non-nullable object parameter is null", () => {
 			const text = wrap(invoke("read_file", param("indentation", "null")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("accepts an explicit null for a scalar null-only parameter", () => {
+			const text = wrap(invoke("read_file", param("nullScalar", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { nullScalar: null } }])
+			expect(calls[0].input.nullScalar).toBeNull()
+		})
+
+		it("accepts an explicit null for a single-entry null union parameter", () => {
+			const text = wrap(invoke("read_file", param("nullUnion", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { nullUnion: null } }])
+			expect(calls[0].input.nullUnion).toBeNull()
+		})
+
+		it("fails closed when a scalar null-only parameter carries a non-null value", () => {
+			const text = wrap(invoke("read_file", param("nullScalar", '{"a":1}')))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a single-entry null union parameter carries a non-null value", () => {
+			const text = wrap(invoke("read_file", param("nullUnion", "123")))
 
 			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
 
