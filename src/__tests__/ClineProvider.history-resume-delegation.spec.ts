@@ -2033,6 +2033,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const removeClineFromStack = vi.fn()
 		const createTaskWithHistoryItem = vi.fn()
 		const log = vi.fn()
+		const taskScheduler = { schedule: vi.fn() }
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
@@ -2040,6 +2041,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			taskHistoryStore,
+			taskScheduler,
 			log,
 		})
 
@@ -2060,6 +2062,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
 		expect(removeClineFromStack).not.toHaveBeenCalled()
 		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+		expect(taskScheduler.schedule).not.toHaveBeenCalled()
 		expect(log).toHaveBeenCalledWith(expect.stringContaining("UI read failed"))
 	})
 

@@ -865,9 +865,9 @@ export class TaskHistoryStore {
 
 	private async refreshCachedTask(taskId: string): Promise<void> {
 		const current = await this.readTaskFile(taskId)
-		this.cache.delete(taskId)
 		this.taskFileMtimes.delete(taskId)
 		if (current) this.cache.set(taskId, current)
+		else this.cache.delete(taskId)
 	}
 
 	private async pruneStaleHistoryBackups(tasksDir: string): Promise<void> {
@@ -1210,6 +1210,7 @@ export class TaskHistoryStore {
 			const firstFileLock =
 				options?.firstFileLock ??
 				(holdFirstFileLock ? await lockJsonFile(await this.getTaskFilePath(firstId)) : undefined)
+			const ownsFirstFileLock = Boolean(firstFileLock && !options?.firstFileLock)
 
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
@@ -1333,7 +1334,7 @@ export class TaskHistoryStore {
 					throw error
 				}
 			} finally {
-				if (firstFileLock && !options?.firstFileLock) await firstFileLock()
+				if (ownsFirstFileLock) await firstFileLock!()
 			}
 		}
 		return options?.storeLockAcquired ? update() : this.withLock(update)

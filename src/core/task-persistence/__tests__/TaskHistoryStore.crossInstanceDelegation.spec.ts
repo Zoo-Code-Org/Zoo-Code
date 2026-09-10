@@ -1068,6 +1068,8 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			await store.upsert(original)
 			const taskFile = path.join(storage, "tasks", "parent", "history_item.json")
 			const peer = { ...original, tokensIn: 7 }
+			const taskFileMtimes = Reflect.get(store, "taskFileMtimes") as Map<string, number>
+			taskFileMtimes.set("parent", 123)
 			const release = Object.assign(
 				vi.fn(async () => {
 					await fs.writeFile(taskFile, JSON.stringify(peer))
@@ -1089,6 +1091,36 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 
 			expect(JSON.parse(await fs.readFile(taskFile, "utf8"))).toMatchObject({ tokensIn: 7 })
 			expect(store.get("parent")).toMatchObject({ tokensIn: 7 })
+			expect(taskFileMtimes.has("parent")).toBe(false)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("clears cache when a compromised release leaves no authoritative task file", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-release-missing-"))
+		const store = new TaskHistoryStore(storage)
+		const compromised = new Error("release removed task file")
+		let compromiseError: Error | undefined
+
+		try {
+			await store.initialize()
+			const original = makeHistoryItem("parent", { status: "active", tokensIn: 1 })
+			await store.upsert(original)
+			const taskFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const release = Object.assign(
+				vi.fn(async () => {
+					await fs.unlink(taskFile)
+					compromiseError = compromised
+					throw compromised
+				}),
+				{ getCompromiseError: () => compromiseError },
+			)
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+
+			await expect(store.withTaskFileLock("parent", async () => undefined)).rejects.toBe(compromised)
+			expect(store.get("parent")).toBeUndefined()
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })

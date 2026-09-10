@@ -119,6 +119,7 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			const taskDir = path.dirname(backupPath)
 			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
 			const lookalikes = [
+				path.join(taskDir, ".0-not-a-history-backup"),
 				path.join(taskDir, `${path.basename(backupPath)}.extra`),
 				path.join(taskDir, `prefix${path.basename(backupPath)}`),
 			]
@@ -130,6 +131,22 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			await expect(fs.access(backupPath)).rejects.toMatchObject({ code: "ENOENT" })
 			for (const lookalike of lookalikes) await expect(fs.access(lookalike)).resolves.toBeUndefined()
 		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("prunes a history backup exactly at the retention boundary", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-boundary-backup-"))
+		const store = new TaskHistoryStore(storagePath)
+		const now = 2_000_000_000_000
+		const dateNow = vi.spyOn(Date, "now").mockReturnValue(now)
+		try {
+			const backupPath = await seedHistoryBackup(storagePath, "boundary-task", TASK_HISTORY_BACKUP_RETENTION_MS)
+			await store.initialize()
+			await expect(fs.access(backupPath)).rejects.toMatchObject({ code: "ENOENT" })
+		} finally {
+			dateNow.mockRestore()
 			store.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
 		}
