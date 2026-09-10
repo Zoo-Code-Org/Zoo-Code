@@ -3,6 +3,8 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import { EventEmitter } from "events"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock crypto — verifyChecksum reads the archive file (mocked via createReadStream)
 // and computes a SHA-256. We make digest() dynamically return the expected checksum
 // for the current process.platform/arch so verification always passes in unit tests.
@@ -95,6 +97,7 @@ import {
 	downloadSemble,
 	getSembleBinaryPath,
 	SEMBLE_SHA256,
+	SEMBLE_MAX_ARCHIVE_BYTES,
 } from "../semble-downloader"
 import * as https from "https"
 import { spawn } from "child_process"
@@ -109,9 +112,15 @@ describe("SEMBLE_SHA256 checksum fixture", () => {
 	})
 })
 
+describe("Semble archive download limit", () => {
+	it("allows 100 MiB for future release growth", () => {
+		expect(SEMBLE_MAX_ARCHIVE_BYTES).toBe(100 * 1024 * 1024)
+	})
+})
+
 describe("semble-downloader", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		closeHandler = undefined
 		mockWriteStream.on = vi.fn(onWriteStreamEvent)
 		mockWriteStream.close = vi.fn(() => closeHandler?.())
@@ -550,7 +559,7 @@ describe("semble-downloader", () => {
 				// Should call PowerShell for zip extraction
 				expect(spawn).toHaveBeenCalledWith(
 					"powershell",
-					expect.arrayContaining(["-NoProfile", "-Command", expect.stringContaining("Expand-Archive")]),
+					["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)],
 					expect.any(Object),
 				)
 				// Should NOT call chmod on windows

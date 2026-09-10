@@ -7,8 +7,14 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	isDynamicProvider,
 	isRetiredProvider,
+	providerIdentifiers,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	OllamaModelsMessageType,
+	OpenAiModelsMessageType,
+	RouterModelsMessageType,
+	VsCodeLmModelsMessageType,
 } from "@roo-code/types"
 
 import {
@@ -76,6 +82,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	NanoGPT,
 	ZooGateway,
 	MiniMax,
 	Mimo,
@@ -174,8 +181,13 @@ const ApiOptions = ({
 		: selectedProvider
 	const isRetiredSelectedProvider =
 		typeof apiConfiguration.apiProvider === "string" && isRetiredProvider(apiConfiguration.apiProvider)
+	const routerProvider =
+		activeSelectedProvider && isDynamicProvider(activeSelectedProvider) ? activeSelectedProvider : undefined
 
-	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels()
+	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels({
+		enabled: !!routerProvider,
+		provider: routerProvider,
+	})
 	useZooGatewayRouterModelsSync()
 
 	const { data: openRouterModelProviders } = useOpenRouterModelProviders(
@@ -207,12 +219,12 @@ const ApiOptions = ({
 	// stops typing.
 	useDebounce(
 		() => {
-			if (selectedProvider === "openai") {
+			if (selectedProvider === providerIdentifiers.openai) {
 				// Use our custom headers state to build the headers object.
 				const headerObject = convertHeadersToObject(customHeaders)
 
 				vscode.postMessage({
-					type: "requestOpenAiModels",
+					type: OpenAiModelsMessageType.requestOpenAiModels,
 					values: {
 						baseUrl: apiConfiguration?.openAiBaseUrl,
 						apiKey: apiConfiguration?.openAiApiKey,
@@ -220,28 +232,32 @@ const ApiOptions = ({
 						openAiHeaders: headerObject,
 					},
 				})
-			} else if (selectedProvider === "ollama") {
+			} else if (selectedProvider === providerIdentifiers.ollama) {
 				vscode.postMessage({
-					type: "requestOllamaModels",
+					type: OllamaModelsMessageType.requestOllamaModels,
 					values: {
 						baseUrl: apiConfiguration?.ollamaBaseUrl,
 						apiKey: apiConfiguration?.ollamaApiKey,
 					},
 				})
-			} else if (selectedProvider === "lmstudio") {
+			} else if (selectedProvider === providerIdentifiers.lmstudio) {
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
-			} else if (selectedProvider === "vscode-lm") {
-				vscode.postMessage({ type: "requestVsCodeLmModels" })
-			} else if (selectedProvider === "litellm") {
+			} else if (selectedProvider === providerIdentifiers.vscodeLm) {
+				vscode.postMessage({ type: VsCodeLmModelsMessageType.requestVsCodeLmModels })
+			} else if (selectedProvider === providerIdentifiers.litellm) {
 				vscode.postMessage({
-					type: "requestRouterModels",
+					type: RouterModelsMessageType.requestRouterModels,
 					values: {
+						provider: providerIdentifiers.litellm,
 						litellmApiKey: apiConfiguration?.litellmApiKey,
 						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
 					},
 				})
-			} else if (selectedProvider === "poe") {
-				vscode.postMessage({ type: "requestRouterModels" })
+			} else if (selectedProvider === providerIdentifiers.poe) {
+				vscode.postMessage({
+					type: RouterModelsMessageType.requestRouterModels,
+					values: { provider: providerIdentifiers.poe },
+				})
 			}
 		},
 		250,
@@ -270,7 +286,7 @@ const ApiOptions = ({
 		// Zoo Gateway renders its own auth-state error inline (sign-in card in
 		// ZooGateway.tsx) so it can react to zooCodeIsAuthenticated changes
 		// without re-running this effect or threading auth state through validation.
-		if (apiConfiguration.apiProvider === "zoo-gateway") {
+		if (apiConfiguration.apiProvider === providerIdentifiers.zooGateway) {
 			setErrorMessage(undefined)
 			return
 		}
@@ -322,7 +338,7 @@ const ApiOptions = ({
 				}
 
 				// Bedrock has a special “custom-arn” pseudo-model that isn't part of MODELS_BY_PROVIDER.
-				if (provider === "bedrock" && modelId === "custom-arn") {
+				if (provider === providerIdentifiers.bedrock && modelId === "custom-arn") {
 					return
 				}
 
@@ -397,7 +413,7 @@ const ApiOptions = ({
 		}))
 
 		if (fromWelcomeView) {
-			const openRouterIndex = options.findIndex((opt) => opt.value === "openrouter")
+			const openRouterIndex = options.findIndex((opt) => opt.value === providerIdentifiers.openrouter)
 			if (openRouterIndex > 0) {
 				const [openRouterOption] = options.splice(openRouterIndex, 1)
 				options.unshift(openRouterOption)
@@ -441,7 +457,7 @@ const ApiOptions = ({
 				</div>
 			) : (
 				<>
-					{selectedProvider === "openrouter" && (
+					{selectedProvider === providerIdentifiers.openrouter && (
 						<OpenRouter
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -454,7 +470,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "requesty" && (
+					{selectedProvider === providerIdentifiers.requesty && (
 						<Requesty
 							uriScheme={uriScheme}
 							apiConfiguration={apiConfiguration}
@@ -467,7 +483,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "unbound" && (
+					{selectedProvider === providerIdentifiers.unbound && (
 						<Unbound
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -479,7 +495,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "anthropic" && (
+					{selectedProvider === providerIdentifiers.anthropic && (
 						<Anthropic
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -487,7 +503,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "openai-codex" && (
+					{selectedProvider === providerIdentifiers.openaiCodex && (
 						<OpenAICodex
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -496,7 +512,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "openai-native" && (
+					{selectedProvider === providerIdentifiers.openaiNative && (
 						<OpenAI
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -505,7 +521,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "mistral" && (
+					{selectedProvider === providerIdentifiers.mistral && (
 						<Mistral
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -513,7 +529,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "baseten" && (
+					{selectedProvider === providerIdentifiers.baseten && (
 						<Baseten
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -521,7 +537,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "bedrock" && (
+					{selectedProvider === providerIdentifiers.bedrock && (
 						<Bedrock
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -530,21 +546,21 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "vertex" && (
+					{selectedProvider === providerIdentifiers.vertex && (
 						<Vertex
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "gemini" && (
+					{selectedProvider === providerIdentifiers.gemini && (
 						<Gemini
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "openai" && (
+					{selectedProvider === providerIdentifiers.openai && (
 						<OpenAICompatible
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -554,21 +570,21 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "lmstudio" && (
+					{selectedProvider === providerIdentifiers.lmstudio && (
 						<LMStudio
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "deepseek" && (
+					{selectedProvider === providerIdentifiers.deepseek && (
 						<DeepSeek
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "qwen-code" && (
+					{selectedProvider === providerIdentifiers.qwenCode && (
 						<QwenCode
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -576,7 +592,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "moonshot" && (
+					{selectedProvider === providerIdentifiers.moonshot && (
 						<Moonshot
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -584,7 +600,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "kimi-code" && (
+					{selectedProvider === providerIdentifiers.kimiCode && (
 						<KimiCode
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -593,36 +609,36 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "minimax" && (
+					{selectedProvider === providerIdentifiers.minimax && (
 						<MiniMax
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "mimo" && (
+					{selectedProvider === providerIdentifiers.mimo && (
 						<Mimo apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
-					{selectedProvider === "vscode-lm" && (
+					{selectedProvider === providerIdentifiers.vscodeLm && (
 						<VSCodeLM
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "ollama" && (
+					{selectedProvider === providerIdentifiers.ollama && (
 						<Ollama
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "xai" && (
+					{selectedProvider === providerIdentifiers.xai && (
 						<XAI apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
-					{selectedProvider === "litellm" && (
+					{selectedProvider === providerIdentifiers.litellm && (
 						<LiteLLM
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -632,18 +648,18 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "sambanova" && (
+					{selectedProvider === providerIdentifiers.sambanova && (
 						<SambaNova
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "zai" && (
+					{selectedProvider === providerIdentifiers.zai && (
 						<ZAi apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
-					{selectedProvider === "vercel-ai-gateway" && (
+					{selectedProvider === providerIdentifiers.vercelAiGateway && (
 						<VercelAiGateway
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -654,7 +670,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "opencode-go" && (
+					{selectedProvider === providerIdentifiers.opencodeGo && (
 						<OpenCodeGo
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -665,7 +681,7 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "kenari" && (
+					{selectedProvider === providerIdentifiers.kenari && (
 						<Kenari
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -676,7 +692,18 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "zoo-gateway" && (
+					{selectedProvider === providerIdentifiers.nanogpt && (
+						<NanoGPT
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.zooGateway && (
 						<ZooGateway
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -687,21 +714,21 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === "fireworks" && (
+					{selectedProvider === providerIdentifiers.fireworks && (
 						<Fireworks
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "friendli" && (
+					{selectedProvider === providerIdentifiers.friendli && (
 						<Friendli
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 
-					{selectedProvider === "poe" && (
+					{selectedProvider === providerIdentifiers.poe && (
 						<Poe
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
@@ -721,6 +748,7 @@ const ApiOptions = ({
 								models={getStaticModelsForProvider(
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
+									apiConfiguration,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
@@ -737,7 +765,7 @@ const ApiOptions = ({
 								}
 							/>
 
-							{selectedProvider === "bedrock" && selectedModelId === "custom-arn" && (
+							{selectedProvider === providerIdentifiers.bedrock && selectedModelId === "custom-arn" && (
 								<BedrockCustomArn
 									apiConfiguration={apiConfiguration}
 									setApiConfigurationField={setApiConfigurationField}
@@ -796,7 +824,7 @@ const ApiOptions = ({
 									}
 									onChange={(value) => setApiConfigurationField("consecutiveMistakeLimit", value)}
 								/>
-								{selectedProvider === "poe" && (
+								{selectedProvider === providerIdentifiers.poe && (
 									<VSCodeTextField
 										value={apiConfiguration?.poeBaseUrl || ""}
 										onInput={handleInputChange("poeBaseUrl")}
@@ -807,7 +835,7 @@ const ApiOptions = ({
 										</label>
 									</VSCodeTextField>
 								)}
-								{selectedProvider === "openrouter" &&
+								{selectedProvider === providerIdentifiers.openrouter &&
 									openRouterModelProviders &&
 									Object.keys(openRouterModelProviders).length > 0 && (
 										<div>

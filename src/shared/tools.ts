@@ -290,6 +290,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	skill: "load skill",
 	generate_image: "generate images",
 	custom_tool: "use custom tools",
+	invalid_tool_call: "invalid tool call",
 } as const
 
 // Define available tool groups.

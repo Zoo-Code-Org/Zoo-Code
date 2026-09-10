@@ -4,6 +4,8 @@ import {
 	KIMI_CODE_BASE_URL,
 	kimiCodeDefaultModelId,
 	kimiCodeDefaultModelInfo,
+	providerIdentifiers,
+	type KimiCodeAuthMethod,
 	type ModelInfo,
 	type ModelRecord,
 } from "@roo-code/types"
@@ -16,7 +18,11 @@ import type { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
 import { OpenAiHandler } from "./openai"
+import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+
+const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
+const API_KEY_AUTH_METHOD: KimiCodeAuthMethod = "api-key"
 
 function getHttpStatus(error: unknown): number | undefined {
 	if (!error || typeof error !== "object") return undefined
@@ -37,7 +43,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 		super({
 			...options,
 			openAiBaseUrl: KIMI_CODE_BASE_URL,
-			openAiApiKey: options.kimiCodeApiKey ?? "not-provided",
+			openAiApiKey: options.kimiCodeApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? kimiCodeDefaultModelId,
 			openAiStreamingEnabled: true,
 		})
@@ -45,7 +51,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 	}
 
 	private async resolveAccessToken(forceRefresh = false): Promise<string> {
-		if ((this.kimiOptions.kimiCodeAuthMethod ?? "oauth") === "api-key") {
+		if ((this.kimiOptions.kimiCodeAuthMethod ?? OAUTH_AUTH_METHOD) === API_KEY_AUTH_METHOD) {
 			if (!this.kimiOptions.kimiCodeApiKey) throw new Error("Kimi Code API key is required")
 			return this.kimiOptions.kimiCodeApiKey
 		}
@@ -63,7 +69,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 		if (!this.modelDiscoveryAttempted) {
 			this.modelDiscoveryAttempted = true
 			try {
-				this.models = await getModels({ provider: "kimi-code", apiKey: accessToken })
+				this.models = await getModels({ provider: providerIdentifiers.kimiCode, apiKey: accessToken })
 			} catch (error) {
 				// Model discovery is best-effort; preserve the configured ID and fallback metadata.
 				console.debug("[KimiCode] Model discovery failed; using fallback model metadata", {
@@ -74,7 +80,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 	}
 
 	private canRefreshOAuth(): boolean {
-		return (this.kimiOptions.kimiCodeAuthMethod ?? "oauth") === "oauth"
+		return (this.kimiOptions.kimiCodeAuthMethod ?? OAUTH_AUTH_METHOD) === OAUTH_AUTH_METHOD
 	}
 
 	override async *createMessage(

@@ -233,6 +233,7 @@
 		"exitStatus": "Uscito con stato {{exitCode}}",
 		"malformedCommand": "Comando non valido: errore di sintassi della shell",
 		"manageCommands": "Comandi approvati automaticamente",
+		"denied": "Comando negato",
 		"addToAllowed": "Aggiungi alla lista dei permessi",
 		"removeFromAllowed": "Rimuovi dalla lista dei permessi",
 		"addToDenied": "Aggiungi alla lista dei negati",
@@ -343,9 +344,9 @@
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novità:",
-			"highlight1": "Più controlli OpenAI — usa la modalità di priorità Fast con OpenAI Codex e scegli un livello di reasoning più elevato per i modelli compatibili con OpenAI.",
-			"highlight2": "Provider e modelli più affidabili — gestione migliorata dei metadati del router, aggiornamento dei modelli Ollama, supporto proxy per Bedrock e controlli di reasoning per Friendli.",
-			"highlight3": "Impostazioni e workflow di sviluppo più fluidi — le impostazioni conservano le modifiche non salvate, i comandi brevi del terminale terminano correttamente, i piani di architettura usano percorsi relativi al workspace e le ultime occorrenze visibili del brand Roo sono state aggiornate a Zoo."
+			"highlight1": "🔑 Usa la tua chiave API Zoo Gateway ovunque: portala in qualsiasi client o workflow compatibile con OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Per un periodo limitato, accedi gratuitamente a MiniMax-M3 tramite Zoo Gateway.",
+			"highlight3": "✨ Ora disponibili: i nuovissimi modelli GPT-6 Astra e Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

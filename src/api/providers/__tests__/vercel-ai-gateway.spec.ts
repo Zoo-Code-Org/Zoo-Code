@@ -13,8 +13,9 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
-import { ApiHandlerOptions } from "../../../shared/api"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { vercelAiGatewayDefaultModelId, VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
 // Mock dependencies
@@ -49,6 +50,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheWritesPrice: 12.5,
 				cacheReadsPrice: 1,
 				description: "Claude Fable 5",
+			},
+			"anthropic/claude-fable-5.1": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 0.25,
+				description: "Claude Fable 5.1",
 			},
 			"anthropic/claude-sonnet-5": {
 				maxTokens: 128000,
@@ -96,7 +109,21 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 0.25,
 				description: "GPT-4o",
 			},
+			"openai/gpt-6-astra": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			},
 		})
+	}),
+	refreshModels: vitest.fn(async (options) => {
+		const { getModels } = await import("../fetchers/modelCache")
+		return getModels(options)
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
@@ -126,13 +153,13 @@ const mockConstructor = vitest.fn()
 })
 
 describe("VercelAiGatewayHandler", () => {
-	const mockOptions: ApiHandlerOptions = {
+	const mockOptions = makeApiHandlerOptions({
 		vercelAiGatewayApiKey: "test-key",
 		vercelAiGatewayModelId: "anthropic/claude-sonnet-4",
-	}
+	})
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate.mockClear()
 		mockConstructor.mockClear()
 	})
@@ -270,10 +297,12 @@ describe("VercelAiGatewayHandler", () => {
 
 		it("uses correct temperature from options", async () => {
 			const customTemp = 0.5
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				modelTemperature: customTemp,
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					modelTemperature: customTemp,
+				}),
+			)
 
 			const systemPrompt = "You are a helpful assistant."
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
@@ -303,10 +332,12 @@ describe("VercelAiGatewayHandler", () => {
 		})
 
 		it("omits temperature for Claude Fable 5", async () => {
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				vercelAiGatewayModelId: "anthropic/claude-fable-5",
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-fable-5",
+				}),
+			)
 
 			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
 
@@ -319,11 +350,31 @@ describe("VercelAiGatewayHandler", () => {
 			)
 		})
 
+		it("omits temperature for Claude Fable 5.1", async () => {
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-fable-5.1",
+				}),
+			)
+
+			await collectStream(handler.createMessage("system prompt", [{ role: "user", content: "test" }]))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5.1",
+					temperature: undefined,
+				}),
+			)
+		})
+
 		it("omits temperature for Claude Sonnet 5", async () => {
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				vercelAiGatewayModelId: "anthropic/claude-sonnet-5",
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-sonnet-5",
+				}),
+			)
 
 			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
 
@@ -338,10 +389,12 @@ describe("VercelAiGatewayHandler", () => {
 		})
 
 		it("omits temperature for Claude Opus 5", async () => {
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				vercelAiGatewayModelId: "anthropic/claude-opus-5",
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-opus-5",
+				}),
+			)
 
 			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
 
@@ -355,12 +408,38 @@ describe("VercelAiGatewayHandler", () => {
 			expect(call.max_completion_tokens).toBe(128000)
 		})
 
+		it.each([
+			["max", "max"],
+			["none", "medium"],
+		] as const)("uses safe Astra request parameters for %s reasoning", async (reasoningEffort, expectedEffort) => {
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "openai/gpt-6-astra",
+					modelTemperature: 0.7,
+					reasoningEffort,
+				}),
+			)
+
+			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
+
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(call).toMatchObject({
+				model: "openai/gpt-6-astra",
+				max_completion_tokens: 128000,
+				reasoning_effort: expectedEffort,
+			})
+			expect(call.temperature).toBeUndefined()
+		})
+
 		it("adds cache breakpoints for supported models", async () => {
 			const { addCacheBreakpoints } = await import("../../transform/caching/vercel-ai-gateway")
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				vercelAiGatewayModelId: "anthropic/claude-3.5-haiku",
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-3.5-haiku",
+				}),
+			)
 
 			const systemPrompt = "You are a helpful assistant."
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
@@ -647,10 +726,12 @@ describe("VercelAiGatewayHandler", () => {
 
 		it("uses custom temperature for completion", async () => {
 			const customTemp = 0.8
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				modelTemperature: customTemp,
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					modelTemperature: customTemp,
+				}),
+			)
 
 			await handler.completePrompt("Test prompt")
 
@@ -694,11 +775,13 @@ describe("VercelAiGatewayHandler", () => {
 
 	describe("temperature support", () => {
 		it("applies temperature for supported models", async () => {
-			const handler = new VercelAiGatewayHandler({
-				...mockOptions,
-				vercelAiGatewayModelId: "anthropic/claude-sonnet-4",
-				modelTemperature: 0.9,
-			})
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-sonnet-4",
+					modelTemperature: 0.9,
+				}),
+			)
 
 			await handler.completePrompt("Test")
 

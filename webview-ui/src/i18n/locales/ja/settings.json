@@ -308,6 +308,20 @@
 				"description": "Zooが保護されたファイル（.rooignoreや.roo/設定ファイルなど）を承認なしで作成・編集することを許可します。"
 			}
 		},
+		"allowlists": {
+			"label": "許可リスト",
+			"description": "操作のカテゴリ全体を自動承認せずに、個々のファイルへのアクセスを許可します。1行に1つのパターンを、.gitignore を参考にした構文で記述します。\"notes.md\" はワークスペース内の任意のディレクトリにあるそのファイルに一致し、\"docs/scratch/**\" はそのディレクトリ配下のすべて、\"*.md\" は任意の Markdown ファイルに一致します。パターンが指すのは常にファイルで、ディレクトリではありません。\"docs\" は \"docs\" という名前のファイルだけを許可します。ディレクトリの中身には \"docs/**\" と書きます。先頭の \"./\" はワークスペースのルートを意味し、先頭の \"/\" はファイルシステムのルートを意味するため、\"/tmp/notes.md\" はワークスペースの外に届きます。\"~/notes.md\" も同様で、先頭の \"~/\" はあなたのホームディレクトリを表します。パターンの先頭に \"!\" を付けると、前の行で一致したものを除外します。.gitignore と同様に最後に一致した行が優先されるため、順序が重要です。フォルダーを開いていない間は、ワークスペース相対のパターンは無視されます。大文字と小文字は区別されます（Windows を除く）。上の「自動承認」がオフの間は、何も自動承認されません。",
+			"readFiles": {
+				"label": "読み取り許可リストのパターン",
+				"description": "上の「読み取り」がオフでも、Zooが承認なしで読み取れるファイルです。下の書き込み許可リストのファイルは常に読み取りもできるため、二重に追加する必要はありません。ディレクトリの一覧表示と検索は常に「読み取り」設定に従います。.rooignore で除外されたファイルは、いずれにせよ読み取れません。",
+				"placeholder": "1行に1つのパターン（例：notes.md）"
+			},
+			"writeFiles": {
+				"label": "書き込み許可リストのパターン",
+				"description": "上の「書き込み」がオフでも、Zooが承認なしで作成・編集できるファイルです。保護されたファイルは、「保護されたファイルを含める」を有効にしない限り（「書き込み」自動承認の設定内）、引き続き承認が必要です。.rooignore で除外されたファイルは、いずれにせよ書き込めません。",
+				"placeholder": "1行に1つのパターン（例：notes.md）"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "MCPサーバービューで個々のMCPツールの自動承認を有効にします（この設定とツールの「常に許可」チェックボックスの両方が必要）"
@@ -328,6 +342,10 @@
 		"execute": {
 			"label": "実行",
 			"description": "承認なしで自動的に許可されたターミナルコマンドを実行",
+			"destructiveCommandGuard": {
+				"label": "破壊的コマンドガードを有効にする",
+				"description": "このプラットフォーム用の Destructive Command Guard（DCG）をダウンロードして使用します。DCG が許可したコマンドは自動的に実行されます。DCG がブロックしたコマンドの実行には承認が必要です。有効な間は Zoo のコマンドリストが無効になります。無効にしても、ダウンロードした実行ファイルは保持されます。"
+			},
 			"allowedCommands": "許可された自動実行コマンド",
 			"allowedCommandsDescription": "「実行操作を常に承認」が有効な場合に自動実行できるコマンドプレフィックス。すべてのコマンドを許可するには * を追加します（注意して使用してください）。",
 			"deniedCommands": "拒否されたコマンド",
@@ -384,6 +402,25 @@
 		"getOpencodeGoApiKey": "Opencode Go APIキーを取得",
 		"kenariApiKey": "Kenari APIキー",
 		"getKenariApiKey": "Kenari APIキーを取得",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT APIキー",
+			"getApiKey": "NanoGPT APIキーを取得",
+			"model": "モデル",
+			"routingPreference": "ルーティング設定",
+			"routingOptions": {
+				"automatic": "自動",
+				"fastest": "最速",
+				"cheapest": "最安",
+				"lowestLatency": "最低レイテンシ",
+				"highestThroughput": "最高スループット",
+				"toolCapable": "ツール対応",
+				"cacheCapable": "キャッシュ対応"
+			},
+			"automaticExplanation": "自動ではルーティングサフィックスを適用しません。",
+			"billingWarning": "高度なルーティング設定では従量課金ルーティングが使用され、NanoGPTの現在の請求ルールによってはサブスクリプションの対象外になる場合があります。",
+			"routingDocs": "NanoGPTのルーティングと請求の詳細を表示"
+		},
 		"apiKeyStorageNotice": "APIキーはVSCodeのシークレットストレージに安全に保存されます",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -423,6 +460,8 @@
 		"headerName": "ヘッダー名",
 		"headerValue": "ヘッダー値",
 		"noCustomHeaders": "カスタムヘッダーが定義されていません。+ ボタンをクリックして追加してください。",
+		"extraBody": "追加ボディ",
+		"extraBodyDescription": "APIリクエストボディにマージされる任意のJSONオブジェクトです。model、messages、tools、streamなど、Zoo Codeが管理するフィールドは上書きできません。機密情報を含めないでください。",
 		"unboundApiKey": "Unbound API キー",
 		"getUnboundApiKey": "Unbound APIキーを取得",
 		"requestyApiKey": "Requesty APIキー",
@@ -491,6 +530,9 @@
 		"openAiApiKey": "OpenAI APIキー",
 		"apiKey": "APIキー",
 		"openAiBaseUrl": "ベースURL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure デプロイ名",
+		"azureOpenAiDeploymentNameDescription": "基盤モデル名ではなく、Azure AI Studio のデプロイ名を入力してください。",
 		"getOpenAiApiKey": "OpenAI APIキーを取得",
 		"mistralApiKey": "Mistral APIキー",
 		"getMistralApiKey": "Mistral / Codestral APIキーを取得",
@@ -976,8 +1018,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "匿名のエラーと使用状況レポートを許可",
-			"description": "匿名の使用データとエラーレポートを送信してZoo Codeの改善にご協力ください。このテレメトリはコード、プロンプト、個人情報を収集しません。詳細については<privacyLink>プライバシーポリシー</privacyLink>をご覧ください。"
+			"label": "エラーと使用状況レポートを許可",
+			"description": "お名前やアカウントではなく、インストールに紐づく識別子と関連付けた使用データとエラーレポートを送信してZoo Codeの改善にご協力ください。このテレメトリはあなたのコードやプロンプトを収集しません。詳細については<privacyLink>プライバシーポリシー</privacyLink>をご覧ください。これはいつでも無効にできます。"
 		},
 		"settings": {
 			"import": "インポート",
@@ -996,6 +1038,11 @@
 		"modelId": "有効なモデルIDを入力してください。",
 		"modelSelector": "有効なモデルセレクターを入力してください。",
 		"openAi": "有効なベースURL、APIキー、モデルIDを入力してください。",
+		"openAiExtraBody": {
+			"invalidJson": "追加ボディには有効なJSONを指定してください。",
+			"objectRequired": "追加ボディはJSONオブジェクトである必要があります。",
+			"reservedKeys": "追加ボディではZoo Codeが管理するフィールドを上書きできません：{{keys}}。"
+		},
 		"arn": {
 			"invalidFormat": "ARNの形式が無効です。フォーマット要件を確認してください。",
 			"regionMismatch": "警告：ARN内のリージョン（{{arnRegion}}）が選択したリージョン（{{region}}）と一致しません。これによりアクセスの問題が発生する可能性があります。プロバイダーはARNのリージョンを使用します。"

@@ -36,7 +36,7 @@
 	"settings.vsCodeLmModelSelector.family.description": "Семейство языковой модели (например, gpt-4)",
 	"settings.customStoragePath.description": "Пользовательский путь хранения. Оставьте пустым для использования пути по умолчанию. Поддерживает абсолютные пути (например, 'D:\\ZooCodeStorage')",
 	"settings.enableCodeActions.description": "Включить быстрые исправления Zoo Code.",
-	"settings.autoImportSettingsPath.description": "Путь к файлу конфигурации ZooCode для автоматического импорта при запуске расширения. Поддерживает абсолютные пути и пути относительно домашнего каталога (например, '~/Documents/roo-code-settings.json'). Оставьте пустым, чтобы отключить автоматический импорт.",
+	"settings.autoImportSettingsPath.description": "Путь к файлу конфигурации ZooCode для автоматического импорта при запуске расширения. Поддерживает абсолютные пути и пути относительно домашнего каталога (например, '~/Documents/zoo-code-settings.json'). Оставьте пустым, чтобы отключить автоматический импорт.",
 	"settings.maximumIndexedFilesForFileSearch.description": "Максимальное количество файлов для индексации при поиске файлов @. Большие значения обеспечивают лучшие результаты поиска в крупных проектах, но могут потреблять больше памяти. По умолчанию: 10 000.",
 	"settings.useAgentRules.description": "Включить загрузку файлов AGENTS.md для специфичных для агента правил (см. https://agent-rules.org/)",
 	"settings.apiRequestTimeout.description": "Тайм-аут ответа API (секунды, по умолчанию: 600, диапазон: 1–3600). Более высокие значения рекомендуются для локальных провайдеров. Неподдерживаемые провайдеры: Amazon Bedrock, Google Gemini(directly or through the Vertex AI platform), Mistral, Moonshot, Ollama, Poe, VS Code LM API.",

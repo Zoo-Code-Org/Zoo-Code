@@ -1,12 +1,105 @@
-import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers } from "../index.js"
+import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
 import {
 	getApiProtocol,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	parseOpenAiExtraBody,
 	PROVIDER_SETTINGS_KEYS,
 	providerSettingsSchema,
 	providerSettingsSchemaDiscriminated,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
+import { providerDefinitionList } from "../provider-settings/index.js"
+
+describe("provider settings discriminated union", () => {
+	it("composes exactly one provider-specific definition for every provider", () => {
+		const registeredProviders = providerDefinitionList.map(({ apiProvider }) => apiProvider)
+
+		expect([...registeredProviders].sort()).toEqual([...providerNames].sort())
+		expect(new Set(registeredProviders).size).toBe(providerNames.length)
+	})
+
+	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
+		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+})
+
+describe("OpenAI-compatible extra body settings", () => {
+	it("accepts a JSON object with provider-specific nested fields", () => {
+		const settings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" }, store: false }),
+		}
+
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+		expect(PROVIDER_SETTINGS_KEYS).toContain("openAiExtraBody")
+	})
+
+	it.each(["not json", "[]", "null", '"value"'])("rejects non-object JSON: %s", (openAiExtraBody) => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openai,
+				openAiExtraBody,
+			}).success,
+		).toBe(false)
+	})
+
+	it.each([
+		"__proto__",
+		"constructor",
+		"prototype",
+		"max_completion_tokens",
+		"max_tokens",
+		"messages",
+		"model",
+		"parallel_tool_calls",
+		"reasoning",
+		"reasoning_effort",
+		"response_format",
+		"stream",
+		"stream_options",
+		"temperature",
+		"tool_choice",
+		"tools",
+	])("rejects the reserved extra-body key %s", (reservedKey) => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openai,
+				openAiExtraBody: JSON.stringify({ [reservedKey]: "override" }),
+			}).success,
+		).toBe(false)
+	})
+
+	it("reports and filters reserved keys while preserving allowed nested fields", () => {
+		const result = parseOpenAiExtraBody(
+			JSON.stringify({
+				metadata: { completion_window: "balanced" },
+				model: "overridden-model",
+				response_format: { type: "json_object" },
+				stream: false,
+			}),
+		)
+
+		expect(result).toEqual({
+			success: false,
+			reason: "reservedKeys",
+			reservedKeys: ["model", "response_format", "stream"],
+			data: { metadata: { completion_window: "balanced" } },
+		})
+	})
+
+	it("accepts stop and n as provider-specific request fields", () => {
+		const settings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiExtraBody: JSON.stringify({ stop: ["DONE"], n: 2 }),
+		}
+
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+		expect(parseOpenAiExtraBody(settings.openAiExtraBody)).toEqual({
+			success: true,
+			data: { stop: ["DONE"], n: 2 },
+		})
+	})
+})
 
 describe("OpenAI Codex provider settings", () => {
 	it("preserves the Fast preference in general and provider-specific schemas", () => {
@@ -116,6 +209,7 @@ describe("getApiProtocol", () => {
 
 	describe("Opencode Go provider", () => {
 		it("should return 'anthropic' for opencode-go Anthropic-format models (Qwen/MiniMax)", () => {
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.8-max")).toBe(ANTHROPIC_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.7-max")).toBe(ANTHROPIC_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.7-plus")).toBe(ANTHROPIC_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.6-plus")).toBe(ANTHROPIC_API_PROTOCOL)
@@ -125,7 +219,7 @@ describe("getApiProtocol", () => {
 		})
 
 		it("should return 'openai' for opencode-go OpenAI-format models (GLM/DeepSeek/etc.)", () => {
-			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.2")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.3")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "deepseek-v4-pro")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "kimi-k2.5")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "mimo-v2.5")).toBe(OPENAI_API_PROTOCOL)

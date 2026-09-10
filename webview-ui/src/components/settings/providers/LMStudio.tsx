@@ -4,7 +4,13 @@ import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
-import type { ProviderSettings, ExtensionMessage, ModelRecord } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	type ExtensionMessage,
+	type ModelRecord,
+	LmStudioModelsMessageType,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
@@ -22,7 +28,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 	const { t } = useAppTranslation()
 
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
-	const routerModels = useRouterModels()
+	const routerModels = useRouterModels({ provider: providerIdentifiers.lmstudio })
 	const initialBaseUrlRef = useRef(apiConfiguration?.lmStudioBaseUrl)
 
 	const handleInputChange = useCallback(
@@ -40,7 +46,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 		const message: ExtensionMessage = event.data
 
 		switch (message.type) {
-			case "lmStudioModels":
+			case LmStudioModelsMessageType.lmStudioModels:
 				{
 					const newModels = message.lmStudioModels ?? {}
 					setLmStudioModels(newModels)

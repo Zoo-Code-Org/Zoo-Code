@@ -34,6 +34,8 @@ import { ZooGatewayHandler, classifyGatewayApiError, toGatewayStreamError } from
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -41,32 +43,37 @@ vitest.mock("delay", () => ({
 		return Promise.resolve()
 	}),
 }))
+const DEFAULT_MODEL_CATALOG = vitest.hoisted(() => ({
+	"anthropic/claude-sonnet-4": {
+		maxTokens: 64000,
+		contextWindow: 200000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 3,
+		outputPrice: 15,
+		cacheWritesPrice: 3.75,
+		cacheReadsPrice: 0.3,
+		description: "Claude Sonnet 4",
+	},
+	"anthropic/claude-3.5-haiku": {
+		maxTokens: 32000,
+		contextWindow: 200000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 1,
+		outputPrice: 5,
+		cacheWritesPrice: 1.25,
+		cacheReadsPrice: 0.1,
+		description: "Claude 3.5 Haiku",
+	},
+}))
+
 vitest.mock("../fetchers/modelCache", () => ({
 	getModels: vitest.fn().mockImplementation(function () {
-		return Promise.resolve({
-			"anthropic/claude-sonnet-4": {
-				maxTokens: 64000,
-				contextWindow: 200000,
-				supportsImages: true,
-				supportsPromptCache: true,
-				inputPrice: 3,
-				outputPrice: 15,
-				cacheWritesPrice: 3.75,
-				cacheReadsPrice: 0.3,
-				description: "Claude Sonnet 4",
-			},
-			"anthropic/claude-3.5-haiku": {
-				maxTokens: 32000,
-				contextWindow: 200000,
-				supportsImages: true,
-				supportsPromptCache: true,
-				inputPrice: 1,
-				outputPrice: 5,
-				cacheWritesPrice: 1.25,
-				cacheReadsPrice: 0.1,
-				description: "Claude 3.5 Haiku",
-			},
-		})
+		return Promise.resolve(DEFAULT_MODEL_CATALOG)
+	}),
+	refreshModels: vitest.fn().mockImplementation(function () {
+		return Promise.resolve(DEFAULT_MODEL_CATALOG)
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
@@ -117,8 +124,22 @@ describe("ZooGatewayHandler", () => {
 		zooGatewayModelId: "anthropic/claude-sonnet-4",
 	}
 
-	beforeEach(() => {
-		vitest.clearAllMocks()
+	beforeEach(async () => {
+		clearAllMocks()
+		const { getModels, refreshModels, getModelsFromCache } = await import("../fetchers/modelCache")
+		vitest
+			.mocked(getModels)
+			.mockReset()
+			.mockImplementation(function () {
+				return Promise.resolve(DEFAULT_MODEL_CATALOG)
+			})
+		vitest
+			.mocked(refreshModels)
+			.mockReset()
+			.mockImplementation(function () {
+				return Promise.resolve(DEFAULT_MODEL_CATALOG)
+			})
+		vitest.mocked(getModelsFromCache).mockReset().mockReturnValue(undefined)
 		mockSessionCleared.value = false
 		mockGetCachedZooCodeToken.mockReturnValue(undefined)
 		mockCreate.mockClear()
@@ -140,12 +161,7 @@ describe("ZooGatewayHandler", () => {
 	}
 
 	async function drainCreateMessage(handler: ZooGatewayHandler) {
-		const stream = handler.createMessage("system", [{ role: "user", content: "hi" }])
-		const out: unknown[] = []
-		for await (const chunk of stream) {
-			out.push(chunk)
-		}
-		return out
+		return collectStream(handler.createMessage("system", [{ role: "user", content: "hi" }]))
 	}
 
 	describe("constructor", () => {
@@ -231,13 +247,13 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		beforeEach(() => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "Test response" }, index: 0 }],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: {
 							prompt_tokens: 10,
@@ -247,30 +263,25 @@ describe("ZooGatewayHandler", () => {
 							prompt_tokens_details: { cached_tokens: 3 },
 							cost: 0.005,
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 		})
 
 		it("requires authentication at request time when no session token is available", async () => {
 			const handler = new ZooGatewayHandler({})
 			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
 
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// drain
-				}
-			}).rejects.toThrow("Zoo Gateway requires authentication. Please sign in to Zoo Code first.")
+			await expect(collectStream(stream)).rejects.toThrow(
+				"Zoo Gateway requires authentication. Please sign in to Zoo Code first.",
+			)
 		})
 
 		it("streams text and usage chunks", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
 
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toEqual([
 				{ type: "text", text: "Test response" },
@@ -283,6 +294,73 @@ describe("ZooGatewayHandler", () => {
 					totalCost: 0.005,
 				},
 			])
+		})
+
+		it("forwards gateway usage.cost as totalCost so the panel matches billing", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						usage: null,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 25694,
+							completion_tokens: 829,
+							total_tokens: 26523,
+							cost: 0.006262,
+						},
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(
+				handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }]),
+			)
+
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 25694,
+				outputTokens: 829,
+				cacheWriteTokens: undefined,
+				cacheReadTokens: undefined,
+				totalCost: 0.006262,
+			})
+		})
+
+		it("defaults totalCost to 0 when usage omits cost", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						usage: null,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 10,
+							completion_tokens: 5,
+							total_tokens: 15,
+						},
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(
+				handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }]),
+			)
+
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 5,
+				cacheWriteTokens: undefined,
+				cacheReadTokens: undefined,
+				totalCost: 0,
+			})
 		})
 
 		it("forwards task and mode metadata as request headers", async () => {
@@ -343,9 +421,9 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("yields tool_call_partial chunks when streaming tool calls", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -360,15 +438,12 @@ describe("ZooGatewayHandler", () => {
 								index: 0,
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("prompt", [])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("prompt", []))
 
 			expect(chunks).toEqual([
 				{
@@ -382,17 +457,17 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("throws the upstream reason when the gateway sends an in-stream error chunk", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						error: {
 							message: "Too many requests, please wait before trying again",
 							status: 429,
 							code: "rate_limited",
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
 
@@ -402,17 +477,17 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("surfaces the add-credits prompt when an in-stream error carries a budget code", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						error: {
 							message: "Monthly budget exceeded",
 							status: 429,
 							code: "monthly_budget_exceeded",
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
 
@@ -639,45 +714,218 @@ describe("ZooGatewayHandler", () => {
 	describe("ensureModelFetched", () => {
 		it("fetches models when instance models are empty", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
-			const { getModels } = await import("../fetchers/modelCache")
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 
 			expect(handler.getModel().info.contextWindow).toBe(200000)
 
 			await handler.ensureModelFetched()
 
 			expect(getModels).toHaveBeenCalled()
+			expect(refreshModels).not.toHaveBeenCalled()
 		})
 
 		it("skips the fetch when models are already populated", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
-			const { getModels } = await import("../fetchers/modelCache")
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 
 			await handler.ensureModelFetched()
 			vitest.mocked(getModels).mockClear()
+			vitest.mocked(refreshModels).mockClear()
 
 			await handler.ensureModelFetched()
 			expect(getModels).not.toHaveBeenCalled()
+			expect(refreshModels).not.toHaveBeenCalled()
 		})
 
 		it("short-circuits a subsequent fetchModel call after models are populated", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
-			const { getModels } = await import("../fetchers/modelCache")
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 
 			await handler.ensureModelFetched()
 			vitest.mocked(getModels).mockClear()
+			vitest.mocked(refreshModels).mockClear()
 
 			await handler.fetchModel()
 			expect(getModels).not.toHaveBeenCalled()
+			expect(refreshModels).not.toHaveBeenCalled()
+		})
+
+		it("refetches when the configured model is missing from a populated map", async () => {
+			vitest.useFakeTimers()
+			try {
+				const { getModels, refreshModels } = await import("../fetchers/modelCache")
+				const staleCatalog = {
+					"anthropic/claude-sonnet-4": {
+						maxTokens: 64000,
+						contextWindow: 200000,
+						supportsImages: true,
+						supportsPromptCache: true,
+						inputPrice: 3,
+						outputPrice: 15,
+					},
+				}
+				vitest.mocked(getModels).mockResolvedValueOnce(staleCatalog)
+				vitest.mocked(refreshModels).mockResolvedValueOnce(staleCatalog)
+
+				const handler = new ZooGatewayHandler({
+					...mockOptions,
+					zooGatewayModelId: "alibaba/qwen3.8-max",
+				})
+
+				await handler.ensureModelFetched()
+				expect(handler.getModel().info.inputPrice).toBe(0)
+
+				const freshCatalog = {
+					"alibaba/qwen3.8-max": {
+						maxTokens: 65536,
+						contextWindow: 1_000_000,
+						supportsImages: true,
+						supportsPromptCache: true,
+						inputPrice: 0.222,
+						outputPrice: 0.667,
+					},
+				}
+				vitest.mocked(getModels).mockClear()
+				vitest.mocked(refreshModels).mockClear()
+				vitest.mocked(getModels).mockResolvedValueOnce(freshCatalog)
+
+				vitest.advanceTimersByTime(5 * 60 * 1000 + 1)
+				await handler.ensureModelFetched()
+
+				expect(getModels).toHaveBeenCalled()
+				expect(refreshModels).not.toHaveBeenCalled()
+				expect(handler.getModel().info.inputPrice).toBe(0.222)
+				expect(handler.getModel().info.outputPrice).toBe(0.667)
+			} finally {
+				vitest.useRealTimers()
+			}
+		})
+
+		it("does not reuse default model prices for an unknown configured model", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+			vitest.mocked(refreshModels).mockResolvedValueOnce({})
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "alibaba/qwen3.8-max",
+			})
+
+			await handler.ensureModelFetched()
+
+			const { id, info } = handler.getModel()
+			expect(id).toBe("alibaba/qwen3.8-max")
+			expect(info.inputPrice).toBe(0)
+			expect(info.outputPrice).toBe(0)
+			expect(info.cacheWritesPrice).toBe(0)
+			expect(info.cacheReadsPrice).toBe(0)
+		})
+
+		it("does not refetch an unresolved model on every ensureModelFetched call", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			const catalog = {
+				"anthropic/claude-sonnet-4": {
+					maxTokens: 64000,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 3,
+					outputPrice: 15,
+				},
+			}
+			vitest.mocked(getModels).mockResolvedValue(catalog)
+			vitest.mocked(refreshModels).mockResolvedValue(catalog)
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "alibaba/qwen3.8-max",
+			})
+
+			await handler.ensureModelFetched()
+			vitest.mocked(getModels).mockClear()
+			vitest.mocked(refreshModels).mockClear()
+
+			await handler.ensureModelFetched()
+			await handler.ensureModelFetched()
+
+			expect(getModels).not.toHaveBeenCalled()
+			expect(refreshModels).not.toHaveBeenCalled()
+			expect(handler.getModel().info.inputPrice).toBe(0)
+		})
+
+		it("negative-caches an empty catalog response for a missing model", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValue({})
+			vitest.mocked(refreshModels).mockResolvedValue({})
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "alibaba/qwen3.8-max",
+			})
+
+			await handler.ensureModelFetched()
+			vitest.mocked(getModels).mockClear()
+			vitest.mocked(refreshModels).mockClear()
+
+			await handler.ensureModelFetched()
+
+			expect(getModels).not.toHaveBeenCalled()
+			expect(refreshModels).not.toHaveBeenCalled()
+			expect(handler.getModel().info.inputPrice).toBe(0)
+		})
+
+		it("force-refreshes before negative-caching when shared catalog is stale", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"anthropic/claude-sonnet-4": {
+					maxTokens: 64000,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 3,
+					outputPrice: 15,
+				},
+			})
+			vitest.mocked(refreshModels).mockResolvedValueOnce({
+				"alibaba/qwen3.8-max": {
+					maxTokens: 65536,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 0.222,
+					outputPrice: 0.667,
+				},
+			})
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "alibaba/qwen3.8-max",
+			})
+
+			await handler.ensureModelFetched()
+
+			expect(getModels).toHaveBeenCalled()
+			expect(refreshModels).toHaveBeenCalled()
+			expect(handler.getModel().info.inputPrice).toBe(0.222)
+			expect(handler.getModel().info.outputPrice).toBe(0.667)
+
+			vitest.mocked(getModels).mockClear()
+			vitest.mocked(refreshModels).mockClear()
+			await handler.ensureModelFetched()
+			expect(getModels).not.toHaveBeenCalled()
+			expect(refreshModels).not.toHaveBeenCalled()
 		})
 
 		it("deduplicates concurrent calls into a single fetch", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
-			const { getModels } = await import("../fetchers/modelCache")
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 			vitest.mocked(getModels).mockClear()
+			vitest.mocked(refreshModels).mockClear()
 
 			await Promise.all([handler.ensureModelFetched(), handler.ensureModelFetched()])
 
 			expect(getModels).toHaveBeenCalledTimes(1)
+			expect(refreshModels).not.toHaveBeenCalled()
 		})
 
 		it("recovers after a rejected fetch so later calls are not poisoned", async () => {
@@ -701,7 +949,7 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("makes getModel return the fetched context window instead of the default", async () => {
-			const { getModels } = await import("../fetchers/modelCache")
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 			vitest.mocked(getModels).mockResolvedValueOnce({
 				"google/gemini-2.5-pro": {
 					maxTokens: 65536,
@@ -721,6 +969,7 @@ describe("ZooGatewayHandler", () => {
 			await handler.ensureModelFetched()
 
 			expect(handler.getModel().info.contextWindow).toBe(1048576)
+			expect(refreshModels).not.toHaveBeenCalled()
 		})
 	})
 })

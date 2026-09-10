@@ -14,6 +14,7 @@ import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-
 
 import { MiniMaxHandler } from "../minimax"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("@anthropic-ai/sdk", () => {
 	const mockCreate = vitest.fn()
@@ -33,7 +34,7 @@ describe("MiniMaxHandler", () => {
 	let mockCreate: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		const anthropicInstance = (Anthropic as unknown as any)()
 		mockCreate = anthropicInstance.messages.create
 	})

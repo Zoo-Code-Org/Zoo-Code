@@ -26,7 +26,8 @@ const SEMBLE_ARCHIVES: Record<string, { archive: string; binary: string }> = {
 export const SEMBLE_VERSION = "v0.4.1"
 const DOWNLOAD_BASE_URL = `https://github.com/Zoo-Code-Org/sembleexec/releases/download/${SEMBLE_VERSION}`
 const VERSION_FILE = ".semble-version"
-const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+// Leave room for future release growth while still rejecting anomalous downloads.
+export const SEMBLE_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 /**
  * SHA-256 checksums for each platform archive at SEMBLE_VERSION.
@@ -122,7 +123,7 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 				name: "Semble",
 				trustedDomains: TRUSTED_DOWNLOAD_DOMAINS,
 				timeoutMs: 120_000,
-				maxBytes: MAX_ARCHIVE_BYTES,
+				maxBytes: SEMBLE_MAX_ARCHIVE_BYTES,
 			}),
 		verifyArchive: (archivePath) => verifyChecksum(archivePath, expectedChecksum),
 		extractArchive: async (archivePath, stagingDir) => {

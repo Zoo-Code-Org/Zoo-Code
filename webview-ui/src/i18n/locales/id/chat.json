@@ -284,6 +284,7 @@
 		"exitStatus": "Keluar dengan status {{exitCode}}",
 		"malformedCommand": "Perintah tidak valid: kesalahan sintaks shell",
 		"manageCommands": "Perintah yang disetujui secara otomatis",
+		"denied": "Perintah ditolak",
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
@@ -372,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Kontrol OpenAI yang lebih lengkap — gunakan mode prioritas Fast dengan OpenAI Codex dan pilih tingkat reasoning yang lebih tinggi untuk model yang kompatibel dengan OpenAI.",
-			"highlight2": "Provider dan model yang lebih andal — peningkatan penanganan metadata router, refresh model Ollama, dukungan proxy Bedrock, dan kontrol reasoning Friendli.",
-			"highlight3": "Settings dan workflow developer yang lebih mulus — settings kini mempertahankan edit yang belum disimpan, perintah terminal singkat selesai dengan benar, rencana architect memakai path relatif workspace, dan branding Roo yang masih terlihat telah diperbarui menjadi Zoo."
+			"highlight1": "🔑 Gunakan kunci API Zoo Gateway milikmu di mana saja—pakai di client atau workflow apa pun yang kompatibel dengan OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Untuk waktu terbatas, dapatkan akses gratis ke MiniMax-M3 melalui Zoo Gateway.",
+			"highlight3": "✨ Kini tersedia: model terbaru GPT-6 Astra dan Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

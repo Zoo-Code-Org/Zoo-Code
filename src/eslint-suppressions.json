@@ -24,14 +24,9 @@
 			"count": 6
 		}
 	},
-	"__tests__/extension.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"__tests__/history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 72
+			"count": 71
 		}
 	},
 	"__tests__/migrateSettings.spec.ts": {
@@ -179,11 +174,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/__tests__/lmstudio.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -206,7 +196,7 @@
 	},
 	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 23
+			"count": 22
 		}
 	},
 	"api/providers/__tests__/openai-codex.spec.ts": {
@@ -226,7 +216,7 @@
 	},
 	"api/providers/__tests__/openai-native.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 78
+			"count": 74
 		}
 	},
 	"api/providers/__tests__/openai-timeout.spec.ts": {
@@ -277,11 +267,6 @@
 	"api/providers/__tests__/vertex.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
-		}
-	},
-	"api/providers/__tests__/xai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"api/providers/__tests__/zai.spec.ts": {
@@ -406,12 +391,12 @@
 	},
 	"api/providers/openai-codex.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 35
+			"count": 31
 		}
 	},
 	"api/providers/openai-native.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 31
+			"count": 28
 		}
 	},
 	"api/providers/openai.ts": {
@@ -486,7 +471,7 @@
 	},
 	"api/transform/__tests__/gemini-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/transform/__tests__/mistral-format.spec.ts": {
@@ -601,7 +586,7 @@
 	},
 	"core/assistant-message/presentAssistantMessage.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 3
 		}
 	},
 	"core/auto-approval/__tests__/AutoApprovalHandler.spec.ts": {
@@ -667,16 +652,6 @@
 	"core/config/__tests__/CustomModesManager.yamlEdgeCases.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"core/config/__tests__/CustomModesSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/config/__tests__/ModeConfig.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
 		}
 	},
 	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
@@ -799,16 +774,6 @@
 			"count": 4
 		}
 	},
-	"core/task-persistence/__tests__/TaskHistoryStore.crossInstance.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/task-persistence/__tests__/TaskHistoryStore.reconciliation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
@@ -831,7 +796,7 @@
 	},
 	"core/task/Task.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 17
 		}
 	},
 	"core/task/__tests__/Task.dispose.test.ts": {
@@ -866,7 +831,7 @@
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 32
+			"count": 18
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
@@ -1006,7 +971,7 @@
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 31
+			"count": 26
 		}
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
@@ -1061,7 +1026,7 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 8
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
@@ -1076,7 +1041,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 40
+			"count": 37
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
@@ -1169,11 +1134,6 @@
 			"count": 5
 		}
 	},
-	"extension.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"extension/__tests__/api-delete-queued-message.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -1206,7 +1166,7 @@
 	},
 	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 311
+			"count": 310
 		}
 	},
 	"integrations/editor/__tests__/EditorUtils.spec.ts": {
@@ -1731,7 +1691,7 @@
 	},
 	"utils/__tests__/shell.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 46
+			"count": 35
 		}
 	},
 	"utils/__tests__/storage.spec.ts": {

@@ -1,4 +1,9 @@
-import { type ProviderSettings, type OrganizationAllowList, type RouterModels } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	type ProviderSettings,
+	type OrganizationAllowList,
+	type RouterModels,
+} from "@roo-code/types"
 
 // Mock i18next to return translation keys with interpolated values
 vi.mock("i18next", () => ({
@@ -17,6 +22,7 @@ vi.mock("i18next", () => ({
 }))
 
 import {
+	formatOpenAiExtraBodyValidationError,
 	getModelValidationError,
 	validateApiConfiguration,
 	validateApiConfigurationExcludingModelErrors,
@@ -53,6 +59,7 @@ describe("Model Validation Functions", () => {
 		deepseek: {},
 		"opencode-go": {},
 		kenari: {},
+		nanogpt: {},
 		"zoo-gateway": {},
 		"kimi-code": {},
 		moonshot: {},
@@ -76,7 +83,7 @@ describe("Model Validation Functions", () => {
 	describe("getModelValidationError", () => {
 		it("returns undefined for valid OpenRouter model", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "valid-model",
 			}
 
@@ -86,7 +93,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns error for invalid OpenRouter model", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "invalid-model",
 			}
 
@@ -96,7 +103,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns error for model not allowed by organization", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "another-valid-model",
 			}
 
@@ -106,7 +113,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns undefined for OpenAI models when no router models provided", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -114,9 +121,45 @@ describe("Model Validation Functions", () => {
 			expect(result).toBeUndefined()
 		})
 
+		it.each([
+			{
+				name: "OpenAI Native",
+				config: {
+					apiProvider: providerIdentifiers.openaiNative,
+					apiModelId: "blocked-model",
+				} satisfies ProviderSettings,
+			},
+			{
+				name: "OpenAI Compatible",
+				config: {
+					apiProvider: providerIdentifiers.openai,
+					openAiModelId: "blocked-model",
+				} satisfies ProviderSettings,
+			},
+			{
+				name: "VS Code LM",
+				config: {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { id: "blocked-model" },
+				} satisfies ProviderSettings,
+			},
+		])("uses the provider-specific model field for $name organization validation", ({ config }) => {
+			const organizationAllowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[config.apiProvider!]: { allowAll: false, models: ["allowed-model"] },
+				},
+			}
+
+			const result = getModelValidationError(config, undefined, organizationAllowList)
+
+			expect(result).toContain("settings:validation.modelNotAllowed")
+			expect(result).toContain("model=blocked-model")
+		})
+
 		it("handles empty model IDs gracefully", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "",
 			}
 
@@ -126,7 +169,7 @@ describe("Model Validation Functions", () => {
 
 		it("handles undefined model IDs gracefully", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				// openRouterModelId is undefined
 			}
 
@@ -138,7 +181,7 @@ describe("Model Validation Functions", () => {
 	describe("validateApiConfigurationExcludingModelErrors", () => {
 		it("returns undefined when configuration is valid", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "valid-key",
 				openRouterModelId: "valid-model",
 			}
@@ -149,7 +192,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns error for missing API key", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "valid-model",
 				// Missing openRouterApiKey
 			}
@@ -160,7 +203,7 @@ describe("Model Validation Functions", () => {
 
 		it("excludes model-specific errors", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "valid-key",
 				openRouterModelId: "invalid-model", // This should be ignored
 			}
@@ -171,7 +214,7 @@ describe("Model Validation Functions", () => {
 
 		it("excludes model-specific organization errors", () => {
 			const config: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "valid-key",
 				openRouterModelId: "another-valid-model", // Not allowed by restrictive org
 			}
@@ -183,12 +226,131 @@ describe("Model Validation Functions", () => {
 			)
 			expect(result).toBeUndefined() // Should exclude model-specific org errors
 		})
+
+		it("accepts a valid OpenAI-compatible Extra Body object", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				openAiBaseUrl: "https://api.sailresearch.com/v1",
+				openAiApiKey: "valid-key",
+				openAiModelId: "zai-org/GLM-5.2-FP8",
+				openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" } }),
+			}
+
+			expect(
+				validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization),
+			).toBeUndefined()
+		})
+
+		it.each([
+			["not json", "settings:validation.openAiExtraBody.invalidJson"],
+			["[]", "settings:validation.openAiExtraBody.objectRequired"],
+			[JSON.stringify({ model: "override" }), "settings:validation.openAiExtraBody.reservedKeys keys=model"],
+			[
+				JSON.stringify({ response_format: { type: "json_object" } }),
+				"settings:validation.openAiExtraBody.reservedKeys keys=response_format",
+			],
+		])("rejects invalid OpenAI-compatible Extra Body input", (openAiExtraBody, expectedError) => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				openAiBaseUrl: "https://api.sailresearch.com/v1",
+				openAiApiKey: "valid-key",
+				openAiModelId: "zai-org/GLM-5.2-FP8",
+				openAiExtraBody,
+			}
+
+			expect(validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)).toBe(
+				expectedError,
+			)
+		})
+	})
+
+	describe("validateApiConfiguration OpenAI-compatible Extra Body validation", () => {
+		const createConfig = (openAiExtraBody: string): ProviderSettings => ({
+			apiProvider: providerIdentifiers.openai,
+			openAiBaseUrl: "https://api.sailresearch.com/v1",
+			openAiApiKey: "valid-key",
+			openAiModelId: "zai-org/GLM-5.2-FP8",
+			openAiExtraBody,
+		})
+
+		it("accepts a valid Extra Body object through both validation entry points", () => {
+			const config = createConfig(JSON.stringify({ metadata: { completion_window: "balanced" } }))
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBeUndefined()
+			expect(
+				validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization),
+			).toBeUndefined()
+		})
+
+		it.each([
+			["invalid JSON", "not json", "settings:validation.openAiExtraBody.invalidJson"],
+			["non-object JSON", "[]", "settings:validation.openAiExtraBody.objectRequired"],
+			[
+				"a reserved request API key",
+				JSON.stringify({ model: "override" }),
+				"settings:validation.openAiExtraBody.reservedKeys keys=model",
+			],
+			[
+				"a reserved security key",
+				'{"constructor":{"prototype":{"polluted":true}}}',
+				"settings:validation.openAiExtraBody.reservedKeys keys=constructor",
+			],
+			[
+				"response_format",
+				JSON.stringify({ response_format: { type: "json_object" } }),
+				"settings:validation.openAiExtraBody.reservedKeys keys=response_format",
+			],
+		])("rejects %s with the localized error", (_name, openAiExtraBody, expectedError) => {
+			const config = createConfig(openAiExtraBody)
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(expectedError)
+		})
+
+		it("returns required-field errors before Extra Body errors", () => {
+			const config = createConfig("not json")
+			config.openAiApiKey = undefined
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(
+				"settings:validation.openAi",
+			)
+		})
+
+		it("formats a reserved-key result without a key list", () => {
+			const t = vi.fn((_key, options) => options?.keys ?? "missing")
+
+			expect(formatOpenAiExtraBodyValidationError({ success: false, reason: "reservedKeys", data: {} }, t)).toBe(
+				"",
+			)
+			expect(t).toHaveBeenCalledWith("settings:validation.openAiExtraBody.reservedKeys", { keys: "" })
+		})
+
+		it("separates multiple reserved keys in the validation message", () => {
+			const t = vi.fn((_key, options) => options?.keys ?? "missing")
+
+			expect(
+				formatOpenAiExtraBodyValidationError(
+					{ success: false, reason: "reservedKeys", data: {}, reservedKeys: ["model", "stream"] },
+					t,
+				),
+			).toBe("model, stream")
+		})
+
+		it("ignores Extra Body fields for non-OpenAI-compatible providers", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "valid-key",
+				openRouterModelId: "valid-model",
+				openAiExtraBody: "not json",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBeUndefined()
+		})
 	})
 
 	describe("Opencode Go validation", () => {
 		it("returns an apiKey error when the Opencode Go API key is missing", () => {
 			const config: ProviderSettings = {
-				apiProvider: "opencode-go",
+				apiProvider: providerIdentifiers.opencodeGo,
 				opencodeGoModelId: "glm-5.1",
 				// Missing opencodeGoApiKey
 			}
@@ -199,7 +361,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns undefined for a valid Opencode Go configuration", () => {
 			const config: ProviderSettings = {
-				apiProvider: "opencode-go",
+				apiProvider: providerIdentifiers.opencodeGo,
 				opencodeGoApiKey: "valid-key",
 				opencodeGoModelId: "glm-5.1",
 			}
@@ -210,7 +372,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns a modelId error when no Opencode Go model id is set", () => {
 			const config: ProviderSettings = {
-				apiProvider: "opencode-go",
+				apiProvider: providerIdentifiers.opencodeGo,
 				opencodeGoApiKey: "valid-key",
 				// Missing opencodeGoModelId
 			}
@@ -222,7 +384,7 @@ describe("Model Validation Functions", () => {
 	describe("Kenari validation", () => {
 		it("returns an apiKey error when the Kenari API key is missing", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kenari",
+				apiProvider: providerIdentifiers.kenari,
 				kenariModelId: "glm-5.1",
 				// Missing kenariApiKey
 			}
@@ -233,7 +395,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns undefined for a valid Kenari configuration", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kenari",
+				apiProvider: providerIdentifiers.kenari,
 				kenariApiKey: "valid-key",
 				kenariModelId: "glm-5.1",
 			}
@@ -244,7 +406,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns a modelId error when no Kenari model id is set", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kenari",
+				apiProvider: providerIdentifiers.kenari,
 				kenariApiKey: "valid-key",
 				// Missing kenariModelId
 			}
@@ -254,10 +416,40 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("NanoGPT validation", () => {
+		it("returns an apiKey error when the NanoGPT API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptModelId: "openai/model",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("returns a modelId error when the NanoGPT model is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "valid-key",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.modelId")
+		})
+
+		it("accepts a NanoGPT API key and selected model", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "valid-key",
+				nanoGptModelId: "openai/model",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
+		})
+	})
+
 	describe("Friendli validation", () => {
 		it("returns an apiKey error when the Friendli API key is missing", () => {
 			const config: ProviderSettings = {
-				apiProvider: "friendli",
+				apiProvider: providerIdentifiers.friendli,
 				apiModelId: "zai-org/GLM-5.2",
 				// Missing friendliApiKey
 			}
@@ -268,7 +460,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns undefined for a valid Friendli configuration", () => {
 			const config: ProviderSettings = {
-				apiProvider: "friendli",
+				apiProvider: providerIdentifiers.friendli,
 				friendliApiKey: "valid-key",
 				apiModelId: "zai-org/GLM-5.2",
 			}
@@ -282,7 +474,7 @@ describe("Model Validation Functions", () => {
 		describe("validateApiConfiguration (welcome-view entry point)", () => {
 			it("returns a sign-in error when neither profile token nor Zoo auth is present", () => {
 				const config: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				}
 
@@ -292,7 +484,7 @@ describe("Model Validation Functions", () => {
 
 			it("returns undefined when Zoo Code auth is active without a profile token", () => {
 				const config: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				}
 
@@ -302,7 +494,7 @@ describe("Model Validation Functions", () => {
 
 			it("returns undefined when a profile session token is set", () => {
 				const config: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 					zooSessionToken: "zoo_ext_test_token",
 				}
@@ -318,7 +510,7 @@ describe("Model Validation Functions", () => {
 			// surface a zoo-gateway-specific error regardless of auth state.
 			it("returns undefined for zoo-gateway when unauthenticated and no token", () => {
 				const config: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				}
 
@@ -332,7 +524,7 @@ describe("Model Validation Functions", () => {
 
 			it("returns undefined for zoo-gateway when a profile token is set", () => {
 				const config: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 					zooSessionToken: "zoo_ext_test_token",
 				}
@@ -354,7 +546,7 @@ describe("Model Validation Functions", () => {
 				}
 
 				const config: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				}
 
@@ -371,7 +563,7 @@ describe("Model Validation Functions", () => {
 	describe("Kimi Code validation", () => {
 		it("returns undefined when using OAuth auth method", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kimi-code",
+				apiProvider: providerIdentifiers.kimiCode,
 				kimiCodeAuthMethod: "oauth",
 			}
 
@@ -381,7 +573,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns undefined when auth method is not specified (defaults to OAuth)", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kimi-code",
+				apiProvider: providerIdentifiers.kimiCode,
 			}
 
 			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
@@ -390,7 +582,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns apiKey error when using api-key auth method without key", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kimi-code",
+				apiProvider: providerIdentifiers.kimiCode,
 				kimiCodeAuthMethod: "api-key",
 			}
 
@@ -400,7 +592,7 @@ describe("Model Validation Functions", () => {
 
 		it("returns undefined when using api-key auth method with key", () => {
 			const config: ProviderSettings = {
-				apiProvider: "kimi-code",
+				apiProvider: providerIdentifiers.kimiCode,
 				kimiCodeAuthMethod: "api-key",
 				kimiCodeApiKey: "valid-key",
 			}

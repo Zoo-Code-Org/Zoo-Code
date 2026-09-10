@@ -308,6 +308,20 @@
 				"description": "Permitir que o Zoo crie e edite arquivos protegidos (como .rooignore e arquivos de configuração .roo/) sem exigir aprovação."
 			}
 		},
+		"allowlists": {
+			"label": "Listas de permissão",
+			"description": "Conceda acesso a arquivos específicos, sem aprovar automaticamente toda uma categoria de ações. Um padrão por linha, em sintaxe inspirada no .gitignore: \"notes.md\" corresponde a esse arquivo em qualquer diretório do espaço de trabalho, \"docs/scratch/**\" a tudo abaixo desse diretório e \"*.md\" a qualquer arquivo Markdown. Um padrão sempre nomeia arquivos, nunca diretórios: \"docs\" concede apenas um arquivo chamado \"docs\"; escreva \"docs/**\" para o conteúdo de um diretório. Um \"./\" inicial indica a raiz do espaço de trabalho, enquanto um \"/\" inicial indica a raiz do sistema de arquivos, de modo que \"/tmp/notes.md\" alcança fora do espaço de trabalho, assim como \"~/notes.md\", onde um \"~/\" inicial indica seu diretório pessoal. Prefixe um padrão com \"!\" para excluir o que uma linha anterior correspondeu; como no .gitignore, a última linha correspondente vence, então a ordem importa. Padrões relativos ao espaço de trabalho são ignorados enquanto nenhuma pasta estiver aberta. Maiúsculas e minúsculas são diferenciadas, exceto no Windows. Nada é aprovado automaticamente enquanto \"Aprovação automática\" acima estiver desativada.",
+			"readFiles": {
+				"label": "Padrões da lista de permissão de leitura",
+				"description": "Arquivos que o Zoo pode ler sem aprovação, mesmo quando \"Leitura\" acima está desativado. Os arquivos da lista de permissão de escrita abaixo sempre podem ser lidos também, então não precisam ser adicionados duas vezes. Listagens de diretórios e buscas sempre seguem a configuração \"Leitura\". Arquivos excluídos pelo .rooignore continuam não podendo ser lidos de qualquer forma.",
+				"placeholder": "Um padrão por linha, ex. notes.md"
+			},
+			"writeFiles": {
+				"label": "Padrões da lista de permissão de escrita",
+				"description": "Arquivos que o Zoo pode criar e editar sem aprovação, mesmo quando \"Escrita\" acima está desativado. Arquivos protegidos continuam exigindo aprovação, a menos que \"Incluir arquivos protegidos\" esteja ativado (nas configurações da aprovação automática de \"Escrita\"). Arquivos excluídos pelo .rooignore continuam não podendo ser gravados de qualquer forma.",
+				"placeholder": "Um padrão por linha, ex. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Ativar aprovação automática de ferramentas MCP individuais na visualização de Servidores MCP (requer tanto esta configuração quanto a caixa de seleção \"Permitir sempre\" da ferramenta)"
@@ -328,6 +342,10 @@
 		"execute": {
 			"label": "Executar",
 			"description": "Executar automaticamente comandos de terminal permitidos sem exigir aprovação",
+			"destructiveCommandGuard": {
+				"label": "Ativar a proteção contra comandos destrutivos",
+				"description": "Baixa e usa o Destructive Command Guard (DCG) para esta plataforma. Comandos permitidos pelo DCG são executados automaticamente. Comandos bloqueados pelo DCG precisam da sua aprovação. As listas de comandos do Zoo ficam desativadas enquanto esta opção estiver ativa. O executável baixado é mantido se você desativá-la."
+			},
 			"allowedCommands": "Comandos de auto-execução permitidos",
 			"allowedCommandsDescription": "Prefixos de comando que podem ser auto-executados quando \"Aprovar sempre operações de execução\" está ativado. Adicione * para permitir todos os comandos (use com cautela).",
 			"deniedCommands": "Comandos negados",
@@ -384,6 +402,25 @@
 		"getOpencodeGoApiKey": "Obter chave API do Opencode Go",
 		"kenariApiKey": "Chave API do Kenari",
 		"getKenariApiKey": "Obter chave API do Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Chave API do NanoGPT",
+			"getApiKey": "Obter chave API do NanoGPT",
+			"model": "Modelo",
+			"routingPreference": "Preferência de roteamento",
+			"routingOptions": {
+				"automatic": "Automática",
+				"fastest": "Mais rápida",
+				"cheapest": "Mais barata",
+				"lowestLatency": "Menor latência",
+				"highestThroughput": "Maior throughput",
+				"toolCapable": "Compatível com ferramentas",
+				"cacheCapable": "Compatível com cache"
+			},
+			"automaticExplanation": "Automática não aplica nenhum sufixo de roteamento.",
+			"billingWarning": "Preferências de roteamento avançadas podem usar cobrança por uso e podem ignorar a cobertura da assinatura, dependendo das regras de cobrança atuais do NanoGPT.",
+			"routingDocs": "Ver detalhes de roteamento e cobrança do NanoGPT"
+		},
 		"apiKeyStorageNotice": "As chaves de API são armazenadas com segurança no Armazenamento Secreto do VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -423,6 +460,8 @@
 		"headerName": "Nome do cabeçalho",
 		"headerValue": "Valor do cabeçalho",
 		"noCustomHeaders": "Nenhum cabeçalho personalizado definido. Clique no botão + para adicionar um.",
+		"extraBody": "Corpo adicional",
+		"extraBodyDescription": "Objeto JSON opcional mesclado aos corpos das solicitações de API. Os campos gerenciados pelo Zoo Code, como model, messages, tools e stream, não podem ser sobrescritos. Não inclua segredos.",
 		"unboundApiKey": "Chave de API Unbound",
 		"getUnboundApiKey": "Obter chave de API Unbound",
 		"requestyApiKey": "Chave de API Requesty",
@@ -491,6 +530,9 @@
 		"apiKey": "Chave de API",
 		"openAiApiKey": "Chave de API OpenAI",
 		"openAiBaseUrl": "URL Base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nome da implantação do Azure",
+		"azureOpenAiDeploymentNameDescription": "Insira o nome da implantação configurado no Azure AI Studio, não o nome do modelo subjacente.",
 		"getOpenAiApiKey": "Obter chave de API OpenAI",
 		"mistralApiKey": "Chave de API Mistral",
 		"getMistralApiKey": "Obter chave de API Mistral / Codestral",
@@ -976,8 +1018,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Permitir relatórios anônimos de erros e uso",
-			"description": "Ajude a melhorar o Zoo Code enviando dados de uso anônimos e relatórios de erros. Esta telemetria não coleta código, prompts ou informações pessoais. Consulte nossa <privacyLink>política de privacidade</privacyLink> para mais detalhes."
+			"label": "Permitir relatórios de erros e uso",
+			"description": "Ajude a melhorar o Zoo Code enviando dados de uso e relatórios de erros, vinculados a um identificador de instalação em vez do seu nome ou conta. Esta telemetria não coleta seu código ou seus prompts. Consulte nossa <privacyLink>política de privacidade</privacyLink> para mais detalhes."
 		},
 		"settings": {
 			"import": "Importar",
@@ -996,6 +1038,11 @@
 		"modelId": "Você deve fornecer um ID de modelo válido.",
 		"modelSelector": "Você deve fornecer um seletor de modelo válido.",
 		"openAi": "Você deve fornecer uma URL base, chave de API e ID de modelo válidos.",
+		"openAiExtraBody": {
+			"invalidJson": "O corpo adicional deve conter um JSON válido.",
+			"objectRequired": "O corpo adicional deve ser um objeto JSON.",
+			"reservedKeys": "O corpo adicional não pode sobrescrever os campos gerenciados pelo Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Formato de ARN inválido. Por favor, verifique os requisitos de formato.",
 			"regionMismatch": "Aviso: A região em seu ARN ({{arnRegion}}) não corresponde à região selecionada ({{region}}). Isso pode causar problemas de acesso. O provedor usará a região do ARN."

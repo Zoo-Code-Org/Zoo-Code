@@ -156,18 +156,21 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const {
 		alwaysAllowReadOnly,
 		alwaysAllowReadOnlyOutsideWorkspace,
+		allowedReadFiles,
 		allowedCommands,
 		deniedCommands,
 		allowedMaxRequests,
 		allowedMaxCost,
 		language,
 		alwaysAllowExecute,
+		destructiveCommandGuardEnabled,
 		alwaysAllowMcp,
 		alwaysAllowModeSwitch,
 		alwaysAllowSubtasks,
 		alwaysAllowWrite,
 		alwaysAllowWriteOutsideWorkspace,
 		alwaysAllowWriteProtected,
+		allowedWriteFiles,
 		autoCondenseContext,
 		autoCondenseContextPercent,
 		enableCheckpoints,
@@ -383,10 +386,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					language,
 					alwaysAllowReadOnly: alwaysAllowReadOnly ?? undefined,
 					alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? undefined,
+					allowedReadFiles: allowedReadFiles ?? [],
 					alwaysAllowWrite: alwaysAllowWrite ?? undefined,
 					alwaysAllowWriteOutsideWorkspace: alwaysAllowWriteOutsideWorkspace ?? undefined,
 					alwaysAllowWriteProtected: alwaysAllowWriteProtected ?? undefined,
+					allowedWriteFiles: allowedWriteFiles ?? [],
 					alwaysAllowExecute: alwaysAllowExecute ?? undefined,
+					destructiveCommandGuardEnabled: destructiveCommandGuardEnabled ?? false,
 					alwaysAllowMcp,
 					alwaysAllowModeSwitch,
 					allowedCommands: allowedCommands ?? [],
@@ -807,13 +813,16 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<AutoApproveSettings
 								alwaysAllowReadOnly={alwaysAllowReadOnly}
 								alwaysAllowReadOnlyOutsideWorkspace={alwaysAllowReadOnlyOutsideWorkspace}
+								allowedReadFiles={allowedReadFiles}
 								alwaysAllowWrite={alwaysAllowWrite}
 								alwaysAllowWriteOutsideWorkspace={alwaysAllowWriteOutsideWorkspace}
 								alwaysAllowWriteProtected={alwaysAllowWriteProtected}
+								allowedWriteFiles={allowedWriteFiles}
 								alwaysAllowMcp={alwaysAllowMcp}
 								alwaysAllowModeSwitch={alwaysAllowModeSwitch}
 								alwaysAllowSubtasks={alwaysAllowSubtasks}
 								alwaysAllowExecute={alwaysAllowExecute}
+								destructiveCommandGuardEnabled={destructiveCommandGuardEnabled}
 								alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
 								followupAutoApproveTimeoutMs={followupAutoApproveTimeoutMs}
 								allowedCommands={allowedCommands}

@@ -308,6 +308,20 @@
 				"description": "Permetre a Zoo crear i editar fitxers protegits (com .rooignore i fitxers de configuració .roo/) sense requerir aprovació."
 			}
 		},
+		"allowlists": {
+			"label": "Llistes de permisos",
+			"description": "Concedeix accés a fitxers concrets, sense aprovar automàticament tota una categoria d'accions. Un patró per línia, amb sintaxi inspirada en .gitignore: \"notes.md\" coincideix amb aquest fitxer en qualsevol directori de l'espai de treball, \"docs/scratch/**\" amb tot el que hi ha sota aquell directori i \"*.md\" amb qualsevol fitxer Markdown. Un patró sempre anomena fitxers, mai directoris: \"docs\" només concedeix un fitxer anomenat \"docs\"; escriu \"docs/**\" per al contingut d'un directori. Un \"./\" inicial indica l'arrel de l'espai de treball, mentre que un \"/\" inicial indica l'arrel del sistema de fitxers, de manera que \"/tmp/notes.md\" arriba fora de l'espai de treball, igual que \"~/notes.md\", on un \"~/\" inicial indica el teu directori personal. Posa \"!\" davant d'un patró per excloure el que ha coincidit en una línia anterior; com a .gitignore, guanya l'última línia que coincideix, així que l'ordre compta. Els patrons relatius a l'espai de treball s'ignoren mentre no hi hagi cap carpeta oberta. Es distingeixen majúscules i minúscules, excepte a Windows. No s'aprova res automàticament si \"Auto-aprovació\" de dalt està desactivada.",
+			"readFiles": {
+				"label": "Patrons de la llista de permisos de lectura",
+				"description": "Fitxers que Zoo pot llegir sense aprovació, encara que \"Llegir\" estigui desactivat a dalt. Els fitxers de la llista de permisos d'escriptura de sota sempre es poden llegir també, així que no cal afegir-los dues vegades. Els llistats de directoris i les cerques sempre segueixen la configuració de \"Llegir\". Els fitxers exclosos per .rooignore continuen sense poder-se llegir.",
+				"placeholder": "Un patró per línia, ex. notes.md"
+			},
+			"writeFiles": {
+				"label": "Patrons de la llista de permisos d'escriptura",
+				"description": "Fitxers que Zoo pot crear i editar sense aprovació, encara que \"Escriure\" estigui desactivat a dalt. Els fitxers protegits continuen requerint aprovació tret que activis \"Incloure fitxers protegits\" (a la configuració de l'auto-aprovació d'\"Escriure\"). Els fitxers exclosos per .rooignore continuen sense poder-se escriure.",
+				"placeholder": "Un patró per línia, ex. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Habilitar l'aprovació automàtica d'eines MCP individuals a la vista de Servidors MCP (requereix tant aquesta configuració com la casella \"Permetre sempre\" de l'eina)"
@@ -328,6 +342,10 @@
 		"execute": {
 			"label": "Executar",
 			"description": "Executar automàticament comandes de terminal permeses sense requerir aprovació",
+			"destructiveCommandGuard": {
+				"label": "Activa la protecció contra ordres destructives",
+				"description": "Baixa i utilitza Destructive Command Guard (DCG) per a aquesta plataforma. Les ordres permeses per DCG s'executen automàticament. Les ordres bloquejades per DCG requereixen la teva aprovació. Les llistes d'ordres de Zoo es desactiven mentre aquesta opció està activa. L'executable baixat es conserva si la desactives."
+			},
 			"allowedCommands": "Comandes d'auto-execució permeses",
 			"allowedCommandsDescription": "Prefixos de comandes que poden ser executats automàticament quan \"Aprovar sempre operacions d'execució\" està habilitat. Afegeix * per permetre totes les comandes (usar amb precaució).",
 			"deniedCommands": "Comandes denegades",
@@ -384,6 +402,25 @@
 		"getOpencodeGoApiKey": "Obtenir clau API de Opencode Go",
 		"kenariApiKey": "Clau API de Kenari",
 		"getKenariApiKey": "Obtenir clau API de Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Clau API de NanoGPT",
+			"getApiKey": "Obtenir clau API de NanoGPT",
+			"model": "Model",
+			"routingPreference": "Preferència d'encaminament",
+			"routingOptions": {
+				"automatic": "Automàtica",
+				"fastest": "Més ràpida",
+				"cheapest": "Més econòmica",
+				"lowestLatency": "Latència més baixa",
+				"highestThroughput": "Rendiment més alt",
+				"toolCapable": "Compatible amb eines",
+				"cacheCapable": "Compatible amb memòria cau"
+			},
+			"automaticExplanation": "L'opció Automàtica no aplica cap sufix d'encaminament.",
+			"billingWarning": "Les preferències d'encaminament avançades poden utilitzar encaminament de pagament per ús i poden quedar fora de la cobertura de la subscripció, segons les regles de facturació actuals de NanoGPT.",
+			"routingDocs": "Consulta els detalls d'encaminament i facturació de NanoGPT"
+		},
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -423,6 +460,8 @@
 		"headerName": "Nom de la capçalera",
 		"headerValue": "Valor de la capçalera",
 		"noCustomHeaders": "No hi ha capçaleres personalitzades definides. Feu clic al botó + per afegir-ne una.",
+		"extraBody": "Cos addicional",
+		"extraBodyDescription": "Objecte JSON opcional que es combina amb els cossos de les sol·licituds API. Els camps gestionats per Zoo Code, com ara model, messages, tools i stream, no es poden sobreescriure. No inclogueu secrets.",
 		"unboundApiKey": "Clau API de Unbound",
 		"getUnboundApiKey": "Obtenir clau API de Unbound",
 		"requestyApiKey": "Clau API de Requesty",
@@ -491,6 +530,9 @@
 		"openAiApiKey": "Clau API d'OpenAI",
 		"apiKey": "Clau API",
 		"openAiBaseUrl": "URL base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nom de desplegament d'Azure",
+		"azureOpenAiDeploymentNameDescription": "Introduïu el nom del desplegament d'Azure AI Studio, no el nom del model subjacent.",
 		"getOpenAiApiKey": "Obtenir clau API d'OpenAI",
 		"mistralApiKey": "Clau API de Mistral",
 		"getMistralApiKey": "Obtenir clau API de Mistral / Codestral",
@@ -976,8 +1018,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Permetre informes anònims d'errors i ús",
-			"description": "Ajuda a millorar Zoo Code enviant dades d'ús anònimes i informes d'error. Aquesta telemetria no recull codi, prompts o informació personal. Consulta la nostra <privacyLink>política de privacitat</privacyLink> per a més detalls. Pots desactivar-ho en qualsevol moment."
+			"label": "Permetre informes d'errors i ús",
+			"description": "Ajuda a millorar Zoo Code enviant dades d'ús i informes d'error, vinculades a un identificador d'instal·lació en lloc del teu nom o compte. Aquesta telemetria no recull el teu codi ni les teves indicacions. Consulta la nostra <privacyLink>política de privacitat</privacyLink> per a més detalls. Pots desactivar-ho en qualsevol moment."
 		},
 		"settings": {
 			"import": "Importar",
@@ -996,6 +1038,11 @@
 		"modelId": "Heu de proporcionar un ID de model vàlid.",
 		"modelSelector": "Heu de proporcionar un selector de model vàlid.",
 		"openAi": "Heu de proporcionar una URL base, clau API i ID de model vàlids.",
+		"openAiExtraBody": {
+			"invalidJson": "El cos addicional ha de contenir JSON vàlid.",
+			"objectRequired": "El cos addicional ha de ser un objecte JSON.",
+			"reservedKeys": "El cos addicional no pot sobreescriure els camps gestionats per Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Format ARN no vàlid. Si us plau, comproveu els requisits del format.",
 			"regionMismatch": "Avís: La regió del vostre ARN ({{arnRegion}}) no coincideix amb la regió seleccionada ({{region}}). Això pot causar problemes d'accés. El proveïdor utilitzarà la regió de l'ARN."

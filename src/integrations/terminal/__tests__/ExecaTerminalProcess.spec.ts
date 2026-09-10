@@ -28,6 +28,8 @@ import { ExecaTerminalProcess } from "../ExecaTerminalProcess"
 import { BaseTerminal } from "../BaseTerminal"
 import type { RooTerminal } from "../types"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 describe("ExecaTerminalProcess", () => {
 	let mockTerminal: RooTerminal
 	let terminalProcess: ExecaTerminalProcess
@@ -56,7 +58,7 @@ describe("ExecaTerminalProcess", () => {
 
 	afterEach(() => {
 		process.env = originalEnv
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("UTF-8 encoding fix", () => {

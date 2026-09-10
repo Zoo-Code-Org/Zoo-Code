@@ -6,6 +6,7 @@ import {
 	kenariDefaultModelInfo,
 	KENARI_DEFAULT_TEMPERATURE,
 	KENARI_BASE_URL,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -37,7 +38,7 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "kenari",
+			name: providerIdentifiers.kenari,
 			baseURL: KENARI_BASE_URL,
 			apiKey: options.kenariApiKey,
 			modelId: options.kenariModelId,
@@ -81,15 +82,15 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 		for await (const chunk of completion) {
 			const delta = chunk.choices[0]?.delta
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
-
 			// Several Kenari models (GLM, DeepSeek) stream reasoning via reasoning_content,
 			// with an OpenRouter-style `reasoning` fallback; the shared helper handles both.
 			const reasoningText = extractReasoningFromDelta(delta)
 			if (reasoningText) {
 				yield { type: "reasoning", text: reasoningText }
+			}
+
+			if (delta?.content) {
+				yield { type: "text", text: delta.content }
 			}
 
 			// Emit raw tool call chunks - NativeToolCallParser handles state management.

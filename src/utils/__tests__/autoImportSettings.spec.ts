@@ -77,6 +77,7 @@ import { autoImportSettings } from "../autoImportSettings"
 import * as vscode from "vscode"
 import fsPromises from "fs/promises"
 import { fileExistsAtPath } from "../fs"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("autoImportSettings", () => {
 	let mockProviderSettingsManager: any
@@ -193,7 +194,7 @@ describe("autoImportSettings", () => {
 				currentApiConfigName: "test-config",
 				apiConfigs: {
 					"test-config": {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						anthropicApiKey: "test-key",
 					},
 				},
@@ -235,13 +236,13 @@ describe("autoImportSettings", () => {
 				currentApiConfigName: "test-config",
 				apiConfigs: {
 					"test-config": {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						anthropicApiKey: "test-key",
 					},
 				},
 			},
 			globalSettings: {
-				imageGenerationProvider: "roo",
+				imageGenerationProvider: retiredProviderIdentifiers.roo,
 				customInstructions: "Test instructions",
 			},
 		}

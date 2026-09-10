@@ -5,3 +5,5 @@ export const DEFAULT_HEADERS = {
 	"X-Title": "Zoo Code",
 	"User-Agent": `ZooCode/${Package.version}`,
 }
+
+export const NOT_PROVIDED = "not-provided"

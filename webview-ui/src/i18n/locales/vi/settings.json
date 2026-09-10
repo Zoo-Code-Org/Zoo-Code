@@ -308,6 +308,20 @@
 				"description": "Cho phép Zoo tạo và chỉnh sửa các tệp được bảo vệ (như .rooignore và các tệp cấu hình .roo/) mà không yêu cầu phê duyệt."
 			}
 		},
+		"allowlists": {
+			"label": "Danh sách cho phép",
+			"description": "Cấp quyền truy cập vào từng tệp cụ thể, mà không tự động phê duyệt cả một nhóm hành động. Mỗi dòng một mẫu, theo cú pháp lấy cảm hứng từ .gitignore: \"notes.md\" khớp với tệp đó trong bất kỳ thư mục nào của workspace, \"docs/scratch/**\" khớp với mọi thứ bên dưới thư mục đó, và \"*.md\" khớp với mọi tệp Markdown. Một mẫu luôn chỉ tệp, không bao giờ chỉ thư mục: \"docs\" chỉ cấp một tệp tên \"docs\"; hãy viết \"docs/**\" cho nội dung của một thư mục. Dấu \"./\" ở đầu chỉ gốc workspace, còn dấu \"/\" ở đầu chỉ gốc hệ thống tệp, nên \"/tmp/notes.md\" vươn ra ngoài workspace, cũng như \"~/notes.md\", trong đó dấu \"~/\" ở đầu chỉ thư mục home của bạn. Thêm \"!\" trước một mẫu để loại trừ những gì dòng trước đã khớp; như trong .gitignore, dòng khớp cuối cùng thắng, nên thứ tự có ý nghĩa. Khi chưa mở thư mục nào, các mẫu tương đối với workspace sẽ bị bỏ qua. Chữ hoa và chữ thường được phân biệt, trừ trên Windows. Không có gì được tự động phê duyệt khi \"Tự động phê duyệt\" ở trên đang tắt.",
+			"readFiles": {
+				"label": "Mẫu danh sách cho phép đọc",
+				"description": "Các tệp mà Zoo có thể đọc không cần phê duyệt, kể cả khi \"Đọc\" ở trên đang tắt. Các tệp trong danh sách cho phép ghi bên dưới cũng luôn đọc được, nên không cần thêm hai lần. Việc liệt kê thư mục và tìm kiếm luôn tuân theo cài đặt \"Đọc\". Các tệp bị .rooignore loại trừ vẫn không đọc được.",
+				"placeholder": "Mỗi dòng một mẫu, ví dụ notes.md"
+			},
+			"writeFiles": {
+				"label": "Mẫu danh sách cho phép ghi",
+				"description": "Các tệp mà Zoo có thể tạo và chỉnh sửa không cần phê duyệt, kể cả khi \"Ghi\" ở trên đang tắt. Các tệp được bảo vệ vẫn cần phê duyệt trừ khi bật \"Bao gồm các tệp được bảo vệ\" (trong cài đặt tự động phê duyệt \"Ghi\"). Các tệp bị .rooignore loại trừ vẫn không ghi được.",
+				"placeholder": "Mỗi dòng một mẫu, ví dụ notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Bật tự động phê duyệt các công cụ MCP riêng lẻ trong chế độ xem Máy chủ MCP (yêu cầu cả cài đặt này và hộp kiểm \"Luôn cho phép\" của công cụ)"
@@ -328,6 +342,10 @@
 		"execute": {
 			"label": "Thực thi",
 			"description": "Tự động thực thi các lệnh terminal được phép mà không cần phê duyệt",
+			"destructiveCommandGuard": {
+				"label": "Bật bảo vệ khỏi lệnh phá hoại",
+				"description": "Tải xuống và sử dụng Destructive Command Guard (DCG) cho nền tảng này. Các lệnh được DCG cho phép sẽ tự động chạy. Các lệnh bị DCG chặn cần bạn phê duyệt. Danh sách lệnh của Zoo sẽ bị vô hiệu hóa khi tùy chọn này được bật. Tệp thực thi đã tải xuống vẫn được giữ lại nếu bạn tắt tùy chọn."
+			},
 			"allowedCommands": "Các lệnh tự động thực thi được phép",
 			"allowedCommandsDescription": "Tiền tố lệnh có thể được tự động thực thi khi \"Luôn phê duyệt các hoạt động thực thi\" được bật. Thêm * để cho phép tất cả các lệnh (sử dụng cẩn thận).",
 			"deniedCommands": "Lệnh bị từ chối",
@@ -384,6 +402,25 @@
 		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"kenariApiKey": "Khóa API Kenari",
 		"getKenariApiKey": "Lấy khóa API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Khóa API NanoGPT",
+			"getApiKey": "Lấy khóa API NanoGPT",
+			"model": "Mô hình",
+			"routingPreference": "Tùy chọn định tuyến",
+			"routingOptions": {
+				"automatic": "Tự động",
+				"fastest": "Nhanh nhất",
+				"cheapest": "Rẻ nhất",
+				"lowestLatency": "Độ trễ thấp nhất",
+				"highestThroughput": "Thông lượng cao nhất",
+				"toolCapable": "Hỗ trợ công cụ",
+				"cacheCapable": "Hỗ trợ bộ nhớ đệm"
+			},
+			"automaticExplanation": "Tự động không áp dụng hậu tố định tuyến.",
+			"billingWarning": "Tùy chọn định tuyến nâng cao có thể sử dụng định tuyến trả theo mức dùng và có thể không thuộc phạm vi gói đăng ký, tùy theo quy tắc thanh toán hiện tại của NanoGPT.",
+			"routingDocs": "Xem chi tiết định tuyến và thanh toán NanoGPT"
+		},
 		"apiKeyStorageNotice": "Khóa API được lưu trữ an toàn trong Bộ lưu trữ bí mật của VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -423,6 +460,8 @@
 		"headerName": "Tên tiêu đề",
 		"headerValue": "Giá trị tiêu đề",
 		"noCustomHeaders": "Chưa có tiêu đề tùy chỉnh nào được định nghĩa. Nhấp vào nút + để thêm.",
+		"extraBody": "Nội dung bổ sung",
+		"extraBodyDescription": "Đối tượng JSON tùy chọn được hợp nhất vào phần thân yêu cầu API. Không thể ghi đè các trường do Zoo Code quản lý như model, messages, tools và stream. Không bao gồm thông tin bí mật.",
 		"unboundApiKey": "Khóa API Unbound",
 		"getUnboundApiKey": "Lấy khóa API Unbound",
 		"requestyApiKey": "Khóa API Requesty",
@@ -491,6 +530,9 @@
 		"openAiApiKey": "Khóa API OpenAI",
 		"apiKey": "Khóa API",
 		"openAiBaseUrl": "URL cơ sở",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Tên triển khai Azure",
+		"azureOpenAiDeploymentNameDescription": "Nhập tên triển khai trong Azure AI Studio, không phải tên mô hình cơ sở.",
 		"getOpenAiApiKey": "Lấy khóa API OpenAI",
 		"mistralApiKey": "Khóa API Mistral",
 		"getMistralApiKey": "Lấy khóa API Mistral / Codestral",
@@ -976,8 +1018,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Cho phép báo cáo lỗi và sử dụng ẩn danh",
-			"description": "Giúp cải thiện Zoo Code bằng cách gửi dữ liệu sử dụng ẩn danh và báo cáo lỗi. Telemetry này không thu thập mã, prompt hoặc thông tin cá nhân. Xem <privacyLink>chính sách bảo mật</privacyLink> của chúng tôi để biết thêm chi tiết. Bạn có thể tắt tính năng này bất cứ lúc nào."
+			"label": "Cho phép báo cáo lỗi và dữ liệu sử dụng",
+			"description": "Giúp cải thiện Zoo Code bằng cách gửi dữ liệu sử dụng và báo cáo lỗi, được liên kết với mã định danh cài đặt thay vì tên hoặc tài khoản của bạn. Telemetry này không thu thập mã nguồn hoặc lời nhắc của bạn. Xem <privacyLink>chính sách bảo mật</privacyLink> của chúng tôi để biết thêm chi tiết. Bạn có thể tắt tính năng này bất cứ lúc nào."
 		},
 		"settings": {
 			"import": "Nhập",
@@ -996,6 +1038,11 @@
 		"modelId": "Bạn phải cung cấp ID mô hình hợp lệ.",
 		"modelSelector": "Bạn phải cung cấp bộ chọn mô hình hợp lệ.",
 		"openAi": "Bạn phải cung cấp URL cơ sở, khóa API và ID mô hình hợp lệ.",
+		"openAiExtraBody": {
+			"invalidJson": "Nội dung bổ sung phải chứa JSON hợp lệ.",
+			"objectRequired": "Nội dung bổ sung phải là một đối tượng JSON.",
+			"reservedKeys": "Nội dung bổ sung không thể ghi đè các trường do Zoo Code quản lý: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Định dạng ARN không hợp lệ. Vui lòng kiểm tra yêu cầu về định dạng.",
 			"regionMismatch": "Cảnh báo: Vùng trong ARN của bạn ({{arnRegion}}) không khớp với vùng bạn đã chọn ({{region}}). Điều này có thể gây ra vấn đề truy cập. Nhà cung cấp sẽ sử dụng vùng từ ARN."

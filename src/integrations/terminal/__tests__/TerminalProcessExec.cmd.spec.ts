@@ -2,6 +2,7 @@
 
 import * as vscode from "vscode"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -157,7 +158,7 @@ async function testCmdCommand(
 		const eventHandlers = (vscode as any).__eventHandlers
 
 		// Execute the command first to set up the process
-		terminalProcess.run(command)
+		const runPromise = terminalProcess.run(command)
 
 		// Trigger the start terminal shell execution event through VSCode mock
 		if (eventHandlers.startTerminalShellExecution) {
@@ -213,6 +214,7 @@ async function testCmdCommand(
 
 		// Wait for the command to complete or timeout
 		await Promise.race([completedPromise, timeoutPromise])
+		await runPromise
 
 		// Calculate execution time in microseconds
 		if (!timeRecorded) {
@@ -251,7 +253,7 @@ describePlatform("TerminalProcess with CMD Command Output", () => {
 	beforeEach(() => {
 		// Reset state between tests
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses CMD-specific commands to test the same functionality

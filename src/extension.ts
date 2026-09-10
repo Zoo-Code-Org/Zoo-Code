@@ -15,7 +15,7 @@ if (fs.existsSync(envPath)) {
 	}
 }
 
-import type { CloudUserInfo, AuthState } from "@roo-code/types"
+import { isTelemetryOptedIn } from "@roo-code/types"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService, PostHogTelemetryClient } from "@roo-code/telemetry"
 import { customToolRegistry } from "@roo-code/core"
@@ -63,9 +63,7 @@ let outputChannel: vscode.OutputChannel
 let extensionContext: vscode.ExtensionContext
 let cloudService: CloudService | undefined
 
-let authStateChangedHandler: ((data: { state: AuthState; previousState: AuthState }) => Promise<void>) | undefined
 let settingsUpdatedHandler: (() => void) | undefined
-let userInfoHandler: ((data: { userInfo: CloudUserInfo }) => Promise<void>) | undefined
 
 /**
  * Check if we should auto-open the Zoo Code sidebar after switching to a worktree.
@@ -173,6 +171,29 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	const contextProxy = await ContextProxy.getInstance(context)
+	const updateTelemetryState = () => {
+		const telemetrySetting = contextProxy.getGlobalState("telemetrySetting") ?? "unset"
+		TelemetryService.instance.updateTelemetryState(
+			isTelemetryOptedIn(telemetrySetting) && vscode.env.isTelemetryEnabled,
+		)
+	}
+
+	updateTelemetryState()
+
+	// React live to VS Code's global telemetry toggle (recommended over only reading
+	// telemetry.telemetryLevel, which PostHogTelemetryClient still checks as a secondary gate).
+	// vscode.env.isTelemetryEnabled is ANDed in directly because the deprecated
+	// telemetry.telemetryLevel setting the client checks doesn't reflect this live event.
+	context.subscriptions.push(
+		vscode.env.onDidChangeTelemetryEnabled(() => {
+			updateTelemetryState()
+
+			// Push the new vscode.env.isTelemetryEnabled value to the webview too, so its
+			// own PostHog client (gated separately in TelemetryClient.ts) can't keep
+			// sending events after the global toggle flips off mid-session.
+			void ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
+		}),
+	)
 
 	// Initialize code index managers for all workspace folders.
 	const codeIndexManagers: CodeIndexManager[] = []
@@ -201,25 +222,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
 
 	// Initialize Roo Code Cloud service.
-	const postStateListener = () => ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
-
-	authStateChangedHandler = async (_data: { state: AuthState; previousState: AuthState }) => {
-		postStateListener()
-	}
-
-	settingsUpdatedHandler = async () => {
-		postStateListener()
-	}
-
-	userInfoHandler = async ({ userInfo }: { userInfo: CloudUserInfo }) => {
-		postStateListener()
+	settingsUpdatedHandler = () => {
+		void ClineProvider.getVisibleInstance()
+			?.postStateToWebviewWithoutClineMessages()
+			.catch((error) => {
+				outputChannel.appendLine(
+					`[CloudService] Failed to refresh state after settings update: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
 	}
 
 	try {
 		cloudService = await CloudService.createInstance(context, cloudLogger, {
-			"auth-state-changed": authStateChangedHandler,
 			"settings-updated": settingsUpdatedHandler,
-			"user-info": userInfoHandler,
 		})
 
 		// Add to subscriptions for proper cleanup on deactivate.
@@ -356,7 +371,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// Initialize background model cache refresh
-	initializeModelCacheRefresh()
+	void initializeModelCacheRefresh().catch((error) => {
+		outputChannel.appendLine(
+			`[ModelCache] Background refresh initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	})
 
 	return new API(outputChannel, provider, socketPath, enableLogging)
 }
@@ -367,16 +386,8 @@ export async function deactivate() {
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {
-			if (authStateChangedHandler) {
-				CloudService.instance.off("auth-state-changed", authStateChangedHandler)
-			}
-
 			if (settingsUpdatedHandler) {
 				CloudService.instance.off("settings-updated", settingsUpdatedHandler)
-			}
-
-			if (userInfoHandler) {
-				CloudService.instance.off("user-info", userInfoHandler as any)
 			}
 
 			outputChannel.appendLine("CloudService event handlers cleaned up")
@@ -389,12 +400,14 @@ export async function deactivate() {
 
 	await McpServerManager.cleanup(extensionContext)
 
-	try {
-		await TelemetryService.instance.shutdown()
-	} catch (error) {
-		outputChannel.appendLine(
-			`Failed to shut down telemetry service: ${error instanceof Error ? error.message : String(error)}`,
-		)
+	if (TelemetryService.hasInstance()) {
+		try {
+			await TelemetryService.instance.shutdown()
+		} catch (error) {
+			outputChannel.appendLine(
+				`Failed to shut down telemetry service: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 	}
 
 	Terminal.setTerminalProfile(undefined)

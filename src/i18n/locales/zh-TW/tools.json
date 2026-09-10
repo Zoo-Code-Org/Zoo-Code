@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "正在搜尋程式碼庫中的「{{query}}」..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard 已阻擋此命令。",
+			"blockedWithReason": "Destructive Command Guard 已阻擋此命令。來自 DCG 的訊息：{{reason}}",
+			"blockedWithRule": "Destructive Command Guard 已阻擋此命令。（規則：{{ruleId}}）",
+			"blockedWithReasonAndRule": "Destructive Command Guard 已阻擋此命令。來自 DCG 的訊息：{{reason}}（規則：{{ruleId}}）"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "由於政策限制，無法建立新工作。"

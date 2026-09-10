@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Cercant '{{query}}' a la base de codi..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard ha bloquejat aquesta ordre.",
+			"blockedWithReason": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard ha bloquejat aquesta ordre. (Regla: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}} (Regla: {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "No s'ha pogut crear una nova tasca a causa de restriccions de política."

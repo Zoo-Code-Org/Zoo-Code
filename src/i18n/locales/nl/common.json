@@ -72,6 +72,10 @@
 		"url_fetch_failed": "Fout bij ophalen van URL-inhoud: {{error}}",
 		"url_fetch_error_with_url": "Fout bij ophalen van inhoud voor {{url}}: {{error}}",
 		"command_timeout": "Time-out bij uitvoeren van commando na {{seconds}} seconden",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard is ingeschakeld, maar is niet beschikbaar voor dit platform",
+			"enableFailed": "Destructive Command Guard kan niet worden ingeschakeld: {{error}}"
+		},
 		"share_task_failed": "Delen van taak mislukt",
 		"share_no_active_task": "Geen actieve taak om te delen",
 		"share_auth_required": "Authenticatie vereist. Log in om taken te delen.",

@@ -79,7 +79,7 @@ export const ModelInfoView = ({
 			supportsLabel={t("settings:modelInfo.supportsPromptCache")}
 			doesNotSupportLabel={t("settings:modelInfo.noPromptCache")}
 		/>,
-		apiProvider === "gemini" && (
+		apiProvider === providerIdentifiers.gemini && (
 			<span className="italic">
 				{selectedModelId.includes("pro-preview")
 					? t("settings:modelInfo.gemini.billingEstimate")

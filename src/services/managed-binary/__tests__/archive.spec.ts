@@ -17,6 +17,12 @@ vi.mock("child_process", () => ({ spawn: vi.fn() }))
 
 const mockSpawn = vi.mocked(spawn)
 
+function decodePowerShellCommand(args: readonly string[]): string {
+	const encodedCommandIndex = args.indexOf("-EncodedCommand")
+	if (encodedCommandIndex === -1) throw new Error("Expected an encoded PowerShell command")
+	return Buffer.from(args[encodedCommandIndex + 1], "base64").toString("utf16le")
+}
+
 function createChild() {
 	return Object.assign(new EventEmitter(), {
 		stdout: new PassThrough(),
@@ -97,7 +103,7 @@ describe("managed binary archive utilities", () => {
 		if (process.platform === "win32") {
 			expect(mockSpawn).toHaveBeenCalledWith(
 				"powershell",
-				["-NoProfile", "-NonInteractive", "-Command", expect.any(String), "/tmp/archive.zip", "/tmp/output"],
+				["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)],
 				expect.objectContaining({ shell: false }),
 			)
 		} else {
@@ -106,6 +112,28 @@ describe("managed binary archive utilities", () => {
 				["-o", "/tmp/archive.zip", "-d", "/tmp/output"],
 				expect.objectContaining({ shell: false }),
 			)
+		}
+	})
+
+	it("passes Windows ZIP paths through an encoded PowerShell command", async () => {
+		const child = createChild()
+		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
+		const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+		Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+		try {
+			const extraction = extractZipArchive("C:\\Roo's files\\archive.zip", "C:\\Roo's files\\output")
+			child.emit("close", 0)
+			await extraction
+
+			const args = mockSpawn.mock.calls[0][1]
+			expect(args).toEqual(["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)])
+			const script = decodePowerShellCommand(args)
+			expect(script).toContain("$archivePath = 'C:\\Roo''s files\\archive.zip'")
+			expect(script).toContain("$destination = 'C:\\Roo''s files\\output'")
+			expect(script).toContain("Expand-Archive -LiteralPath $archivePath")
+			expect(script).not.toContain("$args")
+		} finally {
+			if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 		}
 	})
 
@@ -165,15 +193,11 @@ describe("managed binary archive utilities", () => {
 			await extraction
 
 			const args = mockSpawn.mock.calls[0][1]
-			const script = args[3]
+			const script = decodePowerShellCommand(args)
 			expect(script).toContain("$entries.Count -ne 1")
-			expect(script).not.toContain("C:\\archive.zip")
-			expect(args.slice(4)).toEqual([
-				"C:\\archive.zip",
-				path.join("C:\\output", "binary.exe"),
-				"binary.exe",
-				"Tool",
-			])
+			expect(script).toContain("$archivePath = 'C:\\archive.zip'")
+			expect(script).toContain(`$outputPath = '${path.join("C:\\output", "binary.exe")}'`)
+			expect(args).toEqual(["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)])
 		} finally {
 			if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 		}

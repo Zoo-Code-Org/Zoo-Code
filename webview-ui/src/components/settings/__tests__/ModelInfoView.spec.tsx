@@ -43,6 +43,50 @@ const getPricingRowValues = (tier: string) => {
 }
 
 describe("ModelInfoView service tier pricing", () => {
+	it("uses the canonical gemini provider identifier", () => {
+		expect(providerIdentifiers.gemini).toBe("gemini")
+	})
+
+	it("shows Gemini billing guidance for the canonical Gemini provider", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.gemini}
+				selectedModelId="gemini-3-pro-preview"
+				modelInfo={baseModelInfo}
+			/>,
+		)
+
+		expect(screen.getByText("settings:modelInfo.gemini.billingEstimate")).toBeInTheDocument()
+	})
+
+	it("shows Gemini free-request guidance for non-pro-preview Gemini models", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.gemini}
+				selectedModelId="gemini-3-flash"
+				modelInfo={baseModelInfo}
+			/>,
+		)
+
+		expect(screen.getByText("settings:modelInfo.gemini.freeRequests")).toBeInTheDocument()
+	})
+
+	it("does not show Gemini billing guidance for non-Gemini providers", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.openai}
+				selectedModelId="gpt-5"
+				modelInfo={baseModelInfo}
+			/>,
+		)
+
+		expect(screen.queryByText("settings:modelInfo.gemini.billingEstimate")).not.toBeInTheDocument()
+		expect(screen.queryByText("settings:modelInfo.gemini.freeRequests")).not.toBeInTheDocument()
+	})
+
 	it("shows OpenAI Native tier prices with per-field fallback to Standard pricing", () => {
 		const modelInfo: ModelInfo = {
 			...baseModelInfo,

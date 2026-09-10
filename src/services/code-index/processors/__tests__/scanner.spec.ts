@@ -220,6 +220,36 @@ describe("DirectoryScanner", () => {
 			expect(mockVectorStore.upsertPoints).toHaveBeenCalled()
 		})
 
+		it("should clean up a threshold-triggered batch", async () => {
+			const thresholdScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				1,
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
+			mockCodeParser.parseFile.mockResolvedValue([
+				{
+					file_path: "test/file1.js",
+					content: "test content",
+					start_line: 1,
+					end_line: 5,
+					identifier: "test",
+					type: "function",
+					fileHash: "hash",
+					segmentHash: "threshold-segment",
+				},
+			])
+
+			await thresholdScanner.scanDirectory("/test")
+
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(1)
+			expect(mockVectorStore.upsertPoints).toHaveBeenCalledTimes(1)
+		})
+
 		it("should delete points for removed files", async () => {
 			;(mockCacheManager.getAllHashes as any).mockReturnValue({ "old/file.js": "old-hash" })
 

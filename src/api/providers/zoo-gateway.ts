@@ -7,6 +7,7 @@ import {
 	zooGatewayDefaultModelInfo,
 	ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -19,6 +20,7 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
 
 function getApiErrorStatus(error: unknown): number | undefined {
@@ -159,9 +161,9 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 					...(options.openAiHeaders || {}),
 				},
 			},
-			name: "zoo-gateway",
+			name: providerIdentifiers.zooGateway,
 			baseURL,
-			apiKey: sessionToken || "not-provided",
+			apiKey: sessionToken || NOT_PROVIDED,
 			modelId: options.zooGatewayModelId,
 			defaultModelId: zooGatewayDefaultModelId,
 			defaultModelInfo: zooGatewayDefaultModelInfo,

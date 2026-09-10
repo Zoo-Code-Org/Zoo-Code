@@ -3,16 +3,44 @@ import i18next from "i18next"
 import {
 	type ProviderSettings,
 	type OrganizationAllowList,
-	type ProviderName,
 	type RouterModels,
-	modelIdKeysByProvider,
-	isProviderName,
-	isRetiredProvider,
+	getModelId,
 	isDynamicProvider,
-	isFauxProvider,
-	isCustomProvider,
+	parseOpenAiExtraBody,
 	providerIdentifiers,
 } from "@roo-code/types"
+
+type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
+type OpenAiExtraBodyTranslationKey = `settings:validation.openAiExtraBody.${
+	| "invalidJson"
+	| "objectRequired"
+	| "reservedKeys"}`
+type OpenAiExtraBodyTranslationFunction = (key: OpenAiExtraBodyTranslationKey, options?: { keys: string }) => string
+
+export function formatOpenAiExtraBodyValidationError(
+	result: OpenAiExtraBodyParseResult,
+	t: OpenAiExtraBodyTranslationFunction,
+): string | undefined {
+	if (result.success) {
+		return undefined
+	}
+
+	if (result.reason === "reservedKeys") {
+		return t("settings:validation.openAiExtraBody.reservedKeys", {
+			keys: result.reservedKeys?.join(", ") ?? "",
+		})
+	}
+
+	return t(`settings:validation.openAiExtraBody.${result.reason}`)
+}
+
+function validateOpenAiExtraBody(apiConfiguration: ProviderSettings): string | undefined {
+	if (apiConfiguration.apiProvider !== providerIdentifiers.openai) {
+		return undefined
+	}
+
+	return formatOpenAiExtraBodyValidationError(parseOpenAiExtraBody(apiConfiguration.openAiExtraBody), i18next.t)
+}
 
 export function validateApiConfiguration(
 	apiConfiguration: ProviderSettings,
@@ -24,6 +52,12 @@ export function validateApiConfiguration(
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage
+	}
+
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+
+	if (extraBodyError) {
+		return extraBodyError
 	}
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(
@@ -148,6 +182,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
+		case providerIdentifiers.nanogpt:
+			if (!apiConfiguration.nanoGptApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case providerIdentifiers.zooGateway:
 			if (!apiConfiguration.zooSessionToken && !zooCodeIsAuthenticated) {
 				return i18next.t("settings:validation.zooGatewaySignIn")
@@ -189,8 +228,7 @@ function validateProviderAgainstOrganizationSettings(
 		}
 
 		if (!providerConfig.allowAll) {
-			const activeProvider = isRetiredProvider(provider) ? undefined : provider
-			const modelId = activeProvider ? getModelIdForProvider(apiConfiguration, activeProvider) : undefined
+			const modelId = getModelId(apiConfiguration)
 			const allowedModels = providerConfig.models || []
 
 			if (modelId && !allowedModels.includes(modelId)) {
@@ -204,18 +242,6 @@ function validateProviderAgainstOrganizationSettings(
 			}
 		}
 	}
-}
-
-function getModelIdForProvider(apiConfiguration: ProviderSettings, provider: ProviderName): string | undefined {
-	if (provider === providerIdentifiers.vscodeLm) {
-		return apiConfiguration.vsCodeLmModelSelector?.id
-	}
-
-	if (isCustomProvider(provider) || isFauxProvider(provider)) {
-		return apiConfiguration.apiModelId
-	}
-
-	return apiConfiguration[modelIdKeysByProvider[provider]]
 }
 
 /**
@@ -261,7 +287,7 @@ function validateDynamicProviderModelId(
 		return undefined
 	}
 
-	const modelId = getModelIdForProvider(apiConfiguration, provider)
+	const modelId = getModelId(apiConfiguration)
 
 	if (!modelId) {
 		return i18next.t("settings:validation.modelId")
@@ -285,9 +311,7 @@ export function getModelValidationError(
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {
-	const modelId = isProviderName(apiConfiguration.apiProvider)
-		? getModelIdForProvider(apiConfiguration, apiConfiguration.apiProvider)
-		: apiConfiguration.apiModelId
+	const modelId = getModelId(apiConfiguration) ?? apiConfiguration.apiModelId
 
 	const configWithModelId = {
 		...apiConfiguration,
@@ -324,6 +348,12 @@ export function validateApiConfigurationExcludingModelErrors(
 		if (keysAndIdsPresentErrorMessage) {
 			return keysAndIdsPresentErrorMessage
 		}
+	}
+
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+
+	if (extraBodyError) {
+		return extraBodyError
 	}
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(

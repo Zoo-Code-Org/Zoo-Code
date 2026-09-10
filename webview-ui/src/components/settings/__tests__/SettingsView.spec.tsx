@@ -1,11 +1,9 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/settings/__tests__/SettingsView.spec.tsx
 
-import { render, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
 
 import SettingsView from "../SettingsView"
@@ -291,15 +289,8 @@ const mockPostMessage = (state: any) => {
 
 const renderSettingsView = (initialState: any = {}) => {
 	const onDone = vi.fn()
-	const queryClient = new QueryClient()
 
-	const result = render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+	const result = renderWithExtensionState(<SettingsView onDone={onDone} />)
 
 	// Hydrate initial state.
 	act(() => {
@@ -310,13 +301,7 @@ const renderSettingsView = (initialState: any = {}) => {
 	const activateTab = (tabId: string) => {
 		// Skip trying to find and click the tab, just directly render with the target section
 		// This bypasses the actual tab clicking mechanism but ensures the content is shown
-		result.rerender(
-			<ExtensionStateContextProvider>
-				<QueryClientProvider client={queryClient}>
-					<SettingsView onDone={onDone} targetSection={tabId} />
-				</QueryClientProvider>
-			</ExtensionStateContextProvider>,
-		)
+		result.rerender(<SettingsView onDone={onDone} targetSection={tabId} />)
 	}
 
 	// Helper to get elements within the settings content (not the indexing container)

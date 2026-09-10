@@ -35,6 +35,8 @@ export default defineConfig({
 				"**/*.spec.tsx",
 				"**/*.visual.ts",
 				"**/*.visual.tsx",
+				"**/*.visual.fixture.ts",
+				"**/*.visual.fixture.tsx",
 				"**/vitest.setup.ts",
 				"**/vitest.config.ts",
 				"**/vite.config.ts",

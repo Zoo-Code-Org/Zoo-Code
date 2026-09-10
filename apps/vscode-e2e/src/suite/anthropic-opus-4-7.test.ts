@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 import { createServer, type IncomingMessage, type ServerResponse } from "http"
 
@@ -177,7 +178,7 @@ suite("Claude Opus 4.7 (Anthropic)", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -203,7 +204,7 @@ suite("Claude Opus 4.7 (Anthropic)", function () {
 				// aimock handles /v1/messages natively and serves Anthropic-format SSE responses.
 				// In record mode the real x-api-key is forwarded so aimock can proxy to api.anthropic.com.
 				await api.setConfiguration({
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 					apiKey: aimockUrl && !isRecord ? "mock-key" : process.env.ANTHROPIC_API_KEY!,
 					apiModelId: "claude-opus-4-7",
 					enableReasoningEffort: reasoningEnabled,

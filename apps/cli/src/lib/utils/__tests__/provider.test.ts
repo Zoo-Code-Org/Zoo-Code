@@ -1,4 +1,47 @@
-import { getApiKeyFromEnv } from "../provider.js"
+import { providerIdentifiers } from "@roo-code/types"
+
+import { getApiKeyFromEnv, getEnvVarName, getProviderSettings } from "../provider.js"
+
+describe("provider configuration", () => {
+	it.each([
+		[providerIdentifiers.anthropic, "ANTHROPIC_API_KEY"],
+		[providerIdentifiers.openaiNative, "OPENAI_API_KEY"],
+		[providerIdentifiers.gemini, "GOOGLE_API_KEY"],
+		[providerIdentifiers.openrouter, "OPENROUTER_API_KEY"],
+		[providerIdentifiers.vercelAiGateway, "VERCEL_AI_GATEWAY_API_KEY"],
+	] as const)("maps canonical provider %s to %s", (provider, envVarName) => {
+		expect(getEnvVarName(provider)).toBe(envVarName)
+	})
+
+	it.each([
+		[
+			providerIdentifiers.anthropic,
+			{ apiProvider: providerIdentifiers.anthropic, apiKey: "key", apiModelId: "model" },
+		],
+		[
+			providerIdentifiers.openaiNative,
+			{ apiProvider: providerIdentifiers.openaiNative, openAiNativeApiKey: "key", apiModelId: "model" },
+		],
+		[
+			providerIdentifiers.gemini,
+			{ apiProvider: providerIdentifiers.gemini, geminiApiKey: "key", apiModelId: "model" },
+		],
+		[
+			providerIdentifiers.openrouter,
+			{ apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "key", openRouterModelId: "model" },
+		],
+		[
+			providerIdentifiers.vercelAiGateway,
+			{
+				apiProvider: providerIdentifiers.vercelAiGateway,
+				vercelAiGatewayApiKey: "key",
+				vercelAiGatewayModelId: "model",
+			},
+		],
+	] as const)("builds settings for canonical provider %s", (provider, expected) => {
+		expect(getProviderSettings(provider, "key", "model")).toEqual(expected)
+	})
+})
 
 describe("getApiKeyFromEnv", () => {
 	const originalEnv = process.env

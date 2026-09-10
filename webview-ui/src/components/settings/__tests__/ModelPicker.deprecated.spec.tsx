@@ -1,8 +1,11 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ModelPicker.deprecated.spec.tsx
 
-import { render, screen } from "@testing-library/react"
+import { screen } from "@testing-library/react"
+
+import { renderWithExtensionState } from "@/utils/test-utils"
 import userEvent from "@testing-library/user-event"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 import { ModelPicker } from "../ModelPicker"
@@ -47,7 +50,7 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 		return {
 			id: modelId,
 			info: models[modelId],
-			provider: "openrouter",
+			provider: providerIdentifiers.openrouter,
 			isLoading: false,
 			isError: false,
 		}
@@ -88,19 +91,18 @@ describe("ModelPicker - Deprecated Models", () => {
 	it("should filter out deprecated models from the dropdown", async () => {
 		const user = userEvent.setup()
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<ModelPicker
-					defaultModelId="model-1"
-					models={regularModels}
-					modelIdKey="openRouterModelId"
-					serviceName="Test Service"
-					serviceUrl="https://test.com"
-					apiConfiguration={{ apiProvider: "openrouter" }}
-					setApiConfigurationField={mockSetApiConfigurationField}
-					organizationAllowList={{ allowAll: true, providers: {} }}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<ModelPicker
+				defaultModelId="model-1"
+				models={regularModels}
+				modelIdKey="openRouterModelId"
+				serviceName="Test Service"
+				serviceUrl="https://test.com"
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={{ allowAll: true, providers: {} }}
+			/>,
+			{ queryClient },
 		)
 
 		// Open the dropdown
@@ -116,22 +118,21 @@ describe("ModelPicker - Deprecated Models", () => {
 	})
 
 	it("should show error when a deprecated model is currently selected", () => {
-		render(
-			<QueryClientProvider client={queryClient}>
-				<ModelPicker
-					defaultModelId="deprecated-model"
-					models={regularModels}
-					modelIdKey="openRouterModelId"
-					serviceName="Test Service"
-					serviceUrl="https://test.com"
-					apiConfiguration={{
-						apiProvider: "openrouter",
-						openRouterModelId: "deprecated-model",
-					}}
-					setApiConfigurationField={mockSetApiConfigurationField}
-					organizationAllowList={{ allowAll: true, providers: {} }}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<ModelPicker
+				defaultModelId="deprecated-model"
+				models={regularModels}
+				modelIdKey="openRouterModelId"
+				serviceName="Test Service"
+				serviceUrl="https://test.com"
+				apiConfiguration={{
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "deprecated-model",
+				}}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={{ allowAll: true, providers: {} }}
+			/>,
+			{ queryClient },
 		)
 
 		// Check that the error message is displayed
@@ -143,19 +144,18 @@ describe("ModelPicker - Deprecated Models", () => {
 	it("should allow selecting non-deprecated models", async () => {
 		const user = userEvent.setup()
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<ModelPicker
-					defaultModelId="model-1"
-					models={regularModels}
-					modelIdKey="openRouterModelId"
-					serviceName="Test Service"
-					serviceUrl="https://test.com"
-					apiConfiguration={{ apiProvider: "openrouter" }}
-					setApiConfigurationField={mockSetApiConfigurationField}
-					organizationAllowList={{ allowAll: true, providers: {} }}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<ModelPicker
+				defaultModelId="model-1"
+				models={regularModels}
+				modelIdKey="openRouterModelId"
+				serviceName="Test Service"
+				serviceUrl="https://test.com"
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={{ allowAll: true, providers: {} }}
+			/>,
+			{ queryClient },
 		)
 
 		// Open the dropdown
@@ -171,22 +171,21 @@ describe("ModelPicker - Deprecated Models", () => {
 	})
 
 	it("should not display model info for deprecated models", () => {
-		render(
-			<QueryClientProvider client={queryClient}>
-				<ModelPicker
-					defaultModelId="deprecated-model"
-					models={regularModels}
-					modelIdKey="openRouterModelId"
-					serviceName="Test Service"
-					serviceUrl="https://test.com"
-					apiConfiguration={{
-						apiProvider: "openrouter",
-						openRouterModelId: "deprecated-model",
-					}}
-					setApiConfigurationField={mockSetApiConfigurationField}
-					organizationAllowList={{ allowAll: true, providers: {} }}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<ModelPicker
+				defaultModelId="deprecated-model"
+				models={regularModels}
+				modelIdKey="openRouterModelId"
+				serviceName="Test Service"
+				serviceUrl="https://test.com"
+				apiConfiguration={{
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "deprecated-model",
+				}}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={{ allowAll: true, providers: {} }}
+			/>,
+			{ queryClient },
 		)
 
 		// Model info should not be displayed for deprecated models

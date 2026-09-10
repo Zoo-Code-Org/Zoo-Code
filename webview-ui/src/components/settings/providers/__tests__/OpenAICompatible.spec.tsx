@@ -18,7 +18,7 @@ vi.mock("vscrui", () => ({
 	),
 }))
 
-// Mock the VSCodeTextField and VSCodeButton components
+// Mock the VS Code form components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeTextField: ({
 		children,
@@ -52,6 +52,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			{children}
 		</button>
 	),
+	VSCodeTextArea: ({ value, onInput, children, ...rest }: any) => (
+		<label>
+			{children}
+			<textarea value={value} onChange={(event) => onInput?.(event)} {...rest} />
+		</label>
+	),
 }))
 
 // Mock the translation hook
@@ -68,8 +74,13 @@ vi.mock("@src/components/ui", () => ({
 }))
 
 // Mock other components
+const { mockModelPicker } = vi.hoisted(() => ({ mockModelPicker: vi.fn() }))
+
 vi.mock("../../ModelPicker", () => ({
-	ModelPicker: () => <div data-testid="model-picker">Model Picker</div>,
+	ModelPicker: (props: any) => {
+		mockModelPicker(props)
+		return <div data-testid="model-picker">Model Picker</div>
+	},
 }))
 
 vi.mock("../../R1FormatSetting", () => ({
@@ -141,6 +152,78 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 
 			// Check that the correct translation key is used for the description
 			expect(screen.getByText("settings:includeMaxOutputTokensDescription")).toBeInTheDocument()
+		})
+	})
+
+	describe("Azure OpenAI guidance", () => {
+		it.each([
+			{ openAiBaseUrl: "https://resource.openai.azure.com/" },
+			{ openAiBaseUrl: "https://models.example.com", openAiUseAzure: true },
+		])("shows Azure-specific endpoint and deployment guidance", (apiConfiguration) => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:providers.azureOpenAiBaseUrlPlaceholder")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(
+				expect.objectContaining({ label: "settings:providers.azureOpenAiDeploymentName" }),
+			)
+			expect(screen.getByText("settings:providers.azureOpenAiDeploymentNameDescription")).toBeInTheDocument()
+		})
+
+		it("keeps generic OpenAI-compatible guidance for non-Azure endpoints", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiBaseUrl: "https://models.example.com/v1" } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+			expect(
+				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
+			).not.toBeInTheDocument()
+		})
+
+		it("keeps generic OpenAI-compatible guidance for Azure AI Inference endpoints", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{ openAiBaseUrl: "https://my-resource.services.ai.azure.com/models" } as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+			expect(
+				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
+			).not.toBeInTheDocument()
+		})
+
+		it("keeps generic guidance when Azure AI Inference uses the Azure compatibility flag", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{
+							openAiBaseUrl: "https://my-resource.services.ai.azure.com/models",
+							openAiUseAzure: true,
+						} as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
 		})
 	})
 
@@ -350,6 +433,71 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 				...apiConfiguration.openAiCustomModelInfo,
 				reasoningEffort: "max",
 			})
+		})
+	})
+
+	describe("Extra Body", () => {
+		it("renders an undefined value as an editable empty field without a validation error", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody: undefined } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(screen.getByText("settings:providers.extraBody")).toHaveAttribute("id", "openai-extra-body-label")
+			expect(screen.getByText("settings:providers.extraBodyDescription")).toHaveAttribute(
+				"id",
+				"openai-extra-body-description",
+			)
+			expect(input).toHaveValue("")
+			expect(input).toHaveAttribute(
+				"placeholder",
+				'{\n  "metadata": {\n    "completion_window": "balanced"\n  }\n}',
+			)
+			expect(input).toHaveAttribute("aria-describedby", "openai-extra-body-description")
+			expect(input).not.toHaveAttribute("aria-invalid", "true")
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+
+			fireEvent.change(input, { target: { value: '{"store":false}' } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiExtraBody", '{"store":false}')
+		})
+
+		it("renders the saved JSON and updates the cached provider field", () => {
+			const openAiExtraBody = JSON.stringify({ metadata: { completion_window: "balanced" } }, null, 2)
+
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveValue(openAiExtraBody)
+
+			fireEvent.change(input, { target: { value: '{"store":false}' } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiExtraBody", '{"store":false}')
+		})
+
+		it("marks invalid JSON and describes the validation error", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody: "not json" } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveAttribute("aria-invalid", "true")
+			expect(input).toHaveAttribute("aria-describedby", "openai-extra-body-description openai-extra-body-error")
+			expect(screen.getByText("settings:validation.openAiExtraBody.invalidJson")).toBeInTheDocument()
 		})
 	})
 })

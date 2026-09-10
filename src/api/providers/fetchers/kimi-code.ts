@@ -3,14 +3,16 @@ import { z } from "zod"
 import {
 	KIMI_CODE_BASE_URL,
 	kimiCodeDefaultModelInfo,
+	kimiCodeModelDefaults,
 	kimiCodeReasoningEfforts,
 	type ModelInfo,
 	type ModelRecord,
 } from "@roo-code/types"
 
-const kimiCodeModelSchema = z.object({
+export const kimiCodeModelSchema = z.object({
 	id: z.string().min(1),
 	context_length: z.number().positive().optional(),
+	max_tokens: z.number().int().positive().optional(),
 	supports_reasoning: z.boolean().optional(),
 	supports_image_in: z.boolean().optional(),
 	display_name: z.string().optional(),
@@ -22,9 +24,11 @@ const KIMI_CODE_MODELS_TIMEOUT_MS = 10_000
 
 export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): ModelInfo {
 	const supportsReasoning = model.supports_reasoning ?? false
+	const defaults = kimiCodeModelDefaults[model.id] ?? {}
 	return {
 		...kimiCodeDefaultModelInfo,
 		contextWindow: model.context_length ?? kimiCodeDefaultModelInfo.contextWindow,
+		maxTokens: model.max_tokens ?? defaults.maxTokens ?? kimiCodeDefaultModelInfo.maxTokens,
 		supportsReasoningEffort: supportsReasoning ? [...kimiCodeReasoningEfforts] : false,
 		requiredReasoningEffort: supportsReasoning,
 		reasoningEffort: supportsReasoning ? "max" : undefined,

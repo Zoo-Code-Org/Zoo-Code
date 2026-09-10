@@ -15,19 +15,22 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { type ModelInfo, geminiDefaultModelId, ApiProviderError } from "@roo-code/types"
 
 import { t } from "i18next"
+import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { GeminiHandler } from "../gemini"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 const GEMINI_MODEL_NAME = geminiDefaultModelId
 
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
+	let mockGenerateContentStream: ReturnType<typeof vitest.fn>
 
 	beforeEach(() => {
 		// Reset mocks
 		mockCaptureException.mockClear()
 
 		// Create mock functions
-		const mockGenerateContentStream = vitest.fn()
+		mockGenerateContentStream = vitest.fn()
 		const mockGenerateContent = vitest.fn()
 		const mockGetGenerativeModel = vitest.fn()
 
@@ -60,11 +63,7 @@ describe("GeminiHandler", () => {
 
 		// Helper: build a mock async-iterable stream from chunks
 		function makeStream(chunks: unknown[]) {
-			return {
-				[Symbol.asyncIterator]: async function* () {
-					for (const chunk of chunks) yield chunk
-				},
-			}
+			return asyncStreamFrom(chunks)
 		}
 
 		// Simulate a Gemini 3.x response: thoughtSignature arrives on its own part,
@@ -91,9 +90,7 @@ describe("GeminiHandler", () => {
 
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Read foo.ts" }]
 
-			for await (const _chunk of handler.createMessage(systemPrompt, messages, toolMetadata)) {
-				// drain
-			}
+			await collectStream(handler.createMessage(systemPrompt, messages, toolMetadata))
 
 			expect(handler.getThoughtSignature()).toBe("sig-abc123")
 		})
@@ -126,9 +123,7 @@ describe("GeminiHandler", () => {
 				]),
 			)
 
-			for await (const _chunk of handler.createMessage(systemPrompt, historyAfterTurn1, toolMetadata)) {
-				// drain
-			}
+			await collectStream(handler.createMessage(systemPrompt, historyAfterTurn1, toolMetadata))
 
 			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
 			const contents: any[] = callArgs.contents
@@ -164,9 +159,7 @@ describe("GeminiHandler", () => {
 				]),
 			)
 
-			for await (const _chunk of handler.createMessage(systemPrompt, historyNoSig, toolMetadata)) {
-				// drain
-			}
+			await collectStream(handler.createMessage(systemPrompt, historyNoSig, toolMetadata))
 
 			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
 			const contents: any[] = callArgs.contents
@@ -212,9 +205,7 @@ describe("GeminiHandler", () => {
 				]),
 			)
 
-			for await (const _chunk of handlerNoReasoning.createMessage(systemPrompt, historyWithSig, toolMetadata)) {
-				// drain
-			}
+			await collectStream(handlerNoReasoning.createMessage(systemPrompt, historyWithSig, toolMetadata))
 
 			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
 			const contents: any[] = callArgs.contents
@@ -253,11 +244,7 @@ describe("GeminiHandler", () => {
 			)
 
 			// No tools in metadata, no thinkingConfig → includeThoughtSignatures=false
-			for await (const _chunk of handlerNoReasoning.createMessage(systemPrompt, [
-				{ role: "user", content: "hi" },
-			])) {
-				// drain
-			}
+			await collectStream(handlerNoReasoning.createMessage(systemPrompt, [{ role: "user", content: "hi" }]))
 
 			expect(handlerNoReasoning.getThoughtSignature()).toBeUndefined()
 		})
@@ -279,20 +266,16 @@ describe("GeminiHandler", () => {
 
 		it("should handle text messages correctly", async () => {
 			// Setup the mock implementation to return an async generator
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue({
-				[Symbol.asyncIterator]: async function* () {
-					yield { text: "Hello" }
-					yield { text: " world!" }
-					yield { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
-				},
-			})
+			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+				asyncStreamFrom([
+					{ text: "Hello" },
+					{ text: " world!" },
+					{ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } },
+				]),
+			)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
-			const chunks = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Should have 3 chunks: 'Hello', ' world!', and usage info
 			expect(chunks.length).toBe(3)
@@ -312,17 +295,50 @@ describe("GeminiHandler", () => {
 			)
 		})
 
+		it("should keep an empty tool result as the final user turn", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Run the tool" },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "empty.txt" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call-1", content: "" }],
+				},
+			]
+			const metadata = {
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "read_file", description: "", parameters: {} } }],
+			} satisfies ApiHandlerCreateMessageMetadata
+
+			mockGenerateContentStream.mockResolvedValue(
+				asyncStreamFrom([{ candidates: [{ content: { parts: [{ text: "Done" }] } }] }]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages, metadata))
+
+			const params = mockGenerateContentStream.mock.calls[0][0]
+			expect(params.contents.at(-1)).toEqual({
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "read_file",
+							response: { name: "read_file", content: "(empty)" },
+						},
+					},
+				],
+			})
+		})
+
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
 			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should throw before yielding any chunks
-				}
-			}).rejects.toThrow()
+			await expect(collectStream(stream)).rejects.toThrow()
 		})
 	})
 
@@ -514,11 +530,7 @@ describe("GeminiHandler", () => {
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should throw before yielding any chunks
-				}
-			}).rejects.toThrow()
+			await expect(collectStream(stream)).rejects.toThrow()
 
 			// Verify telemetry was captured
 			expect(mockCaptureException).toHaveBeenCalledTimes(1)
@@ -565,11 +577,7 @@ describe("GeminiHandler", () => {
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
 			// Verify the error is still thrown
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should throw
-				}
-			}).rejects.toThrow()
+			await expect(collectStream(stream)).rejects.toThrow()
 
 			// Telemetry should have been captured before the error was thrown
 			expect(mockCaptureException).toHaveBeenCalled()

@@ -8,6 +8,7 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
+import { ClineProvider } from "../../webview/ClineProvider"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
@@ -57,28 +58,18 @@ describe("TaskHistoryStore", () => {
 			expect(store.getAll()).toEqual([])
 		})
 
-		it("initializes from existing index file", async () => {
+		it("initializes from existing per-task files", async () => {
 			const tasksDir = path.join(tmpDir, "tasks")
 			await fs.mkdir(tasksDir, { recursive: true })
 
 			const item1 = makeHistoryItem({ id: "task-1", ts: 1000 })
 			const item2 = makeHistoryItem({ id: "task-2", ts: 2000 })
 
-			// Create task directories so reconciliation doesn't remove them
 			await fs.mkdir(path.join(tasksDir, "task-1"), { recursive: true })
 			await fs.mkdir(path.join(tasksDir, "task-2"), { recursive: true })
 
-			// Write per-task files
 			await fs.writeFile(path.join(tasksDir, "task-1", GlobalFileNames.historyItem), JSON.stringify(item1))
 			await fs.writeFile(path.join(tasksDir, "task-2", GlobalFileNames.historyItem), JSON.stringify(item2))
-
-			// Write index
-			const index = {
-				version: 1,
-				updatedAt: Date.now(),
-				entries: [item1, item2],
-			}
-			await fs.writeFile(path.join(tasksDir, GlobalFileNames.historyIndex), JSON.stringify(index))
 
 			await store.initialize()
 
@@ -99,6 +90,43 @@ describe("TaskHistoryStore", () => {
 			const item = makeHistoryItem({ id: "task-get" })
 			await store.upsert(item)
 			expect(store.get("task-get")).toMatchObject({ id: "task-get" })
+		})
+	})
+
+	describe("pending action persistence", () => {
+		it("persists set and clear operations across store reinitialization", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "pending-action-task" }))
+			const provider = { taskHistoryStore: store, recentTasksCache: undefined } as unknown as ClineProvider
+			const pendingAction = {
+				kind: "finish_subtask" as const,
+				actionId: "finish-action",
+				approvalText: JSON.stringify({ tool: "finishTask" }),
+				parentTaskId: "parent-1",
+				result: "Done",
+			}
+
+			await ClineProvider.prototype.setPendingTaskAction.call(provider, "pending-action-task", pendingAction)
+			store.dispose()
+			store = new TaskHistoryStore(tmpDir)
+			await store.initialize()
+			expect(store.get("pending-action-task")?.pendingAction).toEqual(pendingAction)
+
+			const reloadedProvider = {
+				taskHistoryStore: store,
+				recentTasksCache: undefined,
+			} as unknown as ClineProvider
+			await expect(
+				ClineProvider.prototype.clearPendingTaskAction.call(
+					reloadedProvider,
+					"pending-action-task",
+					"finish-action",
+				),
+			).resolves.toBe(true)
+			store.dispose()
+			store = new TaskHistoryStore(tmpDir)
+			await store.initialize()
+			expect(store.get("pending-action-task")?.pendingAction).toBeUndefined()
 		})
 	})
 
@@ -373,39 +401,45 @@ describe("TaskHistoryStore", () => {
 
 			expect(store.get("idem-task")).toBeDefined()
 		})
-	})
 
-	describe("flushIndex()", () => {
-		it("writes index to disk on flush", async () => {
-			await store.initialize()
+		it("serializes migration cache updates behind the store lock", async () => {
+			const tasksDir = path.join(tmpDir, "tasks")
+			const migrated = makeHistoryItem({ id: "migration-locked" })
+			const concurrent = makeHistoryItem({ id: "migration-concurrent" })
+			const migratedFile = path.join(tasksDir, migrated.id, GlobalFileNames.historyItem)
+			await fs.mkdir(path.dirname(migratedFile), { recursive: true })
 
-			await store.upsert(makeHistoryItem({ id: "flush-task" }))
-			await store.flushIndex()
+			let releaseMigrationWrite!: () => void
+			const migrationWriteCanFinish = new Promise<void>((resolve) => {
+				releaseMigrationWrite = resolve
+			})
+			let signalMigrationWriteStarted!: () => void
+			const migrationWriteStarted = new Promise<void>((resolve) => {
+				signalMigrationWriteStarted = resolve
+			})
 
-			const indexPath = path.join(tmpDir, "tasks", GlobalFileNames.historyIndex)
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index = JSON.parse(raw)
+			const { safeWriteJson: mockSafeWriteJson } = await import("../../../utils/safeWriteJson")
+			const originalImpl = vi.mocked(mockSafeWriteJson).getMockImplementation()!
+			let firstCall = true
+			vi.mocked(mockSafeWriteJson).mockImplementation(async (...args) => {
+				if (firstCall) {
+					firstCall = false
+					signalMigrationWriteStarted()
+					await migrationWriteCanFinish
+				}
+				return originalImpl(...args)
+			})
 
-			expect(index.version).toBe(1)
-			expect(index.entries).toHaveLength(1)
-			expect(index.entries[0].id).toBe("flush-task")
-		})
-	})
+			const migration = store.migrateFromGlobalState([migrated])
+			await migrationWriteStarted
+			const concurrentUpsert = store.upsert(concurrent)
 
-	describe("dispose()", () => {
-		it("flushes index on dispose", async () => {
-			await store.initialize()
+			expect(store.get(concurrent.id)).toBeUndefined()
+			releaseMigrationWrite()
+			await Promise.all([migration, concurrentUpsert])
 
-			await store.upsert(makeHistoryItem({ id: "dispose-task" }))
-			store.dispose()
-
-			// Give the flush a moment to complete
-			await new Promise((resolve) => setTimeout(resolve, 100))
-
-			const indexPath = path.join(tmpDir, "tasks", GlobalFileNames.historyIndex)
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index = JSON.parse(raw)
-			expect(index.entries).toHaveLength(1)
+			expect(store.get(migrated.id)).toEqual(migrated)
+			expect(store.get(concurrent.id)).toEqual(concurrent)
 		})
 	})
 
@@ -708,8 +742,9 @@ describe("TaskHistoryStore", () => {
 			const parentDisk = JSON.parse(await fs.readFile(parentFile, "utf8"))
 			expect(parentDisk.status).toBe("delegated")
 
-			// Cache was NOT updated (cache set is deferred until after both writes succeed)
-			expect(store.get("child-partial")?.status).toBe("active")
+			// First record's cache IS updated (it was committed to disk).
+			// Second record's cache is unchanged (write never completed).
+			expect(store.get("child-partial")?.status).toBe("completed")
 			expect(store.get("parent-partial")?.status).toBe("delegated")
 		})
 

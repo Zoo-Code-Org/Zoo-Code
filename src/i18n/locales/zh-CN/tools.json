@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "正在搜索代码库中的 '{{query}}'..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard 已拦截此命令。",
+			"blockedWithReason": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}",
+			"blockedWithRule": "Destructive Command Guard 已拦截此命令。（规则：{{ruleId}}）",
+			"blockedWithReasonAndRule": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}（规则：{{ruleId}}）"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "由于策略限制，无法创建新任务。"

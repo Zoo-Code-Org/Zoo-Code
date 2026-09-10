@@ -157,6 +157,20 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.outputPrice).toBe(4.4)
 		})
 
+		it("resolves GLM-5.3 with always-on Low/High/Max reasoning effort", () => {
+			const info = parseOpencodeGoModel({ id: "glm-5.3" })
+			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.maxTokens).toBe(131_072)
+			expect(info.supportsPromptCache).toBe(true)
+			expect(info.supportsMaxTokens).toBe(true)
+			expect(info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(info.reasoningEffort).toBe("max")
+			expect(info.preserveReasoning).toBe(true)
+			expect(info.inputPrice).toBe(1.4)
+			expect(info.outputPrice).toBe(4.4)
+			expect(info.cacheReadsPrice).toBe(0.26)
+		})
+
 		it("falls back to defaults for an unknown model with no cache pricing", () => {
 			const info = parseOpencodeGoModel({ id: "x", context_window: 100000, max_tokens: 8000 })
 			expect(info.supportsPromptCache).toBe(false)

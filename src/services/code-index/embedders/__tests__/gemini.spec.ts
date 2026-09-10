@@ -3,6 +3,8 @@ import type { MockedClass } from "vitest"
 import { GeminiEmbedder } from "../gemini"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock the OpenAICompatibleEmbedder
 vitest.mock("../openai-compatible")
 
@@ -21,7 +23,7 @@ describe("GeminiEmbedder", () => {
 	let embedder: GeminiEmbedder
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

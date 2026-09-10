@@ -6,6 +6,23 @@ export interface ProcessResult {
 	stderr: string
 }
 
+function quotePowerShellString(value: string): string {
+	return `'${value.replace(/'/g, "''")}'`
+}
+
+function encodePowerShellCommand(script: string): string {
+	return Buffer.from(script, "utf16le").toString("base64")
+}
+
+async function runPowerShell(script: string): Promise<ProcessResult> {
+	return runProcess("powershell", [
+		"-NoProfile",
+		"-NonInteractive",
+		"-EncodedCommand",
+		encodePowerShellCommand(script),
+	])
+}
+
 export function runProcess(executable: string, args: string[], timeoutMs = 30_000): Promise<ProcessResult> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(executable, args, { shell: false, stdio: ["ignore", "pipe", "pipe"] })
@@ -50,14 +67,13 @@ export async function extractTarXzArchive(archivePath: string, destination: stri
 
 export async function extractZipArchive(archivePath: string, destination: string): Promise<void> {
 	if (process.platform === "win32") {
-		await runProcess("powershell", [
-			"-NoProfile",
-			"-NonInteractive",
-			"-Command",
-			"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
-			archivePath,
-			destination,
-		])
+		const script = [
+			"$ErrorActionPreference = 'Stop'",
+			`$archivePath = ${quotePowerShellString(archivePath)}`,
+			`$destination = ${quotePowerShellString(destination)}`,
+			"Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
+		].join("; ")
+		await runPowerShell(script)
 		return
 	}
 
@@ -76,10 +92,10 @@ export async function extractSingleFileZipArchive(
 
 	const script = [
 		"$ErrorActionPreference = 'Stop'",
-		"$archivePath = $args[0]",
-		"$outputPath = $args[1]",
-		"$expectedFile = $args[2]",
-		"$archiveName = $args[3]",
+		`$archivePath = ${quotePowerShellString(archivePath)}`,
+		`$outputPath = ${quotePowerShellString(path.join(destination, expectedFile))}`,
+		`$expectedFile = ${quotePowerShellString(expectedFile)}`,
+		`$archiveName = ${quotePowerShellString(archiveName)}`,
 		"Add-Type -AssemblyName System.IO.Compression.FileSystem",
 		"$archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)",
 		"try {",
@@ -89,16 +105,7 @@ export async function extractSingleFileZipArchive(
 		"} finally { $archive.Dispose() }",
 	].join("; ")
 
-	await runProcess("powershell", [
-		"-NoProfile",
-		"-NonInteractive",
-		"-Command",
-		script,
-		archivePath,
-		path.join(destination, expectedFile),
-		expectedFile,
-		archiveName,
-	])
+	await runPowerShell(script)
 }
 
 export async function extractSingleFileTarXzArchive(

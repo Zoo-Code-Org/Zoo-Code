@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from "react"
 import { render, screen, act } from "@testing-library/react"
 import { TooltipProvider } from "@radix-ui/react-tooltip"
+import type { SuggestionItem } from "@roo-code/types"
 
 import { FollowUpSuggest } from "../FollowUpSuggest"
 
@@ -705,6 +706,112 @@ describe("FollowUpSuggest", () => {
 
 			// onCancelAutoApproval should have been called to cancel the backend timeout
 			expect(mockOnCancelAutoApproval).toHaveBeenCalled()
+		})
+	})
+
+	describe("suggestions with blank or missing answers (issue #1226)", () => {
+		/**
+		 * Malformed follow-up payloads as they can arrive from the model: the
+		 * extension-host transport does not validate `FollowUpData`, so a
+		 * suggestion item may be missing `answer` or carry a blank value.
+		 * `SuggestionItem` models a missing or blank `answer` (see
+		 * `hasUsableAnswer`) but not a non-string one, so the fixtures keep
+		 * their malformed shape and cross into the component prop at one
+		 * documented boundary instead of disabling type checks with `any`.
+		 */
+		type MalformedSuggestionPayload = { answer?: unknown }
+
+		const renderWithMalformedSuggestions = (payloads: MalformedSuggestionPayload[]) => {
+			// Documented double assertion at the component boundary: FollowUpSuggest
+			// must tolerate malformed transport data, which `SuggestionItem`
+			// cannot fully express (issue #1226).
+			const suggestions = payloads as unknown as SuggestionItem[]
+
+			return renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={suggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+		}
+
+		it("should not render anything when all answers are blank, missing, or non-string", () => {
+			const { container } = renderWithMalformedSuggestions([
+				{ answer: "" },
+				{ answer: "   \n\t " },
+				{ answer: undefined },
+				{ answer: 42 },
+			])
+
+			// Blank suggestions are filtered out, so no buttons or countdown render.
+			expect(container.firstChild).toBeNull()
+		})
+
+		it("should only render suggestions with non-blank answers", () => {
+			renderWithMalformedSuggestions([
+				{ answer: "" },
+				{ answer: "Valid suggestion" },
+				{ answer: undefined },
+				{ answer: "   " },
+			])
+
+			expect(screen.getByText("Valid suggestion")).toBeInTheDocument()
+			expect(screen.queryAllByRole("button")).toHaveLength(1)
+		})
+
+		it("should not start the auto-approve countdown when all answers are blank", () => {
+			renderWithMalformedSuggestions([{ answer: "" }, { answer: undefined }])
+
+			vi.advanceTimersByTime(10000)
+
+			expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+			// Auto-approval must not select a blank suggestion.
+			expect(mockOnSuggestionClick).not.toHaveBeenCalled()
+		})
+
+		it("does not call the cancel callback on unmount when no usable suggestion starts the countdown", () => {
+			const { unmount } = renderWithMalformedSuggestions([{ answer: "" }])
+
+			unmount()
+
+			// No countdown started, so unmounting must not cancel a backend timeout.
+			expect(mockOnCancelAutoApproval).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("stale visible-suggestions memo (issue #1226)", () => {
+		it("re-renders the suggestion list when the suggestions prop changes", () => {
+			const { rerender } = renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={[{ answer: "First" }]}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			expect(screen.getByText("First")).toBeInTheDocument()
+
+			// A stale memo would keep rendering the original suggestion.
+			rerender(
+				<TestExtensionStateProvider value={defaultTestState}>
+					<TooltipProvider>
+						<FollowUpSuggest
+							suggestions={[{ answer: "Second" }]}
+							onSuggestionClick={mockOnSuggestionClick}
+							ts={123}
+							onCancelAutoApproval={mockOnCancelAutoApproval}
+						/>
+					</TooltipProvider>
+				</TestExtensionStateProvider>,
+			)
+
+			expect(screen.getByText("Second")).toBeInTheDocument()
+			expect(screen.queryByText("First")).not.toBeInTheDocument()
 		})
 	})
 })

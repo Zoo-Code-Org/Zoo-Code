@@ -6,6 +6,19 @@ export type VertexModelId = keyof typeof vertexModels
 export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
+	"gemini-3.7-flash": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		inputPrice: 0.75,
+		outputPrice: 3.75,
+		cacheReadsPrice: 0.075,
+		cacheWritesPrice: 0.5,
+		supportsReasoningBudget: false,
+	},
 	"gemini-3.6-flash": {
 		maxTokens: 65_536,
 		contextWindow: 1_048_576,
@@ -475,6 +488,21 @@ export const vertexModels = {
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
+	},
+	"claude-fable-5-1": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 0.25,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Fable 5.1 extends Fable 5 with stronger long-running agentic coding, multistep research, and document work.",
 	},
 	"claude-fable-5": {
 		maxTokens: 8192,

@@ -228,6 +228,7 @@
 		"exitStatus": "Afgesloten met status {{exitCode}}",
 		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
+		"denied": "Commando geweigerd",
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
 		"addToDenied": "Toevoegen aan geweigerde lijst",
@@ -316,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Meer OpenAI-bediening — gebruik de Fast-prioriteitsmodus met OpenAI Codex en kies een hogere reasoning effort voor OpenAI-compatibele modellen.",
-			"highlight2": "Betrouwbaardere providers en modellen — verbeterde verwerking van routermetadata, Ollama-modelverversing, Bedrock-proxyondersteuning en Friendli-reasoningbediening.",
-			"highlight3": "Soepelere instellingen en ontwikkelworkflows — instellingen bewaren niet-opgeslagen wijzigingen, korte terminalopdrachten worden correct voltooid, architectuurplannen gebruiken werkruimterelatieve paden en de resterende zichtbare Roo-branding is bijgewerkt naar Zoo."
+			"highlight1": "🔑 Gebruik je Zoo Gateway API-sleutel overal—voeg hem toe aan elke OpenAI-compatibele client of workflow: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Krijg tijdelijk gratis toegang tot MiniMax-M3 via Zoo Gateway.",
+			"highlight3": "✨ Nu beschikbaar: de gloednieuwe modellen GPT-6 Astra en Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

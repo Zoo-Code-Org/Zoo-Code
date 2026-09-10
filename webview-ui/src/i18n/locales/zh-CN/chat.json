@@ -233,6 +233,7 @@
 		"exitStatus": "已退出，状态码 {{exitCode}}",
 		"malformedCommand": "命令格式错误：shell 语法错误",
 		"manageCommands": "管理命令权限",
+		"denied": "命令已拒绝",
 		"commandManagementDescription": "管理命令权限：点击 ✓ 允许自动执行，点击 ✗ 拒绝执行。可以打开/关闭模式或从列表中删除。<settingsLink>查看所有设置</settingsLink>",
 		"addToAllowed": "添加到允许列表",
 		"removeFromAllowed": "从允许列表中删除",
@@ -344,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更多 OpenAI 控制选项 — 在 OpenAI Codex 中使用 Fast 优先模式，并为 OpenAI 兼容模型选择更高的 reasoning effort。",
-			"highlight2": "更可靠的提供商和模型 — 改进 router 元数据处理、Ollama 模型刷新、Bedrock 代理支持和 Friendli reasoning 控制。",
-			"highlight3": "更顺畅的设置和开发工作流 — 设置现在会保留未保存的编辑，短终端命令可正确完成，Architect 计划使用相对于工作区的路径，剩余面向用户的 Roo 品牌也已更新为 Zoo。"
+			"highlight1": "🔑 随处使用你的 Zoo Gateway API 密钥——可将其用于任何兼容 OpenAI 的客户端或工作流：<modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 限时通过 Zoo Gateway 免费使用 MiniMax-M3。",
+			"highlight3": "✨ 全新上线：GPT-6 Astra 和 Claude Fable 5.1 模型。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

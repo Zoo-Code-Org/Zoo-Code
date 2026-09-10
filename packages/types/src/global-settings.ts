@@ -46,6 +46,8 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
  */
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
+export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
+
 /**
  * Terminal output preview size options for persisted command output.
  *
@@ -121,9 +123,23 @@ export const globalSettingsSchema = z.object({
 	autoApprovalEnabled: z.boolean().optional(),
 	alwaysAllowReadOnly: z.boolean().optional(),
 	alwaysAllowReadOnlyOutsideWorkspace: z.boolean().optional(),
+	/**
+	 * Gitignore-style patterns naming the files that may be read without
+	 * approval, even when `alwaysAllowReadOnly` is off. Resolved relative to the
+	 * workspace root; absolute patterns are also accepted.
+	 */
+	allowedReadFiles: z.array(z.string()).optional(),
 	alwaysAllowWrite: z.boolean().optional(),
 	alwaysAllowWriteOutsideWorkspace: z.boolean().optional(),
 	alwaysAllowWriteProtected: z.boolean().optional(),
+	/**
+	 * Gitignore-style path patterns, relative to the workspace root, whose files
+	 * may be created/edited without approval even when `alwaysAllowWrite` is off.
+	 *
+	 * Lets a user grant a narrow, path-scoped write permission (for example a
+	 * scratchpad file) without auto-approving writes to the whole workspace.
+	 */
+	allowedWriteFiles: z.array(z.string()).optional(),
 	writeDelayMs: z.number().min(0).optional(),
 	/**
 	 * Fuzzy matching threshold for the multi-search-replace diff strategy.
@@ -136,6 +152,7 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowModeSwitch: z.boolean().optional(),
 	alwaysAllowSubtasks: z.boolean().optional(),
 	alwaysAllowExecute: z.boolean().optional(),
+	destructiveCommandGuardEnabled: z.boolean().optional(),
 	alwaysAllowFollowupQuestions: z.boolean().optional(),
 	followupAutoApproveTimeoutMs: z.number().optional(),
 	allowedCommands: z.array(z.string()).optional(),
@@ -321,6 +338,7 @@ export const SECRET_STATE_KEYS = [
 	"vercelAiGatewayApiKey",
 	"opencodeGoApiKey",
 	"kenariApiKey",
+	"nanoGptApiKey",
 	"basetenApiKey",
 ] as const
 

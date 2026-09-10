@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Zoeken naar '{{query}}' in codebase..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard heeft deze opdracht geblokkeerd.",
+			"blockedWithReason": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. (Regel: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}} (Regel: {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Kan geen nieuwe taak aanmaken vanwege beleidsbeperkingen."

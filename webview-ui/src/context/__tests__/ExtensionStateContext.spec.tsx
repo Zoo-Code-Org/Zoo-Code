@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { render, screen, act } from "@/utils/test-utils"
 import React from "react"
 
@@ -6,6 +7,9 @@ import {
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
+	type MarketplaceItem,
+	type MarketplaceInstalledMetadata,
+	type RouterModels,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 } from "@roo-code/types"
@@ -61,12 +65,42 @@ const ApiConfigTestComponent = () => {
 			<div data-testid="api-configuration">{JSON.stringify(apiConfiguration)}</div>
 			<button
 				data-testid="update-api-config-button"
-				onClick={() => setApiConfiguration({ apiModelId: "new-model", apiProvider: "anthropic" })}>
+				onClick={() =>
+					setApiConfiguration({ apiModelId: "new-model", apiProvider: providerIdentifiers.anthropic })
+				}>
 				Update API Config
 			</button>
 			<button data-testid="partial-update-button" onClick={() => setApiConfiguration({ modelTemperature: 0.7 })}>
 				Partial Update
 			</button>
+		</div>
+	)
+}
+
+const InitialStateTestComponent = () => {
+	const {
+		alwaysAllowFollowupQuestions,
+		followupAutoApproveTimeoutMs,
+		includeTaskHistoryInEnhance,
+		includeCurrentTime,
+		includeCurrentCost,
+		routerModels,
+		marketplaceItems,
+		marketplaceInstalledMetadata,
+	} = useExtensionState()
+
+	return (
+		<div data-testid="initial-state">
+			{JSON.stringify({
+				alwaysAllowFollowupQuestions,
+				followupAutoApproveTimeoutMs,
+				includeTaskHistoryInEnhance,
+				includeCurrentTime,
+				includeCurrentCost,
+				routerModels,
+				marketplaceItems,
+				marketplaceInstalledMetadata,
+			})}
 		</div>
 	)
 }
@@ -181,6 +215,50 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
 	})
 
+	it("initializes shadowed context fields from initialState", () => {
+		const routerModels = {} as RouterModels
+		const marketplaceItems: MarketplaceItem[] = [
+			{
+				id: "mode-item",
+				name: "Test mode",
+				description: "A test mode",
+				type: "mode",
+				content: "custom mode content",
+			},
+		]
+		const marketplaceInstalledMetadata: MarketplaceInstalledMetadata = {
+			project: { "mode-item": { type: "mode" } },
+			global: {},
+		}
+
+		render(
+			<ExtensionStateContextProvider
+				initialState={{
+					alwaysAllowFollowupQuestions: true,
+					followupAutoApproveTimeoutMs: 1500,
+					includeTaskHistoryInEnhance: false,
+					includeCurrentTime: false,
+					includeCurrentCost: false,
+					routerModels,
+					marketplaceItems,
+					marketplaceInstalledMetadata,
+				}}>
+				<InitialStateTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("initial-state").textContent!)).toEqual({
+			alwaysAllowFollowupQuestions: true,
+			followupAutoApproveTimeoutMs: 1500,
+			includeTaskHistoryInEnhance: false,
+			includeCurrentTime: false,
+			includeCurrentCost: false,
+			routerModels: {},
+			marketplaceItems,
+			marketplaceInstalledMetadata,
+		})
+	})
+
 	it("updates showRooIgnoredFiles through setShowRooIgnoredFiles", () => {
 		render(
 			<ExtensionStateContextProvider>
@@ -278,7 +356,7 @@ describe("ExtensionStateContext", () => {
 		expect(updatedConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}),
 		)
 	})
@@ -301,7 +379,7 @@ describe("ExtensionStateContext", () => {
 		expect(initialConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}),
 		)
 
@@ -316,7 +394,7 @@ describe("ExtensionStateContext", () => {
 		expect(updatedConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model", // Should retain this from previous update
-				apiProvider: "anthropic", // Should retain this from previous update
+				apiProvider: providerIdentifiers.anthropic, // Should retain this from previous update
 				modelTemperature: 0.7, // Should add this from partial update
 			}),
 		)
@@ -338,7 +416,7 @@ describe("mergeExtensionState", () => {
 			customModes: [],
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
-			apiConfiguration: { providerId: "openrouter" } as ProviderSettings,
+			apiConfiguration: { providerId: providerIdentifiers.openrouter } as ProviderSettings,
 			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,

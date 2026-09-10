@@ -1,8 +1,8 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/chat/__tests__/TaskHeader.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent } from "@/utils/test-utils"
 
 import type { ProviderSettings } from "@roo-code/types"
 
@@ -43,7 +43,7 @@ const mockExtensionState: {
 	taskHistory: any[]
 } = {
 	apiConfiguration: {
-		apiProvider: "anthropic",
+		apiProvider: providerIdentifiers.anthropic,
 		apiKey: "test-api-key",
 		apiModelId: "claude-3-opus-20240229",
 	} as ProviderSettings,
@@ -54,6 +54,7 @@ const mockExtensionState: {
 
 // Mock the ExtensionStateContext
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: () => mockExtensionState,
 }))
 
@@ -75,7 +76,7 @@ let mockModelInfo: { contextWindow: number; maxTokens: number } | undefined = un
 // Mock useSelectedModel hook
 vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		id: "test-model",
 		info: mockModelInfo,
 		isLoading: false,
@@ -100,14 +101,8 @@ describe("TaskHeader", () => {
 		handleCondenseContext: vi.fn(),
 	}
 
-	const queryClient = new QueryClient()
-
 	const renderTaskHeader = (props: Partial<TaskHeaderProps> = {}) => {
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<TaskHeader {...defaultProps} {...props} />
-			</QueryClientProvider>,
-		)
+		return renderWithExtensionState(<TaskHeader {...defaultProps} {...props} />)
 	}
 
 	it("should display cost when totalCost is greater than 0", () => {

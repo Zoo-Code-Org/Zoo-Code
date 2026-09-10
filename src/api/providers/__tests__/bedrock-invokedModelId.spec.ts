@@ -1,6 +1,8 @@
 // npx vitest run src/api/providers/__tests__/bedrock-invokedModelId.spec.ts
 
 import { ApiHandlerOptions } from "../../../shared/api"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 import { AwsBedrockHandler, StreamEvent } from "../bedrock"
 
@@ -24,18 +26,16 @@ const mockSend = vitest.fn().mockImplementation(async () => {
 			httpStatusCode: 200,
 			requestId: "mock-request-id",
 		},
-		stream: {
-			[Symbol.asyncIterator]: async function* () {
-				yield {
-					metadata: {
-						usage: {
-							inputTokens: 100,
-							outputTokens: 200,
-						},
+		stream: asyncStreamFrom([
+			{
+				metadata: {
+					usage: {
+						inputTokens: 100,
+						outputTokens: 200,
 					},
-				}
+				},
 			},
-		},
+		]),
 	}
 })
 
@@ -77,27 +77,23 @@ vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
 
 describe("AwsBedrockHandler with invokedModelId", () => {
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Helper function to create a mock async iterable stream
 	function createMockStream(events: StreamEvent[]) {
-		return {
-			[Symbol.asyncIterator]: async function* () {
-				for (const event of events) {
-					yield event
-				}
-				// Always yield a metadata event at the end
-				yield {
-					metadata: {
-						usage: {
-							inputTokens: 100,
-							outputTokens: 200,
-						},
+		return asyncStreamFrom([
+			...events,
+			// Always yield a metadata event at the end
+			{
+				metadata: {
+					usage: {
+						inputTokens: 100,
+						outputTokens: 200,
 					},
-				}
+				},
 			},
-		}
+		])
 	}
 
 	it("should update costModelConfig when invokedModelId is present in the stream", async () => {
@@ -162,10 +158,7 @@ describe("AwsBedrockHandler with invokedModelId", () => {
 		const messageGenerator = handler.createMessage("system prompt", [{ role: "user", content: "user message" }])
 
 		// Collect all yielded events to verify usage events
-		const events = []
-		for await (const event of messageGenerator) {
-			events.push(event)
-		}
+		const events = await collectStream(messageGenerator)
 
 		// Verify that getModelById was called with the id, not the full arn
 		expect(getModelByIdSpy).toHaveBeenCalledWith("anthropic.claude-3-opus-20240229-v1:0", "inference-profile")
@@ -236,9 +229,7 @@ describe("AwsBedrockHandler with invokedModelId", () => {
 		const messageGenerator = handler.createMessage("system prompt", [{ role: "user", content: "user message" }])
 
 		// Consume the generator
-		for await (const _ of messageGenerator) {
-			// Just consume the messages
-		}
+		await collectStream(messageGenerator)
 
 		// Verify that getModel returns the original model info (unchanged)
 		const costModel = handler.getModel()
@@ -286,9 +277,7 @@ describe("AwsBedrockHandler with invokedModelId", () => {
 		const messageGenerator = handler.createMessage("system prompt", [{ role: "user", content: "user message" }])
 
 		// Consume the generator
-		for await (const _ of messageGenerator) {
-			// Just consume the messages
-		}
+		await collectStream(messageGenerator)
 
 		// Verify that getModel returns the original model info
 		const costModel = handler.getModel()
@@ -345,9 +334,7 @@ describe("AwsBedrockHandler with invokedModelId", () => {
 		const messageGenerator = handler.createMessage("system prompt", [{ role: "user", content: "user message" }])
 
 		// Consume the generator
-		for await (const _ of messageGenerator) {
-			// Just consume the messages
-		}
+		await collectStream(messageGenerator)
 
 		// Verify that getModel returns the original model info
 		const costModel = handler.getModel()

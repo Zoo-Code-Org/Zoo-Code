@@ -1,12 +1,12 @@
-import type { ProviderName, ReasoningEffortExtended } from "@roo-code/types"
+import { providerIdentifiers, type ProviderName, type ReasoningEffortExtended } from "@roo-code/types"
 import type { OutputFormat } from "./json-events.js"
 
 export const supportedProviders = [
-	"anthropic",
-	"openai-native",
-	"gemini",
-	"openrouter",
-	"vercel-ai-gateway",
+	providerIdentifiers.anthropic,
+	providerIdentifiers.openaiNative,
+	providerIdentifiers.gemini,
+	providerIdentifiers.openrouter,
+	providerIdentifiers.vercelAiGateway,
 ] as const satisfies ProviderName[]
 
 export type SupportedProvider = (typeof supportedProviders)[number]

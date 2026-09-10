@@ -1,8 +1,6 @@
 import React from "react"
-import { render } from "@/utils/test-utils"
+import { renderWithExtensionState } from "@/utils/test-utils"
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { ChatRowContent } from "../ChatRow"
 
 // Mock i18n
@@ -30,25 +28,19 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeBadge: ({ children, ...props }: { children: React.ReactNode }) => <span {...props}>{children}</span>,
 }))
 
-const queryClient = new QueryClient()
-
 const renderChatRowWithProviders = (message: any, isExpanded = false) => {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatRowContent
-					message={message}
-					isExpanded={isExpanded}
-					isLast={false}
-					isStreaming={false}
-					onToggleExpand={mockOnToggleExpand}
-					onSuggestionClick={mockOnSuggestionClick}
-					onBatchFileResponse={mockOnBatchFileResponse}
-					onFollowUpUnmount={mockOnFollowUpUnmount}
-					isFollowUpAnswered={false}
-				/>
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
+	return renderWithExtensionState(
+		<ChatRowContent
+			message={message}
+			isExpanded={isExpanded}
+			isLast={false}
+			isStreaming={false}
+			onToggleExpand={mockOnToggleExpand}
+			onSuggestionClick={mockOnSuggestionClick}
+			onBatchFileResponse={mockOnBatchFileResponse}
+			onFollowUpUnmount={mockOnFollowUpUnmount}
+			isFollowUpAnswered={false}
+		/>,
 	)
 }
 

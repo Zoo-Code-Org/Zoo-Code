@@ -1,9 +1,16 @@
 import axios from "axios"
 import { LMStudioClient, LLMInstanceInfo, LLMInfo } from "@lmstudio/sdk"
 
-import { ModelInfo, lMStudioDefaultModelInfo } from "@roo-code/types"
+import { ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
-import { getLMStudioModels, parseLMStudioModel } from "../lmstudio"
+import { forceFullModelDetailsLoad, getLMStudioModels, hasLoadedFullDetails, parseLMStudioModel } from "../lmstudio"
+
+const mockFlushModels = vi.hoisted(() => vi.fn())
+
+vi.mock("../modelCache", () => ({
+	flushModels: mockFlushModels,
+	getModels: vi.fn(),
+}))
 
 // Mock axios
 vi.mock("axios")
@@ -13,12 +20,14 @@ const mockedAxios = axios as any
 const mockGetModelInfo = vi.fn()
 const mockListLoaded = vi.fn()
 const mockListDownloadedModels = vi.fn()
+const mockLoadModel = vi.fn()
 vi.mock("@lmstudio/sdk", () => {
 	return {
 		LMStudioClient: vi.fn().mockImplementation(function () {
 			return {
 				llm: {
 					listLoaded: mockListLoaded,
+					model: mockLoadModel,
 				},
 				system: {
 					listDownloadedModels: mockListDownloadedModels,
@@ -36,6 +45,30 @@ describe("LMStudio Fetcher", () => {
 		mockListLoaded.mockClear()
 		mockGetModelInfo.mockClear()
 		mockListDownloadedModels.mockClear()
+		mockLoadModel.mockClear()
+		mockFlushModels.mockClear()
+	})
+
+	describe("forceFullModelDetailsLoad", () => {
+		it("loads the selected model before refreshing its server-scoped cache and recording full details", async () => {
+			const baseUrl = "https://securehost:4321"
+			const modelId = "mistralai/devstral-small-2505"
+			await getLMStudioModels("not a valid URL")
+			vi.clearAllMocks()
+			mockedAxios.get.mockResolvedValueOnce({ data: { status: "ok" } })
+			mockLoadModel.mockResolvedValueOnce({})
+			mockFlushModels.mockResolvedValueOnce(undefined)
+
+			expect(hasLoadedFullDetails(modelId)).toBe(false)
+
+			await forceFullModelDetailsLoad(baseUrl, modelId)
+
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`)
+			expect(MockedLMStudioClientConstructor).toHaveBeenCalledWith({ baseUrl: "wss://securehost:4321" })
+			expect(mockLoadModel).toHaveBeenCalledWith(modelId)
+			expect(mockFlushModels).toHaveBeenCalledWith({ provider: providerIdentifiers.lmstudio, baseUrl }, true)
+			expect(hasLoadedFullDetails(modelId)).toBe(true)
+		})
 	})
 
 	describe("parseLMStudioModel", () => {
