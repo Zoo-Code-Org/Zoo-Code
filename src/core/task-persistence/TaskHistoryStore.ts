@@ -872,30 +872,20 @@ export class TaskHistoryStore {
 
 	private async pruneStaleHistoryBackups(tasksDir: string): Promise<void> {
 		const now = Date.now()
-		const taskDirectories = await fs.readdir(tasksDir, { withFileTypes: true })
-		for (const taskDirectory of taskDirectories) {
-			if (!taskDirectory.isDirectory() || taskDirectory.name.startsWith(".")) continue
-			const taskId = taskDirectory.name
+		for (const taskId of this.cache.keys()) {
 			try {
 				await this.withTaskFileLock(taskId, async (fileLock) => {
 					const taskDir = path.join(tasksDir, taskId)
 					const historyPath = path.join(taskDir, GlobalFileNames.historyItem)
-					try {
-						await fs.access(historyPath)
-					} catch {
-						return
-					}
-
-					for (const entry of await fs.readdir(taskDir, { withFileTypes: true })) {
-						if (!entry.isFile()) continue
-						const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry.name)
+					await fs.access(historyPath)
+					for (const entry of await fs.readdir(taskDir)) {
+						const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry)
 						if (!match) continue
-						const backupPath = path.join(taskDir, entry.name)
-						const embeddedTimestamp = Number(match[1])
-						const stat = await fs.stat(backupPath)
+						const backupPath = path.join(taskDir, entry)
+						const { mtimeMs } = await fs.stat(backupPath)
 						if (
-							now - embeddedTimestamp < TASK_HISTORY_BACKUP_RETENTION_MS ||
-							now - stat.mtimeMs < TASK_HISTORY_BACKUP_RETENTION_MS
+							now - Number(match[1]) < TASK_HISTORY_BACKUP_RETENTION_MS ||
+							now - mtimeMs < TASK_HISTORY_BACKUP_RETENTION_MS
 						) {
 							continue
 						}
@@ -1088,33 +1078,28 @@ export class TaskHistoryStore {
 	public async withTaskFileLock<T>(taskId: string, callback: (fileLock: JsonFileLock) => Promise<T>): Promise<T> {
 		return this.withLock(async () => {
 			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
-			let result!: T
-			let callbackFailed = false
-			let callbackError: unknown
-			try {
-				const current = await this.readTaskFile(taskId)
-				if (current) this.cache.set(taskId, current)
-				result = await callback(releaseFileLock)
-			} catch (error) {
-				callbackFailed = true
-				callbackError = error
-			}
-			let releaseError: unknown
-			try {
-				await releaseFileLock()
-			} catch (error) {
-				releaseError = error
-				if (callbackFailed) {
+			const current = await this.readTaskFile(taskId)
+			if (current) this.cache.set(taskId, current)
+			const outcome = await callback(releaseFileLock).then(
+				(result) => ({ result }),
+				(error: unknown) => ({ error }),
+			)
+			const releaseError = await releaseFileLock().then(
+				() => undefined,
+				(error: unknown) => error,
+			)
+			if (releaseFileLock.getCompromiseError()) await this.refreshCachedTask(taskId)
+			if ("error" in outcome) {
+				if (releaseError) {
 					console.error(
 						`[TaskHistoryStore] Failed to release lock for ${taskId} after callback failure:`,
-						error,
+						releaseError,
 					)
 				}
+				throw outcome.error
 			}
-			if (releaseFileLock.getCompromiseError()) await this.refreshCachedTask(taskId)
-			if (callbackFailed) throw callbackError
 			if (releaseError) throw releaseError
-			return result
+			return outcome.result
 		})
 	}
 
