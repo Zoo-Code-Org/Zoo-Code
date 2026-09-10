@@ -517,6 +517,7 @@
 		"serialize-error": "^12.0.0",
 		"shell-quote": "^1.8.2",
 		"simple-git": "^3.27.0",
+		"socket.io": "^4.8.3",
 		"strip-bom": "^5.0.0",
 		"tiktoken": "^1.0.21",
 		"tree-sitter-wasms": "^0.1.13",
@@ -551,6 +552,7 @@
 		"nock": "14.0.15",
 		"ovsx": "0.10.12",
 		"rimraf": "6.0.1",
+		"socket.io-client": "4.8.3",
 		"vitest": "4.1.9"
 	}
 }
