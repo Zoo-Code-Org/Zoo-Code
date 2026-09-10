@@ -81,6 +81,7 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { collectStream } from "../../../test-utils/stream"
 
 const mockLanguageModelChat = {
 	id: "test-model",
@@ -377,11 +378,10 @@ describe("VsCodeLmHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
-			for await (const _chunk of stream) {
-				// drain
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
 		})
 
 		it("sends the request when trimming brings the conversation back under budget", async () => {
@@ -1772,6 +1772,33 @@ describe("leaked tool-call recovery", () => {
 			const { calls } = extractLeakedToolCalls(text, schemas)
 
 			expect(calls).toEqual([{ name: "read_file", input: { optional: { a: 1 } } }])
+		})
+
+		it("accepts an explicit null for a nullable union parameter", () => {
+			const text = wrap(invoke("read_file", param("optional", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { optional: null } }])
+			expect(Object.keys(calls[0].input)).toContain("optional")
+			expect(calls[0].input.optional).toBeNull()
+		})
+
+		it("fails closed when a non-nullable object parameter is null", () => {
+			const text = wrap(invoke("read_file", param("indentation", "null")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("keeps a declared string parameter as the literal text null", () => {
+			const text = wrap(invoke("read_file", param("path", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { path: "null" } }])
 		})
 
 		it("keeps a declared string parameter literal even when it looks like JSON", () => {

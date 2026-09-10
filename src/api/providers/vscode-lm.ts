@@ -224,18 +224,27 @@ export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | un
 /** Non-string JSON Schema types a leaked parameter may be converted into. */
 const STRUCTURED_PARAM_TYPES = new Set(["object", "array", "number", "integer", "boolean"])
 
-/** Declared type of `paramName`, ignoring a nullable `["T","null"]` union. */
-function declaredParamType(schema: Record<string, unknown> | undefined, paramName: string): string | undefined {
+/**
+ * Declared type of `paramName`, resolving a nullable `["T","null"]` union to `T` while reporting
+ * that null is permitted, so an explicit null is not mistaken for a wrong-typed value.
+ */
+function declaredParamType(
+	schema: Record<string, unknown> | undefined,
+	paramName: string,
+): { type: string | undefined; nullable: boolean } {
 	const properties = schema?.["properties"] as Record<string, unknown> | undefined
 	const property = properties?.[paramName] as Record<string, unknown> | undefined
 	const type = property?.["type"]
 	if (typeof type === "string") {
-		return type
+		return { type, nullable: false }
 	}
 	if (Array.isArray(type)) {
-		return type.find((entry): entry is string => typeof entry === "string" && entry !== "null")
+		return {
+			type: type.find((entry): entry is string => typeof entry === "string" && entry !== "null"),
+			nullable: type.includes("null"),
+		}
 	}
-	return undefined
+	return { type: undefined, nullable: false }
 }
 
 /**
@@ -249,7 +258,11 @@ function declaredParamType(schema: Record<string, unknown> | undefined, paramNam
  * reported as a failure so the caller can pass the block through as text rather than dispatch a
  * malformed call.
  */
-function convertLeakedParamValue(raw: string, declaredType: string | undefined): { value: unknown } | undefined {
+function convertLeakedParamValue(
+	raw: string,
+	declared: { type: string | undefined; nullable: boolean },
+): { value: unknown } | undefined {
+	const declaredType = declared.type
 	if (declaredType === undefined || declaredType === "string") {
 		return { value: raw }
 	}
@@ -262,6 +275,11 @@ function convertLeakedParamValue(raw: string, declaredType: string | undefined):
 		parsed = JSON.parse(raw)
 	} catch {
 		return undefined
+	}
+
+	// Must precede the type ladder, whose object branch rejects null outright.
+	if (parsed === null) {
+		return declared.nullable ? { value: null } : undefined
 	}
 
 	const matchesDeclaredType =
