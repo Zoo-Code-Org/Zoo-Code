@@ -661,6 +661,7 @@ describe("TaskHistoryStore", () => {
 			})
 			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
 			const callbackError = new Error("locked callback failed")
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			await expect(
 				store.withTaskFileLock("locked-callback", async () => {
@@ -668,6 +669,8 @@ describe("TaskHistoryStore", () => {
 				}),
 			).rejects.toBe(callbackError)
 			expect(release).toHaveBeenCalledTimes(1)
+			expect(consoleError).not.toHaveBeenCalled()
+			consoleError.mockRestore()
 		})
 
 		it("surfaces a release failure after a successful callback", async () => {

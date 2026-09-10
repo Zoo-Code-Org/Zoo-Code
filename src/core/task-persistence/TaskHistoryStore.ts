@@ -1207,10 +1207,11 @@ export class TaskHistoryStore {
 				options?.rollbackBothOnCallbackFailure ||
 				options?.whileFirstFileLocked,
 			)
+			const suppliedFirstFileLock = options?.firstFileLock
 			const firstFileLock =
-				options?.firstFileLock ??
+				suppliedFirstFileLock ??
 				(holdFirstFileLock ? await lockJsonFile(await this.getTaskFilePath(firstId)) : undefined)
-			const ownsFirstFileLock = Boolean(firstFileLock && !options?.firstFileLock)
+			const ownsFirstFileLock = Boolean(firstFileLock && !suppliedFirstFileLock)
 
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
