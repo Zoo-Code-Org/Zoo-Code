@@ -27,14 +27,14 @@ export interface SafeWriteJsonOptions {
 	merge?: (existing: unknown, incoming: unknown) => unknown
 
 	/** The caller already holds this file's lock. Internal use only. */
-	lockAcquired?: boolean
+	heldLock?: JsonFileLock
 }
 
-type LockRelease = (() => Promise<void>) & {
-	getCompromiseError?: () => Error | undefined
+export type JsonFileLock = (() => Promise<void>) & {
+	getCompromiseError: () => Error | undefined
 }
 
-export async function lockJsonFile(filePath: string): Promise<LockRelease> {
+export async function lockJsonFile(filePath: string): Promise<JsonFileLock> {
 	const absoluteFilePath = path.resolve(filePath)
 	const dirPath = path.dirname(absoluteFilePath)
 	let compromisedError: Error | undefined
@@ -92,15 +92,17 @@ export async function lockJsonFile(filePath: string): Promise<LockRelease> {
 
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
-	let releaseLock: LockRelease = async () => {}
+	let fileLock = options?.heldLock
+	let releaseLock = false
 	let operationFailed = false
 	let operationError: unknown
 	let unlockFailed = false
 	let unlockError: unknown
 
-	if (!options?.lockAcquired) {
+	if (!fileLock) {
 		try {
-			releaseLock = await lockJsonFile(absoluteFilePath)
+			fileLock = await lockJsonFile(absoluteFilePath)
+			releaseLock = true
 		} catch (lockError) {
 			console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
 			throw lockError
@@ -146,7 +148,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				path.dirname(absoluteFilePath),
 				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
 			)
-			const compromiseError = releaseLock.getCompromiseError?.()
+			const compromiseError = fileLock.getCompromiseError()
 			if (compromiseError) throw compromiseError
 			await fs.rename(absoluteFilePath, tempBackupFilePath)
 			actualTempBackupFilePath = tempBackupFilePath
@@ -161,7 +163,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Step 3: Rename the new temporary file to the target file path.
 		// This is the main "commit" step.
-		const compromiseError = releaseLock.getCompromiseError?.()
+		const compromiseError = fileLock.getCompromiseError()
 		if (compromiseError) throw compromiseError
 		await fs.rename(actualTempNewFilePath, absoluteFilePath)
 
@@ -198,7 +200,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Restore only while this operation still owns the lock. After compromise,
 		// another owner may already have replaced the target.
-		if (backupFileToRollbackOrCleanupWithinCatch && !releaseLock.getCompromiseError?.()) {
+		if (backupFileToRollbackOrCleanupWithinCatch && !fileLock.getCompromiseError()) {
 			try {
 				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
 				// Mark as handled, prevent later unlink of this path
@@ -228,7 +230,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		try {
 			// releaseLock will be the actual unlock function if lock was acquired,
 			// or the initial no-op if acquisition failed.
-			await releaseLock()
+			if (releaseLock) await fileLock()
 		} catch (error) {
 			unlockFailed = true
 			unlockError = error

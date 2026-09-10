@@ -7,13 +7,15 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, lockJsonFile, safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, lockJsonFile, safeWriteJson, type JsonFileLock } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 export { DeltaRejectedError } from "./taskStoreConcurrency"
+
+export const TASK_HISTORY_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000
 
 /**
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
@@ -100,7 +102,7 @@ export interface AtomicUpdatePairOptions {
 	 */
 	whileFirstFileLocked?: () => Promise<void>
 	/** The caller already holds the first record's cross-process lock. */
-	firstFileLockAcquired?: boolean
+	firstFileLock?: JsonFileLock
 	/** The caller already holds the in-process store lock. */
 	storeLockAcquired?: boolean
 }
@@ -151,14 +153,17 @@ export class TaskHistoryStore {
 			const persistedActiveIds = this.getPersistedActiveIds()
 
 			// 2. Complete any two-record repair interrupted after its intent was durable.
+			let repairFailed = false
 			try {
 				await this.replayDelegationRepairIntent()
 			} catch (error) {
+				repairFailed = true
 				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
 			}
 
 			// 3. Repair delegation inconsistencies left by a previous crash
 			await this.reconcileDelegationState(persistedActiveIds)
+			if (!repairFailed) await this.pruneStaleHistoryBackups(tasksDir)
 
 			// 4. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
@@ -858,6 +863,55 @@ export class TaskHistoryStore {
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
 
+	private async refreshCachedTask(taskId: string): Promise<void> {
+		const current = await this.readTaskFile(taskId)
+		this.cache.delete(taskId)
+		this.taskFileMtimes.delete(taskId)
+		if (current) this.cache.set(taskId, current)
+	}
+
+	private async pruneStaleHistoryBackups(tasksDir: string): Promise<void> {
+		const now = Date.now()
+		const taskDirectories = await fs.readdir(tasksDir, { withFileTypes: true })
+		for (const taskDirectory of taskDirectories) {
+			if (!taskDirectory.isDirectory() || taskDirectory.name.startsWith(".")) continue
+			const taskId = taskDirectory.name
+			try {
+				await this.withTaskFileLock(taskId, async (fileLock) => {
+					const taskDir = path.join(tasksDir, taskId)
+					const historyPath = path.join(taskDir, GlobalFileNames.historyItem)
+					try {
+						await fs.access(historyPath)
+					} catch {
+						return
+					}
+
+					for (const entry of await fs.readdir(taskDir, { withFileTypes: true })) {
+						if (!entry.isFile()) continue
+						const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry.name)
+						if (!match) continue
+						const backupPath = path.join(taskDir, entry.name)
+						const embeddedTimestamp = Number(match[1])
+						const stat = await fs.stat(backupPath)
+						if (
+							now - embeddedTimestamp < TASK_HISTORY_BACKUP_RETENTION_MS ||
+							now - stat.mtimeMs < TASK_HISTORY_BACKUP_RETENTION_MS
+						) {
+							continue
+						}
+						const compromiseError = fileLock.getCompromiseError()
+						if (compromiseError) throw compromiseError
+						await fs.unlink(backupPath)
+					}
+				})
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+					console.error(`[TaskHistoryStore] Failed to prune stale backups for ${taskId}:`, error)
+				}
+			}
+		}
+	}
+
 	/**
 	 * Return only the fields in `incoming` that differ from `cached`.
 	 */
@@ -881,14 +935,14 @@ export class TaskHistoryStore {
 		item: HistoryItem,
 		delta?: Partial<HistoryItem>,
 		diskGuard?: (current: HistoryItem) => void,
-		options?: { mergeChildIds?: boolean; lockAcquired?: boolean },
+		options?: { mergeChildIds?: boolean; heldLock?: JsonFileLock },
 	): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
 		if (delta) {
 			let written: HistoryItem = item
 			const mergeFn = mergeWithDisk(delta, options)
 			await safeWriteJson(filePath, item, {
-				lockAcquired: options?.lockAcquired,
+				heldLock: options?.heldLock,
 				merge: (existing, incoming) => {
 					if (diskGuard) {
 						if (Object(existing) !== existing || !("id" in (existing as object))) {
@@ -912,11 +966,11 @@ export class TaskHistoryStore {
 		taskId: string,
 		preImage: HistoryItem,
 		expectedWritten: HistoryItem,
-		lockAcquired: boolean,
+		heldLock?: JsonFileLock,
 	): Promise<void> {
 		try {
 			await safeWriteJson(await this.getTaskFilePath(taskId), preImage, {
-				lockAcquired,
+				heldLock,
 				merge: (existing) => {
 					if (!existing || typeof existing !== "object" || !("id" in existing)) {
 						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
@@ -1031,16 +1085,36 @@ export class TaskHistoryStore {
 	 * their already-acquired-lock options; other store mutation, invalidation, and
 	 * reconciliation methods are non-reentrant and must not be called.
 	 */
-	public async withTaskFileLock<T>(taskId: string, callback: () => Promise<T>): Promise<T> {
+	public async withTaskFileLock<T>(taskId: string, callback: (fileLock: JsonFileLock) => Promise<T>): Promise<T> {
 		return this.withLock(async () => {
 			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
+			let result!: T
+			let callbackFailed = false
+			let callbackError: unknown
 			try {
 				const current = await this.readTaskFile(taskId)
 				if (current) this.cache.set(taskId, current)
-				return await callback()
-			} finally {
-				await releaseFileLock()
+				result = await callback(releaseFileLock)
+			} catch (error) {
+				callbackFailed = true
+				callbackError = error
 			}
+			let releaseError: unknown
+			try {
+				await releaseFileLock()
+			} catch (error) {
+				releaseError = error
+				if (callbackFailed) {
+					console.error(
+						`[TaskHistoryStore] Failed to release lock for ${taskId} after callback failure:`,
+						error,
+					)
+				}
+			}
+			if (releaseFileLock.getCompromiseError()) await this.refreshCachedTask(taskId)
+			if (callbackFailed) throw callbackError
+			if (releaseError) throw releaseError
+			return result
 		})
 	}
 
@@ -1054,16 +1128,14 @@ export class TaskHistoryStore {
 	public atomicReadAndUpdate(
 		taskId: string,
 		updater: (current: HistoryItem) => HistoryItem,
-		options: { fileLockAcquired?: boolean; storeLockAcquired?: boolean } = {},
+		options: { fileLock?: JsonFileLock; storeLockAcquired?: boolean } = {},
 	): Promise<HistoryItem[]> {
 		const update = async () => {
 			const cached = this.cache.get(taskId)
 			if (!cached) {
 				throw new Error(`[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`)
 			}
-			const releaseFileLock = options.fileLockAcquired
-				? async () => {}
-				: await lockJsonFile(await this.getTaskFilePath(taskId))
+			const fileLock = options.fileLock ?? (await lockJsonFile(await this.getTaskFilePath(taskId)))
 			try {
 				const current = (await this.readTaskFile(taskId)) ?? cached
 				const updated = updater(structuredClone(current))
@@ -1077,14 +1149,14 @@ export class TaskHistoryStore {
 
 				const merged = { ...current, ...updated }
 				const written = await this.writeTaskFile(merged, this.buildDelta(taskId, current, updated), undefined, {
-					lockAcquired: true,
+					heldLock: fileLock,
 				})
 				this.cache.set(taskId, written)
 				const all = this.getAll()
 				if (this.onWrite) await this.onWrite(all)
 				return all
 			} finally {
-				await releaseFileLock()
+				if (!options.fileLock) await fileLock()
 			}
 		}
 		return options.storeLockAcquired ? update() : this.withLock(update)
@@ -1098,7 +1170,7 @@ export class TaskHistoryStore {
 	 * atomicity is not guaranteed. Supplying a first-record guard, rollback, compensation, or
 	 * `whileFirstFileLocked` holds the first record's lock across both writes,
 	 * `onWrite`, and the callback; the second record's lock still covers only its own
-	 * write. `firstFileLockAcquired` and `storeLockAcquired` reuse locks held by
+	 * write. `firstFileLock` and `storeLockAcquired` reuse locks held by
 	 * `withTaskFileLock` and must only be set by that lock-scoped callback.
 	 *
 	 * @throws If either task ID is not present in the cache.
@@ -1152,11 +1224,9 @@ export class TaskHistoryStore {
 				options?.rollbackBothOnCallbackFailure ||
 				options?.whileFirstFileLocked,
 			)
-			const releaseFirstFileLock = options?.firstFileLockAcquired
-				? async () => {}
-				: holdFirstFileLock
-					? await lockJsonFile(await this.getTaskFilePath(firstId))
-					: async () => {}
+			const firstFileLock =
+				options?.firstFileLock ??
+				(holdFirstFileLock ? await lockJsonFile(await this.getTaskFilePath(firstId)) : undefined)
 
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
@@ -1170,7 +1240,7 @@ export class TaskHistoryStore {
 						: undefined
 				const firstDelta = this.buildDelta(firstId, first, updatedFirst)
 				const writtenFirst = await this.writeTaskFile(mergedFirst, firstDelta, captureAndGuardFirst, {
-					lockAcquired: holdFirstFileLock || options?.firstFileLockAcquired,
+					heldLock: firstFileLock,
 				})
 				let secondDiskSnapshot: HistoryItem | undefined
 				const secondDelta = this.buildDelta(secondId, second, updatedSecond)
@@ -1188,7 +1258,7 @@ export class TaskHistoryStore {
 							const rollbackSnapshot = firstDiskSnapshot
 							let restoredFirst = rollbackSnapshot
 							await safeWriteJson(await this.getTaskFilePath(firstId), rollbackSnapshot, {
-								lockAcquired: true,
+								heldLock: firstFileLock,
 								merge: (existing) => {
 									if (!existing || typeof existing !== "object" || !("id" in existing)) {
 										throw new Error(
@@ -1246,7 +1316,7 @@ export class TaskHistoryStore {
 							secondId,
 							secondDiskSnapshot as HistoryItem,
 							persistedWrittenSecond,
-							false,
+							undefined,
 						)
 					} catch (compensationError) {
 						compensationErrors.push(compensationError)
@@ -1257,7 +1327,7 @@ export class TaskHistoryStore {
 							firstId,
 							firstDiskSnapshot as HistoryItem,
 							persistedWrittenFirst,
-							true,
+							firstFileLock,
 						)
 					} catch (compensationError) {
 						compensationErrors.push(compensationError)
@@ -1280,7 +1350,7 @@ export class TaskHistoryStore {
 					throw error
 				}
 			} finally {
-				await releaseFirstFileLock()
+				if (firstFileLock && !options?.firstFileLock) await firstFileLock()
 			}
 		}
 		return options?.storeLockAcquired ? update() : this.withLock(update)

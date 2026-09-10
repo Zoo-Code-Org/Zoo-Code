@@ -225,6 +225,50 @@ describe("lockJsonFile", () => {
 		}
 	})
 
+	it("aborts a caller-held write when its outer lock is compromised during streaming", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-held-lock-"))
+		const filePath = path.join(tempDir, "history_item.json")
+		const initial = { owner: "original" }
+		const compromised = new Error("outer lock ownership lost")
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		let compromiseError: Error | undefined
+		let unblockWrite!: () => void
+		let notifyBlocked!: () => void
+		const blocked = new Promise<void>((resolve) => {
+			notifyBlocked = resolve
+		})
+		let shouldBlock = true
+		const blockedStream = new Writable({
+			write(_chunk, _encoding, callback) {
+				if (shouldBlock) {
+					shouldBlock = false
+					unblockWrite = callback
+					notifyBlocked()
+					return
+				}
+				callback()
+			},
+		})
+		const heldLock = Object.assign(async () => {}, { getCompromiseError: () => compromiseError })
+		createWriteStreamMock.mockReturnValueOnce(blockedStream)
+
+		try {
+			await fs.writeFile(filePath, JSON.stringify(initial))
+			const write = safeWriteJson(filePath, { owner: "stale-writer" }, { heldLock })
+			await blocked
+			compromiseError = compromised
+			unblockWrite()
+
+			await expect(write).rejects.toBe(compromised)
+			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual(initial)
+			expect(renameMock).not.toHaveBeenCalled()
+			expect(lockMock).not.toHaveBeenCalled()
+		} finally {
+			consoleError.mockRestore()
+			await fs.rm(tempDir, { recursive: true, force: true })
+		}
+	})
+
 	it("retains the backup without restoring it over another owner's target after compromise", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
@@ -283,7 +327,8 @@ describe("lockJsonFile", () => {
 		try {
 			await fs.writeFile(filePath, JSON.stringify(initial))
 
-			await expect(safeWriteJson(filePath, { owner: "writer" }, { lockAcquired: true })).rejects.toBe(commitError)
+			const heldLock = Object.assign(async () => {}, { getCompromiseError: () => undefined })
+			await expect(safeWriteJson(filePath, { owner: "writer" }, { heldLock })).rejects.toBe(commitError)
 
 			expect(lockMock).not.toHaveBeenCalled()
 			expect(renameMock).toHaveBeenCalledTimes(3)

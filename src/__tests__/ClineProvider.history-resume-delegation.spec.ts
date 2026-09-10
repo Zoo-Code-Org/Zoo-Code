@@ -7,6 +7,7 @@ import type { ClineMessage, HistoryItem } from "@roo-code/types"
 
 import type { ApiMessage } from "../core/task-persistence"
 import type { Task } from "../core/task/Task"
+import type { JsonFileLock } from "../utils/safeWriteJson"
 
 /* vscode mock for Task/Provider imports */
 vi.mock("vscode", () => {
@@ -58,10 +59,12 @@ import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { readApiMessages, saveApiMessages, saveTaskMessages } from "../core/task-persistence"
 import { makeProviderStub } from "./helpers/provider-stub"
 
+const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
+
 type LockedDelegationAccess = {
 	runLockedDelegationTransition: <T>(
 		parentTaskId: string,
-		transition: () => Promise<T>,
+		transition: (fileLock: JsonFileLock) => Promise<T>,
 		afterUnlock?: (result: T) => Promise<void>,
 		afterUnlockError?: (error: unknown) => Promise<void>,
 	) => Promise<T>
@@ -90,7 +93,7 @@ function makeTaskHistoryStoreStub(
 			options?: {
 				firstDiskGuard?: (item: HistoryItem) => void
 				whileFirstFileLocked?: () => Promise<void>
-				firstFileLockAcquired?: boolean
+				firstFileLock?: JsonFileLock
 				storeLockAcquired?: boolean
 				rollbackBothOnCallbackFailure?: boolean
 			},
@@ -116,7 +119,9 @@ function makeTaskHistoryStoreStub(
 			return [...itemMap.values()]
 		},
 	)
-	const withTaskFileLock = vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback())
+	const withTaskFileLock = vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+		callback(unlockedJsonFileLock()),
+	)
 
 	return {
 		atomicUpdatePair: overrides.atomicUpdatePair ?? atomicUpdatePair,
@@ -138,12 +143,14 @@ function makeStatefulTaskHistoryStore(...items: HistoryItem[]) {
 				secondId: string,
 				firstUpdater: (item: HistoryItem) => HistoryItem,
 				secondUpdater: (item: HistoryItem) => HistoryItem,
+				options?: { whileFirstFileLocked?: () => Promise<void> },
 			) => {
 				const first = itemMap.get(firstId)
 				const second = itemMap.get(secondId)
 				if (!first || !second) throw new Error(`Missing history item for atomic pair: ${firstId}, ${secondId}`)
 				itemMap.set(firstId, firstUpdater(first))
 				itemMap.set(secondId, secondUpdater(second))
+				await options?.whileFirstFileLocked?.()
 				return [itemMap.get(firstId), itemMap.get(secondId)]
 			},
 		),
@@ -170,10 +177,10 @@ describe("History resume delegation - parent metadata transitions", () => {
 		let lockHeld = false
 		const provider = makeProviderStub({
 			taskHistoryStore: {
-				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => {
+				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) => {
 					lockHeld = true
 					try {
-						return await callback()
+						return await callback(unlockedJsonFileLock())
 					} finally {
 						lockHeld = false
 					}
@@ -460,7 +467,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(taskHistoryStore.withTaskFileLock).toHaveBeenCalledWith("parent-1", expect.any(Function))
 		expect(options).toMatchObject({
 			rollbackFirstOnSecondFailure: true,
-			firstFileLockAcquired: true,
+			firstFileLock: expect.any(Function),
 			storeLockAcquired: true,
 			rollbackBothOnCallbackFailure: true,
 		})
@@ -1554,6 +1561,10 @@ describe("History resume delegation - parent metadata transitions", () => {
 		})
 		let scheduledContinuation: Promise<void> | undefined
 		const emitA = vi.fn()
+		const scheduleParent = vi.fn((_task, run) => {
+			runScheduledContinuation = () => (scheduledContinuation ??= run())
+			return scheduledContinuationSettled
+		})
 		const providerA = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn(async (id: string) => ({ historyItem: taskHistoryStore.get(id)! })),
@@ -1564,10 +1575,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			}),
 			createTaskWithHistoryItem: vi.fn(async () => (currentTaskA = parentInstanceA)),
 			taskScheduler: {
-				schedule: vi.fn((_task, run) => {
-					runScheduledContinuation = () => (scheduledContinuation ??= run())
-					return scheduledContinuationSettled
-				}),
+				schedule: scheduleParent,
 			},
 			taskHistoryStore,
 		})
@@ -1637,6 +1645,8 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(createChildC2).not.toHaveBeenCalled()
 		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
 
+		expect(scheduleParent).toHaveBeenCalledOnce()
+		await vi.waitFor(() => expect(runScheduledContinuation).toEqual(expect.any(Function)))
 		const continuationRun = runScheduledContinuation()
 		await vi.waitFor(() => expect(parentInstanceA.resumeAfterDelegation).toHaveBeenCalledTimes(1))
 		await expect(providerBTransition).resolves.toBe(childC2)
@@ -2294,7 +2304,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 			taskHistoryStore: {
 				get: vi.fn((id: string) => (id === persistedParent.id ? refreshedParent : undefined)),
 				atomicUpdatePair,
-				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback()),
+				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+					callback(unlockedJsonFileLock()),
+				),
 			},
 			log: vi.fn(),
 		})
@@ -2331,7 +2343,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 			taskHistoryStore: {
 				get: vi.fn((id: string) => (id === parent.id ? parent : undefined)),
 				atomicUpdatePair,
-				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback()),
+				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+					callback(unlockedJsonFileLock()),
+				),
 			},
 			log,
 		})
@@ -2474,7 +2488,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 			taskHistoryStore: {
 				get: vi.fn((id: string) => (id === parentItem.id ? parentItem : childItem)),
 				atomicUpdatePair,
-				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback()),
+				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+					callback(unlockedJsonFileLock()),
+				),
 			},
 			log: vi.fn(),
 		})
@@ -2520,11 +2536,11 @@ describe("History resume delegation - parent metadata transitions", () => {
 			totalCost: 0,
 		}
 		let lockHeld = false
-		let currentTaskId: string | undefined = childItem.id
-		const withTaskFileLock = vi.fn(async (_id: string, callback: () => Promise<unknown>) => {
+		let currentTask: object | undefined = { taskId: childItem.id }
+		const withTaskFileLock = vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) => {
 			lockHeld = true
 			try {
-				return await callback()
+				return await callback(unlockedJsonFileLock())
 			} finally {
 				lockHeld = false
 			}
@@ -2538,7 +2554,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				options?: {
 					whileFirstFileLocked?: () => Promise<void>
 					rollbackBothOnCallbackFailure?: boolean
-					firstFileLockAcquired?: boolean
+					firstFileLock?: JsonFileLock
 					storeLockAcquired?: boolean
 				},
 			) => {
@@ -2563,7 +2579,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const removeLockStates: boolean[] = []
 		const removeClineFromStack = vi.fn(async () => {
 			removeLockStates.push(lockHeld)
-			currentTaskId = undefined
+			currentTask = undefined
 		})
 		let parentCreateAttempts = 0
 		const createCalls: Array<{ historyItem: HistoryItem; lockHeld: boolean; startTask: boolean | undefined }> = []
@@ -2575,7 +2591,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		}
 		const createTaskWithHistoryItem = vi.fn(async (historyItem: HistoryItem, options?: { startTask?: boolean }) => {
 			createCalls.push({ historyItem: structuredClone(historyItem), lockHeld, startTask: options?.startTask })
-			currentTaskId = historyItem.id
+			currentTask = historyItem.id === parentItem.id ? resumedParent : { taskId: childItem.id }
 			if (historyItem.id === parentItem.id && parentCreateAttempts++ === 0) {
 				throw new Error("parent rehydration failed")
 			}
@@ -2596,7 +2612,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockImplementation(async () => ({ historyItem: structuredClone(parentItem) })),
-			getCurrentTask: vi.fn(() => (currentTaskId ? { taskId: currentTaskId } : undefined)),
+			getCurrentTask: vi.fn(() => currentTask),
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			taskHistoryStore,
@@ -2620,7 +2636,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			delegatedToId: childItem.id,
 		})
 		expect(childItem.status).toBe("active")
-		expect(currentTaskId).toBe(childItem.id)
+		expect(currentTask).toMatchObject({ taskId: childItem.id })
 		expect(createCalls[1]).toEqual({ historyItem: childItem, lockHeld: false, startTask: false })
 		expect(removeLockStates).toEqual([true, false])
 		expect(removeClineFromStack).toHaveBeenNthCalledWith(1, { saveMessages: false })
@@ -2632,7 +2648,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(parentItem.status).toBe("active")
 		expect(parentItem.awaitingChildId).toBeUndefined()
 		expect(childItem.status).toBe("completed")
-		expect(resumedParent.resumeAfterDelegation).toHaveBeenCalledOnce()
+		await vi.waitFor(() => expect(resumedParent.resumeAfterDelegation).toHaveBeenCalledOnce())
 		expect(withTaskFileLock).toHaveBeenCalledTimes(2)
 		expect(atomicUpdatePair).toHaveBeenCalledTimes(2)
 	})
@@ -2691,7 +2707,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 			taskHistoryStore: {
 				get: vi.fn((id: string) => (id === parentItem.id ? parentItem : childItem)),
 				atomicUpdatePair,
-				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback()),
+				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+					callback(unlockedJsonFileLock()),
+				),
 			},
 		})
 		vi.mocked(readTaskMessages).mockResolvedValue([])
@@ -2761,7 +2779,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 			taskHistoryStore: {
 				get: vi.fn((id: string) => (id === parentItem.id ? parentItem : childItem)),
 				atomicUpdatePair,
-				withTaskFileLock: vi.fn(async (_id: string, callback: () => Promise<unknown>) => callback()),
+				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+					callback(unlockedJsonFileLock()),
+				),
 			},
 		})
 		vi.mocked(readTaskMessages).mockResolvedValue([])

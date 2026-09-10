@@ -19,7 +19,9 @@ vi.mock("../../../utils/storage", () => ({
 
 // Mock safeWriteJson to use plain fs writes in tests (avoids proper-lockfile issues)
 vi.mock("../../../utils/safeWriteJson", () => ({
-	lockJsonFile: vi.fn().mockResolvedValue(async () => {}),
+	lockJsonFile: vi
+		.fn()
+		.mockImplementation(async () => Object.assign(async () => {}, { getCompromiseError: () => undefined })),
 	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
 		await fs.mkdir(path.dirname(filePath), { recursive: true })
 		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
@@ -583,7 +585,9 @@ describe("TaskHistoryStore", () => {
 		it("releases the file lock when the callback rejects", async () => {
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "locked-callback", status: "active" }))
-			const release = vi.fn().mockResolvedValue(undefined)
+			const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+				getCompromiseError: () => undefined,
+			})
 			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
 			const callbackError = new Error("locked callback failed")
 
@@ -623,7 +627,7 @@ describe("TaskHistoryStore", () => {
 			)
 
 			expect(lockJsonFile).not.toHaveBeenCalled()
-			expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]).toMatchObject({ lockAcquired: undefined })
+			expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]).toMatchObject({ heldLock: undefined })
 		})
 
 		it.each([
@@ -649,7 +653,7 @@ describe("TaskHistoryStore", () => {
 				)
 
 				expect(lockJsonFile).toHaveBeenCalledTimes(1)
-				expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]).toMatchObject({ lockAcquired: true })
+				expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]?.heldLock).toEqual(expect.any(Function))
 			},
 		)
 

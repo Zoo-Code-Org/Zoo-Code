@@ -100,6 +100,7 @@ import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
+import type { JsonFileLock } from "../../utils/safeWriteJson"
 
 import { setPanel } from "../../activate/registerCommands"
 
@@ -254,7 +255,7 @@ export class ClineProvider
 
 	private runLockedDelegationTransition<T>(
 		parentTaskId: string,
-		transition: () => Promise<T>,
+		transition: (fileLock: JsonFileLock) => Promise<T>,
 		afterUnlock?: (result: T) => Promise<void>,
 		afterUnlockError?: (error: unknown) => Promise<void>,
 	): Promise<T> {
@@ -4037,7 +4038,7 @@ export class ClineProvider
 		//    slip between the status snapshot and the write. An active child must never be
 		//    silently detached.
 		try {
-			await this.taskHistoryStore.withTaskFileLock(parentTaskId, async () => {
+			await this.taskHistoryStore.withTaskFileLock(parentTaskId, async (fileLock) => {
 				await this.taskHistoryStore.atomicReadAndUpdate(
 					parentTaskId,
 					(historyItem) => {
@@ -4058,7 +4059,7 @@ export class ClineProvider
 									: delegated.pendingAction,
 						}
 					},
-					{ fileLockAcquired: true, storeLockAcquired: true },
+					{ fileLock, storeLockAcquired: true },
 				)
 			})
 			this.recentTasksCache = undefined
@@ -4134,7 +4135,7 @@ export class ClineProvider
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
 		let parentToResume: Task | undefined
 		let childToRestore: HistoryItem | undefined
-		const transition = async () => {
+		const transition = async (firstFileLock: JsonFileLock) => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
@@ -4343,7 +4344,7 @@ export class ClineProvider
 				firstDiskGuard: assertCurrentDelegation,
 				rollbackFirstOnSecondFailure: true,
 				rollbackBothOnCallbackFailure: true,
-				firstFileLockAcquired: true,
+				firstFileLock,
 				storeLockAcquired: true,
 				whileFirstFileLocked: async () => {
 					try {
@@ -4453,20 +4454,68 @@ export class ClineProvider
 				// non-fatal
 			}
 
-			// 9) Emit TaskDelegationResumed (provider-level)
-			try {
-				this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-			} catch {
-				// non-fatal
-			}
-
 			this.cancelledDelegationChildIds.delete(childTaskId)
 			return true
 		}
 		return this.runLockedDelegationTransition(
 			parentTaskId,
 			transition,
-			async () => parentToResume?.resumeAfterDelegation(),
+			async () => {
+				const parentInstance = parentToResume
+				if (!parentInstance) return
+				let admitContinuation!: () => void
+				const continuationAdmitted = new Promise<void>((resolve) => {
+					admitContinuation = resolve
+				})
+				let schedulerAdmitted = false
+				const continuation = this.runDelegationTransition(parentTaskId, async () => {
+					await continuationAdmitted
+					if (!schedulerAdmitted) return {}
+					await this.taskHistoryStore.invalidate(parentTaskId)
+					const persistedParent = this.taskHistoryStore.get(parentTaskId)
+					const currentTask = this.getCurrentTask()
+					if (
+						this.cancelledDelegationChildIds.has(childTaskId) ||
+						parentInstance.abort ||
+						parentInstance.abandoned ||
+						currentTask !== parentInstance ||
+						persistedParent?.status !== "active" ||
+						persistedParent.completedByChildId !== childTaskId ||
+						persistedParent.awaitingChildId !== undefined ||
+						persistedParent.delegatedToId !== undefined
+					) {
+						this.log(
+							`[reopenParentFromDelegation] Skipping stale parent continuation for ${parentTaskId} after child ${childTaskId}`,
+						)
+						return {}
+					}
+					return { runPromise: parentInstance.resumeAfterDelegation() }
+				})
+				void this.taskScheduler
+					.schedule(parentInstance, async () => {
+						schedulerAdmitted = true
+						admitContinuation()
+						const { runPromise } = await continuation
+						if (!runPromise) return
+						try {
+							await runPromise
+							try {
+								this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+							} catch {
+								// non-fatal
+							}
+						} catch (error) {
+							const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
+							this.log(`[reopenParentFromDelegation] ${message}`)
+							await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
+							throw error
+						}
+					})
+					.then(admitContinuation, (error) => {
+						admitContinuation()
+						console.error(`[reopenParentFromDelegation] taskScheduler.schedule failed:`, error)
+					})
+			},
 			async (error) => {
 				if (!childToRestore) return
 				try {

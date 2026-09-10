@@ -4,7 +4,7 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { lockJsonFile } from "../../../utils/safeWriteJson"
+import { lockJsonFile, type JsonFileLock } from "../../../utils/safeWriteJson"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 
 vi.mock("../../../utils/storage", () => ({
@@ -32,7 +32,7 @@ type WriteTaskFile = (
 	item: HistoryItem,
 	delta?: Partial<HistoryItem>,
 	diskGuard?: (current: HistoryItem) => void,
-	options?: { mergeChildIds?: boolean; lockAcquired?: boolean },
+	options?: { mergeChildIds?: boolean; heldLock?: JsonFileLock },
 ) => Promise<HistoryItem>
 
 const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
@@ -45,7 +45,7 @@ type RestoreTaskFilePreImage = (
 	taskId: string,
 	preImage: HistoryItem,
 	expectedWritten: HistoryItem,
-	lockAcquired: boolean,
+	heldLock?: JsonFileLock,
 ) => Promise<void>
 
 const getRestoreTaskFilePreImage = (store: TaskHistoryStore): RestoreTaskFilePreImage => {
@@ -53,8 +53,8 @@ const getRestoreTaskFilePreImage = (store: TaskHistoryStore): RestoreTaskFilePre
 	if (typeof restoreTaskFilePreImage !== "function") {
 		throw new TypeError("TaskHistoryStore.restoreTaskFilePreImage is not callable")
 	}
-	return (taskId, preImage, expectedWritten, lockAcquired) =>
-		Reflect.apply(restoreTaskFilePreImage, store, [taskId, preImage, expectedWritten, lockAcquired])
+	return (taskId, preImage, expectedWritten, heldLock) =>
+		Reflect.apply(restoreTaskFilePreImage, store, [taskId, preImage, expectedWritten, heldLock])
 }
 
 describe("TaskHistoryStore cross-instance delegation", () => {
@@ -369,7 +369,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			const restoreTaskFilePreImage = getRestoreTaskFilePreImage(store)
 			const compensationLockStates: Array<[string, boolean]> = []
 			Reflect.set(store, "restoreTaskFilePreImage", async (...args: Parameters<RestoreTaskFilePreImage>) => {
-				compensationLockStates.push([args[0], args[3]])
+				compensationLockStates.push([args[0], Boolean(args[3])])
 				await restoreTaskFilePreImage(...args)
 			})
 			onWrite.mockClear()
@@ -743,12 +743,12 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			await hostB.atomicReadAndUpdate("parent", (parent) => ({ ...parent, tokensIn: 2 }))
 
 			expect(hostA.get("parent")?.tokensIn).toBe(1)
-			await hostA.withTaskFileLock("parent", async () => {
+			await hostA.withTaskFileLock("parent", async (fileLock) => {
 				expect(hostA.get("parent")?.tokensIn).toBe(2)
 				await hostA.atomicReadAndUpdate(
 					"parent",
 					(parent) => ({ ...parent, status: "delegated", awaitingChildId: "child" }),
-					{ fileLockAcquired: true, storeLockAcquired: true },
+					{ fileLock, storeLockAcquired: true },
 				)
 			})
 
@@ -985,7 +985,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
 			onWrite.mockClear()
 
-			await store.withTaskFileLock("parent", () =>
+			await store.withTaskFileLock("parent", (firstFileLock) =>
 				store.atomicUpdatePair(
 					"parent",
 					"child",
@@ -1000,7 +1000,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 						firstDiskGuard: (parent) => {
 							expect(parent.awaitingChildId).toBe("child")
 						},
-						firstFileLockAcquired: true,
+						firstFileLock,
 						storeLockAcquired: true,
 					},
 				),
@@ -1009,6 +1009,47 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			expect(onWrite).toHaveBeenCalledTimes(1)
 			expect(store.get("parent")?.status).toBe("active")
 			expect(store.get("child")?.status).toBe("completed")
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("surfaces caller-held lock compromise without changing disk or cache", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-held-lock-compromise-"))
+		const store = new TaskHistoryStore(storage)
+		const compromised = new Error("caller-held lock compromised")
+		let compromiseError: Error | undefined
+		const release = Object.assign(
+			vi.fn(async () => {
+				if (compromiseError) throw compromiseError
+			}),
+			{ getCompromiseError: () => compromiseError },
+		)
+
+		try {
+			await store.initialize()
+			const original = makeHistoryItem("parent", { status: "active", tokensIn: 1 })
+			await store.upsert(original)
+			const taskFile = path.join(storage, "tasks", "parent", "history_item.json")
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+
+			await expect(
+				store.withTaskFileLock("parent", (fileLock) =>
+					store.atomicReadAndUpdate(
+						"parent",
+						(current) => {
+							compromiseError = compromised
+							return { ...current, tokensIn: 99 }
+						},
+						{ fileLock, storeLockAcquired: true },
+					),
+				),
+			).rejects.toBe(compromised)
+
+			expect(JSON.parse(await fs.readFile(taskFile, "utf8"))).toMatchObject({ tokensIn: 1 })
+			expect(store.get("parent")).toMatchObject({ tokensIn: 1 })
+			expect(release).toHaveBeenCalledOnce()
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })

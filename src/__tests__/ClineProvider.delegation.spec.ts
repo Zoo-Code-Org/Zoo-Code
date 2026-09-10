@@ -5,6 +5,9 @@ import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskScheduler } from "../core/task/TaskScheduler"
+import type { JsonFileLock } from "../utils/safeWriteJson"
+
+const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
 
 const parentHistoryItem: HistoryItem = {
 	id: "parent-1",
@@ -21,7 +24,9 @@ function makeStoreStub(
 ) {
 	return {
 		invalidate: vi.fn().mockResolvedValue(undefined),
-		withTaskFileLock: vi.fn(async (_taskId: string, callback: () => Promise<unknown>) => callback()),
+		withTaskFileLock: vi.fn(async (_taskId: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+			callback(unlockedJsonFileLock()),
+		),
 		atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
 			updater(parentHistoryItem)
 			return []
@@ -150,7 +155,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		let current: HistoryItem = { ...parentHistoryItem, status: "active", pendingAction }
 		const taskHistoryStore = {
 			invalidate: vi.fn().mockResolvedValue(undefined),
-			withTaskFileLock: vi.fn(async (_taskId: string, callback: () => Promise<unknown>) => callback()),
+			withTaskFileLock: vi.fn(async (_taskId: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+				callback(unlockedJsonFileLock()),
+			),
 			get: vi.fn(() => current),
 			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
 				current = updater(current)
@@ -199,7 +206,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		let current: HistoryItem = { ...parentHistoryItem, status: "active", pendingAction }
 		const taskHistoryStore = {
-			withTaskFileLock: vi.fn(async (_taskId: string, callback: () => Promise<unknown>) => callback()),
+			invalidate: vi.fn().mockResolvedValue(undefined),
+			withTaskFileLock: vi.fn(async (_taskId: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+				callback(unlockedJsonFileLock()),
+			),
 			get: vi.fn(() => current),
 			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
 				current = updater(current)
@@ -410,7 +420,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
 		const [calledTaskId, updater, updateOptions] = taskHistoryStore.atomicReadAndUpdate.mock.calls[0]
 		expect(calledTaskId).toBe("parent-1")
-		expect(updateOptions).toEqual({ fileLockAcquired: true, storeLockAcquired: true })
+		expect(updateOptions).toEqual({ fileLock: expect.any(Function), storeLockAcquired: true })
 
 		// The updater must produce the correct delegation fields
 		const result = updater(parentHistoryItem)
@@ -818,6 +828,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 			const store = {
 				invalidate: vi.fn().mockResolvedValue(undefined),
+				withTaskFileLock: vi.fn(
+					async (_taskId: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) =>
+						callback(unlockedJsonFileLock()),
+				),
 				get: vi.fn((id: string) => (id === parent.taskId ? durableParent : undefined)),
 				atomicReadAndUpdate: vi.fn(async (_id: string, updater: (item: HistoryItem) => HistoryItem) => {
 					markCommitStarted()
@@ -905,12 +919,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				initialTodos: [],
 				mode: "code",
 			}),
-		).rejects.toThrow(
-			"Cannot re-delegate task parent-1: existing child missing-child is undefined, not interrupted",
-		)
+		).rejects.toThrow("Cannot re-delegate while the awaited child is not interrupted")
 
 		expect(child.run).not.toHaveBeenCalled()
-		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-2", false)
+		expect(provider.deleteTaskWithId).not.toHaveBeenCalled()
 	})
 
 	it("rolls back the paused child and restores the parent when atomicReadAndUpdate fails", async () => {

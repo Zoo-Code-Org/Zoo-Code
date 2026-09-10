@@ -1,6 +1,9 @@
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { TaskRegistry } from "../../core/task/TaskRegistry"
 import { type Task } from "../../core/task/Task"
+import type { JsonFileLock } from "../../utils/safeWriteJson"
+
+const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
 
 type ProviderStubFields = {
 	cancelledDelegationChildIds?: Set<string>
@@ -8,7 +11,7 @@ type ProviderStubFields = {
 	taskHistoryStore?: {
 		get: (id: string) => unknown
 		invalidate?: (id: string) => Promise<void>
-		withTaskFileLock?: <T>(id: string, callback: () => Promise<T>) => Promise<T>
+		withTaskFileLock?: <T>(id: string, callback: (fileLock: JsonFileLock) => Promise<T>) => Promise<T>
 	}
 	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
@@ -45,7 +48,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.taskHistoryStore.invalidate ??= async () => {}
 	s.taskScheduler ??= { schedule: async (_task, run) => run() }
-	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback()
+	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback(unlockedJsonFileLock())
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {
