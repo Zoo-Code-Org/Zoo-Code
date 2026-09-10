@@ -258,7 +258,10 @@ describe("lockJsonFile", () => {
 			expect(files).toHaveLength(2)
 			expect(backupFile).toBeDefined()
 			expect(JSON.parse(await fs.readFile(path.join(tempDir, backupFile!), "utf8"))).toEqual(initial)
-			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[Catch] Retaining backup"))
+			expect(consoleError).toHaveBeenCalledWith(
+				expect.stringContaining(`[Catch] Backup at failure: ${path.join(tempDir, backupFile!)}`),
+				compromised,
+			)
 		} finally {
 			consoleError.mockRestore()
 			await fs.rm(tempDir, { recursive: true, force: true })
@@ -312,7 +315,7 @@ describe("lockJsonFile", () => {
 
 			await expect(write).rejects.toBe(operationError)
 			expect(consoleError).toHaveBeenCalledWith(
-				`Operation failed for ${absoluteFilePath}: [Original Error Caught]`,
+				expect.stringContaining(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`),
 				operationError,
 			)
 			expect(consoleError).toHaveBeenCalledWith(`Failed to release lock for ${absoluteFilePath}:`, releaseError)
