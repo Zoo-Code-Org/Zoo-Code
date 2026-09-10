@@ -17,6 +17,7 @@ type Policy = {
 	redelegateBeforePermitRelease?: boolean
 	emptyPublication?: boolean
 	staleConcurrentCommits?: boolean
+	releaseParentTransitionAfterPublication?: boolean
 }
 
 type ModelState = {
@@ -34,6 +35,11 @@ type ModelState = {
 	parentResumed: boolean
 	redelegationOpened: boolean
 	priorPermitReleased: boolean
+	parentTransitionOwner?: Generation
+	pendingParentContinuations: Generation[]
+	resumedContinuation?: Generation
+	earlyRedelegation: boolean
+	continuationPublished: boolean
 	publishedTask?: PublishedTask
 }
 
@@ -86,6 +92,11 @@ const LEGACY_POLICIES: Array<Policy & { expectedViolation: string }> = [
 		name: "stale-concurrent-provider-commits",
 		staleConcurrentCommits: true,
 		expectedViolation: "multiple provider commits for one parent generation",
+	},
+	{
+		name: "publication-releases-parent-transition",
+		releaseParentTransitionAfterPublication: true,
+		expectedViolation: "stale parent continuation crossed a newer transition",
 	},
 ]
 
@@ -253,6 +264,7 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 						next.parent = delegateTaskToChild(base, childIdFor(state.generation, provider))
 						next.commitOwner = provider
 						next.committedProviders = [...state.committedProviders, provider]
+						next.parentTransitionOwner = state.generation
 						next.prepared = undefined
 					}),
 				)
@@ -284,6 +296,8 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 					next.parent = completed.parent
 					next.children[childId] = completed.child
 					next.parentQueued = true
+					next.parentTransitionOwner = 0
+					next.pendingParentContinuations = [0]
 				}),
 			)
 		}
@@ -292,26 +306,38 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 		result.push(
 			action("publish-parent", "publish-parent", state, (next) => {
 				next.parentPublished = true
+				next.continuationPublished = true
 				next.publishedTask = "parent"
+				if (policy.releaseParentTransitionAfterPublication) next.parentTransitionOwner = undefined
 			}),
 		)
 	}
-	if (state.childPermit === "held" && state.parentQueued) {
+	if (
+		state.childPermit === "held" &&
+		((state.parentQueued && !policy.releaseParentTransitionAfterPublication) ||
+			(policy.releaseParentTransitionAfterPublication &&
+				state.generation === 1 &&
+				state.commitOwner !== undefined))
+	) {
 		result.push(
 			action("release-child-permit", "release-permit", state, (next) => {
 				next.childPermit = "released"
 			}),
 		)
 	}
+	const pendingContinuation = state.pendingParentContinuations[0]
 	if (
-		state.parentQueued &&
-		state.parentPublished &&
+		pendingContinuation !== undefined &&
+		state.continuationPublished &&
 		!state.parentResumed &&
 		(state.childPermit === "released" || policy.resumeBeforePermitRelease)
 	) {
 		result.push(
-			action("resume-parent", "resume-parent", state, (next) => {
+			action(`resume-parent(g${pendingContinuation})`, "resume-parent", state, (next) => {
 				next.parentResumed = true
+				next.resumedContinuation = pendingContinuation
+				next.pendingParentContinuations = state.pendingParentContinuations.slice(1)
+				if (state.parentTransitionOwner === pendingContinuation) next.parentTransitionOwner = undefined
 			}),
 		)
 	}
@@ -319,6 +345,9 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 		state.generation === 0 &&
 		!state.redelegationOpened &&
 		((state.parentResumed && state.childPermit === "released") ||
+			(policy.releaseParentTransitionAfterPublication &&
+				state.parentPublished &&
+				state.parentTransitionOwner === undefined) ||
 			(policy.redelegateBeforePermitRelease &&
 				state.parentQueued &&
 				state.parentPublished &&
@@ -332,12 +361,15 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 				next.commitOwner = undefined
 				next.committedProviders = []
 				next.startedProviders = []
-				next.childPermit = "free"
+				next.childPermit = policy.releaseParentTransitionAfterPublication ? state.childPermit : "free"
 				next.parentQueued = false
 				next.parentPublished = false
 				next.parentResumed = false
+				next.resumedContinuation = undefined
 				next.redelegationOpened = true
 				next.priorPermitReleased = state.childPermit === "released"
+				next.earlyRedelegation =
+					state.childPermit !== "released" && policy.releaseParentTransitionAfterPublication === true
 			}),
 		)
 	}
@@ -358,7 +390,14 @@ function invariantViolations(state: ModelState): string[] {
 		violations.push("parent resumed before child permit release")
 	}
 	if (state.generation === 1 && !state.priorPermitReleased) {
-		violations.push("parent redelegated before child permit release")
+		if (!state.earlyRedelegation) violations.push("parent redelegated before child permit release")
+	}
+	if (
+		state.resumedContinuation !== undefined &&
+		state.parentTransitionOwner !== undefined &&
+		state.resumedContinuation !== state.parentTransitionOwner
+	) {
+		violations.push("stale parent continuation crossed a newer transition")
 	}
 	if (state.parentPublished && state.publishedTask !== "parent") {
 		violations.push("published parent does not match current task")
@@ -390,6 +429,9 @@ function initialState(): ModelState {
 		parentResumed: false,
 		redelegationOpened: false,
 		priorPermitReleased: false,
+		pendingParentContinuations: [],
+		earlyRedelegation: false,
+		continuationPublished: false,
 		publishedTask: "parent",
 	}
 }

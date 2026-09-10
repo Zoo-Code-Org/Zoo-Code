@@ -209,8 +209,7 @@ export class ClineProvider
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
-	private static readonly delegationStartLocks = new Map<string, Promise<void>>()
-	private delegationTransitionLocks?: Map<string, Promise<void>>
+	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -250,8 +249,7 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		this.delegationTransitionLocks ??= new Map()
-		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, fn)
+		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -3851,7 +3849,7 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
-		return runDelegationTransition(ClineProvider.delegationStartLocks, params.parentTaskId, () =>
+		return runDelegationTransition(ClineProvider.delegationTransitionLocks, params.parentTaskId, () =>
 			ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
 		)
 	}
@@ -4356,29 +4354,63 @@ export class ClineProvider
 					// non-fatal
 				}
 
-				// The completing child still owns the scheduler permit. Queue the
-				// parent continuation and return so that permit can be released
-				// before the parent delegates again.
-				scheduleTask(
-					this.taskScheduler,
-					parentInstance,
-					ClineProvider.prototype.reopenParentFromDelegation.name,
-					async () => {
+				let admitContinuation!: () => void
+				const continuationAdmitted = new Promise<void>((resolve) => {
+					admitContinuation = resolve
+				})
+				let schedulerAdmitted = false
+				// Reserve the continuation's place in the shared parent queue before this
+				// completion transition releases. Its body waits until scheduler admission,
+				// so the completing child can release its permit without deadlocking.
+				const continuation = this.runDelegationTransition(parentTaskId, async () => {
+					await continuationAdmitted
+					if (!schedulerAdmitted) return
+					await this.taskHistoryStore.invalidate(parentTaskId)
+					const persistedParent = this.taskHistoryStore.get(parentTaskId)
+					const currentTask = this.getCurrentTask()
+					if (
+						this.cancelledDelegationChildIds.has(childTaskId) ||
+						parentInstance.abort ||
+						parentInstance.abandoned ||
+						currentTask !== parentInstance ||
+						persistedParent?.status !== "active" ||
+						persistedParent.completedByChildId !== childTaskId ||
+						persistedParent.awaitingChildId !== undefined ||
+						persistedParent.delegatedToId !== undefined
+					) {
+						this.log(
+							`[reopenParentFromDelegation] Skipping stale parent continuation for ${parentTaskId} after child ${childTaskId}`,
+						)
+						return
+					}
+
+					try {
+						await parentInstance.resumeAfterDelegation()
 						try {
-							await parentInstance.resumeAfterDelegation()
-							try {
-								this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-							} catch {
-								// non-fatal
-							}
-						} catch (error) {
-							const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
-							this.log(`[reopenParentFromDelegation] ${message}`)
-							await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
-							throw error
+							this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+						} catch {
+							// non-fatal
 						}
-					},
-				)
+					} catch (error) {
+						const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
+						this.log(`[reopenParentFromDelegation] ${message}`)
+						await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
+						throw error
+					}
+				})
+				void this.taskScheduler
+					.schedule(parentInstance, async () => {
+						schedulerAdmitted = true
+						admitContinuation()
+						await continuation
+					})
+					.then(admitContinuation, (error) => {
+						admitContinuation()
+						console.error(
+							`[${ClineProvider.prototype.reopenParentFromDelegation.name}] taskScheduler.schedule failed:`,
+							error,
+						)
+					})
 			}
 
 			this.cancelledDelegationChildIds.delete(childTaskId)
