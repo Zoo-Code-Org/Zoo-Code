@@ -16,6 +16,7 @@
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
 		"parser-scope:model-check": "node scripts/run-native-tool-call-parser-scoping.mjs",
+		"mcp:integration-check": "tsx scripts/check-mcp-oauth-integration.ts",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",
