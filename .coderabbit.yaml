@@ -21,7 +21,7 @@ reviews:
     high_level_summary_in_walkthrough: true
     review_status: true
     review_details: true
-    collapse_walkthrough: false
+    collapse_walkthrough: true
     changed_files_summary: true
     poem: false
 
