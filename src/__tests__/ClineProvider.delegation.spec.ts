@@ -180,7 +180,12 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		expect(current.pendingAction).toBeUndefined()
-		expect(current).toMatchObject({ status: "delegated", awaitingChildId: "child-1" })
+		expect(current).toMatchObject({
+			status: "delegated",
+			awaitingChildId: "child-1",
+			delegatedToId: "child-1",
+		})
+		await vi.waitFor(() => expect(child.run).toHaveBeenCalledOnce())
 	})
 
 	it("preserves an unrelated pending action when delegation has no action owner", async () => {
@@ -223,6 +228,12 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		expect(current.pendingAction).toEqual(pendingAction)
+		expect(current).toMatchObject({
+			status: "delegated",
+			awaitingChildId: "child-1",
+			delegatedToId: "child-1",
+		})
+		await vi.waitFor(() => expect(child.run).toHaveBeenCalledOnce())
 	})
 
 	it("rolls back when pending-action ownership changes before the atomic parent update", async () => {
