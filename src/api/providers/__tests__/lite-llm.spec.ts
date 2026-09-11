@@ -1732,7 +1732,9 @@ describe("LiteLLMHandler", () => {
 			const chunks: unknown[] = []
 			for await (const c of stream) chunks.push(c)
 			expect(chunks).toHaveLength(1)
-			expect((chunks[0] as { type: string }).type).toBe("usage")
+			// Assert the mapped usage values, not just the type: this branch maps
+			// prompt_tokens/completion_tokens onto the usage chunk (L365-366).
+			expect(chunks[0]).toMatchObject({ type: "usage", inputTokens: 5, outputTokens: 7 })
 		})
 	})
 })
