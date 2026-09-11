@@ -138,6 +138,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
+import { decideMidStreamFailure, MAX_MID_STREAM_RETRIES } from "./midStreamRetry"
 import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
@@ -172,7 +173,6 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
-const MAX_MID_STREAM_RETRIES = 3 // Maximum automatic retries when a provider stream fails mid-stream
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -3662,7 +3662,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// bounded and visible to the user.
 							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
 
-							if (midStreamRetryAttempt >= MAX_MID_STREAM_RETRIES) {
+							if (decideMidStreamFailure(midStreamRetryAttempt) === "ask") {
 								// Automatic retries exhausted - surface the failure instead of
 								// retrying (and re-billing the request) silently forever.
 								console.error(
@@ -3681,13 +3681,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									// automatic retry budget. Remove the user message this request
 									// added first so it is not duplicated in history on retry.
 									let removedCurrentUserMessage = false
-									if (this.apiConversationHistory.length > 0) {
+									if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 										const lastMessage =
 											this.apiConversationHistory[this.apiConversationHistory.length - 1]
 										if (lastMessage.role === "user") {
 											this.apiConversationHistory.pop()
 											this.messageCounts.user--
-											removedCurrentUserMessage = true
+											if (await this.saveApiConversationHistory(false)) {
+												removedCurrentUserMessage = true
+											} else {
+												this.apiConversationHistory.push(lastMessage)
+												this.messageCounts.user++
+												await this.say(
+													"error",
+													"Failed to persist conversation history before retrying.",
+												)
+												return false
+											}
 										}
 									}
 

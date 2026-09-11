@@ -738,13 +738,27 @@ describe("Cline", () => {
 			// 4 failed attempts (initial + 3 automatic retries), 1 user-approved retry that
 			// succeeded, and 1 follow-up request for the no-tool-use continuation.
 			expect(attemptSpy).toHaveBeenCalledTimes(6)
+		})
 
-			// The user-approved retry must not duplicate the user message in history.
-			const userMessages = task.apiConversationHistory.filter((message) => message.role === "user")
-			expect(userMessages).toHaveLength(2) // original request (re-added once) + no-tools-used follow-up
-			expect(userMessages[0]).toMatchObject({
-				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+		it("does not remove an earlier user turn when approving an empty continuation retry", async () => {
+			const task = await createMidStreamRetryTask()
+			const earlierUserMessage = { role: "user" as const, content: [{ type: "text" as const, text: "earlier" }] }
+			task.apiConversationHistory.push(earlierUserMessage)
+			task.messageCounts.user++
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				task.abort = true
+				return { response: "yesButtonClicked" } satisfies TaskAskResult
 			})
+			vi.spyOn(task, "say")
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				midStreamFailingRequest(new Error("Overloaded")),
+			)
+
+			await task.recursivelyMakeClineRequests([])
+
+			expect(task.ask).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toContainEqual(earlierUserMessage)
+			expect(task.messageCounts.user).toBe(1)
 		})
 	})
 
