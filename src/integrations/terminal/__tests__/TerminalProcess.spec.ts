@@ -95,6 +95,19 @@ describe("TerminalProcess", () => {
 			expect(mockTerminalInfo.running).toBe(false)
 		})
 
+		it("delivers only one close signal after shell execution has started", () => {
+			terminalProcess.ownExecution = { commandLine: { value: "test command" } } as vscode.TerminalShellExecution
+			const emitSpy = vi.spyOn(terminalProcess, "emit")
+
+			terminalProcess.handleTerminalClosed()
+			terminalProcess.handleTerminalClosed()
+
+			expect(emitSpy).toHaveBeenCalledOnce()
+			expect(emitSpy).toHaveBeenCalledWith("shell_execution_complete", { exitCode: undefined })
+			expect(terminalProcess["terminalCloseHandled"]).toBe(true)
+			expect(terminalProcess["finalizedBeforeExecution"]).toBe(false)
+		})
+
 		it("rejects the command promise when terminal process startup rejects", async () => {
 			const startupError = new Error("terminal startup failed")
 			const runSpy = vi.spyOn(TerminalProcess.prototype, "run").mockRejectedValueOnce(startupError)

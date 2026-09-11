@@ -84,11 +84,9 @@ export class TerminalProcess extends BaseTerminalProcess {
 		this.finalizedBeforeExecution = true
 
 		const terminal = this.terminal
-		terminal.busy = false
-		terminal.running = false
-		terminal.activeShellExecution = undefined
-		terminal.setActiveStream(undefined)
 		if (terminal.process === this) {
+			terminal.activeShellExecution = undefined
+			terminal.setActiveStream(undefined)
 			terminal.process = undefined
 		}
 		this.emit("completed", output)

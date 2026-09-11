@@ -124,12 +124,6 @@ export class Terminal extends BaseTerminal {
 				reject(error)
 			})
 
-			if (this.isClosed()) {
-				// Keep the newly created process observable to the caller until runCommand returns.
-				queueMicrotask(() => process.handleTerminalClosed())
-				return
-			}
-
 			if (Terminal.isActiveShellCmdExe()) {
 				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
 				// directly instead of routing through executeCommandInTerminal().
