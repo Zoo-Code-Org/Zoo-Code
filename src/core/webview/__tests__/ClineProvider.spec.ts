@@ -31,6 +31,7 @@ import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
+import { BrowserBridgeServer } from "../browserBridge"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
@@ -619,6 +620,70 @@ describe("ClineProvider", () => {
 
 		expect(mockWebviewView.webview.html).toContain("<!DOCTYPE html>")
 		expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
+	})
+
+	describe("browser bridge ownership (statics API)", () => {
+		// These exercise the provider against a real BrowserBridgeServer (the
+		// WeakMap registry in ../browserBridge), so no statics are mocked: the
+		// bridge is enabled with the static API and released in afterEach.
+		const waitForBridge = async () => {
+			const started = Date.now()
+			while (!BrowserBridgeServer.active(provider)) {
+				if (Date.now() - started > 5_000) {
+					throw new Error("Bridge did not become active")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 10))
+			}
+		}
+
+		afterEach(() => {
+			BrowserBridgeServer.disposeFor(provider)
+		})
+
+		test("webviewFor is undefined while no bridge is active", () => {
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
+			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+		})
+
+		test("resolveWebviewView renders the bridge placeholder and skips the real listener when active", async () => {
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Placeholder instead of the app HTML (no React, no scripts), and the
+			// real iframe's message listener is NOT registered (the virtual
+			// webview already owns the wiring — re-registering would
+			// double-handle messages).
+			expect(mockWebviewView.webview.html).toContain("browser mode")
+			expect(mockWebviewView.webview.html).not.toContain("<script")
+			expect(mockWebviewView.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+		})
+
+		test("postMessageToWebview targets the virtual webview while the bridge is active", async () => {
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const virtualWebview = BrowserBridgeServer.webviewFor(provider)!
+			const virtualPostSpy = vi.spyOn(virtualWebview, "postMessage")
+
+			const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+			await provider.postMessageToWebview(message)
+
+			expect(virtualPostSpy).toHaveBeenCalledWith(message)
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		test("dispose releases the provider-owned bridge", async () => {
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			await provider.dispose()
+
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
+			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+		})
 	})
 
 	describe("logWebviewHiddenDiagnostics", () => {
