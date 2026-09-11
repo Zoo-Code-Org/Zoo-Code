@@ -33,7 +33,7 @@ interface HarnessOptions {
 	eventName?: string
 	issueCommentActor?: string
 	workflowRunAssociated?: boolean
-	workflowRunFallback?: "match" | "sha-mismatch" | "branch-mismatch" | "base-mismatch" | "none"
+	workflowRunFallback?: "match" | "ambiguous" | "sha-mismatch" | "branch-mismatch" | "base-mismatch" | "none"
 	workflowRunHeadBranch?: string
 	workflowRunMissing?: "branch" | "sha"
 	workflowRunHeadOwner?: string
@@ -242,6 +242,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		if (state === "open" && options.prState === "closed") return []
 		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
 			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
+			if (options.workflowRunFallback === "ambiguous") return [pr, { ...pr, number: pr.number + 1 }]
 			if (options.workflowRunFallback === "sha-mismatch") {
 				return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
 			}
@@ -1675,6 +1676,20 @@ describe("PR review-state workflow", () => {
 		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
 		expect(result.listPullRequests).not.toHaveBeenCalledWith(expect.objectContaining({ head: expect.anything() }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("ignores an ambiguous unassociated workflow run", async () => {
+		const result = await runWorkflow({
+			eventName: "workflow_run",
+			workflowRunAssociated: false,
+			workflowRunFallback: "ambiguous",
+		})
+
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.getPullRequest).not.toHaveBeenCalled()
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Ignoring ambiguous workflow_run"))
 	})
 
 	it("ignores closed PRs when resolving an unassociated workflow run", async () => {
