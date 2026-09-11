@@ -18,9 +18,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
 export class CodeIndexManager {
-	// --- Singleton Implementation ---
-	private static instances = new Map<string, CodeIndexManager>() // Map workspace path to instance
-
 	// Specialized class instances
 	private _configManager: CodeIndexConfigManager | undefined
 	private readonly _stateManager: CodeIndexStateManager
@@ -33,61 +30,11 @@ export class CodeIndexManager {
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
 
-	public static getInstance(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexManager | undefined {
-		// Resolve the workspace folder to get both fsPath and the real URI
-		let folder: vscode.WorkspaceFolder | undefined
-
-		if (workspacePath) {
-			folder = vscode.workspace.workspaceFolders?.find((f) => f.uri.fsPath === workspacePath)
-		} else {
-			const activeEditor = vscode.window.activeTextEditor
-			if (activeEditor) {
-				folder = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri)
-			}
-			if (!folder) {
-				const workspaceFolders = vscode.workspace.workspaceFolders
-				if (!workspaceFolders || workspaceFolders.length === 0) {
-					return undefined
-				}
-				folder = workspaceFolders[0]
-			}
-			workspacePath = folder.uri.fsPath
-		}
-
-		if (!CodeIndexManager.instances.has(workspacePath)) {
-			// folder may be undefined when workspacePath was provided but doesn't match
-			// any workspace folder (e.g. cwd passed from a tool). Fall back to file:// URI.
-			const folderUri =
-				folder?.uri ??
-				({
-					fsPath: workspacePath,
-					scheme: "file",
-					authority: "",
-					path: workspacePath,
-					toString: () => `file://${workspacePath}`,
-				} as unknown as vscode.Uri)
-			CodeIndexManager.instances.set(workspacePath, new CodeIndexManager(workspacePath, folderUri, context))
-		}
-		return CodeIndexManager.instances.get(workspacePath)!
-	}
-
-	public static getAllInstances(): CodeIndexManager[] {
-		return Array.from(CodeIndexManager.instances.values())
-	}
-
-	public static disposeAll(): void {
-		for (const instance of CodeIndexManager.instances.values()) {
-			instance.dispose()
-		}
-		CodeIndexManager.instances.clear()
-	}
-
 	private readonly workspacePath: string
 	private readonly _folderUri: vscode.Uri
 	private readonly context: vscode.ExtensionContext
 
-	// Private constructor for singleton pattern
-	private constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
+	public constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this.workspacePath = workspacePath
 		this._folderUri = folderUri
 		this.context = context
