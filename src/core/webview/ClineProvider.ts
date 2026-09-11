@@ -4424,18 +4424,14 @@ export class ClineProvider
 
 			// Notify the webview of both updated items so its in-memory history stays current.
 			if (this.isViewLaunched) {
-				const updatedChild = this.taskHistoryStore.get(childTaskId)
-				const updatedParent = this.taskHistoryStore.get(parentTaskId)
-				if (updatedChild) {
+				for (const taskHistoryItem of [
+					this.taskHistoryStore.get(childTaskId),
+					this.taskHistoryStore.get(parentTaskId),
+				]) {
+					if (!taskHistoryItem) continue
 					await this.postMessageToWebview({
 						type: "taskHistoryItemUpdated",
-						taskHistoryItem: updatedChild,
-					})
-				}
-				if (updatedParent) {
-					await this.postMessageToWebview({
-						type: "taskHistoryItemUpdated",
-						taskHistoryItem: updatedParent,
+						taskHistoryItem,
 					})
 				}
 			}
