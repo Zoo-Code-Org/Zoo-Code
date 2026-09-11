@@ -1250,12 +1250,14 @@ export class TaskHistoryStore {
 					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, captureSecond)
 				} catch (error) {
 					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
-						const restorations = Array.of<TaskFileRestoration>([
+						const expectedFirst = Array.of(persistedHistoryItem(writtenFirst))
+						const firstRestoration: TaskFileRestoration = [
 							firstId,
 							firstDiskSnapshot,
-							Array.of(persistedHistoryItem(writtenFirst)),
+							expectedFirst,
 							firstFileLock,
-						])
+						]
+						const restorations = Array.of(firstRestoration)
 						if (secondDiskSnapshot) {
 							const mergeSecond = mergeWithDisk(secondDelta)
 							const expectedSecond = mergeSecond(secondDiskSnapshot, mergedSecond) as HistoryItem
@@ -1293,19 +1295,11 @@ export class TaskHistoryStore {
 					if (!options?.rollbackBothOnCallbackFailure) throw error
 
 					// Restore second before first, preserving the original compensation order.
+					const expectedSecond = Array.of(persistedHistoryItem(writtenSecond))
+					const expectedFirst = Array.of(persistedHistoryItem(writtenFirst))
 					const compensationErrors = await this.restoreTaskFilePreImages([
-						[
-							secondId,
-							secondDiskSnapshot as HistoryItem,
-							Array.of(persistedHistoryItem(writtenSecond)),
-							undefined,
-						],
-						[
-							firstId,
-							firstDiskSnapshot as HistoryItem,
-							Array.of(persistedHistoryItem(writtenFirst)),
-							firstFileLock,
-						],
+						[secondId, secondDiskSnapshot as HistoryItem, expectedSecond, undefined],
+						[firstId, firstDiskSnapshot as HistoryItem, expectedFirst, firstFileLock],
 					])
 
 					if (this.onWrite) {
