@@ -86,8 +86,9 @@ export const ModelSelector = ({
 
 	const modelIds = useMemo(() => Object.keys(models), [models])
 
-	const isSupported = !!modelConfig && modelIds.length > 0
-	const isDisabled = disabled || !isSupported
+	const isModelListLoading = !!dynamicProvider && routerModels.isLoading
+	const isSupported = !!modelConfig && (isModelListLoading || modelIds.length > 0)
+	const isDisabled = disabled || !isSupported || (isModelListLoading && modelIds.length === 0)
 
 	// Label shown for a model — prefers `ModelInfo.displayName` when present, falling back to
 	// the raw model id (mirrors ModelPicker.tsx's trigger/list label logic).
@@ -143,6 +144,10 @@ export const ModelSelector = ({
 				return
 			}
 
+			if (isDisabled) {
+				return
+			}
+
 			const updated: ProviderSettings = {
 				...apiConfiguration,
 				reasoningEffort: undefined,
@@ -160,7 +165,7 @@ export const ModelSelector = ({
 			setOpen(false)
 			setSearchValue("")
 		},
-		[apiConfiguration, modelConfig, currentApiConfigName],
+		[apiConfiguration, modelConfig, currentApiConfigName, isDisabled],
 	)
 
 	const renderModelItem = useCallback(
@@ -169,31 +174,35 @@ export const ModelSelector = ({
 			const label = getModelLabel(modelId, models[modelId])
 
 			return (
-				<div
+				<button
+					type="button"
+					disabled={isDisabled}
 					key={modelId}
 					onClick={() => handleSelect(modelId)}
 					className={cn(
-						"px-3 py-1.5 text-sm cursor-pointer flex items-center group",
+						"w-full border-0 bg-transparent text-left text-inherit px-3 py-1.5 text-sm cursor-pointer flex items-center group",
 						"hover:bg-vscode-list-hoverBackground",
 						isCurrentModel &&
 							"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
 					)}>
-					<div className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</div>
+					<span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
 					{isCurrentModel && (
-						<div className="size-5 p-1 flex items-center justify-center">
+						<span className="size-5 p-1 flex items-center justify-center" aria-hidden="true">
 							<span className="codicon codicon-check text-xs" />
-						</div>
+						</span>
 					)}
-				</div>
+				</button>
 			)
 		},
-		[selectedModelId, models, getModelLabel, handleSelect],
+		[selectedModelId, models, getModelLabel, handleSelect, isDisabled],
 	)
 
 	if (!isSupported) {
 		return (
 			<StandardTooltip content={t("chat:selectModelUnsupported")}>
 				<button
+					type="button"
+					disabled={disabled}
 					data-testid="model-selector-disabled"
 					className={cn(
 						"min-w-0 inline-flex items-center relative whitespace-nowrap px-1.5 py-1 text-xs",
@@ -220,7 +229,9 @@ export const ModelSelector = ({
 						isDisabled ? "opacity-50 cursor-not-allowed" : enabledSelectorTriggerClassName,
 						triggerClassName,
 					)}>
-					<span className="truncate">{isLoading ? t("common:ui.loading") : selectedModelLabel}</span>
+					<span className="truncate">
+						{isLoading || isModelListLoading ? t("common:ui.loading") : selectedModelLabel}
+					</span>
 				</PopoverTrigger>
 			</StandardTooltip>
 			<PopoverContent
@@ -241,8 +252,10 @@ export const ModelSelector = ({
 							/>
 							{searchValue.length > 0 && (
 								<div className="absolute right-4 top-0 bottom-0 flex items-center justify-center">
-									<span
-										className="codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
+									<button
+										type="button"
+										aria-label={t("common:ui.clear_search")}
+										className="border-0 bg-transparent p-0 codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
 										onClick={() => setSearchValue("")}
 									/>
 								</div>

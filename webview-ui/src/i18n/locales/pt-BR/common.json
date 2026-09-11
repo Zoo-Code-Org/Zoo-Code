@@ -20,6 +20,8 @@
 		"keep": "Manter"
 	},
 	"ui": {
+		"loading": "Carregando...",
+		"clear_search": "Limpar pesquisa",
 		"search_placeholder": "Pesquisar...",
 		"no_results": "Nenhum resultado encontrado"
 	},

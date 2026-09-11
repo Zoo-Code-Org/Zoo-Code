@@ -1,4 +1,14 @@
-import { providerIdentifiers, retiredProviderIdentifiers, type OrganizationAllowList } from "@roo-code/types"
+import type { ComponentProps } from "react"
+import userEvent from "@testing-library/user-event"
+import type { Popover, PopoverTrigger, PopoverContent, StandardTooltip } from "@/components/ui"
+import {
+	providerIdentifiers,
+	retiredProviderIdentifiers,
+	type ModelInfo,
+	type RouterModels,
+	type ProviderSettings,
+	type OrganizationAllowList,
+} from "@roo-code/types"
 
 import { render, screen, fireEvent, within } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
@@ -26,7 +36,10 @@ vi.mock("@/components/ui/hooks/useRooPortal", () => ({
 }))
 
 const { useRouterModelsMock, useSelectedModelMock } = vi.hoisted(() => ({
-	useRouterModelsMock: vi.fn(() => ({ data: {} as Record<string, any>, isLoading: false })),
+	useRouterModelsMock: vi.fn((): { data: Partial<RouterModels> | undefined; isLoading: boolean } => ({
+		data: {},
+		isLoading: false,
+	})),
 	useSelectedModelMock: vi.fn((): { id: string; info?: { displayName?: string }; isLoading: boolean } => ({
 		id: "claude-sonnet-4-5",
 		isLoading: false,
@@ -42,34 +55,129 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 }))
 
 vi.mock("@/components/ui", () => ({
-	Popover: ({ children, open }: any) => (
+	Popover: ({ children, open }: ComponentProps<typeof Popover>) => (
 		<div data-testid="popover-root" data-open={open}>
 			{children}
 		</div>
 	),
-	PopoverTrigger: ({ children, disabled, ...props }: any) => (
+	PopoverTrigger: ({ children, disabled, ...props }: ComponentProps<typeof PopoverTrigger>) => (
 		<button data-testid="model-selector-trigger" disabled={disabled} {...props}>
 			{children}
 		</button>
 	),
-	PopoverContent: ({ children }: any) => <div data-testid="popover-content">{children}</div>,
-	StandardTooltip: ({ children, content }: any) => <div data-tooltip-content={content}>{children}</div>,
+	PopoverContent: ({ children }: ComponentProps<typeof PopoverContent>) => (
+		<div data-testid="popover-content">{children}</div>
+	),
+	StandardTooltip: ({ children, content }: ComponentProps<typeof StandardTooltip>) => (
+		<div data-tooltip-content={content}>{children}</div>
+	),
 }))
 
-const manyDynamicModels = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`openrouter/model-${index}`, {}]))
+const makeModelInfo = (overrides: Partial<ModelInfo> = {}): ModelInfo => ({
+	contextWindow: 128000,
+	supportsPromptCache: false,
+	...overrides,
+})
+
+const manyDynamicModels = Object.fromEntries(
+	Array.from({ length: 8 }, (_, index) => [`openrouter/model-${index}`, makeModelInfo()]),
+)
 
 describe("ModelSelector", () => {
+	const focusDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "focus")
+	beforeAll(() => {
+		// Global setup replaces focus with a no-op for FAST; keyboard tests need native DOM focus.
+		const frame = document.createElement("iframe")
+		document.body.appendChild(frame)
+		const nativeFocus = frame.contentDocument?.createElement("button").focus
+		if (!nativeFocus) throw new Error("Could not initialize native DOM focus")
+		Object.defineProperty(HTMLElement.prototype, "focus", {
+			configurable: true,
+			writable: true,
+			value: nativeFocus,
+		})
+		frame.remove()
+	})
+	afterAll(() => {
+		if (focusDescriptor) Object.defineProperty(HTMLElement.prototype, "focus", focusDescriptor)
+	})
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 		useRouterModelsMock.mockReturnValue({ data: {}, isLoading: false })
 		useSelectedModelMock.mockReturnValue({ id: "claude-sonnet-4-5", isLoading: false })
 	})
 
+	it.each([true, false])("distinguishes a pending dynamic list from a settled list (has models: %s)", (hasModels) => {
+		useRouterModelsMock.mockReturnValue({ data: undefined, isLoading: true })
+		const props = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter }, title: "Select model" }
+		const { rerender } = render(<ModelSelector {...props} />)
+		expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("common:ui.loading")
+		expect(screen.getByTestId("model-selector-trigger")).toBeDisabled()
+		expect(screen.queryByTestId("model-selector-disabled")).not.toBeInTheDocument()
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: hasModels ? { "model-a": makeModelInfo() } : {} },
+			isLoading: false,
+		})
+		rerender(<ModelSelector {...props} />)
+		if (hasModels) {
+			expect(screen.getByTestId("model-selector-trigger")).not.toBeDisabled()
+			expect(screen.getByRole("button", { name: "model-a" })).toBeInTheDocument()
+		} else {
+			expect(screen.getByTestId("model-selector-disabled")).toBeInTheDocument()
+		}
+	})
+
+	it("supports keyboard search clearing and model selection", async () => {
+		const user = userEvent.setup()
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
+		render(
+			<ModelSelector apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }} title="Select model" />,
+		)
+		const search = screen.getByRole("textbox")
+		await user.type(search, "model-3")
+		await user.tab()
+		expect(screen.getByRole("button", { name: "common:ui.clear_search" })).toHaveFocus()
+		await user.keyboard("{Enter}")
+		expect(search).toHaveValue("")
+		expect(screen.queryByRole("button", { name: "common:ui.clear_search" })).not.toBeInTheDocument()
+		search.focus()
+		await user.tab()
+		expect(screen.getByRole("button", { name: "openrouter/model-0" })).toHaveFocus()
+		await user.keyboard(" ")
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				apiConfiguration: expect.objectContaining({ openRouterModelId: "openrouter/model-0" }),
+			}),
+		)
+	})
+
+	it("blocks model updates when disabled after the model list is rendered", async () => {
+		const user = userEvent.setup()
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: { "model-a": makeModelInfo() } }, isLoading: false })
+		const props = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter }, title: "Select model" }
+		const { rerender } = render(<ModelSelector {...props} />)
+		const model = screen.getByRole("button", { name: "model-a" })
+		model.focus()
+		rerender(<ModelSelector {...props} disabled />)
+		expect(model).toBeDisabled()
+		await user.keyboard("{Enter}")
+		await user.click(model)
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+
 	it("renders the static model list for a static provider and sends upsertApiConfiguration on select", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-sonnet-4-5" } as any
+					{
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-sonnet-4-5",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -100,7 +208,7 @@ describe("ModelSelector", () => {
 						reasoningEffort: "high",
 						modelMaxTokens: 4096,
 						modelMaxThinkingTokens: 2048,
-					} as any
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -125,8 +233,8 @@ describe("ModelSelector", () => {
 		useRouterModelsMock.mockReturnValue({
 			data: {
 				openrouter: {
-					"openrouter/model-a": { displayName: "Model A (friendly)" },
-					"openrouter/model-b": {},
+					"openrouter/model-a": makeModelInfo({ displayName: "Model A (friendly)" }),
+					"openrouter/model-b": makeModelInfo(),
 				},
 			},
 			isLoading: false,
@@ -140,7 +248,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -157,7 +268,7 @@ describe("ModelSelector", () => {
 
 	it("renders the dynamic router model list for a dynamic provider", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -165,7 +276,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -187,7 +301,7 @@ describe("ModelSelector", () => {
 	it("requests router models for a dynamic provider with fetching enabled", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -202,7 +316,7 @@ describe("ModelSelector", () => {
 	it("requests router models with fetching disabled for a static provider", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -217,7 +331,7 @@ describe("ModelSelector", () => {
 	it("mounts the popover content into the roo portal container", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -231,7 +345,7 @@ describe("ModelSelector", () => {
 
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: retiredProviderIdentifiers.groq } as any}
+				apiConfiguration={{ apiProvider: retiredProviderIdentifiers.groq } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -248,7 +362,7 @@ describe("ModelSelector", () => {
 
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -267,7 +381,7 @@ describe("ModelSelector", () => {
 
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -281,7 +395,7 @@ describe("ModelSelector", () => {
 
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -299,7 +413,7 @@ describe("ModelSelector", () => {
 	it("disables the enabled selector's trigger when the disabled prop is set", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 				disabled
@@ -317,7 +431,7 @@ describe("ModelSelector", () => {
 
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -331,7 +445,7 @@ describe("ModelSelector", () => {
 	it("shows the title as the enabled trigger's tooltip content and applies the base trigger classes", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -345,7 +459,7 @@ describe("ModelSelector", () => {
 	it("does not open the popover until the user interacts with the trigger", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -357,7 +471,7 @@ describe("ModelSelector", () => {
 	it("does not append anything to the trigger class name by default", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -369,7 +483,7 @@ describe("ModelSelector", () => {
 	it("applies a custom trigger class name when provided", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 				triggerClassName="my-custom-trigger"
@@ -381,7 +495,7 @@ describe("ModelSelector", () => {
 
 	it("highlights the currently selected model with a check mark and not other models", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -389,7 +503,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -411,7 +528,7 @@ describe("ModelSelector", () => {
 
 	it("does not show a search box when there are few models", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -419,7 +536,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -431,7 +551,7 @@ describe("ModelSelector", () => {
 
 	it("does not show a search box at exactly the search threshold, but does show it just above it", () => {
 		const atThreshold = Object.fromEntries(
-			Array.from({ length: 6 }, (_, index) => [`openrouter/model-${index}`, {}]),
+			Array.from({ length: 6 }, (_, index) => [`openrouter/model-${index}`, makeModelInfo()]),
 		)
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: atThreshold }, isLoading: false })
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
@@ -439,7 +559,10 @@ describe("ModelSelector", () => {
 		const { rerender } = render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -448,13 +571,16 @@ describe("ModelSelector", () => {
 
 		expect(screen.queryByLabelText("common:ui.search_placeholder")).not.toBeInTheDocument()
 
-		const aboveThreshold = { ...atThreshold, "openrouter/model-6": {} }
+		const aboveThreshold = { ...atThreshold, "openrouter/model-6": makeModelInfo() }
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: aboveThreshold }, isLoading: false })
 
 		rerender(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -471,7 +597,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -497,7 +626,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -516,7 +648,7 @@ describe("ModelSelector", () => {
 			data: {
 				openrouter: Object.fromEntries([
 					["openrouter/model-a", { displayName: "Zebra Special" }],
-					...Array.from({ length: 7 }, (_, index) => [`openrouter/model-${index}`, {}]),
+					...Array.from({ length: 7 }, (_, index) => [`openrouter/model-${index}`, makeModelInfo()]),
 				]),
 			},
 			isLoading: false,
@@ -526,7 +658,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -551,7 +686,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -575,7 +713,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -596,7 +737,10 @@ describe("ModelSelector", () => {
 		const { container } = render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -621,7 +765,7 @@ describe("ModelSelector", () => {
 	it("shows the selectModel footer heading in the popover", () => {
 		render(
 			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
 				currentApiConfigName="default"
 				title="Select model"
 			/>,
@@ -632,7 +776,7 @@ describe("ModelSelector", () => {
 
 	it("re-derives the search index when the model list changes on rerender", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, ...manyDynamicModels } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), ...manyDynamicModels } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -640,7 +784,10 @@ describe("ModelSelector", () => {
 		const { rerender } = render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -652,7 +799,7 @@ describe("ModelSelector", () => {
 		expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
 
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/brand-new-model": {}, ...manyDynamicModels } },
+			data: { openrouter: { "openrouter/brand-new-model": makeModelInfo(), ...manyDynamicModels } },
 			isLoading: false,
 		})
 
@@ -662,7 +809,7 @@ describe("ModelSelector", () => {
 					{
 						apiProvider: providerIdentifiers.openrouter,
 						openRouterModelId: "openrouter/brand-new-model",
-					} as any
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -678,7 +825,7 @@ describe("ModelSelector", () => {
 
 	it("re-renders the model list with fresh click handlers and highlighting when the selection changes", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -686,7 +833,10 @@ describe("ModelSelector", () => {
 		const { rerender } = render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -697,7 +847,10 @@ describe("ModelSelector", () => {
 		rerender(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-b" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-b",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -723,7 +876,7 @@ describe("ModelSelector", () => {
 
 	it("sends the current config name on select even after it changes on rerender", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -731,7 +884,10 @@ describe("ModelSelector", () => {
 		const { rerender } = render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="config-one"
 				title="Select model"
@@ -741,7 +897,10 @@ describe("ModelSelector", () => {
 		rerender(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="config-two"
 				title="Select model"
@@ -762,7 +921,7 @@ describe("ModelSelector", () => {
 					{
 						apiProvider: providerIdentifiers.bedrock,
 						apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
-					} as any
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -808,7 +967,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-haiku-20241022" } as any
+					{
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-haiku-20241022",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -827,7 +989,7 @@ describe("ModelSelector", () => {
 
 	it("filters dynamic router models by the organization allow list", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -845,7 +1007,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
@@ -864,7 +1029,7 @@ describe("ModelSelector", () => {
 
 	it("does not filter models when the organization allow list allows all", () => {
 		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
 			isLoading: false,
 		})
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
@@ -877,7 +1042,10 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
 				}
 				currentApiConfigName="default"
 				title="Select model"
