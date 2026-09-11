@@ -45,6 +45,7 @@ type TaskTestAccess = {
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	saveApiConversationHistory: () => Promise<boolean>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
 	restoreApiHistoryUserMessage: (message: ApiMessage) => Promise<boolean>
 	recordTerminalApiFailure: (text: string) => Promise<boolean>
 	resetAssistantMessagePersistence: () => void
@@ -794,12 +795,28 @@ describe("Cline", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(task.attemptApiRequest).toHaveBeenCalledTimes(2)
+			expect(vi.mocked(task.attemptApiRequest).mock.calls[1]?.[0]).toBe(1)
 			expect(
 				saySpy.mock.calls.filter(
 					([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
 				),
 			).toHaveLength(1)
 			expect(saySpy).toHaveBeenCalledWith("api_req_retried")
+		})
+
+		it("does not retry after cancellation during an approved backoff", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => failingStream(new Error("overloaded_error")))
+			vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockImplementation(async () => {
+				task.abort = true
+			})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
 		})
 
 		it("resets the retry budget without duplicating the user message when the user approves retry", async () => {

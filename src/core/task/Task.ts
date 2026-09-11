@@ -3766,6 +3766,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							const hasUserContent = currentUserContent.length > 0
 							// Stryker disable next-line ArithmeticOperator: non-empty content guarantees the record appended by this iteration is the final entry.
 							const lastHistoryMessage =
+								// Stryker disable next-line ArithmeticOperator: this iteration's appended record is the final array entry.
 								this.apiConversationHistory[this.apiConversationHistory.length - 1]
 							// Stryker disable next-line ConditionalExpression,OptionalChaining,LogicalOperator,StringLiteral,ArithmeticOperator: non-empty content guarantees the final record is this turn's user message; remaining checks are defensive.
 							// Stryker disable next-line EqualityOperator: the role check is defensive; non-empty content was appended as this iteration's user record.
