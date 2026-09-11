@@ -529,12 +529,13 @@ describe("History resume delegation - parent metadata transitions", () => {
 				},
 			),
 		})
+		const removeClineFromStack = vi.fn()
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => undefined),
-			removeClineFromStack: vi.fn(),
+			removeClineFromStack,
 			createTaskWithHistoryItem: vi.fn().mockResolvedValue({
 				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
 				overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
@@ -552,6 +553,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		})
 
 		expect(updatedChild?.pendingAction).toEqual(pendingAction)
+		expect(removeClineFromStack).not.toHaveBeenCalled()
 	})
 
 	it("reopenParentFromDelegation injects subtask_result into both UI and API histories", async () => {

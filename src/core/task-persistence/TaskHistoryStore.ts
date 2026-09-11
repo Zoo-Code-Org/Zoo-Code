@@ -25,8 +25,6 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
 }
 
-const persistedHistoryItem = (item: HistoryItem): HistoryItem => JSON.parse(JSON.stringify(item)) as HistoryItem
-
 /**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
@@ -1250,7 +1248,7 @@ export class TaskHistoryStore {
 					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, captureSecond)
 				} catch (error) {
 					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
-						const expectedFirst = Array.of(persistedHistoryItem(writtenFirst))
+						const expectedFirst = Array.of(JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem)
 						const firstRestoration: TaskFileRestoration = [
 							firstId,
 							firstDiskSnapshot,
@@ -1264,7 +1262,7 @@ export class TaskHistoryStore {
 							restorations.unshift([
 								secondId,
 								secondDiskSnapshot,
-								Array.of(secondDiskSnapshot, persistedHistoryItem(expectedSecond)),
+								Array.of(secondDiskSnapshot, JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem),
 							])
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
@@ -1295,8 +1293,8 @@ export class TaskHistoryStore {
 					if (!options?.rollbackBothOnCallbackFailure) throw error
 
 					// Restore second before first, preserving the original compensation order.
-					const expectedSecond = Array.of(persistedHistoryItem(writtenSecond))
-					const expectedFirst = Array.of(persistedHistoryItem(writtenFirst))
+					const expectedSecond = Array.of(JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem)
+					const expectedFirst = Array.of(JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem)
 					const compensationErrors = await this.restoreTaskFilePreImages([
 						[secondId, secondDiskSnapshot as HistoryItem, expectedSecond, undefined],
 						[firstId, firstDiskSnapshot as HistoryItem, expectedFirst, firstFileLock],
