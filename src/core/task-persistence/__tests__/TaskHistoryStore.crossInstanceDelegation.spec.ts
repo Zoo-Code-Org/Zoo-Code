@@ -204,7 +204,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 						firstDiskGuard: (parent) => {
 							if (parent.awaitingChildId !== "child") throw new Error("stale delegation")
 						},
-						rollbackFirstOnSecondFailure: true,
+						rollbackBothOnCallbackFailure: true,
 					},
 				),
 			).rejects.toThrow()
@@ -792,7 +792,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 					completedByChildId: "child",
 				}),
 				(child) => ({ ...child, status: "completed" }),
-				{ rollbackFirstOnSecondFailure: true },
+				{ rollbackBothOnCallbackFailure: true },
 			)
 			await expect(result).rejects.toMatchObject({
 				name: "AggregateError",
@@ -1156,7 +1156,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 					"child",
 					(parent) => ({ ...parent, status: "active", awaitingChildId: undefined }),
 					(child) => ({ ...child, status: "completed" }),
-					{ rollbackFirstOnSecondFailure: true },
+					{ rollbackBothOnCallbackFailure: true },
 				)
 				await expect(result).rejects.toMatchObject({
 					name: "AggregateError",

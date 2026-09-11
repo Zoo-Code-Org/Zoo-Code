@@ -742,7 +742,6 @@ describe("TaskHistoryStore", () => {
 
 		it.each([
 			["disk guard", { firstDiskGuard: () => {} }],
-			["second-write rollback", { rollbackFirstOnSecondFailure: true }],
 			["callback compensation", { rollbackBothOnCallbackFailure: true }],
 			["lock-scoped callback", { whileFirstFileLocked: async () => {} }],
 		] satisfies Array<[string, AtomicUpdatePairOptions]>)(
