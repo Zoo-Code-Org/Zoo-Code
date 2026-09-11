@@ -867,11 +867,8 @@ export class TaskHistoryStore {
 			if (!match) continue
 			const backupPath = path.join(taskDir, entry)
 			const { mtimeMs } = await fs.stat(backupPath)
-			if (
-				now - Number(match[1]) >= TASK_HISTORY_BACKUP_RETENTION_MS &&
-				now - mtimeMs >= TASK_HISTORY_BACKUP_RETENTION_MS
-			)
-				stale.push(backupPath)
+			const staleCutoff = now - TASK_HISTORY_BACKUP_RETENTION_MS
+			if (Math.max(Number(match[1]), mtimeMs) <= staleCutoff) stale.push(backupPath)
 		}
 		return stale
 	}
@@ -881,7 +878,7 @@ export class TaskHistoryStore {
 		for (const taskId of this.cache.keys()) {
 			const taskDir = path.join(tasksDir, taskId)
 			try {
-				if ((await this.findStaleHistoryBackups(taskDir, now)).length === 0) continue
+				if (!(await this.findStaleHistoryBackups(taskDir, now)).length) continue
 				await this.withTaskFileLock(taskId, async (fileLock) => {
 					await fs.access(path.join(taskDir, GlobalFileNames.historyItem))
 					for (const backupPath of await this.findStaleHistoryBackups(taskDir, now)) {
@@ -1087,16 +1084,18 @@ export class TaskHistoryStore {
 			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
 			const current = await this.readTaskFile(taskId)
 			if (current) this.cache.set(taskId, current)
-			const outcome = await Promise.resolve()
-				.then(() => callback(releaseFileLock))
-				.then(
-					(result) => ({ result }),
-					(error: unknown) => ({ error }),
-				)
-			const releaseError = await releaseFileLock().then(
-				() => undefined,
-				(error: unknown) => error,
-			)
+			let outcome: { result: T } | { error: unknown }
+			try {
+				outcome = { result: await callback(releaseFileLock) }
+			} catch (error) {
+				outcome = { error }
+			}
+			let releaseError: unknown
+			try {
+				await releaseFileLock()
+			} catch (error) {
+				releaseError = error
+			}
 			if (releaseFileLock.getCompromiseError()) {
 				const reconciled = await this.readTaskFile(taskId)
 				this.taskFileMtimes.delete(taskId)
