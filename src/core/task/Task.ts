@@ -3668,15 +3668,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							if (decideMidStreamFailure(midStreamRetryAttempt) === "ask") {
 								// Automatic retries exhausted - surface the failure instead of
 								// retrying (and re-billing the request) silently forever.
-								// Stryker disable StringLiteral: diagnostic-only task identity and retry-limit text.
 								console.error(
+									// Stryker disable next-line StringLiteral: diagnostic-only task identity and retry-limit text.
 									`[Task#${this.taskId}.${this.instanceId}] Stream failed, automatic retry limit (${MAX_MID_STREAM_RETRIES}) reached: ${streamingFailedMessage}`,
 								)
-								// Stryker restore StringLiteral
 
-								// Stryker disable next-line LogicalOperator: both fallbacks describe the same provider failure.
 								const { response } = await this.ask(
 									"api_req_failed",
+									// Stryker disable next-line LogicalOperator: both fallbacks describe the same provider failure.
 									streamingFailedMessage ?? rawErrorMessage,
 								)
 
@@ -3733,11 +3732,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							}
 
 							// Stream failed - log the error and retry with the same content
-							// Stryker disable StringLiteral,ArithmeticOperator: diagnostic-only attempt metadata.
 							console.error(
+								// Stryker disable next-line StringLiteral,ArithmeticOperator: diagnostic-only attempt metadata.
 								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry (attempt ${midStreamRetryAttempt + 1}/${MAX_MID_STREAM_RETRIES}): ${streamingFailedMessage}`,
 							)
-							// Stryker restore StringLiteral,ArithmeticOperator
 
 							// Announce every automatic retry with the shared exponential
 							// backoff countdown (api_req_retry_delayed) so no retry - and its
@@ -3746,13 +3744,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							// Check if task was aborted during the backoff
 							if (this.abort) {
-								// Stryker disable StringLiteral: diagnostic-only task identity and abort reason.
 								console.log(
+									// Stryker disable next-line StringLiteral: diagnostic-only task identity.
 									`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 								)
 								// Abort the entire task
+								// Stryker disable next-line StringLiteral: abort reason is existing diagnostic metadata.
 								this.abortReason = "user_cancelled"
-								// Stryker restore StringLiteral
 								await this.abortTask()
 								break
 							}
