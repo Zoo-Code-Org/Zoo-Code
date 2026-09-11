@@ -138,7 +138,12 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
-import { decideMidStreamFailure, MAX_MID_STREAM_RETRIES, shouldRemoveMidStreamRetryMessage } from "./midStreamRetry"
+import {
+	decideMidStreamFailure,
+	MAX_MID_STREAM_RETRIES,
+	shouldRemoveMidStreamRetryMessage,
+	wasMidStreamRetryMessageAdded,
+} from "./midStreamRetry"
 import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
@@ -2926,10 +2931,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
-			userMessageWasAdded: boolean
+			userMessageWasAdded?: boolean
 		}
 
-		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0, userMessageWasAdded: false }]
+		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
 
 		while (stack.length > 0) {
 			const currentItem = stack.pop()!
@@ -3068,7 +3073,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				isEmptyUserContent,
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
-			let { userMessageWasAdded } = currentItem
+			let userMessageWasAdded = wasMidStreamRetryMessageAdded(currentItem.userMessageWasAdded)
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++
@@ -3708,7 +3713,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// Stryker disable next-line BooleanLiteral: file details are already materialized in the persisted request being retried.
 										includeFileDetails: false,
 										retryAttempt: 0,
-										userMessageWasAdded: false,
 									})
 
 									// Continue to retry the request
@@ -4108,7 +4112,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						stack.push({
 							userContent: [...this.userMessageContent], // Create a copy to avoid mutation issues
 							includeFileDetails: false, // Subsequent iterations don't need file details
-							userMessageWasAdded: false,
 						})
 
 						// Add periodic yielding to prevent blocking
@@ -4176,7 +4179,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
 							userMessageWasRemoved: removedCurrentUserMessage,
-							userMessageWasAdded: false,
 						})
 
 						// Continue to retry the request
@@ -4198,7 +4200,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
 								userMessageWasRemoved: removedCurrentUserMessage,
-								userMessageWasAdded: false,
 							})
 
 							// Continue to retry the request

@@ -9,3 +9,7 @@ export function decideMidStreamFailure(retryAttempt: number): MidStreamFailureDe
 export function shouldRemoveMidStreamRetryMessage(userMessageWasAdded: boolean, lastRole?: string): boolean {
 	return userMessageWasAdded && lastRole === "user"
 }
+
+export function wasMidStreamRetryMessageAdded(value?: boolean): boolean {
+	return value === true
+}

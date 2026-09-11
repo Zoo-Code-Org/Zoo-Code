@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { decideMidStreamFailure, MAX_MID_STREAM_RETRIES, shouldRemoveMidStreamRetryMessage } from "../midStreamRetry"
+import {
+	decideMidStreamFailure,
+	MAX_MID_STREAM_RETRIES,
+	shouldRemoveMidStreamRetryMessage,
+	wasMidStreamRetryMessageAdded,
+} from "../midStreamRetry"
 
 describe("decideMidStreamFailure", () => {
 	it.each([0, 1, 2])("retries attempt %i", (attempt) => {
@@ -20,5 +25,15 @@ describe("shouldRemoveMidStreamRetryMessage", () => {
 		{ added: true, role: undefined, expected: false },
 	])("returns $expected when added=$added and role=$role", ({ added, role, expected }) => {
 		expect(shouldRemoveMidStreamRetryMessage(added, role)).toBe(expected)
+	})
+})
+
+describe("wasMidStreamRetryMessageAdded", () => {
+	it.each([
+		{ value: true, expected: true },
+		{ value: false, expected: false },
+		{ value: undefined, expected: false },
+	])("returns $expected for $value", ({ value, expected }) => {
+		expect(wasMidStreamRetryMessageAdded(value)).toBe(expected)
 	})
 })
