@@ -16,7 +16,8 @@ import { ApiHandlerOptions } from "../../shared/api"
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
 import { handleProviderError } from "./utils/error-handler"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -102,32 +103,22 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		// Temporary debug log for QA
 		// console.log("[MISTRAL DEBUG] Raw API request body:", requestOptions)
 
-		// Bridge the external abort signal from Task (metadata.abortSignal) into a
-		// request-local controller so the in-flight streaming request can be
-		// cancelled. A pre-aborted signal rejects immediately with an AbortError.
-		const externalAbortSignal = metadata?.abortSignal
-		let requestAbortController: AbortController | undefined
-		let externalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				throw new DOMException("Mistral completion aborted", "AbortError")
-			}
-			const controller = new AbortController()
-			requestAbortController = controller
-			const onExternalAbort = () => controller.abort()
-			externalAbortListener = onExternalAbort
-			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-		}
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(metadata?.abortSignal)
+
+		// The request-local controller is the provider-owned abort handle; the
+		// fetch signal merges it with the external Task signal (AbortSignal.any
+		// inside RequestConfigBuilder), so external aborts cancel the in-flight
+		// request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
 
 		let response
 		try {
-			if (requestAbortController) {
-				response = await this.client.chat.stream(requestOptions, {
-					fetchOptions: { signal: requestAbortController.signal },
-				})
-			} else {
-				response = await this.client.chat.stream(requestOptions)
-			}
+			response = await this.client.chat.stream(requestOptions, {
+				fetchOptions: { signal: requestSignal },
+			})
 
 			for await (const event of response) {
 				const delta = event.data.choices[0]?.delta
@@ -181,20 +172,15 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 				}
 			}
 		} catch (error) {
-			// User-initiated abort: surface a standard AbortError rather than the
-			// wrapped provider error so callers can distinguish cancellation.
-			if (metadata?.abortSignal?.aborted) {
-				throw new DOMException("Mistral completion aborted", "AbortError")
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("Mistral")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
 			TelemetryService.instance.captureException(apiError)
 			throw new Error(`Mistral completion error: ${errorMessage}`)
-		} finally {
-			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
-			if (externalAbortSignal && externalAbortListener) {
-				externalAbortSignal.removeEventListener("abort", externalAbortListener)
-			}
 		}
 	}
 
@@ -260,10 +246,10 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 
 			return content || ""
 		} catch (error) {
-			// User-initiated abort: surface a standard AbortError rather than the
-			// wrapped provider error so callers can distinguish cancellation.
-			if (options?.abortSignal?.aborted) {
-				throw new DOMException("Mistral completion aborted", "AbortError")
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("Mistral")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")

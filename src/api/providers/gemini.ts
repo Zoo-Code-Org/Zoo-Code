@@ -27,6 +27,8 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
+import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
@@ -404,29 +406,21 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 		}
 
-		// Bridge the external abort signal from Task (metadata.abortSignal) into a
-		// request-local controller so the in-flight generateContentStream request
-		// can be cancelled. The @google/genai SDK merges this signal with its own
-		// timeout handling, which is preserved rather than replaced.
-		// A pre-aborted signal rejects immediately with an AbortError.
-		const externalAbortSignal = metadata?.abortSignal
-		let requestAbortController: AbortController | undefined
-		let externalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				throw new DOMException("Gemini request aborted", "AbortError")
-			}
-			const controller = new AbortController()
-			requestAbortController = controller
-			const onExternalAbort = () => controller.abort()
-			externalAbortListener = onExternalAbort
-			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-		}
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(metadata?.abortSignal)
+
+		// The request-local controller is the provider-owned abort handle; the
+		// signal the SDK receives merges it with the external Task signal
+		// (AbortSignal.any inside RequestConfigBuilder), so external aborts
+		// cancel the in-flight request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
 
 		const params: GenerateContentParameters = {
 			model,
 			contents,
-			config: requestAbortController ? { ...config, abortSignal: requestAbortController.signal } : config,
+			config: requestSignal ? { ...config, abortSignal: requestSignal } : config,
 		}
 
 		try {
@@ -560,10 +554,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 		} catch (error) {
-			// User-initiated abort: surface a standard AbortError rather than the
-			// wrapped provider error so callers can distinguish cancellation.
-			if (metadata?.abortSignal?.aborted) {
-				throw new DOMException("Gemini request aborted", "AbortError")
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("Gemini")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
@@ -574,11 +568,6 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			throw error
-		} finally {
-			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
-			if (externalAbortSignal && externalAbortListener) {
-				externalAbortSignal.removeEventListener("abort", externalAbortListener)
-			}
 		}
 	}
 
@@ -723,10 +712,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 			return text
 		} catch (error) {
-			// User-initiated abort: surface a standard AbortError rather than the
-			// wrapped provider error so callers can distinguish cancellation.
-			if (options?.abortSignal?.aborted) {
-				throw new DOMException("Gemini completion aborted", "AbortError")
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("Gemini")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")

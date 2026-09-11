@@ -22,6 +22,8 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 /**
@@ -268,31 +270,20 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
 		}
 
-		// Bridge the external abort signal from Task (metadata.abortSignal) into a
-		// request-local controller so the in-flight streaming request can be
-		// cancelled. A pre-aborted signal rejects immediately with an AbortError.
-		const externalAbortSignal = metadata?.abortSignal
-		let requestAbortController: AbortController | undefined
-		let externalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				throw new DOMException("LiteLLM streaming aborted", "AbortError")
-			}
-			const controller = new AbortController()
-			requestAbortController = controller
-			const onExternalAbort = () => controller.abort()
-			externalAbortListener = onExternalAbort
-			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-		}
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(metadata?.abortSignal)
+
+		// The request-local controller is the provider-owned abort handle; the
+		// request signal merges it with the external Task signal (AbortSignal.any
+		// inside RequestConfigBuilder), so external aborts cancel the in-flight
+		// request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
 
 		try {
 			const { data: completion } = await this.client.chat.completions
-				.create(
-					requestOptions,
-					requestAbortController
-						? { headers: requestHeaders, signal: requestAbortController.signal }
-						: { headers: requestHeaders },
-				)
+				.create(requestOptions, { headers: requestHeaders, signal: requestSignal })
 				.withResponse()
 
 			let lastUsage
@@ -362,20 +353,15 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				yield usageData
 			}
 		} catch (error) {
-			// User-initiated abort: surface a standard AbortError rather than the
-			// wrapped provider error so callers can distinguish cancellation.
-			if (metadata?.abortSignal?.aborted) {
-				throw new DOMException("LiteLLM streaming aborted", "AbortError")
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("LiteLLM")
 			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM streaming error: ${error.message}`)
 			}
 			throw error
-		} finally {
-			// Stryker disable next-line LogicalOperator: externalAbortListener is only assigned when externalAbortSignal is truthy, so && and || evaluate identically here
-			if (externalAbortSignal && externalAbortListener) {
-				externalAbortSignal.removeEventListener("abort", externalAbortListener)
-			}
 		}
 	}
 
@@ -425,10 +411,10 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
-			// User-initiated abort: surface a standard AbortError rather than the
-			// wrapped provider error so callers can distinguish cancellation.
-			if (options?.abortSignal?.aborted) {
-				throw new DOMException("LiteLLM completion aborted", "AbortError")
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("LiteLLM")
 			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM completion error: ${error.message}`)

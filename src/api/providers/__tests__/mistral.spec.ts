@@ -135,6 +135,7 @@ describe("MistralHandler", () => {
 					tools: expect.any(Array),
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 
 			expect(result.value).toBeDefined()
@@ -501,6 +502,7 @@ describe("MistralHandler", () => {
 					]),
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 		})
 
@@ -518,6 +520,7 @@ describe("MistralHandler", () => {
 					tools: expect.any(Array),
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 		})
 
@@ -655,6 +658,7 @@ describe("MistralHandler", () => {
 				expect.objectContaining({
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 		})
 	})
@@ -799,9 +803,23 @@ describe("MistralHandler", () => {
 			const error = await handler
 				.completePrompt("Test prompt", { abortSignal: controller.signal })
 				.catch((e: unknown) => e)
-			expect(error).toBeInstanceOf(DOMException)
+			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("Mistral completion aborted")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+		})
+
+		it("should surface a standard AbortError when the SDK throws an abort error before the signal flag propagates", async () => {
+			// The signal flag has not propagated yet, but the SDK rejects with its
+			// own abort error: isRequestAborted must catch the error-name branch.
+			mockComplete.mockRejectedValueOnce(Object.assign(new Error("Request was aborted."), { name: "AbortError" }))
+			const controller = new AbortController()
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
 		})
 	})
 
@@ -827,7 +845,7 @@ describe("MistralHandler", () => {
 			const error = await collectStream(stream).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("Mistral completion aborted")
+			expect((error as Error).message).toBe("This operation was aborted")
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -883,21 +901,16 @@ describe("MistralHandler", () => {
 			})
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("Mistral completion aborted")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
 			expect(capturedSignal).toBeDefined()
-			// The in-flight stream must run against a request-local signal, not the
-			// external one forwarded by reference.
+			// The in-flight stream must run against a request-local merged signal, not
+			// the external one forwarded by reference.
 			expect(capturedSignal).not.toBe(controller.signal)
 			expect(capturedSignal?.aborted).toBe(true)
-			// The bridge registers a once-only listener on the external signal and
-			// detaches it when the request settles. Target the last "abort"
-			// registration (the bridge's listener) and assert the exact reference
-			// so a bridge that removes a different callback cannot pass.
-			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
-			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
-			expect(typeof addedListener).toBe("function")
-			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			// The bridge (RequestConfigBuilder.addMergedSignal) uses AbortSignal.any,
+			// so the external signal must never be managed with manual listeners.
+			expect(addEventListenerSpy).not.toHaveBeenCalled()
+			expect(removeEventListenerSpy).not.toHaveBeenCalled()
 		})
 
 		it("should wrap a non-abort stream failure when metadata is provided without a signal", async () => {
@@ -910,11 +923,14 @@ describe("MistralHandler", () => {
 			expect((error as Error).message).toBe("Mistral completion error: boom")
 		})
 
-		it("should not pass a signal to the stream call when no external signal is provided", async () => {
+		it("should pass a live request-local signal to the stream call when no external signal is provided", async () => {
 			const stream = handler.createMessage(systemPrompt, messages)
 			await collectStream(stream)
 			const streamOptions = mockCreate.mock.calls[0][1]
-			expect(streamOptions).toBeUndefined()
+			// The request-local controller signal is always present so the provider
+			// keeps its own abort handle; with no external signal it never aborts.
+			expect(streamOptions?.fetchOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(streamOptions?.fetchOptions?.signal?.aborted).toBe(false)
 		})
 	})
 })

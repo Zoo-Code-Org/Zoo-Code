@@ -1432,9 +1432,23 @@ describe("LiteLLMHandler", () => {
 			const error = await handler
 				.completePrompt("test prompt", { abortSignal: controller.signal })
 				.catch((e: unknown) => e)
-			expect(error).toBeInstanceOf(DOMException)
+			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("LiteLLM completion aborted")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("should surface a standard AbortError when the SDK throws an abort error before the signal flag propagates", async () => {
+			// The signal flag has not propagated yet, but the SDK rejects with its
+			// own abort error: isRequestAborted must catch the error-name branch.
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("Request was aborted."), { name: "AbortError" }))
+			const controller = new AbortController()
+
+			const error = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
 		})
 
 		it("should surface the wrapped provider error when the request fails without options", async () => {
@@ -1474,7 +1488,7 @@ describe("LiteLLMHandler", () => {
 			const error = await collectStream(stream).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("LiteLLM streaming aborted")
+			expect((error as Error).message).toBe("This operation was aborted")
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -1532,18 +1546,13 @@ describe("LiteLLMHandler", () => {
 			})
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("LiteLLM streaming aborted")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
 			expect(capturedSignal).toBeDefined()
 			expect(capturedSignal?.aborted).toBe(true)
-			// The bridge registers a once-only listener on the external signal and
-			// detaches it when the request settles. Target the last "abort"
-			// registration (the bridge's listener) and assert the exact reference
-			// so a bridge that removes a different callback cannot pass.
-			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
-			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
-			expect(typeof addedListener).toBe("function")
-			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			// The bridge (RequestConfigBuilder.addMergedSignal) uses AbortSignal.any,
+			// so the external signal must never be managed with manual listeners.
+			expect(addEventListenerSpy).not.toHaveBeenCalled()
+			expect(removeEventListenerSpy).not.toHaveBeenCalled()
 		})
 
 		it("should wrap a non-abort stream failure with the i18n-free provider message and no metadata", async () => {
