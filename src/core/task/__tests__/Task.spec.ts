@@ -795,7 +795,7 @@ describe("Cline", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(task.attemptApiRequest).toHaveBeenCalledTimes(2)
-			expect(vi.mocked(task.attemptApiRequest).mock.calls[1]?.[0]).toBe(1)
+			expect(vi.mocked(task.attemptApiRequest).mock.calls[1]?.[0]).toBe(0)
 			expect(
 				saySpy.mock.calls.filter(
 					([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,

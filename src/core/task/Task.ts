@@ -3797,7 +3797,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								stack.push({
 									userContent: currentUserContent,
 									includeFileDetails: false,
-									retryAttempt: midStreamRetryAttempt + 1,
+									retryAttempt: 0,
 									// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state and prevents fabricated restoration.
 									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
 									removedUserMessage: removedMidStreamUserMessage,
@@ -4290,7 +4290,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								retryAttempt: 0,
 								// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state for empty continuations.
 								userMessageWasRemoved: removedCurrentUserMessage !== undefined,
 								removedUserMessage: removedCurrentUserMessage,
