@@ -37,10 +37,15 @@ export class TerminalProcess extends BaseTerminalProcess {
 		super()
 
 		this.terminalRef = new WeakRef(terminal)
+		terminal.trackProcess(this)
 
 		this.once("completed", () => {
+			this.terminal.releaseProcess(this)
 			this.terminal.busy = false
 		})
+
+		this.once("error", () => this.terminal.releaseProcess(this))
+		this.once("shell_execution_complete", () => this.terminal.releaseProcess(this))
 
 		this.once("no_shell_integration", () => {
 			this.completeBeforeExecution("<no shell integration>")

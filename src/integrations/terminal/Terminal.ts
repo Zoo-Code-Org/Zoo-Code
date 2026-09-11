@@ -91,13 +91,8 @@ export class Terminal extends BaseTerminal {
 			cancel()
 		}
 
-		const processes = new Set(this.activeProcesses)
-		if (this.process instanceof TerminalProcess) {
-			processes.add(this.process)
-		}
-
-		if (processes.size > 0) {
-			for (const process of processes) {
+		if (this.activeProcesses.size > 0) {
+			for (const process of this.activeProcesses) {
 				process.handleTerminalClosed()
 			}
 		} else {
@@ -114,16 +109,12 @@ export class Terminal extends BaseTerminal {
 		const process = new TerminalProcess(this)
 		process.command = command
 		this.process = process
-		this.activeProcesses.add(process)
 
 		// Set up event handlers from callbacks before starting process.
 		// This ensures that we don't miss any events because they are
 		// configured before the process starts.
 		process.on("line", (line) => callbacks.onLine(line, process))
-		process.once("completed", (output) => {
-			this.activeProcesses.delete(process)
-			void callbacks.onCompleted(output, process)
-		})
+		process.once("completed", (output) => callbacks.onCompleted(output, process))
 		process.once("shell_execution_started", (pid) => callbacks.onShellExecutionStarted(pid, process))
 		process.once("shell_execution_complete", (details) => callbacks.onShellExecutionComplete(details, process))
 		process.once("no_shell_integration", (details) => callbacks.onNoShellIntegration?.(details, process))
@@ -132,10 +123,14 @@ export class Terminal extends BaseTerminal {
 			// Set up event handlers
 			process.once("continue", () => resolve())
 			process.once("error", (error) => {
-				this.activeProcesses.delete(process)
 				console.error(`[Terminal ${this.id}] error:`, error)
 				reject(error)
 			})
+
+			if (this.isClosed()) {
+				queueMicrotask(() => process.handleTerminalClosed())
+				return
+			}
 
 			if (Terminal.isActiveShellCmdExe()) {
 				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
@@ -157,7 +152,6 @@ export class Terminal extends BaseTerminal {
 				this.waitForShellIntegration(Terminal.getShellIntegrationTimeout())
 					.then(() => {
 						if (this.isClosed()) {
-							process.handleTerminalClosed()
 							return
 						}
 
@@ -169,7 +163,6 @@ export class Terminal extends BaseTerminal {
 					})
 					.catch(() => {
 						if (this.isClosed()) {
-							process.handleTerminalClosed()
 							return
 						}
 
@@ -187,6 +180,16 @@ export class Terminal extends BaseTerminal {
 		})
 
 		return mergePromise(process, promise)
+	}
+
+	/** Registers a process so terminal closure can finalize it even after supersession. */
+	public trackProcess(process: TerminalProcess): void {
+		this.activeProcesses.add(process)
+	}
+
+	/** Removes a process after its completion or error path has settled. */
+	public releaseProcess(process: TerminalProcess): void {
+		this.activeProcesses.delete(process)
 	}
 
 	/**
