@@ -54,24 +54,34 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: useSelectedModelMock,
 }))
 
-vi.mock("@/components/ui", () => ({
-	Popover: ({ children, open }: ComponentProps<typeof Popover>) => (
-		<div data-testid="popover-root" data-open={open}>
-			{children}
-		</div>
-	),
-	PopoverTrigger: ({ children, disabled, ...props }: ComponentProps<typeof PopoverTrigger>) => (
-		<button data-testid="model-selector-trigger" disabled={disabled} {...props}>
-			{children}
-		</button>
-	),
-	PopoverContent: ({ children }: ComponentProps<typeof PopoverContent>) => (
-		<div data-testid="popover-content">{children}</div>
-	),
-	StandardTooltip: ({ children, content }: ComponentProps<typeof StandardTooltip>) => (
-		<div data-tooltip-content={content}>{children}</div>
-	),
-}))
+vi.mock("@/components/ui", async () => {
+	const { createContext, useContext } = await import("react")
+	const PopoverContext = createContext<Pick<ComponentProps<typeof Popover>, "open" | "onOpenChange">>({})
+	return {
+		Popover: ({ children, open, onOpenChange }: ComponentProps<typeof Popover>) => (
+			<PopoverContext.Provider value={{ open, onOpenChange }}>
+				<div data-testid="popover-root" data-open={open}>
+					{children}
+				</div>
+			</PopoverContext.Provider>
+		),
+		PopoverTrigger: ({ children, ...props }: ComponentProps<typeof PopoverTrigger>) => {
+			const { open, onOpenChange } = useContext(PopoverContext)
+			return (
+				<button {...props} onClick={() => onOpenChange?.(!open)}>
+					{children}
+				</button>
+			)
+		},
+		PopoverContent: ({ children }: ComponentProps<typeof PopoverContent>) => {
+			const { open } = useContext(PopoverContext)
+			return open ? <div data-testid="popover-content">{children}</div> : null
+		},
+		StandardTooltip: ({ children, content }: ComponentProps<typeof StandardTooltip>) => (
+			<div data-tooltip-content={content}>{children}</div>
+		),
+	}
+})
 
 const makeModelInfo = (overrides: Partial<ModelInfo> = {}): ModelInfo => ({
 	contextWindow: 128000,
@@ -125,6 +135,7 @@ describe("ModelSelector", () => {
 		rerender(<ModelSelector {...props} />)
 		if (hasModels) {
 			expect(screen.getByTestId("model-selector-trigger")).not.toBeDisabled()
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
 			expect(screen.getByRole("button", { name: "model-a" })).toBeInTheDocument()
 		} else {
 			expect(screen.getByTestId("model-selector-disabled")).toBeInTheDocument()
@@ -137,6 +148,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }} title="Select model" />,
 		)
+		await user.click(screen.getByTestId("model-selector-trigger"))
 		const search = screen.getByRole("textbox")
 		await user.type(search, "model-3")
 		await user.tab()
@@ -148,6 +160,7 @@ describe("ModelSelector", () => {
 		await user.tab()
 		expect(screen.getByRole("button", { name: "openrouter/model-0" })).toHaveFocus()
 		await user.keyboard(" ")
+		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "upsertApiConfiguration",
@@ -161,6 +174,7 @@ describe("ModelSelector", () => {
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: { "model-a": makeModelInfo() } }, isLoading: false })
 		const props = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter }, title: "Select model" }
 		const { rerender } = render(<ModelSelector {...props} />)
+		await user.click(screen.getByTestId("model-selector-trigger"))
 		const model = screen.getByRole("button", { name: "model-a" })
 		model.focus()
 		rerender(<ModelSelector {...props} disabled />)
@@ -183,6 +197,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(screen.getByTestId("model-selector-trigger")).not.toBeDisabled()
 
@@ -214,6 +229,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		fireEvent.click(screen.getAllByText(/claude-3-5-haiku/i)[0])
 
@@ -227,6 +243,7 @@ describe("ModelSelector", () => {
 			}),
 		)
 		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "false")
+		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
 	})
 
 	it("prefers a model's displayName over its raw id when present", () => {
@@ -257,6 +274,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		// Trigger shows the displayName, not the raw id.
 		expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("Model A (friendly)")
@@ -285,6 +303,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(screen.getByText("openrouter/model-b")).toBeInTheDocument()
 
@@ -466,6 +485,7 @@ describe("ModelSelector", () => {
 		)
 
 		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "false")
+		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
 	})
 
 	it("does not append anything to the trigger class name by default", () => {
@@ -512,6 +532,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const list = within(screen.getByTestId("popover-content"))
 		const currentItem = list.getByText("openrouter/model-a").parentElement
@@ -545,6 +566,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(screen.queryByLabelText("common:ui.search_placeholder")).not.toBeInTheDocument()
 	})
@@ -568,6 +590,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(screen.queryByLabelText("common:ui.search_placeholder")).not.toBeInTheDocument()
 
@@ -606,6 +629,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
 		expect(searchInput).toHaveValue("")
@@ -635,19 +659,21 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
 		fireEvent.change(searchInput, { target: { value: "model-3" } })
 		fireEvent.click(within(screen.getByTestId("popover-content")).getByText("openrouter/model-3"))
-
-		expect(searchInput).toHaveValue("")
+		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(screen.getByLabelText("common:ui.search_placeholder")).toHaveValue("")
 	})
 
 	it("matches a model by its displayName, and by its raw id when it has no displayName", () => {
 		useRouterModelsMock.mockReturnValue({
 			data: {
 				openrouter: Object.fromEntries([
-					["openrouter/model-a", { displayName: "Zebra Special" }],
+					["openrouter/model-a", makeModelInfo({ displayName: "Zebra Special" })],
 					...Array.from({ length: 7 }, (_, index) => [`openrouter/model-${index}`, makeModelInfo()]),
 				]),
 			},
@@ -667,6 +693,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const list = within(screen.getByTestId("popover-content"))
 		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
@@ -695,6 +722,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		// A search term that only fuzzy-matches if the id were searched as "id id" (i.e. searched
 		// against itself twice) must not match, since a model without a displayName is only
@@ -722,6 +750,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		fireEvent.change(screen.getByLabelText("common:ui.search_placeholder"), {
 			target: { value: "no-such-model" },
@@ -746,6 +775,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(container.querySelector(".codicon-close")).not.toBeInTheDocument()
 
@@ -770,6 +800,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(within(screen.getByTestId("popover-content")).getByText("chat:selectModel")).toBeInTheDocument()
 	})
@@ -793,6 +824,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
 		fireEvent.change(searchInput, { target: { value: "brand-new-model" } })
@@ -842,6 +874,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-b", isLoading: false })
 		rerender(
@@ -893,6 +926,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		rerender(
 			<ModelSelector
@@ -927,6 +961,7 @@ describe("ModelSelector", () => {
 				title="Select model"
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const list = within(screen.getByTestId("popover-content"))
 
@@ -977,6 +1012,7 @@ describe("ModelSelector", () => {
 				organizationAllowList={allowList}
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const list = within(screen.getByTestId("popover-content"))
 
@@ -1017,6 +1053,7 @@ describe("ModelSelector", () => {
 				organizationAllowList={allowList}
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const list = within(screen.getByTestId("popover-content"))
 
@@ -1052,6 +1089,7 @@ describe("ModelSelector", () => {
 				organizationAllowList={allowList}
 			/>,
 		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		const list = within(screen.getByTestId("popover-content"))
 

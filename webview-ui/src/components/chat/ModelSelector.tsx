@@ -88,7 +88,7 @@ export const ModelSelector = ({
 
 	const isModelListLoading = !!dynamicProvider && routerModels.isLoading
 	const isSupported = !!modelConfig && (isModelListLoading || modelIds.length > 0)
-	const isDisabled = disabled || !isSupported || (isModelListLoading && modelIds.length === 0)
+	const isDisabled = disabled || modelIds.length === 0
 
 	// Label shown for a model — prefers `ModelInfo.displayName` when present, falling back to
 	// the raw model id (mirrors ModelPicker.tsx's trigger/list label logic).
@@ -144,10 +144,6 @@ export const ModelSelector = ({
 				return
 			}
 
-			if (isDisabled) {
-				return
-			}
-
 			const updated: ProviderSettings = {
 				...apiConfiguration,
 				reasoningEffort: undefined,
@@ -165,7 +161,7 @@ export const ModelSelector = ({
 			setOpen(false)
 			setSearchValue("")
 		},
-		[apiConfiguration, modelConfig, currentApiConfigName, isDisabled],
+		[apiConfiguration, modelConfig, currentApiConfigName],
 	)
 
 	const renderModelItem = useCallback(
