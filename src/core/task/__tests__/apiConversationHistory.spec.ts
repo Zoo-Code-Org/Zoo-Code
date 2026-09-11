@@ -100,6 +100,26 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
+	it("falls back to the single signed block when getThinkingBlocks returns an empty array", () => {
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThinkingBlocks: () => [],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "private reasoning",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "thinking", thinking: "private reasoning", signature: "signature-1" },
+			{ type: "text", text: "answer" },
+		])
+	})
+
 	it("prefers reasoning_details over getThinkingBlocks for Anthropic messages", () => {
 		// Double assertion: the stub only implements the optional history hooks
 		// this path reads, not the full ApiHandler surface.

@@ -550,6 +550,7 @@ describe("Cline", () => {
 			expect(retryAnnouncements).toHaveLength(3)
 			expect(askSpy).toHaveBeenCalledTimes(1)
 			expect(askSpy.mock.calls[0]?.[0]).toBe("api_req_failed")
+			expect(askSpy.mock.calls[0]?.[1]).toContain("Automatic retries were attempted 3 times without success.")
 			expect(task.apiConversationHistory).toHaveLength(2)
 			expect(task.apiConversationHistory[0]).toMatchObject({
 				role: "user",
@@ -603,9 +604,14 @@ describe("Cline", () => {
 			expect(retryAnnouncements).toHaveLength(3)
 			expect(askSpy).toHaveBeenCalledTimes(1)
 			expect(askSpy.mock.calls[0]?.[0]).toBe("api_req_failed")
+			expect(askSpy.mock.calls[0]?.[1]).toContain("4 times mid-response")
 			// Declined retry surfaces the error and records the failure without
 			// losing or duplicating the user message.
-			expect(saySpy.mock.calls.some(([type]) => type === "error")).toBe(true)
+			expect(
+				saySpy.mock.calls.some(
+					([type, text]) => type === "error" && typeof text === "string" && text.includes("was not retried"),
+				),
+			).toBe(true)
 			expect(task.apiConversationHistory).toHaveLength(2)
 			expect(task.apiConversationHistory[0]).toMatchObject({
 				role: "user",
@@ -644,6 +650,7 @@ describe("Cline", () => {
 
 		it("resets the retry budget without duplicating the user message when the user approves retry", async () => {
 			const task = await createTaskWithAutoApproval(true)
+			vi.mocked(getEnvironmentDetails).mockClear()
 			let askCount = 0
 			vi.spyOn(task, "ask").mockImplementation(async () => {
 				askCount++
@@ -683,6 +690,7 @@ describe("Cline", () => {
 			})
 			expect(historyAtSuccess?.[0]?.messageId).toBe(originalUserMessage?.messageId)
 			expect(historyAtSuccess?.[0]?.ts).toBe(originalUserMessage?.ts)
+			expect(vi.mocked(getEnvironmentDetails).mock.calls.every((call) => call[1] === false)).toBe(true)
 			// Final history: original user turn, recovered assistant turn, the
 			// follow-up user turn, and the recorded failure.
 			expect(task.messageCounts).toEqual({ user: 2, assistant: 2 })

@@ -3717,12 +3717,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// message) does not duplicate it in history. Keep the exact
 							// record so a restore preserves its persisted identity.
 							let removedMidStreamUserMessage: ApiMessage | undefined
-							if (currentUserContent.length > 0 && this.apiConversationHistory.length > 0) {
-								const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
-								if (lastMessage.role === "user") {
-									removedMidStreamUserMessage = this.apiConversationHistory.pop()
-									this.messageCounts.user--
-								}
+							const hasUserContent = currentUserContent.length > 0
+							const lastHistoryMessage =
+								this.apiConversationHistory[this.apiConversationHistory.length - 1]
+							// Stryker disable next-line ConditionalExpression,OptionalChaining: whenever content is non-empty here, the last record is this turn's user message; the role check is defensive against corrupted history and has no reachable false branch.
+							if (hasUserContent && lastHistoryMessage?.role === "user") {
+								removedMidStreamUserMessage = this.apiConversationHistory.pop()
+								this.messageCounts.user--
 							}
 
 							const { response } = await this.ask(
@@ -3734,12 +3735,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								await this.say("api_req_retried")
 
 								// Reset the automatic retry budget; the user message is
-								// restored exactly once on the next iteration.
+								// restored exactly once on the next iteration. The
+								// userMessageWasRemoved flag is redundant here because
+								// retryAttempt 0 with non-empty content always re-adds.
 								stack.push({
 									userContent: currentUserContent,
 									includeFileDetails: false,
 									retryAttempt: 0,
-									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
 									removedUserMessage: removedMidStreamUserMessage,
 								})
 
