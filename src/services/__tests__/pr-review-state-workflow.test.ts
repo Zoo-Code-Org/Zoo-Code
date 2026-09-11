@@ -537,9 +537,44 @@ describe("PR review-state workflow", () => {
 		expect(latestGuide(result)).toContain("Review-state labels are managed by this workflow")
 	})
 
-	it("routes bot-authored PRs directly to maintainer review", async () => {
+	it("starts CodeRabbit for zoomote-authored PRs after required CI passes", async () => {
 		const result = await runWorkflow({
 			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.description).toContain("Waiting for automated review")
+	})
+
+	it("does not start CodeRabbit for draft zoomote-authored PRs", async () => {
+		const result = await runWorkflow({
+			draft: true,
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGuide(result)).toContain("Mark the PR ready")
+	})
+
+	it("does not start CodeRabbit for zoomote-authored PRs while required CI fails", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			requiredConclusion: "failure",
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("Fix the failing required CI checks")
+	})
+
+	it("routes other bot-authored PRs directly to maintainer review", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "dependabot[bot]", type: "Bot" },
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
@@ -550,9 +585,9 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)?.description).toContain("Awaiting fresh human maintainer")
 	})
 
-	it("completes bot-authored PR review after human maintainer approval", async () => {
+	it("completes other bot-authored PR review after human maintainer approval", async () => {
 		const result = await runWorkflow({
-			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			prAuthor: { login: "dependabot[bot]", type: "Bot" },
 			permissions: { maintainer: "write" },
 			reviews: [
 				{
@@ -569,7 +604,7 @@ describe("PR review-state workflow", () => {
 
 	it("honors manually requested CodeRabbit changes on bot-authored PRs", async () => {
 		const result = await runWorkflow({
-			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			prAuthor: { login: "dependabot[bot]", type: "Bot" },
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
