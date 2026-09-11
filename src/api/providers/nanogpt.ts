@@ -132,7 +132,12 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			stream: true,
 			stream_options: { include_usage: true },
 			max_tokens: info.maxTokens ?? undefined,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			// Preserve the declared schema instead of making every optional field
+			// required for OpenAI strict mode (e.g. read_file's indentation options).
+			// Non-strict generation still retains every original required constraint.
+			tools: metadata?.tools?.map((tool) =>
+				tool.type === "function" ? { ...tool, function: { ...tool.function, strict: false } } : tool,
+			),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: isAstra ? false : (metadata?.parallelToolCalls ?? true),
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),

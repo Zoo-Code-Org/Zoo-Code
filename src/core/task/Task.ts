@@ -138,6 +138,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
+import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -197,6 +198,8 @@ export interface TaskOptions extends CreateTaskOptions {
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 	rateLimitClock?: RateLimitClock
 	diffFuzzyThreshold?: number
+	/** Explicit task-local execution context for a delegated child. */
+	handoffExecutionContext?: TaskExecutionContext
 }
 
 type AssistantMessagePersistenceResult = boolean
@@ -528,6 +531,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		initialStatus,
 		rateLimitClock,
 		diffFuzzyThreshold,
+		handoffExecutionContext,
 	}: TaskOptions) {
 		super()
 		this.resetAssistantMessagePersistence()
@@ -577,7 +581,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Failed to initialize RooIgnoreController:", error)
 		})
 
-		this.apiConfiguration = apiConfiguration
+		this.apiConfiguration = handoffExecutionContext?.apiConfiguration ?? apiConfiguration
 		this.api = buildApiHandler(this.apiConfiguration)
 		this.rateLimitClock = rateLimitClock ?? createRateLimitClock()
 		this.autoApprovalHandler = new AutoApprovalHandler()
@@ -597,7 +601,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Store the task's mode and API config name when it's created.
 		// For history items, use the stored values; for new tasks, we'll set them
 		// after getting state.
-		if (historyItem) {
+		if (handoffExecutionContext) {
+			this._taskMode = handoffExecutionContext.mode
+			this._taskApiConfigName = handoffExecutionContext.apiConfigName
+			this.taskModeReady = Promise.resolve()
+			this.taskApiConfigReady = Promise.resolve()
+			TelemetryService.instance.captureTaskCreated(this.taskId)
+		} else if (historyItem) {
 			this._taskMode = historyItem.mode || defaultModeSlug
 			this._taskApiConfigName = historyItem.apiConfigName
 			this.taskModeReady = Promise.resolve()
