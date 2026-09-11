@@ -3,7 +3,12 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 
-import { convertToVsCodeLmMessages, convertToAnthropicRole, extractTextCountFromMessage } from "../vscode-lm-format"
+import {
+	convertToVsCodeLmMessages,
+	convertToAnthropicRole,
+	extractTextCountFromMessage,
+	sanitizeSurrogates,
+} from "../vscode-lm-format"
 
 // Mock crypto using Vitest
 vitest.stubGlobal("crypto", {
@@ -322,6 +327,97 @@ describe("convertToVsCodeLmMessages", () => {
 		const result = convertToVsCodeLmMessages(messages)
 		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
 		expect(toolResult.content[0].value).toBe("")
+	})
+})
+
+describe("sanitizeSurrogates", () => {
+	it("leaves plain ASCII unchanged", () => {
+		expect(sanitizeSurrogates("hello world")).toBe("hello world")
+	})
+
+	it("leaves valid surrogate pairs unchanged", () => {
+		// 😀 U+1F600 and 𐀀 U+10000 are astral-plane code points encoded as surrogate pairs.
+		expect(sanitizeSurrogates("a\uD83D\uDE00b\uD800\uDC00c")).toBe("a\uD83D\uDE00b\uD800\uDC00c")
+	})
+
+	it("replaces a lone high surrogate with U+FFFD", () => {
+		expect(sanitizeSurrogates("a\uD800b")).toBe("a\uFFFDb")
+	})
+
+	it("replaces a lone low surrogate with U+FFFD", () => {
+		expect(sanitizeSurrogates("a\uDC00b")).toBe("a\uFFFDb")
+	})
+
+	it("replaces a trailing lone high surrogate", () => {
+		expect(sanitizeSurrogates("abc\uD800")).toBe("abc\uFFFD")
+	})
+
+	it("replaces a reversed (low-then-high) pair as two lone surrogates", () => {
+		expect(sanitizeSurrogates("\uDC00\uD800")).toBe("\uFFFD\uFFFD")
+	})
+
+	it("returns empty input unchanged", () => {
+		expect(sanitizeSurrogates("")).toBe("")
+	})
+})
+
+describe("convertToVsCodeLmMessages surrogate sanitization", () => {
+	const lone = "bad\uD800end"
+	const sanitized = "bad\uFFFDend"
+
+	const textValues = (message: { content: unknown }) =>
+		(message.content as MockLanguageModelTextPart[]).map((part) => part.value)
+
+	it("sanitizes a simple string message", () => {
+		const result = convertToVsCodeLmMessages([{ role: "user", content: lone }])
+		expect(textValues(result[0])).toEqual([sanitized])
+	})
+
+	it("sanitizes string tool_result content", () => {
+		const result = convertToVsCodeLmMessages([
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: lone }] },
+		])
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
+		expect(toolResult.content[0].value).toBe(sanitized)
+	})
+
+	it("sanitizes tool_result text blocks", () => {
+		const result = convertToVsCodeLmMessages([
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "tool-1", content: [{ type: "text", text: lone }] }],
+			},
+		])
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
+		expect(toolResult.content[0].value).toBe(sanitized)
+	})
+
+	it("sanitizes user text blocks", () => {
+		const result = convertToVsCodeLmMessages([{ role: "user", content: [{ type: "text", text: lone }] }])
+		expect(textValues(result[0])).toContain(sanitized)
+	})
+
+	it("sanitizes strings nested in tool_use input", () => {
+		const result = convertToVsCodeLmMessages([
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use",
+						id: "tool-1",
+						name: "read_file",
+						input: { path: lone, nested: { list: [lone] } },
+					},
+				],
+			},
+		])
+		const toolCall = result[0].content[0] as MockLanguageModelToolCallPart
+		expect(toolCall.input).toEqual({ path: sanitized, nested: { list: [sanitized] } })
+	})
+
+	it("sanitizes assistant text blocks", () => {
+		const result = convertToVsCodeLmMessages([{ role: "assistant", content: [{ type: "text", text: lone }] }])
+		expect(textValues(result[0])).toContain(sanitized)
 	})
 })
 
