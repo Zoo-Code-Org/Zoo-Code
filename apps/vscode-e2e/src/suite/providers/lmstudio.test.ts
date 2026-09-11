@@ -154,14 +154,16 @@ suite("LM Studio provider", function () {
 
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		let taskId: string | undefined
 		try {
-			taskId = await api.startNewTask({
-				configuration: { mode: "ask", autoApprovalEnabled: true, alwaysAllowModeSwitch: true },
-				text: `${PROMPT_TAG}: What is the capital of France? Reply with only the city name.`,
+			await waitUntilCompleted({
+				api,
+				timeout: 120_000,
+				start: () =>
+					api.startNewTask({
+						configuration: { mode: "ask", autoApprovalEnabled: true, alwaysAllowModeSwitch: true },
+						text: `${PROMPT_TAG}: What is the capital of France? Reply with only the city name.`,
+					}),
 			})
-
-			await waitUntilCompleted({ api, taskId, timeout: 120_000 })
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 		}
