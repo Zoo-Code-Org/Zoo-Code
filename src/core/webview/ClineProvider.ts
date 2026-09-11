@@ -4128,6 +4128,8 @@ export class ClineProvider
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
 		let parentToResume: Task | undefined
 		let childToRestore: HistoryItem | undefined
+		const isCurrentDelegation = (parent?: HistoryItem) =>
+			parent?.awaitingChildId === childTaskId && (parent.status === "delegated" || parent.status === "active")
 		const transition = async (firstFileLock: JsonFileLock) => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
@@ -4146,12 +4148,7 @@ export class ClineProvider
 			// (setting status → "active", awaitingChildId → undefined) while the user was
 			// approving the subtask finish.  If the parent no longer awaits this child,
 			// routing output back would corrupt an unrelated task.
-			if (
-				this.cancelledDelegationChildIds.has(childTaskId) ||
-				!refreshedParent ||
-				(refreshedParent.status !== "delegated" && refreshedParent.status !== "active") ||
-				refreshedParent.awaitingChildId !== childTaskId
-			) {
+			if (this.cancelledDelegationChildIds.has(childTaskId) || !isCurrentDelegation(refreshedParent)) {
 				this.log(
 					`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId} ` +
 						`(status=${refreshedParent?.status}, awaitingChildId=${refreshedParent?.awaitingChildId})`,
@@ -4295,12 +4292,7 @@ export class ClineProvider
 			let completingChild!: HistoryItem
 			const staleDelegationError = new Error("stale cross-instance delegation")
 			const assertCurrentDelegation = (parent: HistoryItem) => {
-				if (
-					(parent.status !== "delegated" && parent.status !== "active") ||
-					parent.awaitingChildId !== childTaskId
-				) {
-					throw staleDelegationError
-				}
+				if (!isCurrentDelegation(parent)) throw staleDelegationError
 			}
 			const completionOptions = {
 				firstDiskGuard: assertCurrentDelegation,
