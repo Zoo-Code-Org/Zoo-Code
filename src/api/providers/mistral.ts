@@ -121,11 +121,20 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			})
 
 			for await (const event of response) {
+				// Stop consuming buffered events once the request is aborted (the
+				// SDK iterator may keep delivering buffered content after abort).
+				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				const delta = event.data.choices[0]?.delta
 
 				if (delta?.content) {
 					if (typeof delta.content === "string") {
-						// Handle string content as text
+						// Handle string content as text (no pre-yield guard: this is
+						// the first yield of the iteration — the top-of-loop check
+						// runs without a suspension point before it).
 						yield { type: "text", text: delta.content }
 					} else if (Array.isArray(delta.content)) {
 						// Handle array of content chunks
@@ -136,11 +145,13 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 								// ThinkChunk has a 'thinking' property that contains an array of text/reference chunks
 								for (const thinkingPart of chunk.thinking) {
 									if (thinkingPart.type === "text" && thinkingPart.text) {
+										throwIfAborted(requestSignal)
 										yield { type: "reasoning", text: thinkingPart.text }
 									}
 								}
 							} else if (chunk.type === "text" && chunk.text) {
 								// Handle text content normally
+								throwIfAborted(requestSignal)
 								yield { type: "text", text: chunk.text }
 							}
 						}
@@ -153,6 +164,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 				if (toolCalls) {
 					for (let i = 0; i < toolCalls.length; i++) {
 						const toolCall = toolCalls[i]
+						throwIfAborted(requestSignal)
 						yield {
 							type: "tool_call_partial",
 							index: i,
@@ -164,6 +176,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 				}
 
 				if (event.data.usage) {
+					throwIfAborted(requestSignal)
 					yield {
 						type: "usage",
 						inputTokens: event.data.usage.promptTokens || 0,
@@ -171,6 +184,11 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 					}
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 		} catch (error) {
 			// Aborted request: covers both the external signal and SDK-native
 			// abort errors that may surface before the signal flag propagates.
@@ -213,6 +231,9 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		return { id, info, maxTokens, temperature }
 	}
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: model, temperature } = this.getModel()
 
 		try {

@@ -729,6 +729,20 @@ describe("MistralHandler", () => {
 			})
 		})
 
+		it("should reject immediately with AbortError when the external signal is pre-aborted, before the request is built", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			// The fast-fail must run before the client is touched.
+			expect(mockComplete).not.toHaveBeenCalled()
+		})
+
 		it("should work without options (backward compatible)", async () => {
 			mockComplete.mockResolvedValueOnce({
 				choices: [{ message: { content: "response" } }],
@@ -795,14 +809,26 @@ describe("MistralHandler", () => {
 			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
 		})
 
-		it("should surface a standard AbortError when the signal was aborted and the request fails", async () => {
-			mockComplete.mockRejectedValueOnce(new Error("API Error"))
+		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {
 			const controller = new AbortController()
+			// The request stays pending until the external signal aborts it; the
+			// mock rejects with a plain (non-abort) error once the signal has
+			// aborted, so the catch block must classify it via signal.aborted.
+			mockComplete.mockImplementationOnce(() => {
+				return new Promise<never>((_resolve, reject) => {
+					const fail = () => reject(new Error("API Error"))
+					if (controller.signal.aborted) {
+						fail()
+						return
+					}
+					controller.signal.addEventListener("abort", fail, { once: true })
+				})
+			})
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			// Abort after entry — the pre-abort fast-fail must not apply, and the
+			// catch block handles the failure.
 			controller.abort()
-
-			const error = await handler
-				.completePrompt("Test prompt", { abortSignal: controller.signal })
-				.catch((e: unknown) => e)
+			const error = await promise.catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The Mistral request was aborted")
@@ -931,6 +957,136 @@ describe("MistralHandler", () => {
 			// keeps its own abort handle; with no external signal it never aborts.
 			expect(streamOptions?.fetchOptions?.signal).toBeInstanceOf(AbortSignal)
 			expect(streamOptions?.fetchOptions?.signal?.aborted).toBe(false)
+		})
+	})
+
+	describe("createMessage streaming loop abort defense", () => {
+		const systemPrompt = "You are a helpful assistant."
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "Hello!" }],
+			},
+		]
+
+		const thinkingChunk = { type: "thinking", thinking: [{ type: "text", text: "reasoning" }] }
+		const textChunk = { type: "text", text: "content" }
+
+		function eventOf(delta: Record<string, unknown>, usage?: Record<string, unknown>) {
+			return {
+				data: {
+					choices: [
+						{
+							delta,
+							index: 0,
+						},
+					],
+					...(usage ? { usage } : {}),
+				},
+			}
+		}
+
+		function startStream(signal: AbortSignal, generator: AsyncGenerator<unknown>) {
+			mockCreate.mockImplementationOnce(async () => generator)
+			return handler.createMessage(systemPrompt, messages, makeCreateMessageMetadata({ abortSignal: signal }))
+		}
+
+		it("rejects with AbortError instead of yielding text content after a mid-event abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([eventOf({ content: [thinkingChunk, textChunk] })]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding reasoning after a mid-event abort (text-first event)", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([eventOf({ content: [textChunk, thinkingChunk] })]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding a tool call after a mid-event abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([
+					eventOf({
+						content: [thinkingChunk],
+						toolCalls: [{ id: "1", function: { name: "f", arguments: "{}" } }],
+					}),
+				]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding usage after a mid-event abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([eventOf({ content: [thinkingChunk] }, { promptTokens: 1, completionTokens: 2 })]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+		})
+
+		it("does not process or pull events beyond the aborted point and surfaces AbortError instead of completing the stream", async () => {
+			const controller = new AbortController()
+			let pulls = 0
+			const generator = (async function* () {
+				pulls++
+				yield eventOf({ content: [textChunk] })
+				pulls++
+				// String-content shape: its text yield is the first yield of the
+				// iteration and carries no pre-yield guard, so only the top-of-loop
+				// break prevents it from leaking.
+				yield eventOf({ content: "buffered" })
+				pulls++
+				yield eventOf({ content: [textChunk] })
+			})()
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+			// The for-await mechanism pulls the already-buffered event before the
+			// top-of-loop check runs; the break must ensure it is not processed and
+			// that no event beyond it is pulled.
+			expect(pulls).toBe(2)
 		})
 	})
 })

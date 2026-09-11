@@ -1548,19 +1548,24 @@ describe("LiteLLMHandler", () => {
 			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
 				requestStartedResolve()
+				const pendingAbort = new Promise<never>((_resolve, reject) => {
+					const onAbort = () => reject(new DOMException("aborted", "AbortError"))
+					if (capturedSignal?.aborted) {
+						onAbort()
+						return
+					}
+					capturedSignal?.addEventListener("abort", onAbort, { once: true })
+				})
+				// A correctly aborted request stops pulling at the top-of-loop break
+				// and never reads this element, so its rejection must be handled
+				// here to keep it from being reported as an unhandled rejection.
+				void pendingAbort.catch(() => undefined)
 				const mockStream = asyncStreamFrom([
 					{
 						choices: [{ delta: { content: "partial" } }],
 						usage: undefined,
 					},
-					new Promise<never>((_resolve, reject) => {
-						const onAbort = () => reject(new DOMException("aborted", "AbortError"))
-						if (capturedSignal?.aborted) {
-							onAbort()
-							return
-						}
-						capturedSignal?.addEventListener("abort", onAbort, { once: true })
-					}),
+					pendingAbort,
 				])
 				return { withResponse: vi.fn().mockResolvedValue({ data: mockStream }) }
 			})
@@ -1616,6 +1621,118 @@ describe("LiteLLMHandler", () => {
 				handler.createMessage("system", messages, makeCreateMessageMetadata()),
 			).catch((e: unknown) => e)
 			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
+		})
+	})
+
+	describe("createMessage streaming loop abort defense", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		function chunkOf(delta: Record<string, unknown>) {
+			return { choices: [{ delta }] }
+		}
+
+		function startStream(signal: AbortSignal, generator: AsyncGenerator<unknown>) {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: generator }),
+			})
+			return handler.createMessage("system", messages, makeCreateMessageMetadata({ abortSignal: signal }))
+		}
+
+		it("rejects with AbortError instead of yielding text content after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([chunkOf({ reasoning_content: "reasoning", content: "content" })]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding a tool call after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([
+					chunkOf({
+						content: "content",
+						tool_calls: [
+							{
+								index: 0,
+								id: "1",
+								type: "function",
+								function: { name: "f", arguments: "{}" },
+							},
+						],
+					}),
+				]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("does not process or pull chunks beyond the aborted point and surfaces AbortError instead of completing the stream", async () => {
+			const controller = new AbortController()
+			let pulls = 0
+			const generator = (async function* () {
+				pulls++
+				yield chunkOf({ content: "first" })
+				pulls++
+				// Reasoning shape: its reasoning yield is the first yield of the
+				// iteration and carries no pre-yield guard, so only the top-of-loop
+				// break prevents it from leaking.
+				yield chunkOf({ reasoning_content: "buffered" })
+				pulls++
+				yield chunkOf({ content: "third" })
+			})()
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+			// The for-await mechanism pulls the already-buffered chunk before the
+			// top-of-loop check runs; the break must ensure it is not processed and
+			// that no chunk beyond it is pulled.
+			expect(pulls).toBe(2)
+		})
+
+		it("completes normally for a usage-only chunk with empty choices (delta is undefined)", async () => {
+			const controller = new AbortController()
+			// Real OpenAI-shaped streams end with a usage-only chunk whose choices
+			// array is empty: delta is undefined, so the chunk must be skipped
+			// without touching the optional-chained delta fields.
+			const generator = asyncStreamFrom([
+				chunkOf({ content: "content" }),
+				{ choices: [], usage: { prompt_tokens: 5, completion_tokens: 7 } },
+			])
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+
+			const chunks: unknown[] = []
+			for await (const c of stream) chunks.push(c)
+			expect(chunks).toHaveLength(1)
+			expect((chunks[0] as { type: string }).type).toBe("usage")
 		})
 	})
 })

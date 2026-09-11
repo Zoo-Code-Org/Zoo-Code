@@ -432,10 +432,15 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			let finishReason: string | undefined
 
 			let toolCallCounter = 0
-			let hasContent = false
-			let hasReasoning = false
 
 			for await (const chunk of result) {
+				// Stop consuming buffered chunks once the request is aborted (the
+				// SDK iterator may keep delivering buffered content after abort).
+				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				// Track the final structured response (per SDK pattern: candidate.finishReason)
 				if (chunk.candidates && chunk.candidates[0]?.finishReason) {
 					finalResponse = chunk as { responseId?: string }
@@ -468,17 +473,19 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 							if (part.thought) {
 								// This is a thinking/reasoning part
 								if (part.text) {
-									hasReasoning = true
+									// Re-check before emitting: the consumer may have aborted
+									// while processing a previously yielded part of this chunk.
+									throwIfAborted(requestSignal)
 									yield { type: "reasoning", text: part.text }
 								}
 							} else if (part.functionCall) {
-								hasContent = true
 								// Gemini sends complete function calls in a single chunk
 								// Emit as partial chunks for consistent handling with NativeToolCallParser
 								const callId = `${part.functionCall.name}-${toolCallCounter}`
 								const args = JSON.stringify(part.functionCall.args)
 
 								// Emit name first
+								throwIfAborted(requestSignal)
 								yield {
 									type: "tool_call_partial",
 									index: toolCallCounter,
@@ -488,6 +495,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 								}
 
 								// Then emit arguments
+								throwIfAborted(requestSignal)
 								yield {
 									type: "tool_call_partial",
 									index: toolCallCounter,
@@ -500,7 +508,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 							} else {
 								// This is regular content
 								if (part.text) {
-									hasContent = true
+									throwIfAborted(requestSignal)
 									yield { type: "text", text: part.text }
 								}
 							}
@@ -509,8 +517,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 
 				// Fallback to the original text property if no candidates structure
+				// (no pre-yield guard here: this is the only yield of a fallback
+				// chunk, and the top-of-loop check runs without a suspension point
+				// before it).
 				else if (chunk.text) {
-					hasContent = true
 					yield { type: "text", text: chunk.text }
 				}
 
@@ -518,6 +528,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 					lastUsageMetadata = chunk.usageMetadata
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 
 			if (finalResponse?.responseId) {
 				// Capture responseId so Task.addToApiConversationHistory can store it
@@ -660,6 +675,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: model, info } = this.getModel()
 
 		try {

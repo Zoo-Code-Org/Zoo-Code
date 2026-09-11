@@ -291,21 +291,33 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			let lastUsage
 
 			for await (const chunk of completion) {
+				// Stop consuming buffered chunks once the request is aborted (the
+				// OpenAI SDK iterator may keep delivering buffered content after
+				// abort, and swallows the mid-stream AbortError).
+				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				const delta = chunk.choices[0]?.delta
 				const usage = chunk.usage as LiteLLMUsage
 
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
+					// No pre-yield guard: this is the first yield of the iteration —
+					// the top-of-loop check runs without a suspension point before it.
 					yield { type: "reasoning", text: reasoningText }
 				}
 
 				if (delta?.content) {
+					throwIfAborted(requestSignal)
 					yield { type: "text", text: delta.content }
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
+						throwIfAborted(requestSignal)
 						yield {
 							type: "tool_call_partial",
 							index: toolCall.index,
@@ -320,6 +332,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 					lastUsage = usage
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 
 			if (lastUsage) {
 				// Extract cache-related information if available
