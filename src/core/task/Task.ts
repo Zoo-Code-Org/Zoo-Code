@@ -3732,6 +3732,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							// Stryker disable next-line OptionalChaining: undefined state is the defensive manual-approval fallback.
 							if (
+								// Stryker disable next-line OptionalChaining: undefined state is the defensive manual-approval fallback.
 								retryState?.autoApprovalEnabled &&
 								!this.didAlreadyUseTool &&
 								midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES
@@ -3803,7 +3804,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									userContent: currentUserContent,
 									includeFileDetails: false,
 									retryAttempt: 0,
-									// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state and prevents fabricated restoration.
+									// Stryker disable next-line ConditionalExpression,EqualityOperator: removedUserMessage carries the same state and prevents fabricated restoration.
 									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
 									removedUserMessage: removedMidStreamUserMessage,
 								})
@@ -4296,7 +4297,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: 0,
-								// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state for empty continuations.
+								// Stryker disable next-line ConditionalExpression,EqualityOperator: removedUserMessage carries the same state for empty continuations.
 								userMessageWasRemoved: removedCurrentUserMessage !== undefined,
 								removedUserMessage: removedCurrentUserMessage,
 							})
