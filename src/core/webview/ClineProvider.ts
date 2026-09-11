@@ -4132,7 +4132,7 @@ export class ClineProvider
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
-			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			await this.getTaskWithId(parentTaskId)
 			const refreshedParent = this.taskHistoryStore.get(parentTaskId)
 			const childHistory = this.taskHistoryStore.get(childTaskId)
 			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
@@ -4291,7 +4291,7 @@ export class ClineProvider
 				}
 			}
 
-			let updatedHistory!: typeof historyItem
+			let updatedHistory!: HistoryItem
 			let completingParent!: HistoryItem
 			let completingChild!: HistoryItem
 			const staleDelegationError = new Error("stale cross-instance delegation")

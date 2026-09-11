@@ -27,6 +27,8 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 	}
 }
 
+const persistedHistoryItem = (item: HistoryItem): HistoryItem => JSON.parse(JSON.stringify(item)) as HistoryItem
+
 /**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
@@ -1253,12 +1255,7 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
 						const restorations: TaskFileRestoration[] = [
-							[
-								firstId,
-								firstDiskSnapshot,
-								JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem,
-								firstFileLock,
-							],
+							[firstId, firstDiskSnapshot, persistedHistoryItem(writtenFirst), firstFileLock],
 						]
 						if (secondDiskSnapshot) {
 							const expectedSecond = mergeWithDisk(secondDelta)(
@@ -1268,7 +1265,7 @@ export class TaskHistoryStore {
 							restorations.unshift([
 								secondId,
 								secondDiskSnapshot,
-								[secondDiskSnapshot, JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem],
+								[secondDiskSnapshot, persistedHistoryItem(expectedSecond)],
 							])
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
@@ -1298,13 +1295,10 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (!options?.rollbackBothOnCallbackFailure) throw error
 
-					const persistedWrittenSecond = JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem
-					const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
-
 					// Restore second before first, preserving the original compensation order.
 					const compensationErrors = await this.restoreTaskFilePreImages([
-						[secondId, secondDiskSnapshot as HistoryItem, persistedWrittenSecond, undefined],
-						[firstId, firstDiskSnapshot as HistoryItem, persistedWrittenFirst, firstFileLock],
+						[secondId, secondDiskSnapshot as HistoryItem, persistedHistoryItem(writtenSecond), undefined],
+						[firstId, firstDiskSnapshot as HistoryItem, persistedHistoryItem(writtenFirst), firstFileLock],
 					])
 
 					if (this.onWrite) {
