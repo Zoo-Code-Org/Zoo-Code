@@ -691,8 +691,10 @@ describe("Cline", () => {
 
 			// Every automatic retry is announced through the shared backoff countdown so
 			// no retry happens silently.
-			const retryAnnouncements = saySpy.mock.calls.filter((call) => call[0] === "api_req_retry_delayed")
-			expect(retryAnnouncements.length).toBeGreaterThan(0)
+			const completedRetryAnnouncements = saySpy.mock.calls.filter(
+				(call) => call[0] === "api_req_retry_delayed" && call[3] === false,
+			)
+			expect(completedRetryAnnouncements).toHaveLength(3)
 
 			// Once the cap is exhausted the failure is surfaced to the user.
 			expect(askSpy).toHaveBeenCalledTimes(1)
@@ -707,37 +709,34 @@ describe("Cline", () => {
 				},
 				{ role: "assistant", content: [{ type: "text", text: expect.stringContaining("Failure") }] },
 			])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
 
 		it("resets the retry budget when the user approves another retry round", async () => {
 			const task = await createMidStreamRetryTask()
+			task["saveApiConversationHistory"] = vi.fn().mockResolvedValue(true)
 			const streamError = new Error("Overloaded")
 			const askSpy = vi
 				.spyOn(task, "ask")
-				.mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValueOnce({ response: "noButtonClicked" } satisfies TaskAskResult)
 			const saySpy = vi.spyOn(task, "say")
-
-			let callCount = 0
-			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
-				callCount++
-				if (callCount <= 4) {
-					return midStreamFailingRequest(streamError)
-				}
-				if (callCount === 5) {
-					return (async function* () {
-						yield { type: "text", text: "recovered response" } as ApiStreamChunk
-					})()
-				}
-				throw new Error("stop after recovered response")
-			})
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => midStreamFailingRequest(streamError))
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy).toHaveBeenCalledTimes(2)
 			expect(saySpy).toHaveBeenCalledWith("api_req_retried")
-			// 4 failed attempts (initial + 3 automatic retries), 1 user-approved retry that
-			// succeeded, and 1 follow-up request for the no-tool-use continuation.
-			expect(attemptSpy).toHaveBeenCalledTimes(6)
+			// Each round gets one initial request and three automatic retries.
+			expect(attemptSpy).toHaveBeenCalledTimes(8)
+			const completedRetryAnnouncements = saySpy.mock.calls.filter(
+				(call) => call[0] === "api_req_retry_delayed" && call[3] === false,
+			)
+			expect(completedRetryAnnouncements).toHaveLength(6)
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+			expect(task["saveApiConversationHistory"]).toHaveBeenCalledWith(false)
 		})
 
 		it("does not remove an earlier user turn when approving an empty continuation retry", async () => {

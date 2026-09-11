@@ -2697,6 +2697,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		this.abort = true
 		this.cancelAssistantMessagePersistence()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
@@ -2925,6 +2926,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
+			userMessageWasAdded?: boolean
 		}
 
 		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
@@ -3066,6 +3068,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				isEmptyUserContent,
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
+			const userMessageWasAdded = Boolean(currentItem.userMessageWasAdded || shouldAddUserMessage)
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++
@@ -3681,7 +3684,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									// automatic retry budget. Remove the user message this request
 									// added first so it is not duplicated in history on retry.
 									let removedCurrentUserMessage = false
-									if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
+									if (userMessageWasAdded && this.apiConversationHistory.length > 0) {
 										const lastMessage =
 											this.apiConversationHistory[this.apiConversationHistory.length - 1]
 										if (lastMessage.role === "user") {
@@ -3758,6 +3761,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: midStreamRetryAttempt + 1,
+								userMessageWasAdded,
 							})
 
 							// Continue to retry the request
