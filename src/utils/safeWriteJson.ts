@@ -190,7 +190,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	} catch (originalError) {
 		operationFailed = true
 		operationError = originalError
-		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
+		console.error(
+			`Operation failed for ${absoluteFilePath}: [Original Error Caught]; [Catch] Backup at failure: ${actualTempBackupFilePath}`,
+			originalError,
+		)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath

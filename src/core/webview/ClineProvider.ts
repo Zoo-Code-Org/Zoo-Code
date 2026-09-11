@@ -648,7 +648,11 @@ export class ClineProvider
 			try {
 				// Abort the running task and set isAbandoned to true so
 				// all running promises will exit as well.
-				await task.abortTask(true, options)
+				if (options.saveMessages === false) {
+					await task.abortTask(true, options)
+				} else {
+					await task.abortTask(true)
+				}
 			} catch (e) {
 				this.log(
 					`[ClineProvider#removeClineFromStack] abortTask() failed ${task.taskId}.${task.instanceId}: ${e.message}`,
