@@ -3668,6 +3668,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							if (decideMidStreamFailure(midStreamRetryAttempt) === "ask") {
 								// Automatic retries exhausted - surface the failure instead of
 								// retrying (and re-billing the request) silently forever.
+								// Stryker disable next-line StringLiteral: diagnostic-only task identity and retry-limit text.
 								console.error(
 									`[Task#${this.taskId}.${this.instanceId}] Stream failed, automatic retry limit (${MAX_MID_STREAM_RETRIES}) reached: ${streamingFailedMessage}`,
 								)
@@ -3736,6 +3737,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							}
 
 							// Stream failed - log the error and retry with the same content
+							// Stryker disable next-line StringLiteral,ArithmeticOperator: diagnostic-only attempt metadata.
 							console.error(
 								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry (attempt ${midStreamRetryAttempt + 1}/${MAX_MID_STREAM_RETRIES}): ${streamingFailedMessage}`,
 							)
@@ -3747,6 +3749,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							// Check if task was aborted during the backoff
 							if (this.abort) {
+								// Stryker disable next-line StringLiteral: diagnostic-only task identity.
 								console.log(
 									`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 								)

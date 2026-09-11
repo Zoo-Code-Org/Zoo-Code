@@ -741,6 +741,7 @@ describe("Cline", () => {
 
 		it("does not remove an earlier user turn when approving an empty continuation retry", async () => {
 			const task = await createMidStreamRetryTask()
+			task["saveApiConversationHistory"] = vi.fn().mockResolvedValue(true)
 			const earlierUserMessage = { role: "user" as const, content: [{ type: "text" as const, text: "earlier" }] }
 			task.apiConversationHistory.push(earlierUserMessage)
 			task.messageCounts.user++
@@ -758,6 +759,41 @@ describe("Cline", () => {
 			expect(task.ask).toHaveBeenCalledTimes(1)
 			expect(task.apiConversationHistory).toContainEqual(earlierUserMessage)
 			expect(task.messageCounts.user).toBe(1)
+		})
+
+		it("stops and restores history when the approved retry deletion cannot be persisted", async () => {
+			const task = await createMidStreamRetryTask()
+			task["saveApiConversationHistory"] = vi.fn().mockImplementation(async (merge = true) => merge)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const saySpy = vi.spyOn(task, "say")
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => midStreamFailingRequest(new Error("Overloaded")))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+			expect(task["saveApiConversationHistory"]).toHaveBeenCalledWith(false)
+			expect(saySpy).toHaveBeenCalledWith("error", "Failed to persist conversation history before retrying.")
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.messageCounts.user).toBe(1)
+		})
+
+		it("does not enqueue another request when aborted during retry backoff", async () => {
+			const task = await createMidStreamRetryTask()
+			const abortSpy = vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
+			task["backoffAndAnnounce"] = vi.fn().mockImplementation(async () => {
+				task.abort = true
+			})
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => midStreamFailingRequest(new Error("Overloaded")))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(abortSpy).toHaveBeenCalledOnce()
 		})
 	})
 
