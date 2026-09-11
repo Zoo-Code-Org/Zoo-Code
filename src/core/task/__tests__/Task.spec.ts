@@ -11,6 +11,7 @@ import {
 	providerIdentifiers,
 	RooCodeEventName,
 	type GlobalState,
+	type HistoryItem,
 	type ProviderSettings,
 	type ModelInfo,
 	type TaskLike,
@@ -41,6 +42,7 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+	resetAssistantMessagePersistence: () => void
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -646,6 +648,64 @@ describe("Cline", () => {
 	})
 
 	describe("constructor", () => {
+		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
+			"uses an explicit delegated-child context without shared state or startup persistence",
+			async ({ apiConfigName }) => {
+				const captureTaskCreated = vi.spyOn(TelemetryService.instance, "captureTaskCreated")
+				const captureTaskRestarted = vi.spyOn(TelemetryService.instance, "captureTaskRestarted")
+				const getState = vi.spyOn(mockProvider, "getState")
+				const updateTaskHistory = vi.spyOn(mockProvider, "updateTaskHistory")
+				const localConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				}
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "delegated child",
+					startTask: false,
+					handoffExecutionContext: {
+						mode: "ask",
+						apiConfigName,
+						apiConfiguration: localConfiguration,
+					},
+				})
+
+				await expect(task.getTaskMode()).resolves.toBe("ask")
+				await expect(task.getTaskApiConfigName()).resolves.toBe(apiConfigName)
+				expect(task.apiConfiguration).toEqual(localConfiguration)
+				expect(getState).not.toHaveBeenCalled()
+				expect(updateTaskHistory).not.toHaveBeenCalled()
+				expect(captureTaskCreated).toHaveBeenCalledWith(task.taskId)
+				expect(captureTaskRestarted).not.toHaveBeenCalled()
+			},
+		)
+
+		it("keeps history-task initialization distinct from delegated-child initialization", async () => {
+			const captureTaskRestarted = vi.spyOn(TelemetryService.instance, "captureTaskRestarted")
+			const historyItem = {
+				id: "history-task",
+				number: 1,
+				task: "history",
+				ts: Date.now(),
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "architect",
+				apiConfigName: "history-profile",
+			} satisfies HistoryItem
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem,
+				startTask: false,
+			})
+
+			await expect(task.getTaskMode()).resolves.toBe("architect")
+			await expect(task.getTaskApiConfigName()).resolves.toBe("history-profile")
+			expect(captureTaskRestarted).toHaveBeenCalledWith("history-task")
+		})
+
 		it("should always have diff strategy defined", async () => {
 			const cline = new Task({
 				provider: mockProvider,
@@ -2289,6 +2349,7 @@ describe("Cline", () => {
 
 			// Spy on emit method
 			const emitSpy = vi.spyOn(task, "emit")
+			const persistenceWait = task.waitForCurrentAssistantMessagePersistence()
 
 			// Mock the dispose method to avoid actual cleanup
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
@@ -2302,6 +2363,7 @@ describe("Cline", () => {
 
 			// Verify TaskAborted event was emitted
 			expect(emitSpy).toHaveBeenCalledWith("taskAborted")
+			await expect(persistenceWait).resolves.toBe(false)
 		})
 
 		it("should be equivalent to clicking Cancel button functionality", async () => {
@@ -3455,6 +3517,7 @@ describe("Cline", () => {
 				mode: undefined,
 			})
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+			const resetPersistenceSpy = vi.spyOn(getTaskTestAccess(task), "resetAssistantMessagePersistence")
 			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
 				throw new Error("stop after model metadata fetch")
 			})
@@ -3486,6 +3549,7 @@ describe("Cline", () => {
 
 			expect(result).toBe(true)
 			expect(safeSpy).toHaveBeenCalled()
+			expect(resetPersistenceSpy).toHaveBeenCalledTimes(1)
 			expect(ensureModelFetched).toHaveBeenCalled()
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})

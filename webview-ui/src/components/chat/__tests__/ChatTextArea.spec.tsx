@@ -1,7 +1,7 @@
 import { providerIdentifiers } from "@roo-code/types"
 import { defaultModeSlug } from "@roo/modes"
 
-import { render, fireEvent, screen } from "@src/utils/test-utils"
+import { render, fireEvent, screen, act } from "@src/utils/test-utils"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 import * as pathMentions from "@src/utils/path-mentions"
@@ -1204,6 +1204,297 @@ describe("ChatTextArea", () => {
 			// Check that the button is visible
 			expect(sendButton).toHaveClass("opacity-100")
 			expect(sendButton).toHaveClass("pointer-events-auto")
+		})
+	})
+
+	describe("blank suggestion copy crash (issue #1226)", () => {
+		const getSendButton = (container: HTMLElement) => {
+			const buttons = container.querySelectorAll("button")
+			return Array.from(buttons).find((button) => button.querySelector(".lucide-send-horizontal") !== null)
+		}
+
+		it("renders without crashing and treats an undefined inputValue as empty", () => {
+			// Intentionally pass the malformed value that #1226 produced at runtime:
+			// clicking "Copy to input" on an empty follow-up suggestion pushed
+			// `undefined` into the input state.
+			const undefinedInput = { ...defaultProps, inputValue: undefined } as unknown as typeof defaultProps
+			const { container } = render(<ChatTextArea {...undefinedInput} />)
+
+			// Before the #1226 fix, mounting with an undefined inputValue threw
+			// "Cannot read properties of undefined (reading 'trim')" in the
+			// hasInputContent memo. It should render normally instead.
+
+			// The normalized value drives the textarea: a malformed input renders as empty.
+			const textarea = container.querySelector("textarea")
+			expect(textarea).toBeInTheDocument()
+			expect(textarea).toHaveValue("")
+
+			// Clicking "Enhance prompt" with an undefined input must not crash either:
+			// the undefined input behaves like an empty one, so nothing is sent.
+			mockPostMessage.mockClear()
+			fireEvent.click(getEnhancePromptButton())
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "enhancePrompt" }))
+
+			// An undefined input behaves like an empty input: no content to send.
+			const sendButton = getSendButton(container)
+			expect(sendButton).toBeInTheDocument()
+			expect(sendButton).toHaveClass("opacity-0")
+			expect(sendButton).toHaveClass("pointer-events-none")
+		})
+
+		it.each([0, false, { answer: "nope" }])("treats a non-string inputValue of %p as empty", (value) => {
+			// Only nullish values were normalized before the #1226 follow-up fix;
+			// any other non-string value must be treated as empty, not crash.
+			const badInput = { ...defaultProps, inputValue: value } as unknown as typeof defaultProps
+			const { container } = render(<ChatTextArea {...badInput} />)
+
+			// The normalized value drives the textarea: a non-string input renders as empty.
+			const textarea = container.querySelector("textarea")
+			expect(textarea).toBeInTheDocument()
+			expect(textarea).toHaveValue("")
+
+			mockPostMessage.mockClear()
+			fireEvent.click(getEnhancePromptButton())
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "enhancePrompt" }))
+
+			const sendButton = getSendButton(container)
+			expect(sendButton).toBeInTheDocument()
+			expect(sendButton).toHaveClass("opacity-0")
+			expect(sendButton).toHaveClass("pointer-events-none")
+		})
+	})
+
+	describe("string operations on the normalized input (issue #1226)", () => {
+		const getTextarea = (container: HTMLElement) => {
+			const textarea = container.querySelector("textarea")
+			if (!textarea) {
+				throw new Error("expected the chat textarea to be rendered")
+			}
+			return textarea
+		}
+
+		it("inserts command text at the cursor via the insertTextIntoTextarea message", () => {
+			render(<ChatTextArea {...defaultProps} inputValue="hello " />)
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "insertTextIntoTextarea", text: "/command" } }),
+				)
+			})
+
+			// The cursor starts at 0, so the command is prepended with a trailing space.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("/command hello ")
+		})
+
+		it("inspects the characters around the cursor on Backspace without crashing", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="some text" />)
+			const textarea = getTextarea(container)
+
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Plain text: no mention manipulation, so the input is untouched.
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("removes a mention on the second Backspace after deleting the space after it", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			// Position the cursor after the trailing space and tell the component about it.
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+
+			// First Backspace: drops the space after the mention and arms the pending flag.
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Second Backspace: removes the mention itself.
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("hello ")
+		})
+
+		it("resets the pending mention flag without changing the input when the cursor is not after a mention", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			// Arm the pending flag with the first Backspace right after the mention.
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Move the cursor away from the mention before the next Backspace.
+			textarea.setSelectionRange(2, 2)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// removeMention finds no mention at the cursor, so the input is untouched.
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("adds a trailing space after a pasted URL", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="visit " />)
+			const textarea = getTextarea(container)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+
+			// The URL is inserted at cursor position 0, followed by a space.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("https://example.com visit ")
+		})
+
+		it("uses the re-rendered input when inserting command text", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="hello " />)
+			rerender(<ChatTextArea {...defaultProps} inputValue="updated " />)
+			// Reset the DOM cursor: JSDOM moves the selection to the end of a
+			// re-rendered value, so anchor the insertion at position 0 explicitly.
+			getTextarea(container).setSelectionRange(0, 0)
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "insertTextIntoTextarea", text: "/command" } }),
+				)
+			})
+
+			// A stale effect would still insert into the original "hello " value.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("/command updated ")
+		})
+
+		it("posts the trimmed input on enhance and follows a re-rendered value", () => {
+			const { rerender } = render(<ChatTextArea {...defaultProps} inputValue="  Test prompt  " />)
+
+			fireEvent.click(getEnhancePromptButton())
+			// Surrounding whitespace must not reach the extension.
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "enhancePrompt", text: "Test prompt" })
+
+			rerender(<ChatTextArea {...defaultProps} inputValue="updated" />)
+			fireEvent.click(getEnhancePromptButton())
+			// A stale handler would re-post the original "Test prompt" value.
+			expect(mockPostMessage).toHaveBeenLastCalledWith({ type: "enhancePrompt", text: "updated" })
+		})
+
+		it("keeps whitespace-only input hidden from the send button and placeholder", () => {
+			const getSendButton = (container: HTMLElement) =>
+				Array.from(container.querySelectorAll("button")).find((b) => b.querySelector(".lucide-send-horizontal"))
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="   " />)
+
+			// Whitespace-only input has no sendable content, and the placeholder only
+			// renders for a truly empty value.
+			expect(getSendButton(container)).toHaveClass("opacity-0")
+			expect(container.querySelector(".left-2.z-30")).toBeNull()
+
+			// A stale content memo would keep the send button hidden for real text.
+			rerender(<ChatTextArea {...defaultProps} inputValue="Text" />)
+			expect(getSendButton(container)).toHaveClass("opacity-100")
+		})
+
+		it("moves the cursor to the end of the mention on Backspace at the end of the input", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Nothing follows the trailing space, so the space is not deleted; the
+			// cursor moves to the end of the mention instead.
+			expect(textarea.selectionStart).toBe(15)
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("does not intercept Backspace when a word follows the mention", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="@problems done " />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(15, 15)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// The mention is not at the end of the inspected prefix, so the
+			// selection is untouched.
+			expect(textarea.selectionStart).toBe(15)
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("applies the pending cursor once the pasted value commits", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="visit " />)
+			const textarea = getTextarea(container)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+				// Commit the value the paste handler produced so the pending cursor
+				// (0 + 19 + 1 = 20) is applied against the full 26-char value.
+				rerender(<ChatTextArea {...defaultProps} inputValue="https://example.com visit " />)
+			})
+
+			// A stale effect would never re-apply the intended cursor position.
+			expect(defaultProps.setInputValue).toHaveBeenLastCalledWith("https://example.com visit ")
+			expect(textarea.selectionStart).toBe(20)
+		})
+
+		it("inserts a pasted URL at the cursor and tracks re-rendered input", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="visit this" />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(6, 6)
+			fireEvent.mouseUp(textarea)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+
+			// The URL splits "visit this" at the cursor instead of reusing the whole
+			// value for the tail.
+			expect(defaultProps.setInputValue).toHaveBeenLastCalledWith("visit https://example.com this")
+
+			rerender(<ChatTextArea {...defaultProps} inputValue="changed " />)
+			textarea.setSelectionRange(0, 0)
+			fireEvent.mouseUp(textarea)
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+			// A stale paste handler would repeat the original "visit this" value.
+			expect(defaultProps.setInputValue).toHaveBeenLastCalledWith("https://example.com changed ")
+		})
+
+		it("re-highlights mentions after the input changes", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+			rerender(<ChatTextArea {...defaultProps} inputValue="@problems" />)
+
+			// A stale highlight effect would keep the empty highlight from the
+			// initial render.
+			expect(container.querySelector('[data-testid="highlight-layer"]')?.innerHTML).toContain("<mark")
+		})
+
+		it("inserts a dropped path at the cursor and preserves the tail", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="abcdef" />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(3, 3)
+			fireEvent.mouseUp(textarea)
+
+			fireEvent.drop(container.querySelector(".chat-text-area")!, {
+				dataTransfer: { getData: () => "/some/path", files: [] },
+				preventDefault: vi.fn(),
+			})
+
+			// The remainder after the cursor ("def") is preserved.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("abc/some/path def")
 		})
 	})
 })
