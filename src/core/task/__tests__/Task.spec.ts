@@ -784,6 +784,25 @@ describe("Cline", () => {
 			expect(vi.mocked(task.attemptApiRequest)).toHaveBeenCalledTimes(1)
 		})
 
+		it("requires approval before retrying after a tool has executed", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				(async function* () {
+					yield { type: "text", text: "partial output" } as ApiStreamChunk
+					task.didAlreadyUseTool = true
+					throw new Error("overloaded_error")
+				})(),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("failed mid-response"))
+		})
+
 		it("shows the retry countdown after explicit approval", async () => {
 			const task = await createTaskWithAutoApproval(false)
 			const saySpy = vi.spyOn(task, "say")

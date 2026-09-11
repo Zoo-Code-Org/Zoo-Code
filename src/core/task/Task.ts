@@ -3731,7 +3731,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							const retryState = await this.providerRef.deref()?.getState()
 
 							// Stryker disable next-line OptionalChaining: undefined state is the defensive manual-approval fallback.
-							if (retryState?.autoApprovalEnabled && midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES) {
+							if (
+								retryState?.autoApprovalEnabled &&
+								!this.didAlreadyUseTool &&
+								midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES
+							) {
 								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
 								// Check if task was aborted during the backoff
@@ -3779,7 +3783,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								"api_req_failed",
 								`${
 									// Stryker disable next-line OptionalChaining: undefined state uses the manual-approval wording.
-									retryState?.autoApprovalEnabled
+									retryState?.autoApprovalEnabled &&
+									midStreamRetryAttempt >= MAX_AUTOMATIC_API_RETRIES
 										? `The API stream failed ${MAX_AUTOMATIC_API_RETRIES + 1} times mid-response.`
 										: "The API stream failed mid-response."
 								} ${streamingFailedMessage}`,
