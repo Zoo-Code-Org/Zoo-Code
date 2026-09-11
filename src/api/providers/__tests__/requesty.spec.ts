@@ -201,6 +201,96 @@ describe("RequestyHandler", () => {
 		})
 	})
 
+	describe("model lookup signal isolation", () => {
+		// The model fetch is a shared single-flight (dedupedFetch in modelCache): concurrent
+		// callers join one in-flight fetch. The lookup must stay independent of any waiter's
+		// signal, or one caller's abort would reject the shared fetch for every other waiter.
+		it("aborting one waiter mid-lookup does not reject the shared fetch for the other", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+			const getModelsMock = vitest.mocked(getModels)
+
+			// A single in-flight lookup, joined by both waiters (single-flight semantics).
+			let resolveLookup!: (models: ModelRecord) => void
+			let joins = 0
+			let notifyJoined!: () => void
+			const bothJoined = new Promise<void>((resolve) => {
+				notifyJoined = resolve
+			})
+			const sharedLookup = new Promise<ModelRecord>((resolve) => {
+				resolveLookup = resolve
+			})
+			const joinOnce = () => {
+				joins++
+				if (joins === 2) notifyJoined()
+				return sharedLookup
+			}
+			getModelsMock.mockImplementationOnce(joinOnce)
+			getModelsMock.mockImplementationOnce(joinOnce)
+
+			const controllerA = new AbortController()
+			const controllerB = new AbortController()
+			const metadataA = makeCreateMessageMetadata({ abortSignal: controllerA.signal })
+			const metadataB = makeCreateMessageMetadata({ abortSignal: controllerB.signal })
+
+			const pA = collectStream(handler.createMessage("sys", [{ role: "user", content: "a" }], metadataA))
+			const pB = collectStream(handler.createMessage("sys", [{ role: "user", content: "b" }], metadataB))
+			// Defensive: A is expected to reject below; park both so a mid-test failure
+			// cannot surface as an unhandled rejection.
+			void pA.catch(() => {})
+			void pB.catch(() => {})
+
+			// Both waiters must have joined the same in-flight lookup before anyone settles.
+			await withSettleGuard(bothJoined)
+			// The lookup carries no waiter signal: the shared fetch is independent of the callers.
+			for (const [options] of getModelsMock.mock.calls) {
+				expect(options.signal).toBeUndefined()
+			}
+
+			// Abort waiter A mid-lookup: A rejects with the AbortError contract, and the
+			// shared fetch stays pending for B (no cross-request rejection).
+			controllerA.abort()
+			await expect(pA).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+
+			// B: the shared fetch resolves for B; B proceeds normally to the stream phase.
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: mockOptions.requestyModelId,
+						choices: [{ delta: { content: "b-response" } }],
+					},
+					{
+						id: "test-id",
+						choices: [{ delta: {} }],
+						usage: {
+							prompt_tokens: 1,
+							completion_tokens: 1,
+							total_tokens: 2,
+						},
+					},
+				]),
+			)
+			resolveLookup({
+				"coding/claude-4-sonnet": {
+					maxTokens: 8192,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 3,
+					outputPrice: 15,
+					cacheWritesPrice: 3.75,
+					cacheReadsPrice: 0.3,
+					description: "Claude 4 Sonnet",
+				},
+			})
+			const chunksB = await pB
+			expect(chunksB).toContainEqual({ type: "text", text: "b-response" })
+		})
+	})
+
 	describe("createMessage", () => {
 		it("generates correct stream chunks", async () => {
 			const handler = new RequestyHandler(mockOptions)
@@ -827,7 +917,7 @@ describe("RequestyHandler", () => {
 			resolveModelLookup({})
 		})
 
-		it("threads the per-request signal into model discovery", async () => {
+		it("keeps model discovery independent of the per-request signal (shared single-flight fetch)", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "c1", choices: [{ delta: { content: "ok" } }] }]))
 
@@ -853,12 +943,14 @@ describe("RequestyHandler", () => {
 
 			await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata))
 
-			expect(discoverySignal).toBeInstanceOf(AbortSignal)
-			// Discovery must receive the same per-request signal that is forwarded to the
-			// SDK, so a single abort cancels both the lookup and the completion request.
+			// The model lookup is a shared single-flight fetch joined by concurrent callers, so it
+			// must not carry this request's signal: one caller's abort would otherwise reject the
+			// shared fetch for every other waiter. Per-request cancellation is the rejectOnAbort
+			// race (covered by the mid-lookup abort tests above).
+			expect(discoverySignal).toBeUndefined()
+			// The completion request still receives a per-request signal forwarded to the SDK.
 			const sdkOptions = mockCreate.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
 			expect(sdkOptions?.signal).toBeInstanceOf(AbortSignal)
-			expect(discoverySignal).toBe(sdkOptions?.signal)
 		})
 
 		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
@@ -1345,7 +1437,7 @@ describe("RequestyHandler", () => {
 			})
 		})
 
-		it("threads the merged abort signal into model discovery", async () => {
+		it("keeps model discovery independent of the merged abort signal (shared single-flight fetch)", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
@@ -1369,9 +1461,11 @@ describe("RequestyHandler", () => {
 			const controller = new AbortController()
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
 
-			// Without a timeout the merged signal is the external signal itself, so the
-			// lookup receives exactly the caller's signal (identity, not just type).
-			expect(discoverySignal).toBe(controller.signal)
+			// The model lookup is a shared single-flight fetch: it must not carry the caller's
+			// merged signal, or one caller's abort or timeout would reject the shared fetch for
+			// every other waiter. Per-request cancellation is the rejectOnAbort race (covered
+			// by the mid-lookup abort tests).
+			expect(discoverySignal).toBeUndefined()
 		})
 
 		it("should pass timeout through to client", async () => {

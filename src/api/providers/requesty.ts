@@ -86,8 +86,12 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		})
 	}
 
-	public async fetchModel(signal?: AbortSignal) {
-		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL, signal })
+	// Model discovery is a shared single-flight fetch (see dedupedFetch in modelCache): the lookup
+	// carries no signal, because concurrent createMessage/completePrompt callers join one
+	// in-flight fetch and a per-request signal would let one caller's abort or timeout reject the
+	// shared fetch for every other waiter. Each caller handles its own cancellation (rejectOnAbort).
+	public async fetchModel() {
+		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL })
 		return this.getModel()
 	}
 
@@ -168,10 +172,11 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				throw createAbortError("Requesty")
 			}
 
-			// Model discovery is signal-aware: the per-request signal is threaded into the lookup so
-			// the underlying models request is cancelled on abort. The race below remains as a
-			// second line of defence for the window in which the fetcher swallows the cancellation
-			// and resolves with an empty model list.
+			// Model discovery is shared single-flight: the lookup carries no signal (see fetchModel),
+			// so this request's abort or timeout cannot reject the shared fetch for concurrent
+			// callers. Per-request cancellation is the rejectOnAbort race below: controller.signal
+			// bridges the external abort, and the race settles this waiter promptly while the
+			// underlying fetch keeps running to serve the other waiters.
 			const {
 				id: model,
 				info,
@@ -179,7 +184,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				temperature,
 				reasoningEffort: reasoning_effort,
 				reasoning: thinking,
-			} = await rejectOnAbort(this.fetchModel(controller.signal), controller.signal, this.providerName)
+			} = await rejectOnAbort(this.fetchModel(), controller.signal, this.providerName)
 
 			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 				{ role: "system", content: systemPrompt },
@@ -299,7 +304,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		let modelData: Awaited<ReturnType<RequestyHandler["fetchModel"]>>
 		try {
 			modelData = requestAbortSignal
-				? await rejectOnAbort(this.fetchModel(requestAbortSignal), requestAbortSignal, this.providerName)
+				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
 				: await this.fetchModel()
 		} catch (error) {
 			if (isRequestAborted(error, requestAbortSignal)) {
