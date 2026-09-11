@@ -29,6 +29,9 @@ describe("OAuth URLs", () => {
 			version: Package.version,
 			callback_uri: `vscode://${Package.publisher}.${Package.name}/auth-callback`,
 		})
+		expect(getZooCodeAuthUrl()).toContain(
+			`callback_uri=${encodeURIComponent(`vscode://${Package.publisher}.${Package.name}/auth-callback`)}`,
+		)
 		expect(getZooCodeAuthUrl("", "", "")).toBe(getZooCodeAuthUrl())
 	})
 
@@ -41,5 +44,8 @@ describe("OAuth URLs", () => {
 			version: Package.version,
 			callback_uri: `cursor://${Package.publisher}.${Package.name}/auth-callback`,
 		})
+		expect(getZooCodeAuthUrl("cursor")).toContain(
+			`callback_uri=${encodeURIComponent(`cursor://${Package.publisher}.${Package.name}/auth-callback`)}`,
+		)
 	})
 })

@@ -1282,6 +1282,7 @@ describe("importExport", () => {
 
 					expect(result.success).toBe(true)
 					expect(result.warnings).toEqual(expectedWarnings)
+					expect(mockContextProxy.setValues).toHaveBeenCalledTimes(1)
 					expect(mockContextProxy.setValues).toHaveBeenCalledWith(
 						expect.objectContaining({
 							imageGenerationProvider: expectedWarnings ? undefined : providerIdentifiers.openrouter,
