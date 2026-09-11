@@ -762,6 +762,7 @@ interface HandoffState {
 	live: LiveHandoffState
 	dOwnershipEstablished: boolean
 	compensationCompleted: boolean
+	callbackFailureOrigin?: "ui-written" | "api-written" | "c-removed" | "parent-installed"
 }
 
 interface HandoffTraceStep {
@@ -788,6 +789,12 @@ const unsafeHandoffLandmarks = {
 	"stale schedule after D ownership": (state: HandoffState) =>
 		state.dOwnershipEstablished && state.completionPhase === "scheduled" && state.scheduledOwnership === "d",
 	"successful callback compensation": (state: HandoffState) => state.compensationCompleted,
+	"UI-prefix callback compensation": (state: HandoffState) =>
+		state.compensationCompleted && state.callbackFailureOrigin === "ui-written",
+	"conversation-prefix callback compensation": (state: HandoffState) =>
+		state.compensationCompleted && state.callbackFailureOrigin === "api-written",
+	"installed-parent callback compensation": (state: HandoffState) =>
+		state.compensationCompleted && state.callbackFailureOrigin === "parent-installed",
 } satisfies Record<string, (state: HandoffState) => boolean>
 const fixedHandoffLandmarks = {
 	...unsafeHandoffLandmarks,
@@ -877,12 +884,20 @@ function nextHandoffSteps(state: HandoffState): HandoffTraceStep[] {
 				next.apiConversation = "c-result"
 				next.completionPhase = "api-written"
 			}),
+			handoffTransition(state, "handoff.completion.callback-fail-after-UI", (next) => {
+				next.callbackFailureOrigin = "ui-written"
+				next.completionPhase = "callback-failed"
+			}),
 		)
 	} else if (state.completionPhase === "api-written") {
 		steps.push(
 			handoffTransition(state, "handoff.completion.write-parent-record", (next) => {
 				next.parentRecord = "completed-c"
 				next.completionPhase = "parent-record-written"
+			}),
+			handoffTransition(state, "handoff.completion.callback-fail-after-API", (next) => {
+				next.callbackFailureOrigin = "api-written"
+				next.completionPhase = "callback-failed"
 			}),
 		)
 	} else if (state.completionPhase === "parent-record-written") {
@@ -906,6 +921,7 @@ function nextHandoffSteps(state: HandoffState): HandoffTraceStep[] {
 				next.completionPhase = "parent-installed"
 			}),
 			handoffTransition(state, "handoff.completion.callback-fail", (next) => {
+				next.callbackFailureOrigin = "c-removed"
 				next.completionPhase = "callback-failed"
 			}),
 		)
@@ -914,6 +930,10 @@ function nextHandoffSteps(state: HandoffState): HandoffTraceStep[] {
 			handoffTransition(state, "handoff.completion.release", (next) => {
 				if (next.mode === "fixed") delete next.lockOwner
 				next.completionPhase = "done"
+			}),
+			handoffTransition(state, "handoff.completion.callback-fail-after-parent-install", (next) => {
+				next.callbackFailureOrigin = "parent-installed"
+				next.completionPhase = "callback-failed"
 			}),
 		)
 	} else if (state.completionPhase === "callback-failed") {
