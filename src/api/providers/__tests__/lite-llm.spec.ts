@@ -1393,6 +1393,26 @@ describe("LiteLLMHandler", () => {
 			)
 		})
 
+		it("should reject immediately with AbortError when the signal is pre-aborted, before model discovery", async () => {
+			const fetchModelSpy = vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: litellmDefaultModelId,
+				info: litellmDefaultModelInfo,
+			})
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			// The pre-abort fast-fail must run before provider model discovery:
+			// an already-aborted request must not trigger getModels/refreshModels.
+			expect(fetchModelSpy).not.toHaveBeenCalled()
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("should pass timeout through to client", async () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
@@ -1424,14 +1444,27 @@ describe("LiteLLMHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
 		})
 
-		it("should surface a standard AbortError when the signal was aborted and the request fails", async () => {
-			mockCreate.mockRejectedValueOnce(new Error("LiteLLM API error"))
+		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {
 			const controller = new AbortController()
+			// The request stays pending until the external signal aborts it; the
+			// mock rejects with a plain (non-abort) error once the signal has
+			// aborted, so the catch block must classify it via signal.aborted.
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				const signal = options?.signal
+				return new Promise<string>((_resolve, reject) => {
+					const fail = () => reject(new Error("LiteLLM API error"))
+					if (signal?.aborted) {
+						fail()
+						return
+					}
+					signal?.addEventListener("abort", fail, { once: true })
+				})
+			})
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Abort while the (pending) request is in flight — after entry, so the
+			// pre-abort fast-fail does not apply and the catch block handles it.
 			controller.abort()
-
-			const error = await handler
-				.completePrompt("test prompt", { abortSignal: controller.signal })
-				.catch((e: unknown) => e)
+			const error = await promise.catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
@@ -1476,6 +1509,10 @@ describe("LiteLLMHandler", () => {
 		]
 
 		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const fetchModelSpy = vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: litellmDefaultModelId,
+				info: litellmDefaultModelInfo,
+			})
 			const controller = new AbortController()
 			controller.abort()
 
@@ -1489,6 +1526,9 @@ describe("LiteLLMHandler", () => {
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("This operation was aborted")
+			// The pre-abort fast-fail must run before provider model discovery:
+			// an already-aborted request must not trigger getModels/refreshModels.
+			expect(fetchModelSpy).not.toHaveBeenCalled()
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 

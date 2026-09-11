@@ -136,6 +136,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Fast-fail if the request was already aborted before building, so an
+		// already-aborted request fails with AbortError before provider model
+		// discovery (getModels/refreshModels) begins.
+		throwIfAborted(metadata?.abortSignal)
+
 		const { id: modelId, info } = await this.fetchModel()
 
 		// Models that require reasoning_content to be echoed back during tool-call
@@ -270,9 +275,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
 		}
 
-		// Fast-fail if the request was already aborted before building.
-		throwIfAborted(metadata?.abortSignal)
-
 		// The request-local controller is the provider-owned abort handle; the
 		// request signal merges it with the external Task signal (AbortSignal.any
 		// inside RequestConfigBuilder), so external aborts cancel the in-flight
@@ -366,6 +368,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building, so an
+		// already-aborted request fails with AbortError before provider model
+		// discovery (getModels/refreshModels) begins.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: modelId, info } = await this.fetchModel()
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
