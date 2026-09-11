@@ -243,7 +243,11 @@ describe("normalizeSuppliedImages", () => {
 	it("should not let duplicates consume the image count or size budgets", () => {
 		const first = `data:image/png;base64,${Buffer.from("first").toString("base64")}`
 		const second = `data:image/png;base64,${Buffer.from("second").toString("base64")}`
+		const maxTotalImageSize = Buffer.byteLength("firstsecond") / (1024 * 1024)
 
-		expect(normalizeSuppliedImages([...Array(20).fill(first), second])).toEqual([first, second])
+		expect(normalizeSuppliedImages([...Array(20).fill(first), second], { maxTotalImageSize })).toEqual([
+			first,
+			second,
+		])
 	})
 })

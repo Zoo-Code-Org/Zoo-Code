@@ -128,6 +128,23 @@ describe("API - SendMessage Command", () => {
 		expect(addMessage).toHaveBeenCalledWith("Continue safely", [])
 	})
 
+	it("should apply the configured total image size before streaming enqueue", async () => {
+		const addMessage = vi.fn()
+		const first = `data:image/png;base64,${Buffer.from("first").toString("base64")}`
+		const second = `data:image/png;base64,${Buffer.from("second").toString("base64")}`
+		mockProvider.contextProxy.getValues = vi.fn().mockReturnValue({
+			maxTotalImageSize: Buffer.byteLength("first") / (1024 * 1024),
+		})
+		mockProvider.getCurrentTask = vi.fn().mockReturnValue({
+			isStreaming: true,
+			messageQueueService: { addMessage },
+		})
+
+		await api.sendMessage("Continue safely", [first, second])
+
+		expect(addMessage).toHaveBeenCalledWith("Continue safely", [first])
+	})
+
 	it("should retain webview routing when the current task is not streaming", async () => {
 		const addMessage = vi.fn()
 		const messageText = "Answer the current ask"
