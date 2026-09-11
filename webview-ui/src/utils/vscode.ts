@@ -1,66 +1,8 @@
 import type { WebviewApi } from "vscode-webview"
-import { io, type Socket } from "socket.io-client"
 
 import { WebviewMessage } from "@roo/WebviewMessage"
 
-/**
- * Browser bridge transport for standalone (non-webview) browser mode.
- *
- * When the UI runs in a normal Chrome tab (loaded from the Vite dev server),
- * `acquireVsCodeApi` is undefined. Messages then flow over socket.io to the
- * extension host instead of the VSCode webview message protocol:
- *
- *  - `postMessage(message)` emits `webviewMessage` to the bridge server
- *  - inbound `extensionMessage` events are re-dispatched through
- *    `window.postMessage` so the existing `window.addEventListener("message")`
- *    consumers in the app work unchanged.
- */
-class BrowserBridgeClient {
-	private readonly socket: Socket
-
-	constructor(port: number) {
-		this.socket = io(`http://127.0.0.1:${port}`, {
-			transports: ["websocket", "polling"],
-		})
-
-		// Mark the document so CSS can provide a dark-theme fallback for the
-		// --vscode-* variables that VS Code normally injects into the webview.
-		document.documentElement.classList.add("roo-browser-mode")
-
-		this.socket.on("extensionMessage", (message: unknown) => {
-			window.postMessage(message, "*")
-		})
-
-		this.socket.on("connect_error", (error) => {
-			console.warn("[BrowserBridge] socket.io connect error:", error)
-		})
-	}
-
-	public postMessage(message: WebviewMessage) {
-		this.socket.emit("webviewMessage", message)
-	}
-
-	public dispose() {
-		this.socket.disconnect()
-	}
-}
-
-/**
- * The bridge port is served as a `?bridgePort=<port>` query parameter on the
- * URL opened in Chrome by the "Open in Chrome" command. Its presence tells the
- * UI that the browser bridge is active — there is no env-var or build-time
- * flag involved. Returns `undefined` when the param is absent.
- */
-function getBridgePortFromUrl(): number | undefined {
-	const raw = new URLSearchParams(window.location.search).get("bridgePort")
-	if (raw !== null && raw !== "") {
-		const port = Number(raw)
-		if (Number.isInteger(port) && port > 0 && port < 65536) {
-			return port
-		}
-	}
-	return undefined
-}
+import { BrowserBridgeClient } from "./browserBridgeClient"
 
 /**
  * A utility wrapper around the acquireVsCodeApi() function, which enables
@@ -73,7 +15,6 @@ function getBridgePortFromUrl(): number | undefined {
  */
 class VSCodeAPIWrapper {
 	private readonly vsCodeApi: WebviewApi<unknown> | undefined
-	private readonly browserBridge: BrowserBridgeClient | undefined
 
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
@@ -81,13 +22,10 @@ class VSCodeAPIWrapper {
 		if (typeof acquireVsCodeApi === "function") {
 			this.vsCodeApi = acquireVsCodeApi()
 		} else {
-			// Use the browser bridge only when the "Open in Chrome" flow opened
-			// this tab with a ?bridgePort=... query param. Otherwise (e.g. a
-			// plain dev-server tab) fall back to localStorage-only behavior.
-			const bridgePort = getBridgePortFromUrl()
-			if (bridgePort !== undefined) {
-				this.browserBridge = new BrowserBridgeClient(bridgePort)
-			}
+			// Browser mode is self-gated inside the client: it connects only
+			// when this dev-server tab was opened by the "Open in Chrome"
+			// command with a ?bridgePort=... query param.
+			void BrowserBridgeClient.maybeConnect()
 		}
 	}
 
@@ -102,8 +40,8 @@ class VSCodeAPIWrapper {
 	public postMessage(message: WebviewMessage) {
 		if (this.vsCodeApi) {
 			this.vsCodeApi.postMessage(message)
-		} else if (this.browserBridge) {
-			this.browserBridge.postMessage(message)
+		} else if (BrowserBridgeClient.active()) {
+			BrowserBridgeClient.postMessage(message)
 		} else {
 			console.log(message)
 		}

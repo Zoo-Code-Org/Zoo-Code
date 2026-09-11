@@ -114,7 +114,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
-import type { BrowserBridgeServer } from "./browserBridge"
+import { BrowserBridgeServer } from "./browserBridge"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
@@ -208,13 +208,6 @@ export class ClineProvider
 	>()
 	private nextThemeFixtureProbeId = 0
 	private view?: vscode.WebviewView | vscode.WebviewPanel
-	// Owned socket.io bridge when this provider was switched to browser mode.
-	// Each provider owns its own bridge (and therefore its own port); it is
-	// disposed together with the provider.
-	private browserBridge?: BrowserBridgeServer
-	// The webview used for message passing. Equals `view.webview` normally, or
-	// the bridge's virtual webview when the browser bridge is active.
-	private bridgeWebview?: vscode.Webview
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
 	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
@@ -907,9 +900,7 @@ export class ClineProvider
 		this.flushGlobalStateWriteThrough()
 
 		// Release the provider-owned browser bridge (socket.io server + port).
-		this.browserBridge?.dispose()
-		this.browserBridge = undefined
-		this.bridgeWebview = undefined
+		BrowserBridgeServer.disposeFor(this)
 
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
@@ -1059,12 +1050,10 @@ export class ClineProvider
 		// an informational placeholder inside the real iframe (no React, no
 		// scripts, but with a clickable link back to the browser tab) so the
 		// environments don't run simultaneously. The virtual webview (backed by
-		// socket.io) already has its message listener registered in
-		// enableBrowserBridge(), so it is not re-registered here.
-		const browserBridgeActive = this.browserBridge !== undefined
-
-		if (browserBridgeActive) {
-			webviewView.webview.html = this.browserBridge?.getPlaceholderHtml() ?? ""
+		// socket.io) already has its message listener registered when the
+		// bridge was enabled, so it is not re-registered here.
+		if (BrowserBridgeServer.active(this)) {
+			BrowserBridgeServer.setPlaceholder(this)
 		} else {
 			webviewView.webview.html =
 				this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
@@ -1104,9 +1093,9 @@ export class ClineProvider
 
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received. When the bridge is active
-		// the listener was already registered on the virtual webview in
-		// enableBrowserBridge(); re-registering here would double-handle every message.
-		if (!this.bridgeWebview) {
+		// the listener was already registered on the virtual webview;
+		// re-registering here would double-handle every message.
+		if (!BrowserBridgeServer.active(this)) {
 			this.setWebviewMessageListener(webviewView.webview)
 		}
 
@@ -1507,7 +1496,7 @@ export class ClineProvider
 			return
 		}
 
-		const webview = this.bridgeWebview ?? this.view?.webview
+		const webview = BrowserBridgeServer.webviewFor(this) ?? this.view?.webview
 		if (!webview) {
 			return
 		}
@@ -1517,45 +1506,6 @@ export class ClineProvider
 		} catch {
 			// View disposed, drop message silently
 		}
-	}
-
-	/**
-	 * Irreversibly switches this provider to the browser bridge.
-	 *
-	 * From this point on the provider posts to the virtual webview (backed by
-	 * socket.io) and the real iframe renders a placeholder with a clickable
-	 * link to the browser tab so the two environments never run
-	 * simultaneously. Safe to call repeatedly — the switch only happens once.
-	 * The provider takes ownership of the bridge and disposes it together with
-	 * itself.
-	 */
-	public enableBrowserBridge(bridge: BrowserBridgeServer): void {
-		if (this.bridgeWebview) {
-			// Already switched: this provider is permanently bound to its first
-			// bridge (one provider -> one bridge -> one port). Refuse the new
-			// bridge and dispose it so its socket.io server/port does not leak.
-			bridge.dispose()
-			return
-		}
-
-		this.browserBridge = bridge
-		this.bridgeWebview = bridge.getOrCreateVirtualWebview()
-		// The message listener must be registered on the virtual webview exactly
-		// once. resolveWebviewView() checks `this.bridgeWebview` and skips its own
-		// registration, so re-resolves don't double-handle messages.
-		this.setWebviewMessageListener(this.bridgeWebview)
-		if (this.view) {
-			this.view.webview.html = bridge.getPlaceholderHtml()
-		}
-	}
-
-	/**
-	 * The port of the provider-owned browser bridge, or `undefined` when the
-	 * provider has not been switched to browser mode yet. Lets command handlers
-	 * reuse the existing bridge instead of creating a second one.
-	 */
-	public getActiveBrowserBridgePort(): number | undefined {
-		return this.browserBridge?.port
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
@@ -4607,7 +4557,7 @@ export class ClineProvider
 			const fileUri = vscode.Uri.file(filePath)
 
 			// Check if we have a webview available
-			const activeWebview = this.bridgeWebview ?? this.view?.webview
+			const activeWebview = BrowserBridgeServer.webviewFor(this) ?? this.view?.webview
 			if (activeWebview) {
 				const webviewUri = activeWebview.asWebviewUri(fileUri)
 				return webviewUri.toString()

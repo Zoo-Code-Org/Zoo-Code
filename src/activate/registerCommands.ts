@@ -4,7 +4,6 @@ import delay from "delay"
 import type { CommandId } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Package } from "../shared/package"
 import { getCommand } from "../utils/commands"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { ContextProxy } from "../core/config/ContextProxy"
@@ -73,58 +72,8 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 
 	context.subscriptions.push(registerRipgrepDiagnosticCommand())
 
-	// Dev-only tooling: the browser bridge command is registered at runtime only
-	// when ROO_BROWSER_BRIDGE=1 is set in the extension host environment (see
-	// .vscode/launch.json) AND the extension runs in Development mode. It is
-	// intentionally absent from package.json contributions, so public users
-	// never see a toolbar button or a localized command-palette entry.
-	if (process.env.ROO_BROWSER_BRIDGE === "1" && context.extensionMode === vscode.ExtensionMode.Development) {
-		context.subscriptions.push(registerBrowserBridgeCommand(options))
-	}
-}
-
-/**
- * Registers the dev-only `openInBrowser` command that switches a provider to
- * the socket.io browser bridge. Returns the disposable so the caller can
- * manage its lifecycle via `context.subscriptions`.
- */
-export function registerBrowserBridgeCommand({ outputChannel }: RegisterCommandOptions): vscode.Disposable {
-	return vscode.commands.registerCommand(`${Package.name}.openInBrowser`, async () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
-		if (!visibleProvider) {
-			return
-		}
-
-		// One provider -> one bridge -> one port, permanently. If this provider
-		// is already in browser mode, reuse its bridge instead of starting a
-		// second one (an extra socket.io server would leak its port).
-		const activePort = visibleProvider.getActiveBrowserBridgePort()
-
-		if (activePort !== undefined) {
-			outputChannel.appendLine(`[openInBrowser] Reusing existing browser bridge on port ${activePort}.`)
-			await vscode.env.openExternal(vscode.Uri.parse(BrowserBridgeServer.getBrowserUrl(activePort)))
-			return
-		}
-
-		const bridge = await BrowserBridgeServer.start(
-			(message) => outputChannel.appendLine(message),
-			(error) => {
-				// Surface bridge failures to the developer, not just the output
-				// channel — a silently dead command is a dead end.
-				void vscode.window.showErrorMessage(`Failed to start the browser bridge: ${error.message}`)
-			},
-		)
-		if (!bridge) {
-			outputChannel.appendLine("[openInBrowser] Failed to start the browser bridge.")
-			return
-		}
-		// Irreversible switch: from now on the provider posts to the virtual
-		// webview (socket.io) and the real iframe renders a placeholder with a
-		// clickable link to the browser tab.
-		visibleProvider.enableBrowserBridge(bridge)
-
-		await vscode.env.openExternal(vscode.Uri.parse(bridge.getBrowserUrl()))
-	})
+	// Dev-only tooling: self-gating no-op in production (see browserBridge.ts).
+	BrowserBridgeServer.registerCommand(context, options.outputChannel, () => ClineProvider.getVisibleInstance())
 }
 
 // `showRipgrepDiagnostic` is registered separately by
