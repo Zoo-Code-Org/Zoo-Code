@@ -982,6 +982,30 @@ describe("PR review-state workflow", () => {
 		expect(latestGuide(result)).toContain("calculating mergeability")
 	})
 
+	it("preserves the current state when pending mergeability metadata cannot be updated", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: null, mergeableState: "unknown" },
+			],
+			removeLabelStatus: 500,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Remove label failed"))
+	})
+
 	it("routes CodeRabbit change requests back to the author", async () => {
 		const result = await runWorkflow({
 			labels: ["coderabbit-review-active"],
