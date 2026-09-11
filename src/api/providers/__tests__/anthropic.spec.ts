@@ -1067,6 +1067,125 @@ describe("AnthropicHandler", () => {
 			])
 		})
 
+		it("ignores thinking deltas that arrive for a different block index", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "real thought" },
+					},
+					// Malformed stream: a thinking delta for a block that is not the
+					// open thinking block must not pollute the signed block text.
+					{
+						type: "content_block_delta",
+						index: 1,
+						delta: { type: "thinking_delta", thinking: "stray" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "sig" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(handler.getThinkingBlocks()).toEqual([{ thinking: "real thought", signature: "sig" }])
+		})
+
+		it("does not complete a thinking block when content_block_stop arrives for a different index", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "unclosed" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "sig" },
+					},
+					// Malformed stream: a stop for another block must not finalize
+					// the open thinking block.
+					{ type: "content_block_stop", index: 1 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([])
+			expect(handler.getThoughtSignature()).toBeUndefined()
+			expect(handler.getThinkingBlocks()).toBeUndefined()
+		})
+
+		it("does not emit a thinking block completed without a signature", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "unsigned thought" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([])
+			expect(handler.getThoughtSignature()).toBeUndefined()
+			expect(handler.getThinkingBlocks()).toBeUndefined()
+		})
+
 		it("clears a previously captured signature when the next response has no signed thinking block", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([

@@ -1102,6 +1102,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// For API requests, consecutive same-role messages are merged via mergeConsecutiveApiMessages()
 	// so rewind/edit behavior can still reference original message boundaries.
 
+	/**
+	 * Restores a user message previously removed from the API conversation
+	 * history, keeping the original record (including messageId and ts).
+	 * Rebuilding the message would assign a new identity, and the merge-on-save
+	 * would then keep both the on-disk original and the rebuilt copy,
+	 * duplicating the user turn after a restart.
+	 */
+	private async restoreApiHistoryUserMessage(message: ApiMessage) {
+		this.apiConversationHistory.push(message)
+		this.messageCounts.user++
+		await this.saveApiConversationHistory()
+	}
+
 	/** Replaces the entire API conversation history and persists the new state. */
 	async overwriteApiConversationHistory(newHistory: ApiMessage[], persist = true) {
 		this.hydrateApiConversationHistory(newHistory)
@@ -2918,6 +2931,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
+			removedUserMessage?: ApiMessage // The exact removed record, so a retry can restore it with its persisted identity
 		}
 
 		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
@@ -3060,8 +3074,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
 			if (shouldAddUserMessage) {
-				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
-				this.messageCounts.user++
+				if (currentItem.removedUserMessage) {
+					// Restore the exact record removed before the retry. Rebuilding it
+					// would assign a new messageId/ts, and the merge-on-save would keep
+					// both the on-disk original and the rebuilt copy, duplicating the
+					// user turn after a restart.
+					await this.restoreApiHistoryUserMessage(currentItem.removedUserMessage)
+				} else {
+					await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
+					this.messageCounts.user++
+				}
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -3692,14 +3714,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// Automatic retry budget exhausted - surface the failure.
 							// Remove this turn's user message so a user-approved retry
 							// (which resets retryAttempt to 0 and therefore re-adds the
-							// message) does not duplicate it in history.
-							let removedMidStreamUserMessage = false
+							// message) does not duplicate it in history. Keep the exact
+							// record so a restore preserves its persisted identity.
+							let removedMidStreamUserMessage: ApiMessage | undefined
 							if (currentUserContent.length > 0 && this.apiConversationHistory.length > 0) {
 								const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 								if (lastMessage.role === "user") {
-									this.apiConversationHistory.pop()
+									removedMidStreamUserMessage = this.apiConversationHistory.pop()
 									this.messageCounts.user--
-									removedMidStreamUserMessage = true
 								}
 							}
 
@@ -3712,12 +3734,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								await this.say("api_req_retried")
 
 								// Reset the automatic retry budget; the user message is
-								// re-added exactly once on the next iteration.
+								// restored exactly once on the next iteration.
 								stack.push({
 									userContent: currentUserContent,
 									includeFileDetails: false,
 									retryAttempt: 0,
-									userMessageWasRemoved: removedMidStreamUserMessage,
+									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
+									removedUserMessage: removedMidStreamUserMessage,
 								})
 
 								continue
@@ -3726,11 +3749,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// User declined to retry: restore the user message, surface
 							// the error, record the failure, and stop the loop.
 							if (removedMidStreamUserMessage) {
-								await this.addToApiConversationHistory({
-									role: "user",
-									content: currentUserContent,
-								})
-								this.messageCounts.user++
+								await this.restoreApiHistoryUserMessage(removedMidStreamUserMessage)
 							}
 
 							await this.say(
@@ -4114,14 +4133,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Only pop the user message that this iteration added. When
 					// shouldAddUserMessage is false (empty continuation, resumed history,
 					// or flushPendingToolResultsToHistory message) there is nothing to
-					// remove, and popping would corrupt history.
-					let removedCurrentUserMessage = false
+					// remove, and popping would corrupt history. Keep the exact record
+					// so a restore preserves its persisted identity.
+					let removedCurrentUserMessage: ApiMessage | undefined
 					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 						if (lastMessage.role === "user") {
-							this.apiConversationHistory.pop()
+							removedCurrentUserMessage = this.apiConversationHistory.pop()
 							this.messageCounts.user--
-							removedCurrentUserMessage = true
 						}
 					}
 
@@ -4132,11 +4151,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// surface it and stop instead of retrying.
 					if (lastStopReason === "max_tokens") {
 						if (removedCurrentUserMessage) {
-							await this.addToApiConversationHistory({
-								role: "user",
-								content: currentUserContent,
-							})
-							this.messageCounts.user++
+							await this.restoreApiHistoryUserMessage(removedCurrentUserMessage)
 						}
 
 						await this.say(
@@ -4190,7 +4205,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							userContent: currentUserContent,
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							userMessageWasRemoved: removedCurrentUserMessage,
+							userMessageWasRemoved: removedCurrentUserMessage !== undefined,
+							removedUserMessage: removedCurrentUserMessage,
 						})
 
 						// Continue to retry the request
@@ -4215,20 +4231,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-								userMessageWasRemoved: removedCurrentUserMessage,
+								userMessageWasRemoved: removedCurrentUserMessage !== undefined,
+								removedUserMessage: removedCurrentUserMessage,
 							})
 
 							// Continue to retry the request
 							continue
 						} else {
-							// User declined to retry. Re-add the user message only if this
+							// User declined to retry. Restore the user message only if this
 							// iteration removed one, so the history and counter stay consistent.
 							if (removedCurrentUserMessage) {
-								await this.addToApiConversationHistory({
-									role: "user",
-									content: currentUserContent,
-								})
-								this.messageCounts.user++
+								await this.restoreApiHistoryUserMessage(removedCurrentUserMessage)
 							}
 
 							await this.say(

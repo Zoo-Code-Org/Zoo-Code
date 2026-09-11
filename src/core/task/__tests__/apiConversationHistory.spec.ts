@@ -77,6 +77,51 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
+	it("does not add thinking blocks for non-Anthropic protocols even when getThinkingBlocks exists", () => {
+		// Double assertion: the stub only implements the optional history hooks
+		// this path reads, not the full ApiHandler surface.
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThinkingBlocks: () => [{ thinking: "first thought", signature: "signature-1" }],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "first thought",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "reasoning", text: "first thought", summary: [] },
+			{ type: "text", text: "answer" },
+			{ type: "thoughtSignature", thoughtSignature: "signature-1" },
+		])
+	})
+
+	it("prefers reasoning_details over getThinkingBlocks for Anthropic messages", () => {
+		// Double assertion: the stub only implements the optional history hooks
+		// this path reads, not the full ApiHandler surface.
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThinkingBlocks: () => [{ thinking: "first thought", signature: "signature-1" }],
+			getReasoningDetails: () => [{ type: "reasoning", text: "detail" }],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "first thought",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.reasoning_details).toEqual([{ type: "reasoning", text: "detail" }])
+		// No thinking or reasoning block is prepended when reasoning_details wins.
+		expect(result.content).toBe("answer")
+	})
+
 	it("falls back to generic reasoning blocks for Anthropic messages without thought signatures", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: "answer" },

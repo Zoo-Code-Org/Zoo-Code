@@ -282,7 +282,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		this.lastThinkingSignature = undefined
 		this.completedThinkingBlocks = []
 		let thinkingBlockIndex: number | undefined
+		// Stryker disable next-line StringLiteral: initial value is reset at every thinking-block start and only read after one, so it is never observable.
 		let pendingThinkingSignature = ""
+		// Stryker disable next-line StringLiteral: initial value is reset at every thinking-block start and only read after one, so it is never observable.
 		let pendingThinkingText = ""
 
 		for await (const chunk of stream) {
@@ -410,7 +412,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 							})
 							yield { type: "thinking_complete", signature: pendingThinkingSignature }
 						}
+						// Stryker disable next-line StringLiteral: reset value is never observed - the next thinking-block start overwrites it before any read.
 						pendingThinkingSignature = ""
+						// Stryker disable next-line StringLiteral: reset value is never observed - the next thinking-block start overwrites it before any read.
 						pendingThinkingText = ""
 					}
 					break
