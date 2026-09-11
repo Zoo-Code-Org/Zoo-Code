@@ -863,35 +863,26 @@ export class TaskHistoryStore {
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
 
-	private async refreshCachedTask(taskId: string): Promise<void> {
-		const current = await this.readTaskFile(taskId)
-		this.taskFileMtimes.delete(taskId)
-		if (current) this.cache.set(taskId, current)
-		else this.cache.delete(taskId)
-	}
-
 	private async pruneStaleHistoryBackups(tasksDir: string): Promise<void> {
 		const now = Date.now()
 		for (const taskId of this.cache.keys()) {
 			try {
 				await this.withTaskFileLock(taskId, async (fileLock) => {
 					const taskDir = path.join(tasksDir, taskId)
-					const historyPath = path.join(taskDir, GlobalFileNames.historyItem)
-					await fs.access(historyPath)
+					await fs.access(path.join(taskDir, GlobalFileNames.historyItem))
 					for (const entry of await fs.readdir(taskDir)) {
 						const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry)
 						if (!match) continue
 						const backupPath = path.join(taskDir, entry)
 						const { mtimeMs } = await fs.stat(backupPath)
 						if (
-							now - Number(match[1]) < TASK_HISTORY_BACKUP_RETENTION_MS ||
-							now - mtimeMs < TASK_HISTORY_BACKUP_RETENTION_MS
+							now - Number(match[1]) >= TASK_HISTORY_BACKUP_RETENTION_MS &&
+							now - mtimeMs >= TASK_HISTORY_BACKUP_RETENTION_MS
 						) {
-							continue
+							const compromiseError = fileLock.getCompromiseError()
+							if (compromiseError) throw compromiseError
+							await fs.unlink(backupPath)
 						}
-						const compromiseError = fileLock.getCompromiseError()
-						if (compromiseError) throw compromiseError
-						await fs.unlink(backupPath)
 					}
 				})
 			} catch (error) {
@@ -1086,7 +1077,12 @@ export class TaskHistoryStore {
 				() => undefined,
 				(error: unknown) => error,
 			)
-			if (releaseFileLock.getCompromiseError()) await this.refreshCachedTask(taskId)
+			if (releaseFileLock.getCompromiseError()) {
+				const reconciled = await this.readTaskFile(taskId)
+				this.taskFileMtimes.delete(taskId)
+				if (reconciled) this.cache.set(taskId, reconciled)
+				else this.cache.delete(taskId)
+			}
 			if ("error" in outcome) {
 				if (releaseError) {
 					console.error(
@@ -1295,27 +1291,17 @@ export class TaskHistoryStore {
 					const persistedWrittenSecond = JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem
 					const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
 
-					// Both snapshots are captured by guarded writes before callback work can run.
-					try {
-						await this.restoreTaskFilePreImage(
-							secondId,
-							secondDiskSnapshot as HistoryItem,
-							persistedWrittenSecond,
-							undefined,
-						)
-					} catch (compensationError) {
-						compensationErrors.push(compensationError)
-					}
-
-					try {
-						await this.restoreTaskFilePreImage(
-							firstId,
-							firstDiskSnapshot as HistoryItem,
-							persistedWrittenFirst,
-							firstFileLock,
-						)
-					} catch (compensationError) {
-						compensationErrors.push(compensationError)
+					// Restore second before first, preserving the original compensation order.
+					const restorations: Array<[string, HistoryItem, HistoryItem, JsonFileLock | undefined]> = [
+						[secondId, secondDiskSnapshot as HistoryItem, persistedWrittenSecond, undefined],
+						[firstId, firstDiskSnapshot as HistoryItem, persistedWrittenFirst, firstFileLock],
+					]
+					for (const restoration of restorations) {
+						try {
+							await this.restoreTaskFilePreImage(...restoration)
+						} catch (compensationError) {
+							compensationErrors.push(compensationError)
+						}
 					}
 
 					if (this.onWrite) {

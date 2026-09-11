@@ -61,15 +61,6 @@ import { makeProviderStub } from "./helpers/provider-stub"
 
 const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
 
-type LockedDelegationAccess = {
-	runLockedDelegationTransition: <T>(
-		parentTaskId: string,
-		transition: (fileLock: JsonFileLock) => Promise<T>,
-		afterUnlock?: (result: T) => Promise<void>,
-		afterUnlockError?: (error: unknown) => Promise<void>,
-	) => Promise<T>
-}
-
 /**
  * Create a minimal taskHistoryStore stub whose atomicUpdatePair calls both updaters
  * with the provided items and resolves, simulating the happy-path atomic write.
@@ -171,76 +162,6 @@ describe("History resume delegation - parent metadata transitions", () => {
 		vi.mocked(readApiMessages).mockResolvedValue([])
 		vi.mocked(saveTaskMessages).mockImplementation(async ({ messages }) => messages)
 		vi.mocked(saveApiMessages).mockImplementation(async ({ messages }) => messages)
-	})
-
-	it("runs post-lock callbacks only for their matching transition outcome", async () => {
-		let lockHeld = false
-		const provider = makeProviderStub({
-			taskHistoryStore: {
-				withTaskFileLock: vi.fn(async (_id: string, callback: (fileLock: JsonFileLock) => Promise<unknown>) => {
-					lockHeld = true
-					try {
-						return await callback(unlockedJsonFileLock())
-					} finally {
-						lockHeld = false
-					}
-				}),
-			},
-		}) as unknown as LockedDelegationAccess
-		const afterUnlock = vi.fn(async (result: string) => {
-			expect(lockHeld).toBe(false)
-			expect(result).toBe("completed")
-		})
-		const afterUnlockError = vi.fn(async (error: unknown) => {
-			expect(lockHeld).toBe(false)
-			expect(error).toBeInstanceOf(Error)
-		})
-
-		await expect(
-			provider.runLockedDelegationTransition(
-				"parent-success",
-				async () => "completed",
-				afterUnlock,
-				afterUnlockError,
-			),
-		).resolves.toBe("completed")
-		expect(afterUnlock).toHaveBeenCalledOnce()
-		expect(afterUnlockError).not.toHaveBeenCalled()
-
-		const transitionError = new Error("locked transition failed")
-		await expect(
-			provider.runLockedDelegationTransition(
-				"parent-failure",
-				async () => {
-					throw transitionError
-				},
-				afterUnlock,
-				afterUnlockError,
-			),
-		).rejects.toBe(transitionError)
-		expect(afterUnlockError).toHaveBeenCalledOnce()
-
-		const resumeError = new Error("resume failed")
-		await expect(
-			provider.runLockedDelegationTransition(
-				"parent-resume-failure",
-				async () => "completed",
-				async () => {
-					throw resumeError
-				},
-				afterUnlockError,
-			),
-		).rejects.toBe(resumeError)
-		expect(afterUnlockError).toHaveBeenCalledOnce()
-
-		await expect(
-			provider.runLockedDelegationTransition("parent-no-callbacks", async () => "completed"),
-		).resolves.toBe("completed")
-		await expect(
-			provider.runLockedDelegationTransition("parent-failure-no-callbacks", async () => {
-				throw transitionError
-			}),
-		).rejects.toBe(transitionError)
 	})
 
 	it("rejects a stale restored completion action before changing parent or child state", async () => {

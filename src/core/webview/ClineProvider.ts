@@ -253,25 +253,6 @@ export class ClineProvider
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
-	private runLockedDelegationTransition<T>(
-		parentTaskId: string,
-		transition: (fileLock: JsonFileLock) => Promise<T>,
-		afterUnlock?: (result: T) => Promise<void>,
-		afterUnlockError?: (error: unknown) => Promise<void>,
-	): Promise<T> {
-		return this.runDelegationTransition(parentTaskId, async () => {
-			let result: T
-			try {
-				result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
-			} catch (error) {
-				await afterUnlockError?.(error)
-				throw error
-			}
-			await afterUnlock?.(result)
-			return result
-		})
-	}
-
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
@@ -4199,9 +4180,6 @@ export class ClineProvider
 			const ts = Date.now()
 
 			// Defensive: ensure arrays
-			if (!Array.isArray(parentClineMessages)) parentClineMessages = []
-			if (!Array.isArray(parentApiMessages)) parentApiMessages = []
-
 			const subtaskUiMessage: ClineMessage = {
 				messageId: crypto.randomUUID(),
 				type: "say",
@@ -4302,32 +4280,6 @@ export class ClineProvider
 				}
 			}
 
-			const restoreConversationFiles = async (cause: unknown): Promise<void> => {
-				const restorationResults = await Promise.allSettled([
-					saveTaskMessages({
-						messages: originalParentClineMessages,
-						taskId: parentTaskId,
-						globalStoragePath,
-						merge: false,
-					}),
-					saveApiMessages({
-						messages: originalParentApiMessages,
-						taskId: parentTaskId,
-						globalStoragePath,
-						merge: false,
-					}),
-				])
-				const restorationErrors = restorationResults.flatMap((result) =>
-					result.status === "rejected" ? [result.reason] : [],
-				)
-				if (restorationErrors.length > 0) {
-					throw new AggregateError(
-						[cause, ...restorationErrors],
-						`[reopenParentFromDelegation] Failed to restore parent ${parentTaskId} conversation files`,
-					)
-				}
-			}
-
 			let updatedHistory!: typeof historyItem
 			let completingParent!: HistoryItem
 			let completingChild!: HistoryItem
@@ -4381,7 +4333,29 @@ export class ClineProvider
 							// non-fatal
 						}
 					} catch (error) {
-						await restoreConversationFiles(error)
+						const restorationResults = await Promise.allSettled([
+							saveTaskMessages({
+								messages: originalParentClineMessages,
+								taskId: parentTaskId,
+								globalStoragePath,
+								merge: false,
+							}),
+							saveApiMessages({
+								messages: originalParentApiMessages,
+								taskId: parentTaskId,
+								globalStoragePath,
+								merge: false,
+							}),
+						])
+						const restorationErrors = restorationResults.flatMap((result) =>
+							result.status === "rejected" ? [result.reason] : [],
+						)
+						if (restorationErrors.length) {
+							throw new AggregateError(
+								[error, ...restorationErrors],
+								`[reopenParentFromDelegation] Failed to restore parent ${parentTaskId} conversation files`,
+							)
+						}
 						throw error
 					}
 				},
@@ -4457,79 +4431,82 @@ export class ClineProvider
 			this.cancelledDelegationChildIds.delete(childTaskId)
 			return true
 		}
-		return this.runLockedDelegationTransition(
-			parentTaskId,
-			transition,
-			async () => {
-				const parentInstance = parentToResume
-				if (!parentInstance) return
-				let admitContinuation!: () => void
-				const continuationAdmitted = new Promise<void>((resolve) => {
-					admitContinuation = resolve
-				})
-				let schedulerAdmitted = false
-				const continuation = this.runDelegationTransition(parentTaskId, async () => {
-					await continuationAdmitted
-					if (!schedulerAdmitted) return {}
-					await this.taskHistoryStore.invalidate(parentTaskId)
-					const persistedParent = this.taskHistoryStore.get(parentTaskId)
-					const currentTask = this.getCurrentTask()
-					if (
-						this.cancelledDelegationChildIds.has(childTaskId) ||
-						parentInstance.abort ||
-						parentInstance.abandoned ||
-						currentTask !== parentInstance ||
-						persistedParent?.status !== "active" ||
-						persistedParent.completedByChildId !== childTaskId ||
-						persistedParent.awaitingChildId !== undefined ||
-						persistedParent.delegatedToId !== undefined
-					) {
-						this.log(
-							`[reopenParentFromDelegation] Skipping stale parent continuation for ${parentTaskId} after child ${childTaskId}`,
-						)
-						return {}
-					}
-					return { runPromise: parentInstance.resumeAfterDelegation() }
-				})
-				void this.taskScheduler
-					.schedule(parentInstance, async () => {
-						schedulerAdmitted = true
-						admitContinuation()
-						const { runPromise } = await continuation
-						if (!runPromise) return
-						try {
-							await runPromise
-							try {
-								this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-							} catch {
-								// non-fatal
-							}
-						} catch (error) {
-							const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
-							this.log(`[reopenParentFromDelegation] ${message}`)
-							await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
-							throw error
+		return this.runDelegationTransition(parentTaskId, async () => {
+			let result: boolean
+			try {
+				result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
+			} catch (error) {
+				if (childToRestore) {
+					try {
+						if (this.getCurrentTask()?.taskId === parentTaskId) {
+							await this.removeClineFromStack({ saveMessages: false })
 						}
-					})
-					.then(admitContinuation, (error) => {
-						admitContinuation()
-						console.error(`[reopenParentFromDelegation] taskScheduler.schedule failed:`, error)
-					})
-			},
-			async (error) => {
-				if (!childToRestore) return
-				try {
-					if (this.getCurrentTask()?.taskId === parentTaskId) {
-						await this.removeClineFromStack({ saveMessages: false })
+						if (!this.getCurrentTask()) {
+							await this.createTaskWithHistoryItem(childToRestore, { startTask: false })
+						}
+					} catch (restoreError) {
+						throw new AggregateError([error, restoreError], `Failed to restore child ${childTaskId}`)
 					}
-					if (!this.getCurrentTask()) {
-						await this.createTaskWithHistoryItem(childToRestore, { startTask: false })
-					}
-				} catch (restoreError) {
-					throw new AggregateError([error, restoreError], `Failed to restore child ${childTaskId}`)
 				}
-			},
-		)
+				throw error
+			}
+
+			const parentInstance = parentToResume
+			if (!parentInstance) return result
+			let admitContinuation!: () => void
+			const continuationAdmitted = new Promise<void>((resolve) => {
+				admitContinuation = resolve
+			})
+			let schedulerAdmitted = false
+			const continuation = this.runDelegationTransition(parentTaskId, async () => {
+				await continuationAdmitted
+				if (!schedulerAdmitted) return {}
+				await this.taskHistoryStore.invalidate(parentTaskId)
+				const persistedParent = this.taskHistoryStore.get(parentTaskId)
+				const currentTask = this.getCurrentTask()
+				if (
+					this.cancelledDelegationChildIds.has(childTaskId) ||
+					parentInstance.abort ||
+					parentInstance.abandoned ||
+					currentTask !== parentInstance ||
+					persistedParent?.status !== "active" ||
+					persistedParent.completedByChildId !== childTaskId ||
+					persistedParent.awaitingChildId !== undefined ||
+					persistedParent.delegatedToId !== undefined
+				) {
+					this.log(
+						`[reopenParentFromDelegation] Skipping stale parent continuation for ${parentTaskId} after child ${childTaskId}`,
+					)
+					return {}
+				}
+				return { runPromise: parentInstance.resumeAfterDelegation() }
+			})
+			void this.taskScheduler
+				.schedule(parentInstance, async () => {
+					schedulerAdmitted = true
+					admitContinuation()
+					const { runPromise } = await continuation
+					if (!runPromise) return
+					try {
+						await runPromise
+						try {
+							this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+						} catch {
+							// non-fatal
+						}
+					} catch (error) {
+						const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
+						this.log(`[reopenParentFromDelegation] ${message}`)
+						await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
+						throw error
+					}
+				})
+				.then(admitContinuation, (error) => {
+					admitContinuation()
+					console.error(`[reopenParentFromDelegation] taskScheduler.schedule failed:`, error)
+				})
+			return result
+		})
 	}
 
 	/** Emits completion after delegated child disposal through the provider-owned event channel. */
