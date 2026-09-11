@@ -367,7 +367,10 @@ describe("History resume delegation - parent metadata transitions", () => {
 	})
 
 	it("reopenParentFromDelegation accepts an active parent awaiting the returning child", async () => {
-		const providerEmit = vi.fn()
+		const cancelledDelegationChildIds = new Set<string>()
+		const providerEmit = vi.fn((event: RooCodeEventName) => {
+			if (event === RooCodeEventName.TaskDelegationCompleted) cancelledDelegationChildIds.add("child-1")
+		})
 		const parentHistoryItem = {
 			id: "parent-1",
 			status: "active",
@@ -413,6 +416,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			taskHistoryStore,
+			cancelledDelegationChildIds,
 		})
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
@@ -481,6 +485,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			}),
 			{ startTask: false },
 		)
+		expect(cancelledDelegationChildIds.has("child-1")).toBe(false)
 		expect(taskHistoryStore.get("parent-1")).toEqual(updatedParent)
 		expect(taskHistoryStore.get("child-1")).toEqual(updatedChild)
 	})
