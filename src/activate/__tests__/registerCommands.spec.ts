@@ -2,13 +2,7 @@ import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 
-import {
-	getVisibleProviderOrLog,
-	openClineInNewTab,
-	registerBrowserBridgeCommand,
-	registerCommands,
-	setPanel,
-} from "../registerCommands"
+import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -21,7 +15,6 @@ vi.mock("vscode", () => ({
 	},
 	Uri: {
 		joinPath: vi.fn((_base: unknown, ..._pathSegments: string[]) => ({ path: _pathSegments.join("/") })),
-		parse: vi.fn((value: string) => ({ toString: () => value })),
 	},
 	ViewColumn: {
 		Two: 2,
@@ -29,11 +22,7 @@ vi.mock("vscode", () => ({
 	window: {
 		createTextEditorDecorationType: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		createWebviewPanel: vi.fn(),
-		showErrorMessage: vi.fn(),
 		visibleTextEditors: [],
-	},
-	env: {
-		openExternal: vi.fn().mockResolvedValue(true),
 	},
 	workspace: {
 		workspaceFolders: [
@@ -51,13 +40,6 @@ vi.mock("vscode", () => ({
 }))
 
 vi.mock("../../core/webview/ClineProvider")
-
-vi.mock("../../core/webview/browserBridge", () => ({
-	BrowserBridgeServer: {
-		start: vi.fn(),
-		getBrowserUrl: vi.fn((port: number) => `http://localhost:5173/?bridgePort=${port}`),
-	},
-}))
 
 vi.mock("../../shared/package", () => ({
 	Package: {
@@ -151,11 +133,7 @@ describe("getVisibleProviderOrLog", () => {
 describe("registerCommands handlers", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockContext: vscode.ExtensionContext
-	let mockVisibleProvider: {
-		postMessageToWebview: Mock
-		getActiveBrowserBridgePort: Mock
-		enableBrowserBridge: Mock
-	}
+	let mockVisibleProvider: { postMessageToWebview: Mock }
 	let mockProvider: { postMessageToWebview: Mock }
 	let handlers: Record<string, (...args: unknown[]) => unknown>
 
@@ -180,8 +158,6 @@ describe("registerCommands handlers", () => {
 
 		mockVisibleProvider = {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
-			getActiveBrowserBridgePort: vi.fn().mockReturnValue(undefined),
-			enableBrowserBridge: vi.fn(),
 		}
 
 		mockProvider = {
@@ -397,113 +373,6 @@ describe("registerCommands handlers", () => {
 
 		// Should not throw even with no visible provider
 		await handlers["zoo-code.plusButtonClicked"]()
-	})
-})
-
-// The openInBrowser command is dev-only tooling: it is not contributed in
-// package.json and is registered directly through registerBrowserBridgeCommand
-// (only when ROO_BROWSER_BRIDGE=1 in a Development host), so these tests drive
-// that function instead of the main registration loop.
-describe("registerBrowserBridgeCommand", () => {
-	let mockOutputChannel: vscode.OutputChannel
-	let mockVisibleProvider: {
-		getActiveBrowserBridgePort: Mock
-		enableBrowserBridge: Mock
-	}
-	let openInBrowser: () => Promise<unknown>
-
-	const getOpenedUrl = (): string => {
-		const uri = vi.mocked(vscode.env.openExternal).mock.calls[0]?.[0] as { toString(): string } | undefined
-		return uri?.toString() ?? ""
-	}
-
-	beforeEach(() => {
-		vi.clearAllMocks()
-
-		mockOutputChannel = {
-			appendLine: vi.fn(),
-			append: vi.fn(),
-			clear: vi.fn(),
-			hide: vi.fn(),
-			name: "mock",
-			replace: vi.fn(),
-			show: vi.fn(),
-			dispose: vi.fn(),
-		}
-
-		mockVisibleProvider = {
-			getActiveBrowserBridgePort: vi.fn().mockReturnValue(undefined),
-			enableBrowserBridge: vi.fn(),
-		}
-		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(mockVisibleProvider)
-
-		let handler: (() => Promise<unknown>) | undefined
-		;(vscode.commands.registerCommand as Mock).mockImplementation((id: string, cb: () => Promise<unknown>) => {
-			expect(id).toBe("zoo-code.openInBrowser")
-			handler = cb
-			return { dispose: vi.fn() }
-		})
-
-		registerBrowserBridgeCommand({
-			context: { subscriptions: [] } as unknown as vscode.ExtensionContext,
-			outputChannel: mockOutputChannel,
-			provider: {} as ClineProvider,
-		})
-		openInBrowser = () => handler!()
-	})
-
-	it("starts a bridge, enables it on the provider, and opens the URL with the port", async () => {
-		const bridge = {
-			port: 43210,
-			dispose: vi.fn(),
-			getBrowserUrl: vi.fn().mockReturnValue("http://localhost:5173/?bridgePort=43210"),
-		}
-		const { BrowserBridgeServer } = await import("../../core/webview/browserBridge")
-		vi.mocked(BrowserBridgeServer.start).mockResolvedValue(bridge as never)
-
-		await openInBrowser()
-
-		expect(BrowserBridgeServer.start).toHaveBeenCalledTimes(1)
-		expect(mockVisibleProvider.enableBrowserBridge).toHaveBeenCalledWith(bridge)
-		expect(mockVisibleProvider.getActiveBrowserBridgePort).toHaveBeenCalled()
-		expect(vscode.env.openExternal).toHaveBeenCalledTimes(1)
-		expect(getOpenedUrl()).toBe("http://localhost:5173/?bridgePort=43210")
-	})
-
-	it("reuses the existing bridge and does not start a second one", async () => {
-		const { BrowserBridgeServer } = await import("../../core/webview/browserBridge")
-		mockVisibleProvider.getActiveBrowserBridgePort.mockReturnValue(43210)
-
-		await openInBrowser()
-
-		expect(BrowserBridgeServer.start).not.toHaveBeenCalled()
-		expect(mockVisibleProvider.enableBrowserBridge).not.toHaveBeenCalled()
-		expect(vscode.env.openExternal).toHaveBeenCalledTimes(1)
-		expect(getOpenedUrl()).toBe("http://localhost:5173/?bridgePort=43210")
-		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-			"[openInBrowser] Reusing existing browser bridge on port 43210.",
-		)
-	})
-
-	it("aborts when there is no visible provider", async () => {
-		const { BrowserBridgeServer } = await import("../../core/webview/browserBridge")
-		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
-
-		await openInBrowser()
-
-		expect(BrowserBridgeServer.start).not.toHaveBeenCalled()
-		expect(vscode.env.openExternal).not.toHaveBeenCalled()
-	})
-
-	it("logs when the bridge fails to start", async () => {
-		const { BrowserBridgeServer } = await import("../../core/webview/browserBridge")
-		vi.mocked(BrowserBridgeServer.start).mockResolvedValue(undefined as never)
-
-		await openInBrowser()
-
-		expect(mockVisibleProvider.enableBrowserBridge).not.toHaveBeenCalled()
-		expect(vscode.env.openExternal).not.toHaveBeenCalled()
-		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith("[openInBrowser] Failed to start the browser bridge.")
 	})
 })
 
