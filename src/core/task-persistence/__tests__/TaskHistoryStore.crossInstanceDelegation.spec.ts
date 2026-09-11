@@ -32,7 +32,7 @@ type WriteTaskFile = (
 	item: HistoryItem,
 	delta?: Partial<HistoryItem>,
 	diskGuard?: (current: HistoryItem) => void,
-	options?: { mergeChildIds?: boolean; heldLock?: JsonFileLock },
+	options?: { heldLock?: JsonFileLock },
 ) => Promise<HistoryItem>
 
 const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
@@ -58,7 +58,7 @@ const getRestoreTaskFilePreImage = (store: TaskHistoryStore): RestoreTaskFilePre
 }
 
 describe("TaskHistoryStore cross-instance delegation", () => {
-	it("unions child IDs by default and replaces them only when explicitly requested", async () => {
+	it("unions changed child IDs and preserves them for unrelated updates", async () => {
 		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-child-id-merge-"))
 		const store = new TaskHistoryStore(storage)
 
@@ -77,22 +77,8 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			expect(unioned.childIds).toEqual(["peer-child", "local-child"])
 			expect(JSON.parse(await fs.readFile(taskFile, "utf8")).childIds).toEqual(["peer-child", "local-child"])
 
-			await fs.writeFile(taskFile, JSON.stringify({ ...task, childIds: ["new-peer-child"] }))
-			const replaced = await writeTaskFile(
-				{ ...task, childIds: ["replacement-child"] },
-				{ id: task.id, childIds: ["replacement-child"] },
-				undefined,
-				{ mergeChildIds: false },
-			)
-			expect(replaced.childIds).toEqual(["replacement-child"])
-
 			await fs.writeFile(taskFile, JSON.stringify({ ...task, childIds: ["preserved-child"] }))
-			const unrelatedUpdate = await writeTaskFile(
-				{ ...task, tokensIn: 2 },
-				{ id: task.id, tokensIn: 2 },
-				undefined,
-				{ mergeChildIds: false },
-			)
+			const unrelatedUpdate = await writeTaskFile({ ...task, tokensIn: 2 }, { id: task.id, tokensIn: 2 })
 			expect(unrelatedUpdate).toMatchObject({ tokensIn: 2, childIds: ["preserved-child"] })
 		} finally {
 			store.dispose()
