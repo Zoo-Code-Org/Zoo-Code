@@ -59,6 +59,42 @@ describe("TerminalProcess", () => {
 	})
 
 	describe("run", () => {
+		it("does not execute a command started after the terminal is already closed", async () => {
+			mockTerminalInfo.handleClose()
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+
+			const result = mockTerminalInfo.runCommand("test command", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+			const process = mockTerminalInfo.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+			await result
+
+			expect(mockTerminal.shellIntegration.executeCommand).not.toHaveBeenCalled()
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
+		})
+
+		it("emits the startup-close completion sequence once and resets running state", () => {
+			mockTerminalInfo.running = true
+			const emitSpy = vi.spyOn(terminalProcess, "emit")
+
+			terminalProcess.handleTerminalClosed()
+			terminalProcess.handleTerminalClosed()
+
+			expect(emitSpy).toHaveBeenCalledTimes(3)
+			expect(emitSpy).toHaveBeenCalledWith("shell_execution_complete", { exitCode: undefined })
+			expect(emitSpy).toHaveBeenCalledWith("completed", "")
+			expect(emitSpy).toHaveBeenCalledWith("continue")
+			expect(mockTerminalInfo.running).toBe(false)
+		})
+
 		it("rejects the command promise when terminal process startup rejects", async () => {
 			const startupError = new Error("terminal startup failed")
 			const runSpy = vi.spyOn(TerminalProcess.prototype, "run").mockRejectedValueOnce(startupError)
