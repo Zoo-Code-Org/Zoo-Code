@@ -721,8 +721,16 @@ jobs:
                     continue;
                   }
                   if (latestPrDetail.mergeable === null || latestPrDetail.mergeable_state === 'unknown') {
-                    desiredLabel = null;
-                    phase = 'mergeability-pending';
+                    try {
+                      core.info(`PR #${pr.number}: mergeability pending — preserving current state labels`);
+                      await updateReviewGate(pr, 'mergeability-pending', false);
+                      await setCodeRabbitReviewActive(pr, false);
+                      await updateReviewGuide(pr, 'mergeability-pending', existingGuide);
+                    } catch (error) {
+                      error.preserveStateLabels = true;
+                      throw error;
+                    }
+                    continue;
                   }
                 }
 

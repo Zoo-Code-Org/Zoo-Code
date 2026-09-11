@@ -957,10 +957,10 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
-	it("does not tag a PR awaiting maintainer while mergeability is unknown", async () => {
+	it("preserves the current state while mergeability is unknown", async () => {
 		const result = await runWorkflow({
 			eventName: "push",
-			labels: ["awaiting-maintainer"],
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
 			mergeabilitySequence: [
 				{ mergeable: null, mergeableState: "unknown" },
 				{ mergeable: null, mergeableState: "unknown" },
@@ -975,9 +975,35 @@ describe("PR review-state workflow", () => {
 			],
 		})
 
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
 		expect(latestGateStatus(result)?.description).toContain("calculating mergeability")
+		expect(latestGuide(result)).toContain("calculating mergeability")
+	})
+
+	it("preserves the current state when pending mergeability metadata cannot be updated", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: null, mergeableState: "unknown" },
+			],
+			removeLabelStatus: 500,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Remove label failed"))
 	})
 
 	it("routes CodeRabbit change requests back to the author", async () => {

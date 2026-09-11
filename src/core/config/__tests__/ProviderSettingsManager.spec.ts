@@ -627,6 +627,21 @@ describe("ProviderSettingsManager", () => {
 			)
 		})
 
+		it("keeps nested defaults pristine when the initial save fails", async () => {
+			mockSecrets.store.mockRejectedValueOnce(new Error("Storage failed"))
+
+			await expect(
+				providerSettingsManager.saveConfig("default", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "test-key",
+				}),
+			).rejects.toThrow("Storage failed")
+
+			await expect(providerSettingsManager.listConfig()).resolves.toEqual([
+				{ name: "default", id: expect.any(String), apiProvider: undefined },
+			])
+		})
+
 		it("should preserve full fields including legacy provider-specific keys when saving retired provider profiles", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
