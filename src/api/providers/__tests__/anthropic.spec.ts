@@ -1,9 +1,11 @@
 // npx vitest run src/api/providers/__tests__/anthropic.spec.ts
 
 import { AnthropicHandler } from "../anthropic"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { prepareApiConversationMessage } from "../../../core/task/apiConversationHistory"
 
 // Mock TelemetryService
 vitest.mock("@roo-code/telemetry", () => ({
@@ -1064,6 +1066,58 @@ describe("AnthropicHandler", () => {
 			expect(handler.getThinkingBlocks()).toEqual([
 				{ thinking: "first thought", signature: "sig-one" },
 				{ thinking: "second thought", signature: "sig-two" },
+			])
+		})
+
+		it("round-trips multiple signed thinking blocks into a tool-result continuation", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 1 } } },
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "one", signature: "" },
+					},
+					{ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-one" } },
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "thinking", thinking: "two", signature: "" },
+					},
+					{ type: "content_block_delta", index: 1, delta: { type: "signature_delta", signature: "sig-two" } },
+					{ type: "content_block_stop", index: 1 },
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+			const assistant = prepareApiConversationMessage({
+				message: {
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: {} }],
+				},
+				reasoning: "one\ntwo",
+				api: handler,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+				},
+				apiConversationHistory: [],
+			})
+
+			await collectStream(
+				handler.createMessage(systemPrompt, [
+					assistant,
+					{ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "done" }] },
+				]),
+			)
+
+			const continuation = mockCreate.mock.calls.at(-1)?.[0].messages as Anthropic.Messages.MessageParam[]
+			expect(continuation[0]?.content).toEqual([
+				{ type: "thinking", thinking: "one", signature: "sig-one" },
+				{ type: "thinking", thinking: "two", signature: "sig-two" },
+				{ type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
 			])
 		})
 
