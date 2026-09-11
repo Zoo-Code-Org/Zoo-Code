@@ -578,7 +578,7 @@ describe("TerminalRegistry", () => {
 
 			expect(settledSpy).toHaveBeenCalledOnce()
 			expect(disposeSpy).toHaveBeenCalledOnce()
-			expect(terminal["cancelShellIntegrationWait"]).toBeUndefined()
+			expect(terminal["cancelShellIntegrationWaits"].size).toBe(0)
 		})
 
 		it("does not let an older shell-integration wait clear a newer cancellation", async () => {
@@ -590,18 +590,16 @@ describe("TerminalRegistry", () => {
 				return { dispose: vi.fn() }
 			})
 			const first = terminal["waitForShellIntegration"](100)
-			const firstCancel = terminal["cancelShellIntegrationWait"]
 			const second = terminal["waitForShellIntegration"](100)
-			const secondCancel = terminal["cancelShellIntegrationWait"]
 
-			expect(firstCancel).not.toBe(secondCancel)
+			expect(terminal["cancelShellIntegrationWaits"].size).toBe(2)
 			handlers[0]({ terminal: terminal.terminal, shellIntegration: {} as never })
 			await settleWithin(first)
-			expect(terminal["cancelShellIntegrationWait"]).toBe(secondCancel)
+			expect(terminal["cancelShellIntegrationWaits"].size).toBe(1)
 
 			handlers[1]({ terminal: terminal.terminal, shellIntegration: {} as never })
 			await settleWithin(second)
-			expect(terminal["cancelShellIntegrationWait"]).toBeUndefined()
+			expect(terminal["cancelShellIntegrationWaits"].size).toBe(0)
 		})
 
 		it("rejects a direct shell-integration wait when the terminal is already closed", async () => {
@@ -611,6 +609,136 @@ describe("TerminalRegistry", () => {
 			await expect(terminal["waitForShellIntegration"](100)).rejects.toThrow(
 				"Terminal closed before shell integration became available",
 			)
+		})
+
+		it("releases all startup resources when handleClose interrupts runCommand", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpy = vi.fn()
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce(() => ({
+				dispose: disposeSpy,
+			}))
+			const result = terminal.runCommand("git status", {
+				onLine: vi.fn(),
+				onCompleted: vi.fn(),
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+				onNoShellIntegration: vi.fn(),
+			})
+			const process = terminal.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+
+			terminal.handleClose()
+			await result
+
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+			for (const event of [
+				"line",
+				"completed",
+				"continue",
+				"error",
+				"shell_execution_started",
+				"shell_execution_complete",
+				"no_shell_integration",
+			]) {
+				expect(process?.listenerCount(event), event).toBe(0)
+			}
+		})
+
+		it("cancels every concurrent shell-integration wait when the terminal closes", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpies = [vi.fn(), vi.fn()]
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration)
+				.mockImplementationOnce(() => ({ dispose: disposeSpies[0] }))
+				.mockImplementationOnce(() => ({ dispose: disposeSpies[1] }))
+			const rejectedSpies = [vi.fn(), vi.fn()]
+			void terminal["waitForShellIntegration"](1_000).catch(rejectedSpies[0])
+			void terminal["waitForShellIntegration"](1_000).catch(rejectedSpies[1])
+
+			terminal.handleClose()
+			await Promise.resolve()
+
+			expect(rejectedSpies[0]).toHaveBeenCalledOnce()
+			expect(rejectedSpies[1]).toHaveBeenCalledOnce()
+			expect(disposeSpies[0]).toHaveBeenCalledOnce()
+			expect(disposeSpies[1]).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("settles every concurrent runCommand startup when the terminal closes", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpies = [vi.fn(), vi.fn()]
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration)
+				.mockImplementationOnce(() => ({ dispose: disposeSpies[0] }))
+				.mockImplementationOnce(() => ({ dispose: disposeSpies[1] }))
+			const completedSpies = [vi.fn(), vi.fn()]
+			const completionSpies = [vi.fn(), vi.fn()]
+			const results = [
+				terminal.runCommand("first", {
+					onLine: vi.fn(),
+					onCompleted: completedSpies[0],
+					onShellExecutionStarted: vi.fn(),
+					onShellExecutionComplete: completionSpies[0],
+				}),
+				terminal.runCommand("second", {
+					onLine: vi.fn(),
+					onCompleted: completedSpies[1],
+					onShellExecutionStarted: vi.fn(),
+					onShellExecutionComplete: completionSpies[1],
+				}),
+			]
+			const settledSpies = [vi.fn(), vi.fn()]
+			void results[0].then(settledSpies[0])
+			void results[1].then(settledSpies[1])
+
+			terminal.handleClose()
+			await Promise.all(results)
+
+			expect(settledSpies[0]).toHaveBeenCalledOnce()
+			expect(settledSpies[1]).toHaveBeenCalledOnce()
+			expect(completedSpies[0]).toHaveBeenCalledOnce()
+			expect(completedSpies[1]).toHaveBeenCalledOnce()
+			expect(completionSpies[0]).toHaveBeenCalledOnce()
+			expect(completionSpies[1]).toHaveBeenCalledOnce()
+			expect(disposeSpies[0]).toHaveBeenCalledOnce()
+			expect(disposeSpies[1]).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("does not complete again when a no-shell process is followed by terminal closure", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const process = new TerminalProcess(terminal)
+			terminal.process = process
+			terminal.busy = true
+			const noShellSpy = vi.fn()
+			const completedSpy = vi.fn()
+			const continueSpy = vi.fn()
+			const shellCompleteSpy = vi.fn()
+			process.on("no_shell_integration", noShellSpy)
+			process.on("completed", completedSpy)
+			process.on("continue", continueSpy)
+			process.on("shell_execution_complete", shellCompleteSpy)
+
+			await process.run("git status")
+
+			expect(noShellSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(continueSpy).toHaveBeenCalledOnce()
+			expect(terminal.process).toBeUndefined()
+			expect(process.eventNames()).toEqual([])
+
+			terminal.handleClose()
+
+			expect(shellCompleteSpy).not.toHaveBeenCalled()
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(continueSpy).toHaveBeenCalledOnce()
 		})
 
 		it("clears the timeout and disposes the listener when shell integration activates", async () => {
@@ -662,7 +790,8 @@ describe("TerminalRegistry", () => {
 			const rejectedSpy = vi.fn()
 			void terminal["waitForShellIntegration"](1_000).catch(rejectedSpy)
 
-			terminal["cancelShellIntegrationWait"]?.()
+			const [cancel] = terminal["cancelShellIntegrationWaits"]
+			cancel?.()
 			await Promise.resolve()
 
 			expect(rejectedSpy).toHaveBeenCalledOnce()

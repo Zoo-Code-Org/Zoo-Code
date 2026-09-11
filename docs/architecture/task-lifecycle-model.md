@@ -53,7 +53,7 @@ Production completion also accepts a recovery-compatible `active` parent that st
 
 ## Terminal command lifecycle model
 
-The same command runs a bounded terminal lifecycle explorer for issue #1362. It models command startup, shell activation, streamed output, normal completion, and terminal closure. Its invariants require completion to remain at-most-once, closure to detach the process, buffered output to be delivered, and an active stream iterator to be released. Named landmarks retain the important interleavings: closure before command submission, closure after output, closure after a normal end event, and duplicate closure.
+The same command runs a bounded terminal lifecycle explorer for issue #1362. It models command startup, shell activation, streamed output, normal completion, concurrent shell-integration waits, and terminal closure. Its invariants require completion to remain at-most-once, closure to detach the process and settle every pending wait, buffered output to be delivered, and an active stream iterator to be released. Named landmarks retain the important interleavings: closure before command submission, closure after output, closure after a normal end event, duplicate closure, and closure with two pending waits.
 
 This terminal model is intentionally separate from persisted task delegation state because VS Code terminal events are an extension-host adapter protocol rather than `HistoryItem` transitions. Focused `TerminalRegistry` tests bind the abstract properties to production behavior, including omitted `onDidEndTerminalShellExecution` events and an undefined `exitStatus` during the close callback.
 

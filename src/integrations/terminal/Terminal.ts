@@ -12,7 +12,7 @@ import { mergePromise } from "./mergePromise"
 export class Terminal extends BaseTerminal {
 	public terminal: vscode.Terminal
 	private closed = false
-	private cancelShellIntegrationWait?: () => void
+	private cancelShellIntegrationWaits = new Set<() => void>()
 
 	public cmdCounter: number = 0
 
@@ -86,8 +86,10 @@ export class Terminal extends BaseTerminal {
 		}
 
 		this.closed = true
-		this.cancelShellIntegrationWait?.()
-		this.cancelShellIntegrationWait = undefined
+		for (const cancel of this.cancelShellIntegrationWaits) {
+			cancel()
+		}
+		this.cancelShellIntegrationWaits.clear()
 
 		if (this.process instanceof TerminalProcess) {
 			this.process.handleTerminalClosed()
@@ -149,6 +151,7 @@ export class Terminal extends BaseTerminal {
 				this.waitForShellIntegration(Terminal.getShellIntegrationTimeout())
 					.then(() => {
 						if (this.isClosed()) {
+							process.handleTerminalClosed()
 							return
 						}
 
@@ -160,6 +163,7 @@ export class Terminal extends BaseTerminal {
 					})
 					.catch(() => {
 						if (this.isClosed()) {
+							process.handleTerminalClosed()
 							return
 						}
 
@@ -207,9 +211,7 @@ export class Terminal extends BaseTerminal {
 				clearTimeout(timer)
 				ref.disposable?.dispose()
 
-				if (this.cancelShellIntegrationWait === cancel) {
-					this.cancelShellIntegrationWait = undefined
-				}
+				this.cancelShellIntegrationWaits.delete(cancel)
 
 				callback()
 			}
@@ -218,7 +220,7 @@ export class Terminal extends BaseTerminal {
 			}, timeoutMs)
 
 			cancel = () => finish(() => reject(new Error("Terminal closed before shell integration became available")))
-			this.cancelShellIntegrationWait = cancel
+			this.cancelShellIntegrationWaits.add(cancel)
 
 			ref.disposable = vscode.window.onDidChangeTerminalShellIntegration((e) => {
 				if (e.terminal === this.terminal) {

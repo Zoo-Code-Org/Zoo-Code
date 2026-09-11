@@ -30,6 +30,8 @@ export class TerminalProcess extends BaseTerminalProcess {
 	// whatever command is currently running on the same reused terminal -- see the
 	// self-finalize grace period in run()'s finalize().
 	public ownExecution?: vscode.TerminalShellExecution
+	private terminalCloseHandled = false
+	private finalizedBeforeExecution = false
 
 	constructor(terminal: Terminal) {
 		super()
@@ -41,10 +43,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 		})
 
 		this.once("no_shell_integration", () => {
-			this.emit("completed", "<no shell integration>")
-			this.terminal.busy = false
-			this.terminal.setActiveStream(undefined)
-			this.continue()
+			this.completeBeforeExecution("<no shell integration>")
 		})
 	}
 
@@ -60,8 +59,17 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 	/** Completes this process when its terminal closes without an execution-end event. */
 	public handleTerminalClosed(): void {
+		if (this.terminalCloseHandled || this.finalizedBeforeExecution) {
+			return
+		}
+		this.terminalCloseHandled = true
+
 		const executionStarted = this.ownExecution !== undefined
-		this.terminal.shellExecutionComplete({ exitCode: undefined })
+		if (this.terminal.process === this) {
+			this.terminal.shellExecutionComplete({ exitCode: undefined })
+		} else {
+			this.emit("shell_execution_complete", { exitCode: undefined })
+		}
 
 		if (executionStarted) {
 			return
@@ -69,8 +77,23 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 		// run() has not installed its completion listener yet, so finish the
 		// startup-wait path directly instead of leaving runCommand() pending.
-		this.emit("completed", "")
-		this.emit("continue")
+		this.completeBeforeExecution("")
+	}
+
+	private completeBeforeExecution(output: string): void {
+		this.finalizedBeforeExecution = true
+
+		const terminal = this.terminal
+		terminal.busy = false
+		terminal.running = false
+		terminal.activeShellExecution = undefined
+		terminal.setActiveStream(undefined)
+		if (terminal.process === this) {
+			terminal.process = undefined
+		}
+		this.emit("completed", output)
+		this.continue()
+		this.removeAllListeners()
 	}
 
 	public override async run(command: string) {
@@ -91,13 +114,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 				message: "Command was submitted; output is not available, as shell integration is inactive.",
 				commandSubmitted: true,
 			})
-
-			this.emit(
-				"completed",
-				"<shell integration is not available, so terminal output and command execution status is unknown>",
-			)
-
-			this.emit("continue")
 			return
 		}
 
