@@ -7,6 +7,16 @@ import type { HistoryItem } from "@roo-code/types"
 import { lockJsonFile } from "../../../utils/safeWriteJson"
 import { TASK_HISTORY_BACKUP_RETENTION_MS, TaskHistoryStore } from "../TaskHistoryStore"
 
+const safeWriteJsonActuals = vi.hoisted(() => ({
+	lockJsonFile: undefined as typeof import("../../../utils/safeWriteJson").lockJsonFile | undefined,
+}))
+
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../utils/safeWriteJson")>()
+	safeWriteJsonActuals.lockJsonFile = actual.lockJsonFile
+	return { ...actual, lockJsonFile: vi.fn(actual.lockJsonFile) }
+})
+
 type WriteTaskFile = (item: HistoryItem, delta?: Partial<HistoryItem>) => Promise<HistoryItem>
 
 interface WriteBarrier {
@@ -86,6 +96,10 @@ async function seedHistoryBackup(storagePath: string, taskId: string, ageMs: num
 }
 
 describe("TaskHistoryStore real cross-host locking", () => {
+	beforeEach(() => {
+		vi.mocked(lockJsonFile).mockReset().mockImplementation(safeWriteJsonActuals.lockJsonFile!)
+	})
+
 	it("retains recent history backups during initialization", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-recent-backup-"))
 		const store = new TaskHistoryStore(storagePath)
@@ -160,8 +174,16 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		const release = await lockJsonFile(historyPath)
 		let released = false
 		try {
+			let signalLockAttempted!: () => void
+			const lockAttempted = new Promise<void>((resolve) => {
+				signalLockAttempted = resolve
+			})
+			vi.mocked(lockJsonFile).mockImplementation(async (target) => {
+				if (target === historyPath) signalLockAttempted()
+				return safeWriteJsonActuals.lockJsonFile!(target)
+			})
 			const initialization = store.initialize()
-			await new Promise((resolve) => setTimeout(resolve, 50))
+			await lockAttempted
 			await expect(fs.access(backupPath)).resolves.toBeUndefined()
 			await release()
 			released = true
@@ -184,10 +206,22 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			await storeA.upsert(item("shared-task"))
 			await storeB.initialize()
 
+			const historyPath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+			let lockAttempts = 0
+			let releaseAttempts!: () => void
+			const bothAttempted = new Promise<void>((resolve) => {
+				releaseAttempts = resolve
+			})
+			vi.mocked(lockJsonFile).mockImplementation(async (target) => {
+				if (target === historyPath && ++lockAttempts === 2) releaseAttempts()
+				if (target === historyPath) await bothAttempted
+				return safeWriteJsonActuals.lockJsonFile!(target)
+			})
 			await Promise.all([
 				storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, mode: "architect" })),
 				storeB.atomicReadAndUpdate("shared-task", (current) => ({ ...current, totalCost: 42 })),
 			])
+			expect(lockAttempts).toBe(2)
 
 			await storeA.invalidate("shared-task")
 			expect(storeA.get("shared-task")).toMatchObject({ mode: "architect", totalCost: 42 })

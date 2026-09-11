@@ -4,8 +4,13 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { lockJsonFile, type JsonFileLock } from "../../../utils/safeWriteJson"
+import { lockJsonFile, safeWriteJson, type JsonFileLock } from "../../../utils/safeWriteJson"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
+
+const safeWriteJsonActuals = vi.hoisted(() => ({
+	lockJsonFile: undefined as typeof import("../../../utils/safeWriteJson").lockJsonFile | undefined,
+	safeWriteJson: undefined as typeof import("../../../utils/safeWriteJson").safeWriteJson | undefined,
+}))
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn(async (defaultPath: string) => defaultPath),
@@ -13,7 +18,9 @@ vi.mock("../../../utils/storage", () => ({
 
 vi.mock("../../../utils/safeWriteJson", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../../utils/safeWriteJson")>()
-	return { ...actual, lockJsonFile: vi.fn(actual.lockJsonFile) }
+	safeWriteJsonActuals.lockJsonFile = actual.lockJsonFile
+	safeWriteJsonActuals.safeWriteJson = actual.safeWriteJson
+	return { ...actual, lockJsonFile: vi.fn(actual.lockJsonFile), safeWriteJson: vi.fn(actual.safeWriteJson) }
 })
 
 const makeHistoryItem = (id: string, overrides: Partial<HistoryItem>): HistoryItem => ({
@@ -58,6 +65,11 @@ const getRestoreTaskFilePreImage = (store: TaskHistoryStore): RestoreTaskFilePre
 }
 
 describe("TaskHistoryStore cross-instance delegation", () => {
+	beforeEach(() => {
+		vi.mocked(lockJsonFile).mockReset().mockImplementation(safeWriteJsonActuals.lockJsonFile!)
+		vi.mocked(safeWriteJson).mockReset().mockImplementation(safeWriteJsonActuals.safeWriteJson!)
+	})
+
 	it("unions changed child IDs and preserves them for unrelated updates", async () => {
 		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-child-id-merge-"))
 		const store = new TaskHistoryStore(storage)
@@ -219,6 +231,56 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			expect(store.get("parent")?.tokensIn).toBe(99)
 			const persistedParent = JSON.parse(await fs.readFile(parentFile, "utf8"))
 			expect(persistedParent).toEqual(store.get("parent"))
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("restores both records when the second commit succeeds but reports an unlock failure", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-ambiguous-second-commit-"))
+		const store = new TaskHistoryStore(storage)
+		const unlockError = new Error("second record unlock failed")
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+					childIds: ["child"],
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			const childBefore = JSON.parse(await fs.readFile(childFile, "utf8"))
+			vi.mocked(safeWriteJson).mockImplementation(async (filePath, data, options) => {
+				await safeWriteJsonActuals.safeWriteJson!(filePath, data, options)
+				if (filePath === childFile && (data as HistoryItem).status === "completed") throw unlockError
+			})
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({
+						...parent,
+						status: "active",
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+					}),
+					(child) => ({ ...child, status: "completed" }),
+					{ rollbackBothOnCallbackFailure: true },
+				),
+			).rejects.toBe(unlockError)
+
+			expect(JSON.parse(await fs.readFile(parentFile, "utf8"))).toEqual(parentBefore)
+			expect(JSON.parse(await fs.readFile(childFile, "utf8"))).toEqual(childBefore)
+			expect(store.get("parent")).toEqual(parentBefore)
+			expect(store.get("child")).toEqual(childBefore)
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })
@@ -796,7 +858,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			)
 			await expect(result).rejects.toMatchObject({
 				name: "AggregateError",
-				message: "[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed",
+				message: "[TaskHistoryStore] atomicUpdatePair: second write and pair rollback failed",
 				errors: [
 					expect.objectContaining({ message: "child write failed" }),
 					expect.objectContaining({
@@ -1160,7 +1222,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				)
 				await expect(result).rejects.toMatchObject({
 					name: "AggregateError",
-					message: "[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed",
+					message: "[TaskHistoryStore] atomicUpdatePair: second write and pair rollback failed",
 					errors: [
 						expect.objectContaining({ message: "child write failed" }),
 						expect.objectContaining({

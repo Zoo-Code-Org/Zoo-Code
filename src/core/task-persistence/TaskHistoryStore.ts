@@ -55,6 +55,13 @@ interface DelegationRepairIntent {
 	}
 }
 
+type TaskFileRestoration = readonly [
+	taskId: string,
+	preImage: HistoryItem,
+	expectedWritten: HistoryItem | readonly HistoryItem[],
+	heldLock?: JsonFileLock,
+]
+
 /**
  * TaskHistoryStore encapsulates all task history persistence logic.
  *
@@ -853,27 +860,34 @@ export class TaskHistoryStore {
 	}
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
+	private async findStaleHistoryBackups(taskDir: string, now: number): Promise<string[]> {
+		const stale: string[] = []
+		for (const entry of await fs.readdir(taskDir)) {
+			const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry)
+			if (!match) continue
+			const backupPath = path.join(taskDir, entry)
+			const { mtimeMs } = await fs.stat(backupPath)
+			if (
+				now - Number(match[1]) >= TASK_HISTORY_BACKUP_RETENTION_MS &&
+				now - mtimeMs >= TASK_HISTORY_BACKUP_RETENTION_MS
+			)
+				stale.push(backupPath)
+		}
+		return stale
+	}
 
 	private async pruneStaleHistoryBackups(tasksDir: string): Promise<void> {
 		const now = Date.now()
 		for (const taskId of this.cache.keys()) {
+			const taskDir = path.join(tasksDir, taskId)
 			try {
+				if ((await this.findStaleHistoryBackups(taskDir, now)).length === 0) continue
 				await this.withTaskFileLock(taskId, async (fileLock) => {
-					const taskDir = path.join(tasksDir, taskId)
 					await fs.access(path.join(taskDir, GlobalFileNames.historyItem))
-					for (const entry of await fs.readdir(taskDir)) {
-						const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry)
-						if (!match) continue
-						const backupPath = path.join(taskDir, entry)
-						const { mtimeMs } = await fs.stat(backupPath)
-						if (
-							now - Number(match[1]) >= TASK_HISTORY_BACKUP_RETENTION_MS &&
-							now - mtimeMs >= TASK_HISTORY_BACKUP_RETENTION_MS
-						) {
-							const compromiseError = fileLock.getCompromiseError()
-							if (compromiseError) throw compromiseError
-							await fs.unlink(backupPath)
-						}
+					for (const backupPath of await this.findStaleHistoryBackups(taskDir, now)) {
+						const compromiseError = fileLock.getCompromiseError()
+						if (compromiseError) throw compromiseError
+						await fs.unlink(backupPath)
 					}
 				})
 			} catch (error) {
@@ -935,7 +949,7 @@ export class TaskHistoryStore {
 	private async restoreTaskFilePreImage(
 		taskId: string,
 		preImage: HistoryItem,
-		expectedWritten: HistoryItem,
+		expectedWritten: HistoryItem | readonly HistoryItem[],
 		heldLock?: JsonFileLock,
 	): Promise<void> {
 		try {
@@ -945,7 +959,8 @@ export class TaskHistoryStore {
 					if (!existing || typeof existing !== "object" || !("id" in existing)) {
 						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
 					}
-					if (!deepEqual(existing, expectedWritten)) {
+					const expected = Array.isArray(expectedWritten) ? expectedWritten : [expectedWritten]
+					if (!expected.some((candidate) => deepEqual(existing, candidate))) {
 						throw new Error(`cannot compensate ${taskId} after concurrent update`)
 					}
 					return preImage
@@ -958,6 +973,18 @@ export class TaskHistoryStore {
 			if (current) this.cache.set(taskId, current)
 			throw error
 		}
+	}
+
+	private async restoreTaskFilePreImages(restorations: readonly TaskFileRestoration[]): Promise<unknown[]> {
+		const errors: unknown[] = []
+		for (const restoration of restorations) {
+			try {
+				await this.restoreTaskFilePreImage(...restoration)
+			} catch (error) {
+				errors.push(error)
+			}
+		}
+		return errors
 	}
 
 	/**
@@ -1060,10 +1087,12 @@ export class TaskHistoryStore {
 			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
 			const current = await this.readTaskFile(taskId)
 			if (current) this.cache.set(taskId, current)
-			const outcome = await callback(releaseFileLock).then(
-				(result) => ({ result }),
-				(error: unknown) => ({ error }),
-			)
+			const outcome = await Promise.resolve()
+				.then(() => callback(releaseFileLock))
+				.then(
+					(result) => ({ result }),
+					(error: unknown) => ({ error }),
+				)
 			const releaseError = await releaseFileLock().then(
 				() => undefined,
 				(error: unknown) => error,
@@ -1223,18 +1252,30 @@ export class TaskHistoryStore {
 					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, captureSecond)
 				} catch (error) {
 					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
-						try {
-							const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
-							await this.restoreTaskFilePreImage(
+						const restorations: TaskFileRestoration[] = [
+							[
 								firstId,
 								firstDiskSnapshot,
-								persistedWrittenFirst,
+								JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem,
 								firstFileLock,
-							)
-						} catch (rollbackError) {
+							],
+						]
+						if (secondDiskSnapshot) {
+							const expectedSecond = mergeWithDisk(secondDelta)(
+								secondDiskSnapshot,
+								mergedSecond,
+							) as HistoryItem
+							restorations.unshift([
+								secondId,
+								secondDiskSnapshot,
+								[secondDiskSnapshot, JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem],
+							])
+						}
+						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
+						if (rollbackErrors.length) {
 							throw new AggregateError(
-								[error, rollbackError],
-								`[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed`,
+								[error, ...rollbackErrors],
+								`[TaskHistoryStore] atomicUpdatePair: second write and pair rollback failed`,
 							)
 						}
 					} else {
@@ -1257,22 +1298,14 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (!options?.rollbackBothOnCallbackFailure) throw error
 
-					const compensationErrors: unknown[] = []
 					const persistedWrittenSecond = JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem
 					const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
 
 					// Restore second before first, preserving the original compensation order.
-					const restorations: Array<[string, HistoryItem, HistoryItem, JsonFileLock | undefined]> = [
+					const compensationErrors = await this.restoreTaskFilePreImages([
 						[secondId, secondDiskSnapshot as HistoryItem, persistedWrittenSecond, undefined],
 						[firstId, firstDiskSnapshot as HistoryItem, persistedWrittenFirst, firstFileLock],
-					]
-					for (const restoration of restorations) {
-						try {
-							await this.restoreTaskFilePreImage(...restoration)
-						} catch (compensationError) {
-							compensationErrors.push(compensationError)
-						}
-					}
+					])
 
 					if (this.onWrite) {
 						try {

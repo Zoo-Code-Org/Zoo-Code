@@ -4324,6 +4324,7 @@ export class ClineProvider
 						})
 
 						const current = this.getCurrentTask()
+						if (current && current.taskId !== childTaskId) return
 						if (current?.taskId === childTaskId) {
 							childToRestore = completingChild
 							await this.removeClineFromStack({ saveMessages: false })

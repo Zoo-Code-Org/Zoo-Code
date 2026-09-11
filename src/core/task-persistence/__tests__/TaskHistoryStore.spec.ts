@@ -152,6 +152,19 @@ describe("TaskHistoryStore", () => {
 			)
 			consoleError.mockRestore()
 		})
+
+		it("does not acquire task-file locks when no stale backup candidate exists", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "no-backup", status: "completed" }))
+			vi.mocked(lockJsonFile).mockClear()
+			const pruneStaleHistoryBackups = Reflect.get(store, "pruneStaleHistoryBackups") as (
+				tasksDir: string,
+			) => Promise<void>
+
+			await Reflect.apply(pruneStaleHistoryBackups, store, [path.join(tmpDir, "tasks")])
+
+			expect(lockJsonFile).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("get()", () => {
@@ -653,7 +666,7 @@ describe("TaskHistoryStore", () => {
 	})
 
 	describe("withTaskFileLock()", () => {
-		it("releases the file lock when the callback rejects", async () => {
+		it("releases the file lock exactly once when the callback throws synchronously", async () => {
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "locked-callback", status: "active" }))
 			const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
@@ -664,7 +677,7 @@ describe("TaskHistoryStore", () => {
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			await expect(
-				store.withTaskFileLock("locked-callback", async () => {
+				store.withTaskFileLock("locked-callback", () => {
 					throw callbackError
 				}),
 			).rejects.toBe(callbackError)

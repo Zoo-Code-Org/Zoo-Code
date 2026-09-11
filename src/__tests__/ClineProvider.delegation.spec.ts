@@ -6,8 +6,7 @@ import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskScheduler } from "../core/task/TaskScheduler"
 import type { JsonFileLock } from "../utils/safeWriteJson"
-
-const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
+import { unlockedJsonFileLock } from "./helpers/provider-stub"
 
 const parentHistoryItem: HistoryItem = {
 	id: "parent-1",

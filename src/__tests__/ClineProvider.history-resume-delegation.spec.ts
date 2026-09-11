@@ -57,9 +57,7 @@ vi.mock("../core/task-persistence", async (importOriginal) => {
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { readApiMessages, saveApiMessages, saveTaskMessages } from "../core/task-persistence"
-import { makeProviderStub } from "./helpers/provider-stub"
-
-const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
+import { makeProviderStub, unlockedJsonFileLock } from "./helpers/provider-stub"
 
 type LockedDelegationAccess = {
 	runLockedDelegationTransition: (
@@ -1241,6 +1239,58 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(resumedIdx).toBeGreaterThan(completedIdx)
 	})
 
+	it("does not admit an aborted parent through the default scheduler stub", async () => {
+		const parentItem = {
+			id: "parent-not-admitted",
+			status: "delegated",
+			awaitingChildId: "child-not-admitted",
+			childIds: ["child-not-admitted"],
+			ts: 1,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const parentInstance = {
+			taskId: parentItem.id,
+			abort: true,
+			resumeAfterDelegation: vi.fn(),
+			overwriteClineMessages: vi.fn(),
+			overwriteApiConversationHistory: vi.fn(),
+		}
+		let currentTask: object | undefined = { taskId: "child-not-admitted" }
+		const emit = vi.fn()
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			getCurrentTask: vi.fn(() => currentTask),
+			removeClineFromStack: vi.fn(async () => {
+				currentTask = undefined
+			}),
+			createTaskWithHistoryItem: vi.fn(async () => (currentTask = parentInstance)),
+			taskHistoryStore: makeTaskHistoryStoreStub({ id: "child-not-admitted", status: "active" }, parentItem),
+			emit,
+		})
+		vi.mocked(readTaskMessages).mockResolvedValue([])
+		vi.mocked(readApiMessages).mockResolvedValue([])
+
+		await expect(
+			ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: parentItem.id,
+				childTaskId: "child-not-admitted",
+				completionResultSummary: "done",
+			}),
+		).resolves.toBe(true)
+		await Promise.resolve()
+
+		expect(parentInstance.resumeAfterDelegation).not.toHaveBeenCalled()
+		expect(emit).not.toHaveBeenCalledWith(
+			RooCodeEventName.TaskDelegationResumed,
+			parentItem.id,
+			"child-not-admitted",
+		)
+	})
+
 	it("keeps a failed scheduled parent resume visible and resumable without emitting resumed success", async () => {
 		const resumeError = new Error("provider stream failed")
 		const emitSpy = vi.fn()
@@ -1263,15 +1313,18 @@ describe("History resume delegation - parent metadata transitions", () => {
 			totalCost: 0,
 		}
 		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-resume-failure", status: "active" }, parentItem)
+		let currentTask: object | undefined = { taskId: "child-resume-failure" }
 		let scheduled: Promise<void> | undefined
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
 			emit: emitSpy,
 			log,
-			getCurrentTask: vi.fn(() => parentInstance),
-			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
-			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
+			getCurrentTask: vi.fn(() => currentTask),
+			removeClineFromStack: vi.fn(async () => {
+				currentTask = undefined
+			}),
+			createTaskWithHistoryItem: vi.fn(async () => (currentTask = parentInstance)),
 			taskScheduler: {
 				schedule: vi.fn((_task, run) => {
 					scheduled = run()
@@ -1331,13 +1384,16 @@ describe("History resume delegation - parent metadata transitions", () => {
 			parentItem,
 		)
 		const emit = vi.fn()
+		let currentTask: object | undefined = { taskId: "child-scheduler-rejection" }
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
 			emit,
-			getCurrentTask: vi.fn(() => parentInstance),
-			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
-			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
+			getCurrentTask: vi.fn(() => currentTask),
+			removeClineFromStack: vi.fn(async () => {
+				currentTask = undefined
+			}),
+			createTaskWithHistoryItem: vi.fn(async () => (currentTask = parentInstance)),
 			taskScheduler: {
 				schedule: vi.fn().mockRejectedValue(scheduleError),
 			},
@@ -1424,7 +1480,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(eventNames).not.toContain(RooCodeEventName.TaskSpawned)
 	})
 
-	it("reopenParentFromDelegation skips stale resume when another task remains current (RPD-02)", async () => {
+	it("persists completion without evicting or rehydrating over another current task (RPD-02)", async () => {
 		const parentInstance = {
 			resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
 			overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
@@ -1477,15 +1533,13 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const updatedParent = firstUpdater(parentItem as HistoryItem)
 		expect(updatedParent).toMatchObject({ id: "parent-rpd02", status: "active", completedByChildId: "child-rpd02" })
 
-		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
-			expect.objectContaining({
-				id: "parent-rpd02",
-				status: "active",
-				completedByChildId: "child-rpd02",
-			}),
-			{ startTask: false },
-		)
-		await vi.waitFor(() => expect(taskHistoryStore.invalidate).toHaveBeenCalledWith("parent-rpd02"))
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+		expect(taskHistoryStore.get("parent-rpd02")).toMatchObject({
+			status: "active",
+			completedByChildId: "child-rpd02",
+		})
+		expect(taskHistoryStore.get("child-rpd02")).toMatchObject({ status: "completed" })
+		expect(taskHistoryStore.invalidate).not.toHaveBeenCalled()
 		expect(parentInstance.resumeAfterDelegation).not.toHaveBeenCalled()
 	})
 

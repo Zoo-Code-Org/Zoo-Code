@@ -27,15 +27,15 @@ vi.mock("fs", async () => {
 
 import { LOCK_STALE_MS, lockJsonFile, safeWriteJson } from "../safeWriteJson"
 
-describe("lockJsonFile", () => {
-	beforeEach(() => {
-		lockMock.mockReset()
-		renameMock.mockReset()
-		renameMock.mockImplementation(actuals.rename!)
-		createWriteStreamMock.mockReset()
-		createWriteStreamMock.mockImplementation(actuals.createWriteStream!)
-	})
+beforeEach(() => {
+	lockMock.mockReset()
+	renameMock.mockReset()
+	renameMock.mockImplementation(actuals.rename!)
+	createWriteStreamMock.mockReset()
+	createWriteStreamMock.mockImplementation(actuals.createWriteStream!)
+})
 
+describe("lockJsonFile", () => {
 	it("acquires the lock with bounded retries and compromise handling", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
@@ -90,7 +90,9 @@ describe("lockJsonFile", () => {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		}
 	})
+})
 
+describe("safeWriteJson", () => {
 	it("surfaces a release error without logging an operation-failure arbitration message", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
@@ -106,7 +108,9 @@ describe("lockJsonFile", () => {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		}
 	})
+})
 
+describe("lockJsonFile", () => {
 	it("logs an underlying release error but rejects with the earlier compromise", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
@@ -135,7 +139,9 @@ describe("lockJsonFile", () => {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		}
 	})
+})
 
+describe("safeWriteJson", () => {
 	it("logs the target path and acquisition error before propagating it", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
@@ -369,7 +375,9 @@ describe("lockJsonFile", () => {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		}
 	})
+})
 
+describe("lockJsonFile", () => {
 	it("resolves after a normal release", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-lock-"))
 		const filePath = path.join(tempDir, "history_item.json")
