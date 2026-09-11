@@ -876,13 +876,13 @@ export class TaskHistoryStore {
 						const backupPath = path.join(taskDir, entry)
 						const { mtimeMs } = await fs.stat(backupPath)
 						if (
-							now - Number(match[1]) < TASK_HISTORY_BACKUP_RETENTION_MS ||
-							now - mtimeMs < TASK_HISTORY_BACKUP_RETENTION_MS
-						)
-							continue
-						const compromiseError = fileLock.getCompromiseError()
-						if (compromiseError) throw compromiseError
-						await fs.unlink(backupPath)
+							now - Number(match[1]) >= TASK_HISTORY_BACKUP_RETENTION_MS &&
+							now - mtimeMs >= TASK_HISTORY_BACKUP_RETENTION_MS
+						) {
+							const compromiseError = fileLock.getCompromiseError()
+							if (compromiseError) throw compromiseError
+							await fs.unlink(backupPath)
+						}
 					}
 				})
 			} catch (error) {
@@ -1069,25 +1069,31 @@ export class TaskHistoryStore {
 			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
 			const current = await this.readTaskFile(taskId)
 			if (current) this.cache.set(taskId, current)
-			const [outcome] = await Promise.allSettled([callback(releaseFileLock)])
-			const [releaseOutcome] = await Promise.allSettled([releaseFileLock()])
+			const outcome = await callback(releaseFileLock).then(
+				(result) => ({ result }),
+				(error: unknown) => ({ error }),
+			)
+			const releaseError = await releaseFileLock().then(
+				() => undefined,
+				(error: unknown) => error,
+			)
 			if (releaseFileLock.getCompromiseError()) {
 				const reconciled = await this.readTaskFile(taskId)
 				this.taskFileMtimes.delete(taskId)
 				if (reconciled) this.cache.set(taskId, reconciled)
 				else this.cache.delete(taskId)
 			}
-			if (outcome.status === "rejected") {
-				if (releaseOutcome.status === "rejected") {
+			if ("error" in outcome) {
+				if (releaseError) {
 					console.error(
 						`[TaskHistoryStore] Failed to release lock for ${taskId} after callback failure:`,
-						releaseOutcome.reason,
+						releaseError,
 					)
 				}
-				throw outcome.reason
+				throw outcome.error
 			}
-			if (releaseOutcome.status === "rejected") throw releaseOutcome.reason
-			return outcome.value
+			if (releaseError) throw releaseError
+			return outcome.result
 		})
 	}
 
@@ -1164,15 +1170,15 @@ export class TaskHistoryStore {
 			const updatedFirst = firstUpdater(structuredClone(first))
 			const updatedSecond = secondUpdater(structuredClone(second))
 
-			for (const [position, id, updated] of [
-				["first", firstId, updatedFirst],
-				["second", secondId, updatedSecond],
-			] as const) {
-				if (updated.id !== id) {
-					throw new Error(
-						`[TaskHistoryStore] atomicUpdatePair: ${position} updater changed id from ${id} to ${updated.id}`,
-					)
-				}
+			if (updatedFirst.id !== firstId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicUpdatePair: first updater changed id from ${firstId} to ${updatedFirst.id}`,
+				)
+			}
+			if (updatedSecond.id !== secondId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicUpdatePair: second updater changed id from ${secondId} to ${updatedSecond.id}`,
+				)
 			}
 
 			// Validate status transitions before any disk write — mirrors upsertCore guard.
@@ -1191,12 +1197,12 @@ export class TaskHistoryStore {
 			// Merge with existing cache entries before writing, mirroring upsertCore.
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
-			const needsFirstSnapshot = Boolean(
+			const holdFirstFileLock = Boolean(
 				options?.firstDiskGuard ||
 				options?.rollbackFirstOnSecondFailure ||
-				options?.rollbackBothOnCallbackFailure,
+				options?.rollbackBothOnCallbackFailure ||
+				options?.whileFirstFileLocked,
 			)
-			const holdFirstFileLock = Boolean(needsFirstSnapshot || options?.whileFirstFileLocked)
 			const suppliedFirstFileLock = options?.firstFileLock
 			const firstFileLock =
 				suppliedFirstFileLock ??
@@ -1206,12 +1212,13 @@ export class TaskHistoryStore {
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
 				const firstDiskGuard = options?.firstDiskGuard
-				const captureAndGuardFirst = needsFirstSnapshot
-					? (current: HistoryItem) => {
-							if (firstDiskGuard) firstDiskGuard(current)
-							firstDiskSnapshot = structuredClone(current)
-						}
-					: undefined
+				const captureAndGuardFirst =
+					firstDiskGuard || options?.rollbackFirstOnSecondFailure || options?.rollbackBothOnCallbackFailure
+						? (current: HistoryItem) => {
+								if (firstDiskGuard) firstDiskGuard(current)
+								firstDiskSnapshot = structuredClone(current)
+							}
+						: undefined
 				const firstDelta = this.buildDelta(firstId, first, updatedFirst)
 				const writtenFirst = await this.writeTaskFile(mergedFirst, firstDelta, captureAndGuardFirst, {
 					heldLock: firstFileLock,
