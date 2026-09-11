@@ -30,15 +30,20 @@ export class CodeIndexManager {
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
 
-	private readonly workspacePath: string
+	public readonly workspacePath: string
 	private readonly _folderUri: vscode.Uri
 	private readonly context: vscode.ExtensionContext
 
-	public constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
+	public constructor(
+		workspacePath: string,
+		folderUri: vscode.Uri,
+		context: vscode.ExtensionContext,
+		stateManager: CodeIndexStateManager,
+	) {
 		this.workspacePath = workspacePath
 		this._folderUri = folderUri
 		this.context = context
-		this._stateManager = new CodeIndexStateManager()
+		this._stateManager = stateManager
 	}
 
 	// --- Public API ---
@@ -206,7 +211,7 @@ export class CodeIndexManager {
 		}
 
 		// Check if we're in error state and recover if needed
-		const currentStatus = this.getCurrentStatus()
+		const currentStatus = this._stateManager.getCurrentStatus()
 		if (currentStatus.systemStatus === "Error") {
 			await this.recoverFromError()
 
@@ -315,16 +320,6 @@ export class CodeIndexManager {
 	}
 
 	// --- Private Helpers ---
-
-	public getCurrentStatus() {
-		const status = this._stateManager.getCurrentStatus()
-		return {
-			...status,
-			workspacePath: this.workspacePath,
-			workspaceEnabled: this.isWorkspaceEnabled,
-			autoEnableDefault: this.autoEnableDefault,
-		}
-	}
 
 	public async searchIndex(query: string, directoryPrefix?: string): Promise<VectorStoreSearchResult[]> {
 		if (!this.isFeatureEnabled) {

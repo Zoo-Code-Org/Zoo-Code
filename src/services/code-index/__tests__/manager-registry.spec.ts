@@ -5,6 +5,11 @@ import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexDisposalError } from "../errors/code-index-disposal-error"
 
 vi.mock("vscode", () => ({
+	EventEmitter: class {
+		public readonly event = vi.fn().mockReturnValue({ dispose: vi.fn() })
+		public fire = vi.fn()
+		public dispose = vi.fn()
+	},
 	window: { activeTextEditor: undefined },
 	workspace: { workspaceFolders: undefined, getWorkspaceFolder: vi.fn() },
 	Uri: { file: vi.fn() },
@@ -48,7 +53,20 @@ describe("CodeIndexManagerRegistry", () => {
 	it("defaults to the first workspace and reuses its manager", () => {
 		const manager = CodeIndexManagerRegistry.getInstance(context)
 		expect(CodeIndexManagerRegistry.getInstance(context, first.uri.fsPath)).toBe(manager)
-		expect(CodeIndexManager).toHaveBeenCalledExactlyOnceWith(first.uri.fsPath, first.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledExactlyOnceWith(
+			first.uri.fsPath,
+			first.uri,
+			context,
+			expect.anything(),
+		)
+	})
+
+	it("returns the workspace scope alongside the manager accessor", () => {
+		const codeIndexScope = CodeIndexManagerRegistry.getCodeIndexScope(context, first.uri.fsPath)
+
+		expect(codeIndexScope).toBeDefined()
+		expect(CodeIndexManagerRegistry.getCodeIndexScope(context, first.uri.fsPath)).toBe(codeIndexScope)
+		expect(CodeIndexManagerRegistry.getInstance(context, first.uri.fsPath)).toBe(codeIndexScope?.codeIndexManager)
 	})
 
 	it("uses the active editor workspace and preserves its remote URI", () => {
@@ -57,20 +75,20 @@ describe("CodeIndexManagerRegistry", () => {
 		vi.mocked(vscode.workspace.getWorkspaceFolder).mockReturnValue(second)
 		CodeIndexManagerRegistry.getInstance(context)
 		expect(vscode.workspace.getWorkspaceFolder).toHaveBeenCalledWith(editor.document.uri)
-		expect(CodeIndexManager).toHaveBeenCalledWith(second.uri.fsPath, second.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith(second.uri.fsPath, second.uri, context, expect.anything())
 	})
 
 	it("falls back to the first workspace when the active editor is outside it", () => {
 		Object.defineProperty(vscode.window, "activeTextEditor", { value: makeTextEditor() })
 		CodeIndexManagerRegistry.getInstance(context)
-		expect(CodeIndexManager).toHaveBeenCalledWith(first.uri.fsPath, first.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith(first.uri.fsPath, first.uri, context, expect.anything())
 	})
 
 	it("prefers an explicit workspace over the active editor", () => {
 		Object.defineProperty(vscode.window, "activeTextEditor", { value: makeTextEditor() })
 		vi.mocked(vscode.workspace.getWorkspaceFolder).mockReturnValue(first)
 		CodeIndexManagerRegistry.getInstance(context, second.uri.fsPath)
-		expect(CodeIndexManager).toHaveBeenCalledWith(second.uri.fsPath, second.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith(second.uri.fsPath, second.uri, context, expect.anything())
 		expect(vscode.workspace.getWorkspaceFolder).not.toHaveBeenCalled()
 	})
 
@@ -80,7 +98,7 @@ describe("CodeIndexManagerRegistry", () => {
 		vi.mocked(vscode.Uri.file).mockReturnValue(uri)
 		CodeIndexManagerRegistry.getInstance(context, "/outside")
 		expect(vscode.Uri.file).toHaveBeenCalledWith("/outside")
-		expect(CodeIndexManager).toHaveBeenCalledWith("/outside", uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith("/outside", uri, context, expect.anything())
 	})
 
 	it("creates distinct managers for different workspaces", () => {
@@ -93,6 +111,13 @@ describe("CodeIndexManagerRegistry", () => {
 		const a = CodeIndexManagerRegistry.getInstance(context, first.uri.fsPath)!
 		const b = CodeIndexManagerRegistry.getInstance(context, second.uri.fsPath)!
 		expect(CodeIndexManagerRegistry.getAllInstances()).toEqual([a, b])
+	})
+
+	it("lists all registered scopes", () => {
+		const firstScope = CodeIndexManagerRegistry.getCodeIndexScope(context, first.uri.fsPath)!
+		const secondScope = CodeIndexManagerRegistry.getCodeIndexScope(context, second.uri.fsPath)!
+
+		expect(CodeIndexManagerRegistry.getAllCodeIndexScopes()).toEqual([firstScope, secondScope])
 	})
 
 	it("disposes every registered manager", () => {

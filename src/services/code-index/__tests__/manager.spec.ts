@@ -22,6 +22,11 @@ vi.mock("vscode", () => {
 	const testPath = require("path")
 	const testWorkspacePath = testPath.join(testPath.sep, "test", "workspace")
 	return {
+		EventEmitter: class {
+			public readonly event = vi.fn().mockReturnValue({ dispose: vi.fn() })
+			public fire = vi.fn()
+			public dispose = vi.fn()
+		},
 		Uri: {
 			file: (p: string) => ({
 				fsPath: p,
@@ -95,7 +100,7 @@ vi.mock("ignore", () => ({
 vi.mock("../state-manager", () => ({
 	CodeIndexStateManager: vi.fn().mockImplementation(function () {
 		return {
-			onProgressUpdate: vi.fn(),
+			onProgressUpdate: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 			getCurrentStatus: vi.fn(),
 			dispose: vi.fn(),
 			setSystemState: vi.fn(),
@@ -636,10 +641,6 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				currentItemUnit: "items",
 			})
 
-			// Verify initial state is not error
-			const initialStatus = manager.getCurrentStatus()
-			expect(initialStatus.systemStatus).not.toBe("Error")
-
 			// Act - call recoverFromError when not in error state
 			await expect(manager.recoverFromError()).resolves.not.toThrow()
 
@@ -705,22 +706,6 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			await manager.startIndexing()
 
 			expect(mockStateManager.setSystemState).not.toHaveBeenCalledWith("Indexing", expect.any(String))
-		})
-
-		it("should include workspaceEnabled in getCurrentStatus", async () => {
-			await manager.setAutoEnableDefault(false)
-
-			const mockStateManager = (manager as any)._stateManager
-			mockStateManager.getCurrentStatus = vi.fn().mockReturnValue({
-				systemStatus: "Standby",
-				message: "",
-				processedItems: 0,
-				totalItems: 0,
-				currentItemUnit: "items",
-			})
-
-			const status = manager.getCurrentStatus()
-			expect(status.workspaceEnabled).toBe(false)
 		})
 
 		it("should persist workspace enabled state", async () => {

@@ -30,6 +30,10 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { CodeIndexController } from "../../../services/code-index/code-index-controller"
+import { CodeIndexWebviewMessageHandler } from "../../../services/code-index/code-index-webview-message-handler"
+import { CodeIndexStateManager } from "../../../services/code-index/state-manager"
+import { WebviewMessageHandlerRegistry } from "../WebviewMessageHandlerRegistry"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
@@ -2937,6 +2941,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				getCurrentTask: vi.fn(),
 				getCurrentWorkspaceCodeIndexManager: vi.fn(),
+				getCurrentWorkspaceCodeIndexScope: vi.fn(),
 				getMcpHub: vi.fn().mockReturnValue({
 					getMcpSettingsFilePath: vi.fn().mockResolvedValue("/test/mcp.json"),
 				}),
@@ -2963,12 +2968,15 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	const createIndexManager = (overrides: Record<string, unknown> = {}) =>
 		Object.assign(
 			{
+				workspacePath: "/test/workspace",
 				setWorkspaceEnabled: vi.fn().mockResolvedValue(undefined),
 				setAutoEnableDefault: vi.fn().mockResolvedValue(undefined),
+				autoEnableDefault: true,
 				isFeatureEnabled: true,
 				isFeatureConfigured: true,
 				isWorkspaceEnabled: true,
 				initialize: vi.fn().mockResolvedValue(undefined),
+				handleSettingsChange: vi.fn().mockResolvedValue(undefined),
 				state: "Standby",
 				isInitialized: true,
 				startIndexing: vi.fn().mockResolvedValue(undefined),
@@ -2977,6 +2985,23 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				getCurrentStatus: vi.fn().mockReturnValue({ systemStatus: "Standby" }),
 			},
 			overrides,
+		)
+
+	const createCodeIndexScope = (manager: ReturnType<typeof createIndexManager>) => {
+		const stateManager = new CodeIndexStateManager()
+		vi.spyOn(stateManager, "getCurrentStatus").mockImplementation(manager.getCurrentStatus)
+		return {
+			codeIndexManager: manager,
+			codeIndexController: new CodeIndexController(manager, stateManager),
+		}
+	}
+
+	const handleWebviewMessage = (provider: ClineProvider, message: WebviewMessage) =>
+		webviewMessageHandler(
+			provider,
+			message,
+			undefined,
+			new WebviewMessageHandlerRegistry([new CodeIndexWebviewMessageHandler(provider)]),
 		)
 
 	beforeEach(() => {
@@ -2992,10 +3017,10 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockReturnValue(indexingPromise),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue(createCodeIndexScope(manager)),
 		})
 
-		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		await expect(handleWebviewMessage(provider, { type: "startIndexing" })).resolves.toBeUndefined()
 		expect(manager.startIndexing).toHaveBeenCalledOnce()
 
 		rejectIndexing(new Error("boom"))
@@ -3150,13 +3175,17 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	it("covers changed indexing status, secret, and missing-manager responses", async () => {
 		const manager = createIndexManager()
 		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getCodeIndexScope = vi.fn().mockReturnValueOnce(undefined)
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexManager: getManager,
+			getCurrentWorkspaceCodeIndexScope: getCodeIndexScope,
+		})
 
-		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
-		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
-		await webviewMessageHandler(provider, { type: "requestCodeIndexSecretStatus" })
-		getManager.mockReturnValueOnce(undefined)
-		await webviewMessageHandler(provider, { type: "startIndexing" })
+		await handleWebviewMessage(provider, { type: "requestIndexingStatus" })
+		await handleWebviewMessage(provider, { type: "requestIndexingStatus" })
+		await handleWebviewMessage(provider, { type: "requestCodeIndexSecretStatus" })
+		getCodeIndexScope.mockReturnValueOnce(undefined)
+		await handleWebviewMessage(provider, { type: "startIndexing" })
 
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "codeIndexSecretStatus" }),
@@ -3173,10 +3202,10 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				.mockRejectedValueOnce(new Error("second failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue(createCodeIndexScope(manager)),
 		})
 
-		await webviewMessageHandler(provider, { type: "startIndexing" })
+		await handleWebviewMessage(provider, { type: "startIndexing" })
 		await Promise.resolve()
 
 		expect(manager.startIndexing).toHaveBeenCalledTimes(2)
@@ -3189,11 +3218,11 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("toggle failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue(createCodeIndexScope(manager)),
 		})
 
-		await webviewMessageHandler(provider, { type: "stopIndexing" })
-		await webviewMessageHandler(provider, { type: "toggleWorkspaceIndexing", bool: true })
+		await handleWebviewMessage(provider, { type: "stopIndexing" })
+		await handleWebviewMessage(provider, { type: "toggleWorkspaceIndexing", bool: true })
 		await Promise.resolve()
 
 		expect(manager.stopIndexing).toHaveBeenCalledOnce()
@@ -3213,15 +3242,18 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("auto-enable failure")),
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
-		const getAllInstances = vi
-			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
-			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
+		const codeIndexScope = createCodeIndexScope(manager)
+		const getAllCodeIndexScopes = vi
+			.spyOn(CodeIndexManagerRegistry, "getAllCodeIndexScopes")
+			.mockReturnValue([codeIndexScope] as unknown as ReturnType<
+				typeof CodeIndexManagerRegistry.getAllCodeIndexScopes
+			>)
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue(codeIndexScope),
 		})
 
 		try {
-			await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: true })
+			await handleWebviewMessage(provider, { type: "setAutoEnableDefault", bool: true })
 			await Promise.resolve()
 
 			expect(manager.startIndexing).toHaveBeenCalledOnce()
@@ -3230,19 +3262,20 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				expect.objectContaining({ type: "indexingStatusUpdate" }),
 			)
 		} finally {
-			getAllInstances.mockRestore()
+			getAllCodeIndexScopes.mockRestore()
 		}
 	})
 
 	it("covers changed clear-index response paths", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const codeIndexScope = createCodeIndexScope(manager)
+		const getCodeIndexScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(codeIndexScope)
+		const provider = createProvider({ getCurrentWorkspaceCodeIndexScope: getCodeIndexScope })
 
-		await webviewMessageHandler(provider, { type: "clearIndexData" })
-		await webviewMessageHandler(provider, { type: "clearIndexData" })
+		await handleWebviewMessage(provider, { type: "clearIndexData" })
+		await handleWebviewMessage(provider, { type: "clearIndexData" })
 		manager.clearIndexData.mockRejectedValueOnce(new Error("clear failed"))
-		await webviewMessageHandler(provider, { type: "clearIndexData" })
+		await handleWebviewMessage(provider, { type: "clearIndexData" })
 
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "indexCleared",
