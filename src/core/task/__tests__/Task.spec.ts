@@ -647,6 +647,107 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("mid-stream retries", () => {
+		function midStreamFailingRequest(error: Error) {
+			return (async function* () {
+				yield { type: "text", text: "partial response" } as ApiStreamChunk
+				throw error
+			})()
+		}
+
+		async function createMidStreamRetryTask() {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: mockApiConfig,
+				autoApprovalEnabled: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			return task
+		}
+
+		it("stops auto-retrying and surfaces the failure after the mid-stream retry limit", async () => {
+			const task = await createMidStreamRetryTask()
+			const streamError = new Error("Overloaded")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const saySpy = vi.spyOn(task, "say")
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => midStreamFailingRequest(streamError))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			// 1 initial attempt + MAX_MID_STREAM_RETRIES (3) automatic retries, then it stops
+			// instead of looping (and re-billing the request) forever.
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+
+			// Every automatic retry is announced through the shared backoff countdown so
+			// no retry happens silently.
+			const retryAnnouncements = saySpy.mock.calls.filter((call) => call[0] === "api_req_retry_delayed")
+			expect(retryAnnouncements.length).toBeGreaterThan(0)
+
+			// Once the cap is exhausted the failure is surfaced to the user.
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Overloaded"))
+			expect(saySpy).toHaveBeenCalledWith("error", expect.stringContaining("Overloaded"))
+
+			expect(result).toBe(false)
+			expect(task.apiConversationHistory).toMatchObject([
+				{
+					role: "user",
+					content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+				},
+				{ role: "assistant", content: [{ type: "text", text: expect.stringContaining("Failure") }] },
+			])
+		})
+
+		it("resets the retry budget when the user approves another retry round", async () => {
+			const task = await createMidStreamRetryTask()
+			const streamError = new Error("Overloaded")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const saySpy = vi.spyOn(task, "say")
+
+			let callCount = 0
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				callCount++
+				if (callCount <= 4) {
+					return midStreamFailingRequest(streamError)
+				}
+				if (callCount === 5) {
+					return (async function* () {
+						yield { type: "text", text: "recovered response" } as ApiStreamChunk
+					})()
+				}
+				throw new Error("stop after recovered response")
+			})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(saySpy).toHaveBeenCalledWith("api_req_retried")
+			// 4 failed attempts (initial + 3 automatic retries), 1 user-approved retry that
+			// succeeded, and 1 follow-up request for the no-tool-use continuation.
+			expect(attemptSpy).toHaveBeenCalledTimes(6)
+
+			// The user-approved retry must not duplicate the user message in history.
+			const userMessages = task.apiConversationHistory.filter((message) => message.role === "user")
+			expect(userMessages).toHaveLength(2) // original request (re-added once) + no-tools-used follow-up
+			expect(userMessages[0]).toMatchObject({
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+		})
+	})
+
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
 			"uses an explicit delegated-child context without shared state or startup persistence",

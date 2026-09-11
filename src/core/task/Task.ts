@@ -172,6 +172,7 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+const MAX_MID_STREAM_RETRIES = 3 // Maximum automatic retries when a provider stream fails mid-stream
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -3655,34 +3656,98 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							this.abortReason = cancelReason
 							await this.abortTask()
 						} else {
+							// Stream failed - retry with the same content, but only up to
+							// MAX_MID_STREAM_RETRIES automatic attempts. Every attempt
+							// re-bills the full input context, so retries must be both
+							// bounded and visible to the user.
+							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
+
+							if (midStreamRetryAttempt >= MAX_MID_STREAM_RETRIES) {
+								// Automatic retries exhausted - surface the failure instead of
+								// retrying (and re-billing the request) silently forever.
+								console.error(
+									`[Task#${this.taskId}.${this.instanceId}] Stream failed, automatic retry limit (${MAX_MID_STREAM_RETRIES}) reached: ${streamingFailedMessage}`,
+								)
+
+								const { response } = await this.ask(
+									"api_req_failed",
+									streamingFailedMessage ?? rawErrorMessage,
+								)
+
+								if (response === "yesButtonClicked") {
+									await this.say("api_req_retried")
+
+									// The user approved another round of retries, so reset the
+									// automatic retry budget. Remove the user message this request
+									// added first so it is not duplicated in history on retry.
+									let removedCurrentUserMessage = false
+									if (this.apiConversationHistory.length > 0) {
+										const lastMessage =
+											this.apiConversationHistory[this.apiConversationHistory.length - 1]
+										if (lastMessage.role === "user") {
+											this.apiConversationHistory.pop()
+											this.messageCounts.user--
+											removedCurrentUserMessage = true
+										}
+									}
+
+									stack.push({
+										userContent: currentUserContent,
+										includeFileDetails: false,
+										retryAttempt: 0,
+										userMessageWasRemoved: removedCurrentUserMessage,
+									})
+
+									// Continue to retry the request
+									continue
+								}
+
+								// User declined to retry - record the failure visibly and stop.
+								await this.say("error", streamingFailedMessage ?? rawErrorMessage)
+
+								// Synthetic assistant message recording the failure -- increment
+								// messageCounts.assistant to match, same as the normal
+								// assistant-message-saved path.
+								await this.addToApiConversationHistory({
+									role: "assistant",
+									content: [
+										{
+											type: "text",
+											text: "Failure: The API request failed mid-stream and the retry was declined.",
+										},
+									],
+								})
+								this.messageCounts.assistant++
+
+								return false
+							}
+
 							// Stream failed - log the error and retry with the same content
-							// The existing rate limiting will prevent rapid retries
 							console.error(
-								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry: ${streamingFailedMessage}`,
+								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry (attempt ${midStreamRetryAttempt + 1}/${MAX_MID_STREAM_RETRIES}): ${streamingFailedMessage}`,
 							)
 
-							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
-							const stateForBackoff = await this.providerRef.deref()?.getState()
-							if (stateForBackoff?.autoApprovalEnabled) {
-								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
+							// Announce every automatic retry with the shared exponential
+							// backoff countdown (api_req_retry_delayed) so no retry - and its
+							// associated token cost - happens silently.
+							await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
-								// Check if task was aborted during the backoff
-								if (this.abort) {
-									console.log(
-										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
-									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
-									await this.abortTask()
-									break
-								}
+							// Check if task was aborted during the backoff
+							if (this.abort) {
+								console.log(
+									`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
+								)
+								// Abort the entire task
+								this.abortReason = "user_cancelled"
+								await this.abortTask()
+								break
 							}
 
 							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								retryAttempt: midStreamRetryAttempt + 1,
 							})
 
 							// Continue to retry the request
