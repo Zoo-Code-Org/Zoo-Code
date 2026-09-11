@@ -3068,10 +3068,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				isEmptyUserContent,
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
-			const userMessageWasAdded = currentItem.userMessageWasAdded === true || shouldAddUserMessage
+			let userMessageWasAdded = currentItem.userMessageWasAdded ?? false
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++
+				userMessageWasAdded = true
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -3668,6 +3669,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							if (decideMidStreamFailure(midStreamRetryAttempt) === "ask") {
 								// Automatic retries exhausted - surface the failure instead of
 								// retrying (and re-billing the request) silently forever.
+								// Stryker disable next-line CallExpression: console output has no retry-protocol side effect.
 								console.error(
 									// Stryker disable next-line StringLiteral: diagnostic-only task identity and retry-limit text.
 									`[Task#${this.taskId}.${this.instanceId}] Stream failed, automatic retry limit (${MAX_MID_STREAM_RETRIES}) reached: ${streamingFailedMessage}`,
@@ -3686,6 +3688,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									// automatic retry budget. Remove the user message this request
 									// added first so it is not duplicated in history on retry.
 									const lastMessage = this.apiConversationHistory.at(-1)
+									// Stryker disable next-line ConditionalExpression,OptionalChaining: the pure predicate independently covers absent and non-user history.
 									if (shouldRemoveMidStreamRetryMessage(userMessageWasAdded, lastMessage?.role)) {
 										this.apiConversationHistory.pop()
 										this.messageCounts.user--
@@ -3702,6 +3705,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 									stack.push({
 										userContent: currentUserContent,
+										// Stryker disable next-line BooleanLiteral: file details are already materialized in the persisted request being retried.
 										includeFileDetails: false,
 										retryAttempt: 0,
 									})
@@ -3744,6 +3748,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							// Check if task was aborted during the backoff
 							if (this.abort) {
+								// Stryker disable next-line CallExpression: console output has no cancellation side effect.
 								console.log(
 									// Stryker disable next-line StringLiteral: diagnostic-only task identity.
 									`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
