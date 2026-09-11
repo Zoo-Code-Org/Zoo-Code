@@ -253,23 +253,24 @@ export class ClineProvider
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
-	private runLockedDelegationTransition<T>(
+	private runLockedDelegationTransition(
 		parentTaskId: string,
-		transition: (fileLock: JsonFileLock) => Promise<T>,
-		afterUnlock?: (result: T) => Promise<void>,
-		afterUnlockError?: (error: unknown) => Promise<void>,
-	): Promise<T> {
-		return this.runDelegationTransition(parentTaskId, async () => {
-			let result: T
-			try {
-				result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
-			} catch (error) {
-				await afterUnlockError?.(error)
-				throw error
-			}
-			await afterUnlock?.(result)
-			return result
-		})
+		transition: (fileLock: JsonFileLock) => Promise<boolean>,
+		afterUnlock: (result: boolean) => Promise<void>,
+		afterUnlockError: (error: unknown) => Promise<void>,
+	): Promise<boolean> {
+		return this.runDelegationTransition(parentTaskId, () =>
+			this.taskHistoryStore.withTaskFileLock(parentTaskId, transition).then(
+				async (result) => {
+					await afterUnlock(result)
+					return result
+				},
+				async (error) => {
+					await afterUnlockError(error)
+					throw error
+				},
+			),
+		)
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -4312,7 +4313,6 @@ export class ClineProvider
 			}
 			const completionOptions = {
 				firstDiskGuard: assertCurrentDelegation,
-				rollbackFirstOnSecondFailure: true,
 				rollbackBothOnCallbackFailure: true,
 				firstFileLock,
 				storeLockAcquired: true,

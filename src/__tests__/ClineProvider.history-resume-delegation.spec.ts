@@ -62,12 +62,12 @@ import { makeProviderStub } from "./helpers/provider-stub"
 const unlockedJsonFileLock = (): JsonFileLock => Object.assign(async () => {}, { getCompromiseError: () => undefined })
 
 type LockedDelegationAccess = {
-	runLockedDelegationTransition: <T>(
+	runLockedDelegationTransition: (
 		parentTaskId: string,
-		transition: (fileLock: JsonFileLock) => Promise<T>,
-		afterUnlock?: (result: T) => Promise<void>,
-		afterUnlockError?: (error: unknown) => Promise<void>,
-	) => Promise<T>
+		transition: (fileLock: JsonFileLock) => Promise<boolean>,
+		afterUnlock: (result: boolean) => Promise<void>,
+		afterUnlockError: (error: unknown) => Promise<void>,
+	) => Promise<boolean>
 }
 
 /**
@@ -191,13 +191,8 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const afterUnlockError = vi.fn(async () => expect(lockHeld).toBe(false))
 
 		await expect(
-			provider.runLockedDelegationTransition(
-				"parent-success",
-				async () => "completed",
-				afterUnlock,
-				afterUnlockError,
-			),
-		).resolves.toBe("completed")
+			provider.runLockedDelegationTransition("parent-success", async () => true, afterUnlock, afterUnlockError),
+		).resolves.toBe(true)
 		expect(afterUnlock).toHaveBeenCalledOnce()
 		expect(afterUnlockError).not.toHaveBeenCalled()
 
@@ -438,7 +433,6 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(secondId).toBe("child-1")
 		expect(taskHistoryStore.withTaskFileLock).toHaveBeenCalledWith("parent-1", expect.any(Function))
 		expect(options).toMatchObject({
-			rollbackFirstOnSecondFailure: true,
 			firstFileLock: expect.any(Function),
 			storeLockAcquired: true,
 			rollbackBothOnCallbackFailure: true,
