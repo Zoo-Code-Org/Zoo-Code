@@ -760,6 +760,67 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
 
+		// Leaked tool-call recovery state (see `extractLeakedToolCalls`). Only enabled when we
+		// actually offered tools this turn, so it can never misfire on plain conversations.
+		// Carries each tool's parameter schema, so a recovered parameter is converted to the type
+		// the tool declares instead of always arriving as a string.
+		const providedToolSchemas: LeakedToolSchemas = new Map(
+			(metadata?.tools ?? [])
+				.filter((tool) => tool.type === "function")
+				.filter((tool) => tool.function.name.length > 0)
+				.map((tool) => [tool.function.name, tool.function.parameters as Record<string, unknown> | undefined]),
+		)
+		const salvageLeakedToolCalls = providedToolSchemas.size > 0
+		let salvageBuffering = false
+		let salvageBuffer = ""
+		let salvageCarry = ""
+		let salvageEmittedText = ""
+		let salvagedToolCallIndex = 0
+
+		// Drains the salvage state into ordered chunks: prose first, then any recovered calls. Must
+		// run before a native tool_call is yielded — text after a tool_use block is rejected by
+		// Anthropic once the turn is serialized back into history.
+		const flushSalvage = (): ApiStreamChunk[] => {
+			const flushed: ApiStreamChunk[] = []
+			if (!salvageLeakedToolCalls) {
+				return flushed
+			}
+
+			if (!salvageBuffering) {
+				if (salvageCarry) {
+					flushed.push({ type: "text", text: salvageCarry })
+					salvageCarry = ""
+				}
+				return flushed
+			}
+
+			const buffered = salvageBuffer
+			salvageBuffering = false
+			salvageBuffer = ""
+			if (!buffered) {
+				return flushed
+			}
+
+			const { calls, leftoverText } = extractLeakedToolCalls(buffered, providedToolSchemas, salvageEmittedText)
+			salvageEmittedText += buffered
+			if (leftoverText) {
+				flushed.push({ type: "text", text: leftoverText })
+			}
+			for (const call of calls) {
+				console.warn(
+					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
+					{ name: call.name, params: Object.keys(call.input) },
+				)
+				flushed.push({
+					type: "tool_call",
+					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
+					name: call.name,
+					arguments: JSON.stringify(call.input),
+				})
+			}
+			return flushed
+		}
+
 		try {
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
@@ -783,11 +844,54 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					}
 
 					accumulatedText += chunk.value
-					yield {
-						type: "text",
-						text: chunk.value,
+
+					// Fast path: when we didn't offer any tools there is nothing to salvage, so
+					// stream the text straight through exactly as before.
+					if (!salvageLeakedToolCalls) {
+						yield { type: "text", text: chunk.value }
+						continue
+					}
+
+					// Once we've seen the start of a leaked tool-call block, buffer the rest of the
+					// stream so the full markup can be parsed and replayed as a structured call.
+					if (salvageBuffering) {
+						salvageBuffer += chunk.value
+						// Markup that never closes must not withhold the response indefinitely; past the
+						// cap the buffer is released as plain text and buffering stops for the turn.
+						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS && !hasCompleteInvokeBlock(salvageBuffer)) {
+							const overflowed = salvageBuffer
+							salvageBuffering = false
+							salvageBuffer = ""
+							salvageEmittedText += overflowed
+							yield { type: "text", text: overflowed }
+						}
+						continue
+					}
+
+					// Watch for the start of a leaked tool-call block, carrying a small tail across
+					// chunks so a marker split across chunk boundaries is still detected.
+					const combined = salvageCarry + chunk.value
+					const markerMatch = combined.match(LEAKED_TOOL_CALL_START)
+					if (markerMatch) {
+						const before = combined.slice(0, markerMatch.index)
+						if (before) {
+							salvageEmittedText += before
+							yield { type: "text", text: before }
+						}
+						salvageBuffering = true
+						salvageBuffer = combined.slice(markerMatch.index)
+						salvageCarry = ""
+					} else {
+						const carryLength = trailingPartialToolMarkerLength(combined)
+						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
+						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
+						if (emit) {
+							salvageEmittedText += emit
+							yield { type: "text", text: emit }
+						}
 					}
 				} else if (chunk instanceof vscode.LanguageModelToolCallPart) {
+					yield* flushSalvage()
 					try {
 						// Validate tool call parameters
 						if (!chunk.name || typeof chunk.name !== "string") {
@@ -833,6 +937,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					console.warn("Zoo Code <Language Model API>: Unknown chunk type received:", chunk)
 				}
 			}
+
+			// Flush any leaked tool-call recovery state accumulated during streaming.
+			yield* flushSalvage()
 
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
