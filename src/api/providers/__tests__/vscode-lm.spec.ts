@@ -1625,3 +1625,192 @@ describe("recovered parameters for normalized MCP schemas", () => {
 		expect(extractLeakedToolCalls(text, builderSchemas).calls).toEqual([{ name, input: { tags: ["a"] } }])
 	})
 })
+
+describe("leaked tool-call parser contracts", () => {
+	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
+	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+	const wrap = (body: string) => `<function${"_calls"}>${body}</function${"_calls"}>`
+	// The fence in a quoting fixture must begin a line, so the wrapper opens on its own line.
+	const wrapLines = (body: string) => `<function${"_calls"}>\n${body}\n</function${"_calls"}>`
+
+	const tools = new Set(["update_todo_list"])
+	const callsOf = (text: string) => extractLeakedToolCalls(text, tools).calls
+	const todo = (value = "x") => invoke("update_todo_list", param("todos", value))
+
+	const schemaFor = (properties: Record<string, unknown>) =>
+		new Map<string, Record<string, unknown> | undefined>([["update_todo_list", { properties }]])
+	const convert = (properties: Record<string, unknown>, raw: string) =>
+		extractLeakedToolCalls(wrap(invoke("update_todo_list", param("value", raw))), schemaFor(properties)).calls
+
+	describe("wrapper discrimination", () => {
+		it("requires whitespace between invoke and its name attribute", () => {
+			const glued = `<function${"_calls"}><in${"voke"}name="update_todo_list"></in${"voke"}></function${"_calls"}>`
+
+			expect(callsOf(glued)).toHaveLength(0)
+		})
+
+		it("tolerates a newline between invoke and its name attribute", () => {
+			const spaced = wrap(`<in${"voke"}\n name="update_todo_list">${param("todos", "x")}</in${"voke"}>`)
+
+			expect(callsOf(spaced)).toHaveLength(1)
+		})
+
+		it("does not recover an unterminated name attribute", () => {
+			expect(callsOf(wrap(`<in${"voke"} name="update_todo_list>x</in${"voke"}>`))).toHaveLength(0)
+		})
+
+		it("does not recover an empty name attribute", () => {
+			expect(callsOf(wrap(invoke("", param("todos", "x"))))).toHaveLength(0)
+		})
+
+		it("recovers after an unrelated closed wrapper", () => {
+			expect(callsOf(`${wrap("")}\n${wrap(todo())}`)).toHaveLength(1)
+		})
+
+		it("arms on an opening wrapper tag carrying inner whitespace", () => {
+			expect(callsOf(`<function${"_calls"} >${todo()}`)).toHaveLength(1)
+		})
+
+		it("disarms on a closing wrapper tag carrying inner whitespace", () => {
+			expect(callsOf(`<function${"_calls"}></function${"_calls"} >${todo()}`)).toHaveLength(0)
+		})
+	})
+
+	describe("fence and quote discrimination", () => {
+		it("keeps a fence indented three spaces open", () => {
+			expect(callsOf(wrapLines("   ```\n" + todo()))).toHaveLength(0)
+		})
+
+		it("does not open a fence indented four spaces", () => {
+			expect(callsOf(wrapLines("    ```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("requires a fence to begin its line", () => {
+			expect(callsOf(wrapLines("text ```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("does not close a wide fence with a narrower one", () => {
+			expect(callsOf(wrapLines("````\n```\n" + todo() + "\n"))).toHaveLength(0)
+		})
+
+		it("closes a fence of equal width", () => {
+			expect(callsOf(wrapLines("```\ncode\n```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("does not close a tilde fence with a backtick fence", () => {
+			expect(callsOf(wrapLines("~~~\n```\n" + todo() + "\n"))).toHaveLength(0)
+		})
+
+		it("suppresses on an odd backtick count earlier in the line", () => {
+			expect(callsOf(wrapLines("see `" + todo()))).toHaveLength(0)
+		})
+
+		it("does not suppress on an even backtick count", () => {
+			expect(callsOf(wrapLines("see `x` " + todo()))).toHaveLength(1)
+		})
+
+		it("does not suppress on trailing whitespace alone", () => {
+			expect(callsOf(wrapLines(todo() + "   "))).toHaveLength(1)
+		})
+
+		it("does not suppress on trailing residual tags alone", () => {
+			expect(callsOf(wrapLines(todo() + "<<>>"))).toHaveLength(1)
+		})
+
+		it("stops applying a quoting cue after sentence punctuation", () => {
+			expect(callsOf(wrapLines("Never do that. Now " + todo()))).toHaveLength(1)
+		})
+
+		it("does not suppress on ordinary narration", () => {
+			expect(callsOf(wrapLines("Working on it now " + todo()))).toHaveLength(1)
+		})
+	})
+
+	describe("schema-directed conversion boundaries", () => {
+		it("rejects a float for a declared integer", () => {
+			expect(convert({ value: { type: "integer" } }, "1.5")).toHaveLength(0)
+		})
+
+		it("rejects a non-finite number", () => {
+			expect(convert({ value: { type: "number" } }, "1e400")).toHaveLength(0)
+		})
+
+		it("rejects an array for a declared object", () => {
+			expect(convert({ value: { type: "object" } }, "[]")).toHaveLength(0)
+		})
+
+		it("leaves an ambiguous multi-type union literal", () => {
+			expect(convert({ value: { type: ["array", "object"] } }, '["a"]')[0].input).toEqual({ value: '["a"]' })
+		})
+
+		it("fails a block closed for an unsupported declared type", () => {
+			expect(convert({ value: { type: "date" } }, "x")).toHaveLength(0)
+		})
+
+		it("does not treat an inherited Object.prototype key as a supported type", () => {
+			expect(convert({ value: { type: "toString" } }, "x")).toHaveLength(0)
+		})
+
+		it("bails out on a null anyOf branch", () => {
+			expect(convert({ value: { anyOf: [null] } }, '["a"]')[0].input).toEqual({ value: '["a"]' })
+		})
+
+		it("trims a parameter value", () => {
+			expect(callsOf(wrap(invoke("update_todo_list", param("todos", "  spaced  "))))[0].input).toEqual({
+				todos: "spaced",
+			})
+		})
+
+		it("parses a whitespace-padded JSON array", () => {
+			expect(convert({ value: { type: "array" } }, '  ["a"]  ')[0].input).toEqual({ value: ["a"] })
+		})
+	})
+
+	describe("carry boundaries", () => {
+		it("holds a generic fragment of exactly the carry bound", () => {
+			expect(trailingPartialToolMarkerLength("<" + "a".repeat(63))).toBe(64)
+		})
+
+		it("drops a generic fragment one character past the bound", () => {
+			expect(trailingPartialToolMarkerLength("<" + "a".repeat(64))).toBe(0)
+		})
+
+		it("holds an invoke tail of exactly the carry bound", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(56))).toBe(64)
+		})
+
+		it("drops an invoke tail one character past the bound", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(57))).toBe(0)
+		})
+	})
+
+	describe("preceding text and leftover segments", () => {
+		it("positions the quote window using preceding text", () => {
+			const { calls } = extractLeakedToolCalls(todo(), tools, `<function${"_calls"}>`)
+
+			expect(calls).toHaveLength(1)
+		})
+
+		it("suppresses on a fence opened in an earlier chunk", () => {
+			const { calls } = extractLeakedToolCalls(todo(), tools, `<function${"_calls"}>\n\`\`\`\n`)
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("keeps text that follows a recovered call", () => {
+			expect(extractLeakedToolCalls(`${wrap(todo())}\nAfterwards.`, tools).leftoverText).toBe("\nAfterwards.")
+		})
+
+		it("strips a closing wrapper tag carrying inner whitespace", () => {
+			const text = `<function${"_calls"}>${todo()}</function${"_calls"} >`
+
+			expect(extractLeakedToolCalls(text, tools).leftoverText).toBe("")
+		})
+
+		it("recovers two calls from one wrapper", () => {
+			const { calls } = extractLeakedToolCalls(wrap(`${todo("a")}\n${todo("b")}`), tools)
+
+			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
+		})
+	})
+})

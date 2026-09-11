@@ -84,28 +84,21 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-// Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
-// the rest of the response, so the marker only counts once the `name="` attribute has arrived.
-const LEAKED_TOOL_CALL_START = /<(?:antml:)?(?:function_calls\s*>|invoke\s+name=")/i
-const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
-const LEAKED_INVOKE_PARAM = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
+// Built per call rather than shared at module scope: a `/g` regex carries `lastIndex` across
+// callers, so a single shared instance makes concurrent streams resume mid-text.
+const leakedInvokeBlockPattern = () => /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
+const leakedInvokeParamPattern = () =>
+	/<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
 
 /** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
-
-/**
- * Upper bound on buffered text held while waiting for a leaked `<invoke>` block to close. Markup
- * that never closes would otherwise withhold the whole response from the user until the stream
- * ended, so past this size the buffer is released as ordinary text.
- */
-const MAX_SALVAGE_BUFFER_CHARS = 64 * MAX_PARTIAL_INVOKE_CARRY
 
 /**
  * Same-line prose that introduces markup as an example rather than invoking it. This is a
  * deliberately narrow lexical cue: a quoted invoke that ENDS its line is otherwise
  * indistinguishable from a genuine leak, which is just as often preceded by prose.
  */
-const QUOTING_CUE =
+const quotingCuePattern = () =>
 	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
 
 /**
@@ -129,14 +122,6 @@ function isInsideCodeFence(before: string): boolean {
 		}
 	}
 	return openFence !== null
-}
-
-/** True when `text` already contains a closed `<invoke>` block, so buffering is still productive. */
-function hasCompleteInvokeBlock(text: string): boolean {
-	LEAKED_INVOKE_BLOCK.lastIndex = 0
-	const found = LEAKED_INVOKE_BLOCK.test(text)
-	LEAKED_INVOKE_BLOCK.lastIndex = 0
-	return found
 }
 
 /**
@@ -213,7 +198,7 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 	// commonly preceded by narration too ("Working on it.\n"), so only an explicit quoting cue
 	// immediately before the markup suppresses it. Heuristic: prose that quotes markup without
 	// such a cue still reads as a live call.
-	return QUOTING_CUE.test(stripTagsCompletely(sameLineBefore))
+	return quotingCuePattern().test(stripTagsCompletely(sameLineBefore))
 }
 
 /**
@@ -223,19 +208,40 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
  */
 export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | undefined>
 
-/** Non-string JSON Schema types a leaked parameter may be converted into. */
-const STRUCTURED_PARAM_TYPES = new Set(["object", "array", "number", "integer", "boolean", "null"])
+/**
+ * Non-string JSON Schema types a leaked parameter may be converted into, each paired with the
+ * check that a parsed value must satisfy. `null` maps to a never-satisfied check because an
+ * explicit null is settled by the nullable test before this table is consulted.
+ */
+function structuredParamCheck(declaredType: string): ((parsed: unknown) => boolean) | undefined {
+	const checks: Record<string, (parsed: unknown) => boolean> = {
+		object: (parsed) => typeof parsed === "object" && !Array.isArray(parsed),
+		array: (parsed) => Array.isArray(parsed),
+		number: (parsed) => typeof parsed === "number" && Number.isFinite(parsed),
+		integer: (parsed) => Number.isInteger(parsed),
+		boolean: (parsed) => typeof parsed === "boolean",
+		null: () => false,
+	}
+	// Own-property only: a schema declaring `"toString"` would otherwise inherit a live function
+	// from Object.prototype and be treated as a supported type.
+	return Object.hasOwn(checks, declaredType) ? checks[declaredType] : undefined
+}
+
+/** A resolved declaration, or `undefined` when the schema does not pin down a single type. */
+type DeclaredType = { type: string; nullable: boolean }
 
 /** Resolves a `["T","null"]` type union to `T` while reporting that null is permitted. */
-function resolveTypeUnion(types: string[]): { type: string | undefined; nullable: boolean } {
+function resolveTypeUnion(types: string[]): DeclaredType | undefined {
 	const nullable = types.includes("null")
 	const nonNullTypes = types.filter((entry) => entry !== "null")
+	// A null-only union has no non-null member; leaving the type unresolved would fall back to the
+	// raw string "null", so declare the null type explicitly to force a JSON parse.
+	if (nonNullTypes.length === 0) {
+		return nullable ? { type: "null", nullable } : undefined
+	}
 	// Two or more non-null members leave the intended type ambiguous; picking one would coerce the
 	// value to a type the tool may not accept, so the raw string is kept instead.
-	const nonNull = nonNullTypes.length === 1 ? nonNullTypes[0] : undefined
-	// A null-only union has no non-null member; keeping type undefined would fall back to the raw
-	// string "null", so declare the null type explicitly to force a JSON parse.
-	return { type: nonNull ?? (nonNullTypes.length === 0 && nullable ? "null" : undefined), nullable }
+	return nonNullTypes.length === 1 ? { type: nonNullTypes[0], nullable } : undefined
 }
 
 /**
@@ -246,10 +252,7 @@ function resolveTypeUnion(types: string[]): { type: string | undefined; nullable
  * union into typed `anyOf` branches. Without reading that form a declared array or object would
  * fall through to the raw string, and the tool would receive `'["a","b"]'` instead of a list.
  */
-function declaredParamType(
-	schema: Record<string, unknown> | undefined,
-	paramName: string,
-): { type: string | undefined; nullable: boolean } {
+function declaredParamType(schema: Record<string, unknown> | undefined, paramName: string): DeclaredType | undefined {
 	const properties = schema?.["properties"] as Record<string, unknown> | undefined
 	const property = properties?.[paramName] as Record<string, unknown> | undefined
 	const type = property?.["type"]
@@ -267,13 +270,13 @@ function declaredParamType(
 			// Any branch that is not a simple named type (nested composition, $ref, enum-only) makes
 			// the union unsupported here; bail out rather than guess at a partial reading.
 			if (typeof branchType !== "string") {
-				return { type: undefined, nullable: false }
+				return undefined
 			}
 			branchTypes.push(branchType)
 		}
 		return resolveTypeUnion(branchTypes)
 	}
-	return { type: undefined, nullable: false }
+	return undefined
 }
 
 /**
@@ -287,15 +290,12 @@ function declaredParamType(
  * reported as a failure so the caller can pass the block through as text rather than dispatch a
  * malformed call.
  */
-function convertLeakedParamValue(
-	raw: string,
-	declared: { type: string | undefined; nullable: boolean },
-): { value: unknown } | undefined {
-	const declaredType = declared.type
-	if (declaredType === undefined || declaredType === "string") {
+function convertLeakedParamValue(raw: string, declared: DeclaredType | undefined): { value: unknown } | undefined {
+	if (declared === undefined || declared.type === "string") {
 		return { value: raw }
 	}
-	if (!STRUCTURED_PARAM_TYPES.has(declaredType)) {
+	const matchesDeclaredType = structuredParamCheck(declared.type)
+	if (!matchesDeclaredType) {
 		return undefined
 	}
 
@@ -306,25 +306,12 @@ function convertLeakedParamValue(
 		return undefined
 	}
 
-	// Must precede the type ladder, whose object branch rejects null outright.
+	// Must precede the table, whose object check would otherwise accept a null.
 	if (parsed === null) {
 		return declared.nullable ? { value: null } : undefined
 	}
 
-	const matchesDeclaredType =
-		declaredType === "null"
-			? false
-			: declaredType === "object"
-				? typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-				: declaredType === "array"
-					? Array.isArray(parsed)
-					: declaredType === "boolean"
-						? typeof parsed === "boolean"
-						: declaredType === "integer"
-							? Number.isInteger(parsed)
-							: typeof parsed === "number" && Number.isFinite(parsed)
-
-	return matchesDeclaredType ? { value: parsed } : undefined
+	return matchesDeclaredType(parsed) ? { value: parsed } : undefined
 }
 
 /**
@@ -336,13 +323,12 @@ function parseLeakedInvokeParams(
 	schema: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
 	const input: Record<string, unknown> = {}
-	LEAKED_INVOKE_PARAM.lastIndex = 0
+	const paramPattern = leakedInvokeParamPattern()
 	let match: RegExpExecArray | null
-	while ((match = LEAKED_INVOKE_PARAM.exec(body)) !== null) {
+	while ((match = paramPattern.exec(body)) !== null) {
 		const name = match[1]
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
 		if (!converted) {
-			LEAKED_INVOKE_PARAM.lastIndex = 0
 			return undefined
 		}
 		input[name] = converted.value
@@ -372,9 +358,9 @@ export function extractLeakedToolCalls(
 	let pending = ""
 	let lastIndex = 0
 
-	LEAKED_INVOKE_BLOCK.lastIndex = 0
+	const blockPattern = leakedInvokeBlockPattern()
 	let match: RegExpExecArray | null
-	while ((match = LEAKED_INVOKE_BLOCK.exec(text)) !== null) {
+	while ((match = blockPattern.exec(text)) !== null) {
 		pending += text.slice(lastIndex, match.index)
 		const name = match[1]
 		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
@@ -420,7 +406,6 @@ export function extractLeakedToolCalls(
 
 	return { calls, leftoverText: leftover }
 }
-
 
 export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
