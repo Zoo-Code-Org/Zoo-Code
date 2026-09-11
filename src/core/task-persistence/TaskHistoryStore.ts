@@ -22,9 +22,7 @@ export const TASK_HISTORY_BACKUP_RETENTION_MS = 86_400_000
  * current disk state, preserving fields written by another process.
  */
 function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
-	return (existing, incoming) => {
-		return mergeHistoryDelta(existing, incoming as HistoryItem, delta)
-	}
+	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
 }
 
 const persistedHistoryItem = (item: HistoryItem): HistoryItem => JSON.parse(JSON.stringify(item)) as HistoryItem

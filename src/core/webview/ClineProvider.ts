@@ -648,11 +648,7 @@ export class ClineProvider
 			try {
 				// Abort the running task and set isAbandoned to true so
 				// all running promises will exit as well.
-				if (options.saveMessages === false) {
-					await task.abortTask(true, options)
-				} else {
-					await task.abortTask(true)
-				}
+				await task.abortTask(true, options)
 			} catch (e) {
 				this.log(
 					`[ClineProvider#removeClineFromStack] abortTask() failed ${task.taskId}.${task.instanceId}: ${e.message}`,
@@ -4497,7 +4493,10 @@ export class ClineProvider
 					})
 					.then(admitContinuation, (error) => {
 						admitContinuation()
-						console.error(`[reopenParentFromDelegation] taskScheduler.schedule failed:`, error)
+						console.error(
+							`[${ClineProvider.prototype.reopenParentFromDelegation.name}] taskScheduler.schedule failed:`,
+							error,
+						)
 					})
 			},
 			async (error) => {
