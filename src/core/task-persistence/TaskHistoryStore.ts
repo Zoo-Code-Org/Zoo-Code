@@ -917,28 +917,25 @@ export class TaskHistoryStore {
 		options?: { mergeChildIds?: boolean; heldLock?: JsonFileLock },
 	): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
-		if (delta) {
-			let written: HistoryItem = item
-			const mergeFn = mergeWithDisk(delta, options)
-			await safeWriteJson(filePath, item, {
-				heldLock: options?.heldLock,
-				merge: (existing, incoming) => {
-					if (diskGuard) {
-						if (Object(existing) !== existing || !("id" in (existing as object))) {
-							throw new Error(`[TaskHistoryStore] guarded write: task ${item.id} not found on disk`)
-						}
-						diskGuard(existing as HistoryItem)
-					}
-					const result = mergeFn(existing, incoming)
-					written = result as HistoryItem
-					return result
-				},
-			})
-			return written
-		} else {
+		if (!delta) {
 			await safeWriteJson(filePath, item)
 			return item
 		}
+		let written: HistoryItem = item
+		const mergeFn = mergeWithDisk(delta, options)
+		await safeWriteJson(filePath, item, {
+			heldLock: options?.heldLock,
+			merge: (existing, incoming) => {
+				if (diskGuard) {
+					if (Object(existing) !== existing || !("id" in (existing as object))) {
+						throw new Error(`[TaskHistoryStore] guarded write: task ${item.id} not found on disk`)
+					}
+					diskGuard(existing as HistoryItem)
+				}
+				return (written = mergeFn(existing, incoming) as HistoryItem)
+			},
+		})
+		return written
 	}
 
 	private async restoreTaskFilePreImage(
@@ -1119,11 +1116,8 @@ export class TaskHistoryStore {
 				const current = (await this.readTaskFile(taskId)) ?? cached
 				const updated = updater(structuredClone(current))
 				if (updated.id !== taskId) throw new Error(`Task updater changed id from ${taskId} to ${updated.id}`)
-				if (updated.status !== undefined) {
-					const currentStatus: HistoryItemStatus = current.status ?? "active"
-					if (updated.status !== currentStatus) {
-						assertValidTransition(current.status, updated.status)
-					}
+				if (updated.status !== undefined && updated.status !== (current.status ?? "active")) {
+					assertValidTransition(current.status, updated.status)
 				}
 
 				const merged = { ...current, ...updated }
@@ -1186,11 +1180,8 @@ export class TaskHistoryStore {
 				[first, updatedFirst],
 				[second, updatedSecond],
 			] as const) {
-				if (updated.status !== undefined) {
-					const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
-					if (updated.status !== normalizedExisting) {
-						assertValidTransition(existing.status, updated.status)
-					}
+				if (updated.status !== undefined && updated.status !== (existing.status ?? "active")) {
+					assertValidTransition(existing.status, updated.status)
 				}
 			}
 
@@ -1211,11 +1202,12 @@ export class TaskHistoryStore {
 
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
-				const firstDiskGuard = options?.firstDiskGuard
 				const captureAndGuardFirst =
-					firstDiskGuard || options?.rollbackFirstOnSecondFailure || options?.rollbackBothOnCallbackFailure
+					options?.firstDiskGuard ||
+					options?.rollbackFirstOnSecondFailure ||
+					options?.rollbackBothOnCallbackFailure
 						? (current: HistoryItem) => {
-								if (firstDiskGuard) firstDiskGuard(current)
+								options?.firstDiskGuard?.(current)
 								firstDiskSnapshot = structuredClone(current)
 							}
 						: undefined

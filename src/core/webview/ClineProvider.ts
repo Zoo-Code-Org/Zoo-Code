@@ -4167,33 +4167,27 @@ export class ClineProvider
 				return false
 			}
 
-			let parentClineMessages: ClineMessage[] = []
+			let parentClineMessages: ClineMessage[]
+			let parentApiMessages: ApiMessage[]
 			try {
 				parentClineMessages = await readTaskMessages({
 					taskId: parentTaskId,
 					globalStoragePath,
 				})
-			} catch (error) {
-				this.log(
-					`[reopenParentFromDelegation] Failed to read messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-				return false
-			}
-			const originalParentClineMessages = structuredClone(parentClineMessages)
-
-			let parentApiMessages: ApiMessage[] = []
-			try {
 				parentApiMessages = await readApiMessages({
 					taskId: parentTaskId,
 					globalStoragePath,
 				})
 			} catch (error) {
 				this.log(
-					`[reopenParentFromDelegation] Failed to read API messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+					`[reopenParentFromDelegation] Failed to read conversation for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
 				)
 				return false
 			}
-			const originalParentApiMessages = structuredClone(parentApiMessages)
+			const [originalParentClineMessages, originalParentApiMessages] = structuredClone([
+				parentClineMessages,
+				parentApiMessages,
+			])
 
 			// 2) Inject synthetic records: UI subtask_result and update API tool_result
 			const ts = Date.now()
@@ -4236,20 +4230,17 @@ export class ClineProvider
 				// Check if the last message is already a user message with a tool_result for this tool_use_id
 				// (in case this is a retry or the history was already updated)
 				const lastMsg = parentApiMessages[parentApiMessages.length - 1]
-				let alreadyHasToolResult = false
-				if (lastMsg?.role === "user" && Array.isArray(lastMsg.content)) {
-					for (const block of lastMsg.content) {
-						if (block.type === "tool_result" && block.tool_use_id === toolUseId) {
-							// Update the existing tool_result content
-							block.content = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
-							alreadyHasToolResult = true
-							break
-						}
-					}
-				}
+				const existingToolResult =
+					lastMsg?.role === "user" && Array.isArray(lastMsg.content)
+						? lastMsg.content.find(
+								(block) => block.type === "tool_result" && block.tool_use_id === toolUseId,
+							)
+						: undefined
 
 				// If no existing tool_result found, create a NEW user message with the tool_result
-				if (!alreadyHasToolResult) {
+				if (existingToolResult?.type === "tool_result") {
+					existingToolResult.content = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
+				} else {
 					parentApiMessages.push({
 						messageId: crypto.randomUUID(),
 						role: "user",
