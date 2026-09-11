@@ -396,6 +396,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		createCommitStatus,
 		createLabel,
 		setFailed,
+		info: core.info,
 		warning: core.warning,
 		getPullRequest,
 		listPullRequests: github.rest.pulls.list,
@@ -546,6 +547,7 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
 		expect(latestGateStatus(result)?.state).toBe("pending")
 		expect(latestGateStatus(result)?.description).toContain("Waiting for automated review")
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("coderabbit=pending"))
 	})
 
 	it("does not start CodeRabbit for draft zoomote-authored PRs", async () => {
@@ -583,6 +585,7 @@ describe("PR review-state workflow", () => {
 		)
 		expect(latestGateStatus(result)?.state).toBe("success")
 		expect(latestGateStatus(result)?.description).toContain("Awaiting fresh human maintainer")
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("coderabbit=optional"))
 	})
 
 	it("completes other bot-authored PR review after human maintainer approval", async () => {
