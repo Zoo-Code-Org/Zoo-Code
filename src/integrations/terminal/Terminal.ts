@@ -89,7 +89,6 @@ export class Terminal extends BaseTerminal {
 		for (const cancel of this.cancelShellIntegrationWaits) {
 			cancel()
 		}
-		this.cancelShellIntegrationWaits.clear()
 
 		if (this.process instanceof TerminalProcess) {
 			this.process.handleTerminalClosed()

@@ -616,20 +616,26 @@ describe("TerminalRegistry", () => {
 			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
 			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
 			const disposeSpy = vi.fn()
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
 			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce(() => ({
 				dispose: disposeSpy,
 			}))
 			const result = terminal.runCommand("git status", {
 				onLine: vi.fn(),
-				onCompleted: vi.fn(),
+				onCompleted: completedSpy,
 				onShellExecutionStarted: vi.fn(),
-				onShellExecutionComplete: vi.fn(),
+				onShellExecutionComplete: completionSpy,
 				onNoShellIntegration: vi.fn(),
 			})
 			const process = terminal.process
 			expect(process).toBeInstanceOf(TerminalProcess)
 
 			terminal.handleClose()
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
 			await result
 
 			expect(disposeSpy).toHaveBeenCalledOnce()
@@ -679,20 +685,21 @@ describe("TerminalRegistry", () => {
 				.mockImplementationOnce(() => ({ dispose: disposeSpies[1] }))
 			const completedSpies = [vi.fn(), vi.fn()]
 			const completionSpies = [vi.fn(), vi.fn()]
-			const results = [
-				terminal.runCommand("first", {
-					onLine: vi.fn(),
-					onCompleted: completedSpies[0],
-					onShellExecutionStarted: vi.fn(),
-					onShellExecutionComplete: completionSpies[0],
-				}),
-				terminal.runCommand("second", {
-					onLine: vi.fn(),
-					onCompleted: completedSpies[1],
-					onShellExecutionStarted: vi.fn(),
-					onShellExecutionComplete: completionSpies[1],
-				}),
-			]
+			const first = terminal.runCommand("first", {
+				onLine: vi.fn(),
+				onCompleted: completedSpies[0],
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpies[0],
+			})
+			const firstProcess = terminal.process
+			const second = terminal.runCommand("second", {
+				onLine: vi.fn(),
+				onCompleted: completedSpies[1],
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpies[1],
+			})
+			const secondProcess = terminal.process
+			const results = [first, second]
 			const settledSpies = [vi.fn(), vi.fn()]
 			void results[0].then(settledSpies[0])
 			void results[1].then(settledSpies[1])
@@ -706,6 +713,8 @@ describe("TerminalRegistry", () => {
 			expect(completedSpies[1]).toHaveBeenCalledOnce()
 			expect(completionSpies[0]).toHaveBeenCalledOnce()
 			expect(completionSpies[1]).toHaveBeenCalledOnce()
+			expect(completionSpies[0]).toHaveBeenCalledWith({ exitCode: undefined }, firstProcess)
+			expect(completionSpies[1]).toHaveBeenCalledWith({ exitCode: undefined }, secondProcess)
 			expect(disposeSpies[0]).toHaveBeenCalledOnce()
 			expect(disposeSpies[1]).toHaveBeenCalledOnce()
 			expect(vi.getTimerCount()).toBe(0)
@@ -730,15 +739,85 @@ describe("TerminalRegistry", () => {
 
 			expect(noShellSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("<no shell integration>")
 			expect(continueSpy).toHaveBeenCalledOnce()
 			expect(terminal.process).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.isStreamClosed).toBe(true)
+			expect(process["finalizedBeforeExecution"]).toBe(true)
 			expect(process.eventNames()).toEqual([])
+			const emitSpy = vi.spyOn(process, "emit")
 
 			terminal.handleClose()
 
+			expect(emitSpy).not.toHaveBeenCalled()
 			expect(shellCompleteSpy).not.toHaveBeenCalled()
 			expect(completedSpy).toHaveBeenCalledOnce()
 			expect(continueSpy).toHaveBeenCalledOnce()
+		})
+
+		it("keeps terminal-close completion idempotent when invoked directly", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const process = new TerminalProcess(terminal)
+			terminal.process = process
+			const shellCompleteSpy = vi.spyOn(terminal, "shellExecutionComplete")
+			const completedSpy = vi.fn()
+			process.on("completed", completedSpy)
+
+			process.handleTerminalClosed()
+			process.handleTerminalClosed()
+
+			expect(shellCompleteSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(process["terminalCloseHandled"]).toBe(true)
+		})
+
+		it("finalizes a superseded startup process without clearing the current process", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const superseded = new TerminalProcess(terminal)
+			const current = new TerminalProcess(terminal)
+			terminal.process = current
+			const completionSpy = vi.fn()
+			const completedSpy = vi.fn()
+			superseded.on("shell_execution_complete", completionSpy)
+			superseded.on("completed", completedSpy)
+
+			superseded.handleTerminalClosed()
+
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined })
+			expect(Object.hasOwn(completionSpy.mock.calls[0][0], "exitCode")).toBe(true)
+			expect(completedSpy).toHaveBeenCalledWith("")
+			expect(terminal.process).toBe(current)
+		})
+
+		it("settles a superseded command whose integration wait resolved immediately before closure", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const handlers: Array<(event: vscode.TerminalShellIntegrationChangeEvent) => void> = []
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementation((handler) => {
+				handlers.push(handler)
+				return { dispose: vi.fn() }
+			})
+			const firstCompleted = vi.fn()
+			const firstResult = terminal.runCommand("first", {
+				onLine: vi.fn(),
+				onCompleted: firstCompleted,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			})
+			const firstProcess = terminal.process
+			handlers[0]({ terminal: terminal.terminal, shellIntegration: {} as never })
+
+			const secondResult = terminal.runCommand("second", {
+				onLine: vi.fn(),
+				onCompleted: vi.fn(),
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			})
+			terminal.handleClose()
+			await Promise.all([firstResult, secondResult])
+
+			expect(firstCompleted).toHaveBeenCalledWith("", firstProcess)
 		})
 
 		it("clears the timeout and disposes the listener when shell integration activates", async () => {
