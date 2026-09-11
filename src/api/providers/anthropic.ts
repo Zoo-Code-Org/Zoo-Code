@@ -378,7 +378,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						case "signature_delta":
 							// Accumulate the verification signature for the open
 							// thinking block (see content_block_start/content_block_stop).
-							pendingThinkingSignature += chunk.delta.signature
+							if (chunk.index === thinkingBlockIndex) {
+								pendingThinkingSignature += chunk.delta.signature
+							}
 							break
 						case "text_delta":
 							yield { type: "text", text: chunk.delta.text }

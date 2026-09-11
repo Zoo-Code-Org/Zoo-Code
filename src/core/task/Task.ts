@@ -1119,10 +1119,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * would then keep both the on-disk original and the rebuilt copy,
 	 * duplicating the user turn after a restart.
 	 */
-	private async restoreApiHistoryUserMessage(message: ApiMessage) {
+	private async restoreApiHistoryUserMessage(message: ApiMessage): Promise<boolean> {
 		this.apiConversationHistory.push(message)
 		this.messageCounts.user++
-		await this.saveApiConversationHistory()
+		let saved = await this.saveApiConversationHistory()
+		if (!saved) {
+			saved = await this.retrySaveApiConversationHistory()
+		}
+		return saved
+	}
+
+	private async recordTerminalApiFailure(text: string): Promise<boolean> {
+		const message = { role: "assistant" as const, content: [{ type: "text" as const, text }] }
+		await this.addToApiConversationHistory(message)
+		let saved = this.assistantMessageSavedToHistory
+		if (!saved) {
+			saved = await this.retrySaveApiConversationHistory()
+			this.assistantMessageSavedToHistory = saved
+		}
+		if (!saved) {
+			const appendedMessage = this.apiConversationHistory.at(-1)
+			if (appendedMessage?.role === "assistant") {
+				this.apiConversationHistory.pop()
+			}
+			return false
+		}
+		this.messageCounts.assistant++
+		return true
 	}
 
 	/** Replaces the entire API conversation history and persists the new state. */
@@ -1647,28 +1670,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 		}
 
-		// Wait for askResponse to be set
-		await pWaitFor(
-			() => {
-				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
-					return true
-				}
-
-				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
-				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang.
-				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.claimNextMessage()
-					const resolution = message ? queuedResponseForAsk(type, text) : undefined
-					if (message && resolution) {
-						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+		// Wait for askResponse to be set. Status timers belong to this ask and
+		// must not survive cancellation, supersession, or a rejected wait.
+		try {
+			await pWaitFor(
+				() => {
+					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+						return true
 					}
-				}
 
-				return false
-			},
-			{ interval: 100 },
-		)
+					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
+					// suggestion click that was incorrectly queued due to UI state), consume it
+					// immediately so the task doesn't hang.
+					if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
+						const message = this.messageQueueService.claimNextMessage()
+						const resolution = message ? queuedResponseForAsk(type, text) : undefined
+						if (message && resolution) {
+							queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+						}
+					}
+
+					return false
+				},
+				{ interval: 100 },
+			)
+		} finally {
+			for (const timeout of timeouts) clearTimeout(timeout)
+			if (this.autoApprovalTimeoutRef && timeouts.includes(this.autoApprovalTimeoutRef)) {
+				this.autoApprovalTimeoutRef = undefined
+			}
+		}
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
@@ -3695,8 +3726,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							)
 
 							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
+							const retryState = await this.providerRef.deref()?.getState()
 
-							if (midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES) {
+							if (retryState?.autoApprovalEnabled && midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES) {
 								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
 								// Check if task was aborted during the backoff
@@ -3738,11 +3770,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							const { response } = await this.ask(
 								"api_req_failed",
-								`The API stream failed ${MAX_AUTOMATIC_API_RETRIES + 1} times mid-response. ${streamingFailedMessage}`,
+								`${
+									retryState?.autoApprovalEnabled
+										? `The API stream failed ${MAX_AUTOMATIC_API_RETRIES + 1} times mid-response.`
+										: "The API stream failed mid-response."
+								} ${streamingFailedMessage}`,
 							)
 
 							if (response === "yesButtonClicked") {
 								await this.say("api_req_retried")
+								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
+								if (this.abort) break
 
 								// Reset the automatic retry budget; the user message is
 								// restored exactly once on the next iteration. The
@@ -3751,7 +3789,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								stack.push({
 									userContent: currentUserContent,
 									includeFileDetails: false,
-									retryAttempt: 0,
+									retryAttempt: midStreamRetryAttempt + 1,
+									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
 									removedUserMessage: removedMidStreamUserMessage,
 								})
 
@@ -3760,8 +3799,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							// User declined to retry: restore the user message, surface
 							// the error, record the failure, and stop the loop.
-							if (removedMidStreamUserMessage) {
-								await this.restoreApiHistoryUserMessage(removedMidStreamUserMessage)
+							if (
+								removedMidStreamUserMessage &&
+								!(await this.restoreApiHistoryUserMessage(removedMidStreamUserMessage))
+							) {
+								return false
 							}
 
 							await this.say(
@@ -3772,11 +3814,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// Synthetic assistant message recording the failure -- increment
 							// messageCounts.assistant to match, same as the normal
 							// assistant-message-saved path.
-							await this.addToApiConversationHistory({
-								role: "assistant",
-								content: [{ type: "text", text: "Failure: the API stream failed mid-response." }],
-							})
-							this.messageCounts.assistant++
+							await this.recordTerminalApiFailure("Failure: the API stream failed mid-response.")
 
 							return false
 						}
@@ -4162,8 +4200,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// the same way while re-billing the full context each time, so
 					// surface it and stop instead of retrying.
 					if (lastStopReason === "max_tokens") {
-						if (removedCurrentUserMessage) {
-							await this.restoreApiHistoryUserMessage(removedCurrentUserMessage)
+						if (
+							removedCurrentUserMessage &&
+							!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
+						) {
+							return false
 						}
 
 						await this.say(
@@ -4174,16 +4215,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Synthetic assistant message recording the failure -- increment
 						// messageCounts.assistant to match, same as the normal
 						// assistant-message-saved path.
-						await this.addToApiConversationHistory({
-							role: "assistant",
-							content: [
-								{
-									type: "text",
-									text: "Failure: response hit the max output token limit before producing any visible content.",
-								},
-							],
-						})
-						this.messageCounts.assistant++
+						await this.recordTerminalApiFailure(
+							"Failure: response hit the max output token limit before producing any visible content.",
+						)
 
 						return false
 					}
@@ -4252,8 +4286,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						} else {
 							// User declined to retry. Restore the user message only if this
 							// iteration removed one, so the history and counter stay consistent.
-							if (removedCurrentUserMessage) {
-								await this.restoreApiHistoryUserMessage(removedCurrentUserMessage)
+							if (
+								removedCurrentUserMessage &&
+								!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
+							) {
+								return false
 							}
 
 							await this.say(
@@ -4264,11 +4301,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// Synthetic assistant message recording the failure -- increment
 							// messageCounts.assistant to match, same as the normal
 							// assistant-message-saved path.
-							await this.addToApiConversationHistory({
-								role: "assistant",
-								content: [{ type: "text", text: "Failure: I did not provide a response." }],
-							})
-							this.messageCounts.assistant++
+							await this.recordTerminalApiFailure("Failure: I did not provide a response.")
 						}
 					}
 				}

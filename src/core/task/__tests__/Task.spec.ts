@@ -30,6 +30,7 @@ import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import pWaitFor from "p-wait-for"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -43,6 +44,7 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+	saveApiConversationHistory: () => Promise<boolean>
 	resetAssistantMessagePersistence: () => void
 }
 
@@ -422,6 +424,7 @@ describe("Cline", () => {
 			autoApprovalEnabled,
 		})
 		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+		vi.spyOn(getTaskTestAccess(task), "saveApiConversationHistory").mockResolvedValue(true)
 		return task
 	}
 
@@ -563,6 +566,70 @@ describe("Cline", () => {
 			})
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
+
+		it("does not pop pre-existing history when an empty continuation is exhausted", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const priorHistory: ApiMessage[] = [
+				{ role: "user", content: [{ type: "text", text: "prior request" }], messageId: "prior-user", ts: 1 },
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "prior response" }],
+					messageId: "prior-assistant",
+					ts: 2,
+				},
+			]
+			const originalPriorHistory = structuredClone(priorHistory)
+			await task.overwriteApiConversationHistory(priorHistory, false)
+			task.messageCounts = { user: 1, assistant: 1 }
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+
+			const result = await task.recursivelyMakeClineRequests([])
+
+			expect(result).toBe(false)
+			expect(task.apiConversationHistory).toHaveLength(3)
+			expect(task.apiConversationHistory.slice(0, 2)).toEqual(originalPriorHistory)
+			expect(task.apiConversationHistory[2]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Failure: I did not provide a response." }],
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 2 })
+		})
+
+		it("rolls back a terminal failure record when persistence fails", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(getTaskTestAccess(task), "saveApiConversationHistory")
+				.mockResolvedValueOnce(true)
+				.mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]?.role).toBe("user")
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
+		it("keeps the restored user turn and skips terminal recording when restore persistence fails", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(getTaskTestAccess(task), "saveApiConversationHistory")
+				.mockResolvedValueOnce(true)
+				.mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([{ type: "text", text: "original user request" }]),
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
 	})
 
 	describe("mid-stream retries", () => {
@@ -629,7 +696,7 @@ describe("Cline", () => {
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
 
-		it("makes retries visible even when auto-approval is disabled", async () => {
+		it("requires approval before retrying when auto-approval is disabled", async () => {
 			const task = await createTaskWithAutoApproval(false)
 			const saySpy = vi.spyOn(task, "say")
 			const askSpy = vi
@@ -640,13 +707,31 @@ describe("Cline", () => {
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(result).toBe(false)
-			// Retries stay visible even without auto-approval: one final
-			// (non-partial) countdown announcement per automatic retry.
+			// No request or countdown starts until the user explicitly approves.
 			const retryAnnouncements = saySpy.mock.calls.filter(
 				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
 			)
-			expect(retryAnnouncements).toHaveLength(3)
+			expect(retryAnnouncements).toHaveLength(0)
 			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(task.attemptApiRequest)).toHaveBeenCalledTimes(1)
+		})
+
+		it("shows the retry countdown after explicit approval", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const saySpy = vi.spyOn(task, "say")
+			vi.spyOn(task, "ask")
+				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => failingStream(new Error("overloaded_error")))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(task.attemptApiRequest).toHaveBeenCalledTimes(2)
+			expect(
+				saySpy.mock.calls.filter(
+					([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+				),
+			).toHaveLength(1)
 		})
 
 		it("resets the retry budget without duplicating the user message when the user approves retry", async () => {
@@ -695,6 +780,25 @@ describe("Cline", () => {
 			// Final history: original user turn, recovered assistant turn, the
 			// follow-up user turn, and the recorded failure.
 			expect(task.messageCounts).toEqual({ user: 2, assistant: 2 })
+		})
+	})
+
+	describe("ask lifecycle cleanup", () => {
+		it("clears the api_req_failed idle timer before throwing after cancellation", async () => {
+			vi.useFakeTimers()
+			const task = await createTaskWithAutoApproval(false)
+			const idleListener = vi.fn()
+			task.on(RooCodeEventName.TaskIdle, idleListener)
+			vi.mocked(pWaitFor).mockImplementationOnce(async (predicate) => {
+				task.abort = true
+				predicate()
+			})
+
+			await expect(task.ask("api_req_failed", "retry?")).rejects.toThrow("aborted")
+			await vi.advanceTimersByTimeAsync(2_000)
+
+			expect(idleListener).not.toHaveBeenCalled()
+			vi.useRealTimers()
 		})
 	})
 
@@ -790,12 +894,7 @@ describe("Cline", () => {
 			// If the scope were shared across retries, the old partial state for
 			// "call_stale" would still be in the WeakMap when the retry runs,
 			// and could corrupt finalization of "call_fresh".
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "retry scope test",
-				startTask: false,
-			})
+			const task = await createTaskWithAutoApproval(true)
 
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)

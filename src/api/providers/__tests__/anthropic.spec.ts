@@ -1165,6 +1165,27 @@ describe("AnthropicHandler", () => {
 			expect(handler.getThinkingBlocks()).toEqual([{ thinking: "real thought", signature: "sig" }])
 		})
 
+		it("ignores signature deltas that arrive for a different block index", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 1 } } },
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "thought", signature: "" },
+					},
+					{ type: "content_block_delta", index: 1, delta: { type: "signature_delta", signature: "stray" } },
+					{ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "correct" } },
+					{ type: "content_block_stop", index: 0 },
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(handler.getThinkingBlocks()).toEqual([{ thinking: "thought", signature: "correct" }])
+		})
+
 		it("does not complete a thinking block when content_block_stop arrives for a different index", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([
