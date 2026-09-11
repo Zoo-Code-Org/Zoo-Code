@@ -18,11 +18,12 @@ import { WebviewMessage } from "@roo/WebviewMessage"
  *    `window.postMessage` so the existing `window.addEventListener("message")`
  *    consumers in the app work unchanged.
  *
- * Production bundle isolation: the first thing `maybeConnect` does is return
- * when `import.meta.env.DEV` is false. Vite replaces that with a literal
- * `false` at build time, so the entire remainder of the body — including the
- * dynamic `import("socket.io-client")` and the browser-mode CSS import — is
- * dead code the bundler strips, and neither ever lands in the shipped assets.
+ * Production bundle isolation works on two levels: every call site in
+ * `vscode.ts` is wrapped in `import.meta.env.DEV &&`, which Vite replaces with
+ * a literal `false` at build time, so this class becomes unreachable and the
+ * bundler tree-shakes it entirely (dynamic `import("socket.io-client")` and
+ * the browser-mode CSS import never land in the shipped assets). As defense in
+ * depth, `maybeConnect`/`active` also self-gate on `import.meta.env.DEV`.
  */
 
 /**

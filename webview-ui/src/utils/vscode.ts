@@ -21,10 +21,12 @@ class VSCodeAPIWrapper {
 		// context (i.e. VS Code development window or web browser)
 		if (typeof acquireVsCodeApi === "function") {
 			this.vsCodeApi = acquireVsCodeApi()
-		} else {
-			// Browser mode is self-gated inside the client: it connects only
-			// when this dev-server tab was opened by the "Open in Chrome"
-			// command with a ?bridgePort=... query param.
+		} else if (import.meta.env.DEV) {
+			// Build-time gate: `false` in production makes BrowserBridgeClient
+			// unreachable so the bundler tree-shakes the whole class (and the
+			// lazy socket.io-client import inside it). The client self-gates
+			// again at runtime: it connects only when this dev-server tab was
+			// opened by the "Open in Chrome" command with a ?bridgePort= param.
 			void BrowserBridgeClient.maybeConnect()
 		}
 	}
@@ -40,7 +42,9 @@ class VSCodeAPIWrapper {
 	public postMessage(message: WebviewMessage) {
 		if (this.vsCodeApi) {
 			this.vsCodeApi.postMessage(message)
-		} else if (BrowserBridgeClient.active()) {
+		} else if (import.meta.env.DEV && BrowserBridgeClient.active()) {
+			// Same build-time gate as the constructor: keeps the bridge class
+			// out of the production bundle entirely.
 			BrowserBridgeClient.postMessage(message)
 		} else {
 			console.log(message)

@@ -595,9 +595,6 @@ importers:
       simple-git:
         specifier: ^3.27.0
         version: 3.36.0
-      socket.io:
-        specifier: ^4.8.3
-        version: 4.8.3
       strip-bom:
         specifier: ^5.0.0
         version: 5.0.0
@@ -695,6 +692,9 @@ importers:
       rimraf:
         specifier: 6.0.1
         version: 6.0.1
+      socket.io:
+        specifier: 4.8.3
+        version: 4.8.3
       socket.io-client:
         specifier: 4.8.3
         version: 4.8.3
@@ -866,9 +866,6 @@ importers:
       shiki:
         specifier: ^3.2.1
         version: 3.4.1
-      socket.io-client:
-        specifier: ^4.8.3
-        version: 4.8.3
       source-map:
         specifier: ^0.7.4
         version: 0.7.6
@@ -963,6 +960,9 @@ importers:
       monocart-reporter:
         specifier: ^2.9.20
         version: 2.12.2
+      socket.io-client:
+        specifier: 4.8.3
+        version: 4.8.3
       vite:
         specifier: 8.1.0
         version: 8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
