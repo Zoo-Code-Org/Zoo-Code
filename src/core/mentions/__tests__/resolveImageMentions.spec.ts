@@ -11,9 +11,12 @@ vi.mock("../../tools/helpers/imageHelpers", () => ({
 	readImageAsDataUrlWithBuffer: vi.fn(),
 	validateImageForProcessing: vi.fn(),
 	ImageMemoryTracker: vi.fn().mockImplementation(function () {
+		let totalMemoryUsed = 0
 		return {
-			getTotalMemoryUsed: vi.fn().mockReturnValue(0),
-			addMemoryUsage: vi.fn(),
+			getTotalMemoryUsed: vi.fn(() => totalMemoryUsed),
+			addMemoryUsage: vi.fn((sizeInMB: number) => {
+				totalMemoryUsed += sizeInMB
+			}),
 		}
 	}),
 	DEFAULT_MAX_IMAGE_FILE_SIZE_MB: 5,
@@ -191,6 +194,27 @@ describe("resolveImageMentions", () => {
 		})
 
 		expect(mockValidateImage).toHaveBeenCalledWith(expect.any(String), true, 10, 50, 0)
+	})
+
+	it("should count supplied images against the local mention size budget", async () => {
+		const suppliedBytes = Buffer.from("supplied-image")
+		const suppliedImage = `data:image/png;base64,${suppliedBytes.toString("base64")}`
+		mockValidateImage.mockResolvedValue({ isValid: false, reason: "memory_limit" })
+
+		const result = await resolveImageMentions({
+			text: "See @/local.png",
+			images: [suppliedImage],
+			cwd: "/workspace",
+		})
+
+		expect(mockValidateImage).toHaveBeenCalledWith(
+			expect.any(String),
+			true,
+			5,
+			20,
+			suppliedBytes.byteLength / (1024 * 1024),
+		)
+		expect(result.images).toEqual([suppliedImage])
 	})
 })
 

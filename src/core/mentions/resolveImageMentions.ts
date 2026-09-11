@@ -51,6 +51,10 @@ function dedupePreserveOrder(values: string[]): string[] {
 	return result
 }
 
+function getDataUrlSizeInMB(dataUrl: string): number {
+	return Buffer.byteLength(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64") / (1024 * 1024)
+}
+
 export function normalizeSuppliedImages(
 	images?: string[],
 	{
@@ -74,7 +78,7 @@ export function normalizeSuppliedImages(
 		const extension = match[1] === "svg+xml" ? ".svg" : match[1] === "x-icon" ? ".ico" : `.${match[1]}`
 		if (!isSupportedImageFormat(extension)) continue
 
-		const sizeInMB = Buffer.byteLength(match[2], "base64") / (1024 * 1024)
+		const sizeInMB = getDataUrlSizeInMB(image)
 		if (sizeInMB > maxImageFileSize || totalSize + sizeInMB > maxTotalImageSize) continue
 
 		totalSize += sizeInMB
@@ -134,6 +138,9 @@ export async function resolveImageMentions({
 	}
 
 	const imageMemoryTracker = new ImageMemoryTracker()
+	for (const image of existingImages) {
+		imageMemoryTracker.addMemoryUsage(getDataUrlSizeInMB(image))
+	}
 	const newImages: string[] = []
 
 	for (const mention of imageMentions) {
