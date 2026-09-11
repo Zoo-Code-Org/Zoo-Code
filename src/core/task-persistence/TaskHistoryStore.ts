@@ -1236,32 +1236,14 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (options?.rollbackFirstOnSecondFailure && firstDiskSnapshot) {
 						try {
-							const rollbackSnapshot = firstDiskSnapshot
-							let restoredFirst = rollbackSnapshot
-							await safeWriteJson(await this.getTaskFilePath(firstId), rollbackSnapshot, {
-								heldLock: firstFileLock,
-								merge: (existing) => {
-									if (!existing || typeof existing !== "object" || !("id" in existing)) {
-										throw new Error(
-											`[TaskHistoryStore] atomicUpdatePair: ${firstId} missing during rollback`,
-										)
-									}
-									const current = existing as HistoryItem
-									const firstWriteStillCurrent = Object.entries(firstDelta).every(([key, value]) =>
-										deepEqual((current as Record<string, unknown>)[key], value),
-									)
-									if (!firstWriteStillCurrent) {
-										throw new Error(
-											`[TaskHistoryStore] atomicUpdatePair: cannot roll back ${firstId} after a concurrent update`,
-										)
-									}
-									restoredFirst = structuredClone(rollbackSnapshot)
-									return restoredFirst
-								},
-							})
-							this.cache.set(firstId, restoredFirst)
+							const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
+							await this.restoreTaskFilePreImage(
+								firstId,
+								firstDiskSnapshot,
+								persistedWrittenFirst,
+								firstFileLock,
+							)
 						} catch (rollbackError) {
-							this.cache.set(firstId, writtenFirst)
 							throw new AggregateError(
 								[error, rollbackError],
 								`[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed`,

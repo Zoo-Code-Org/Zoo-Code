@@ -814,8 +814,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				errors: [
 					expect.objectContaining({ message: "child write failed" }),
 					expect.objectContaining({
-						message:
-							"[TaskHistoryStore] atomicUpdatePair: cannot roll back parent after a concurrent update",
+						message: "cannot compensate parent after concurrent update",
 					}),
 				],
 			})
@@ -824,7 +823,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				await fs.readFile(path.join(storage, "tasks", "parent", "history_item.json"), "utf8"),
 			)
 			expect(persistedParent.completedByChildId).toBe("peer-child")
-			expect(store.get("parent")).toMatchObject({ status: "active", completedByChildId: "child" })
+			expect(store.get("parent")).toMatchObject({ status: "active", completedByChildId: "peer-child" })
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })
@@ -1179,11 +1178,11 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 					errors: [
 						expect.objectContaining({ message: "child write failed" }),
 						expect.objectContaining({
-							message: "[TaskHistoryStore] atomicUpdatePair: parent missing during rollback",
+							message: "[TaskHistoryStore] atomicUpdatePair: parent missing during compensation",
 						}),
 					],
 				})
-				expect(store.get("parent")?.status).toBe("active")
+				expect(store.get("parent")).toBeUndefined()
 			} finally {
 				store.dispose()
 				await fs.rm(storage, { recursive: true, force: true })
