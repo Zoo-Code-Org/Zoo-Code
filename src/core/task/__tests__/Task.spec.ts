@@ -478,9 +478,11 @@ describe("Cline", () => {
 			expect(task.messageCounts.assistant).toBe(1)
 
 			const durableHistory = structuredClone(task.apiConversationHistory)
+			access.resetAssistantMessagePersistence()
 			saveSpy.mockResolvedValueOnce(false)
 			retrySpy.mockResolvedValueOnce(false)
 			await expect(access.recordTerminalApiFailure("not durable")).resolves.toBe(false)
+			expect(retrySpy).toHaveBeenCalledTimes(1)
 			expect(task.apiConversationHistory).toEqual(durableHistory)
 			expect(task.messageCounts.assistant).toBe(1)
 		})
@@ -661,7 +663,9 @@ describe("Cline", () => {
 				.mockResolvedValue(false)
 			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
 
-			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+			await expect(
+				task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }]),
+			).resolves.toBe(false)
 
 			expect(task.apiConversationHistory).toHaveLength(1)
 			expect(task.apiConversationHistory[0]?.role).toBe("user")
@@ -769,6 +773,7 @@ describe("Cline", () => {
 			)
 			expect(retryAnnouncements).toHaveLength(0)
 			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy.mock.calls[0]?.[1]).toContain("The API stream failed mid-response.")
 			expect(vi.mocked(task.attemptApiRequest)).toHaveBeenCalledTimes(1)
 		})
 
@@ -788,6 +793,7 @@ describe("Cline", () => {
 					([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
 				),
 			).toHaveLength(1)
+			expect(saySpy).toHaveBeenCalledWith("api_req_retried")
 		})
 
 		it("resets the retry budget without duplicating the user message when the user approves retry", async () => {
@@ -844,6 +850,7 @@ describe("Cline", () => {
 			vi.useFakeTimers()
 			const task = await createTaskWithAutoApproval(false)
 			const idleListener = vi.fn()
+			const clearTimeoutSpy = vi.spyOn(global, "clearTimeout")
 			task.on(RooCodeEventName.TaskIdle, idleListener)
 			vi.mocked(pWaitFor).mockImplementationOnce(async (predicate) => {
 				task.abort = true
@@ -854,6 +861,7 @@ describe("Cline", () => {
 			await vi.advanceTimersByTimeAsync(2_000)
 
 			expect(idleListener).not.toHaveBeenCalled()
+			expect(clearTimeoutSpy).toHaveBeenCalled()
 			vi.useRealTimers()
 		})
 	})

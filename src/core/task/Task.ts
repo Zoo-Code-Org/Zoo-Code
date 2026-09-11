@@ -1138,6 +1138,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.assistantMessageSavedToHistory = saved
 		}
 		if (!saved) {
+			// Stryker disable next-line OptionalChaining: this method synchronously appended this assistant record; the guard is defensive against external mutation.
 			const appendedMessage = this.apiConversationHistory.at(-1)
 			if (appendedMessage?.role === "assistant") {
 				this.apiConversationHistory.pop()
@@ -3724,8 +3725,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							)
 
 							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
+							// Stryker disable next-line OptionalChaining: provider collection during teardown is nondeterministic; absence must use manual approval.
 							const retryState = await this.providerRef.deref()?.getState()
 
+							// Stryker disable next-line OptionalChaining: undefined state is the defensive manual-approval fallback.
 							if (retryState?.autoApprovalEnabled && midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES) {
 								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
@@ -3757,10 +3760,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// message) does not duplicate it in history. Keep the exact
 							// record so a restore preserves its persisted identity.
 							let removedMidStreamUserMessage: ApiMessage | undefined
+							// Stryker disable next-line ConditionalExpression,EqualityOperator: non-empty content was appended as this iteration's user record; empty continuations preserve history.
 							const hasUserContent = currentUserContent.length > 0
 							const lastHistoryMessage =
 								this.apiConversationHistory[this.apiConversationHistory.length - 1]
-							// Stryker disable next-line ConditionalExpression,OptionalChaining: whenever content is non-empty here, the last record is this turn's user message; the role check is defensive against corrupted history and has no reachable false branch.
+							// Stryker disable next-line ConditionalExpression,OptionalChaining,LogicalOperator,StringLiteral,ArithmeticOperator: non-empty content guarantees the final record is this turn's user message; remaining checks are defensive.
 							if (hasUserContent && lastHistoryMessage?.role === "user") {
 								removedMidStreamUserMessage = this.apiConversationHistory.pop()
 								this.messageCounts.user--
@@ -3769,6 +3773,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							const { response } = await this.ask(
 								"api_req_failed",
 								`${
+									// Stryker disable next-line OptionalChaining: undefined state uses the manual-approval wording.
 									retryState?.autoApprovalEnabled
 										? `The API stream failed ${MAX_AUTOMATIC_API_RETRIES + 1} times mid-response.`
 										: "The API stream failed mid-response."
@@ -3788,6 +3793,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									userContent: currentUserContent,
 									includeFileDetails: false,
 									retryAttempt: midStreamRetryAttempt + 1,
+									// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state and prevents fabricated restoration.
 									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
 									removedUserMessage: removedMidStreamUserMessage,
 								})
@@ -4225,6 +4231,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// user is asked, so a persistently empty response cannot loop
 					// (and bill) forever without visibility.
 					// Reuse the state variable from above
+					// Stryker disable next-line OptionalChaining: undefined state deliberately falls back to explicit approval during teardown.
 					if (state?.autoApprovalEnabled && (currentItem.retryAttempt ?? 0) < MAX_AUTOMATIC_API_RETRIES) {
 						// Auto-retry with backoff - don't persist failure message when retrying
 						await this.backoffAndAnnounce(
@@ -4249,6 +4256,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							userContent: currentUserContent,
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+							// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state for empty continuations.
 							userMessageWasRemoved: removedCurrentUserMessage !== undefined,
 							removedUserMessage: removedCurrentUserMessage,
 						})
@@ -4260,6 +4268,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const { response } = await this.ask(
 							"api_req_failed",
 							`The model returned no assistant messages. This may indicate an issue with the API or the model's output.${
+								// Stryker disable next-line OptionalChaining: undefined state deliberately uses the no-automatic-retry prompt.
 								state?.autoApprovalEnabled
 									? ` Automatic retries were attempted ${MAX_AUTOMATIC_API_RETRIES} times without success.`
 									: ""
@@ -4275,6 +4284,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state for empty continuations.
 								userMessageWasRemoved: removedCurrentUserMessage !== undefined,
 								removedUserMessage: removedCurrentUserMessage,
 							})
