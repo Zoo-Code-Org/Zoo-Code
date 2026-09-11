@@ -1258,10 +1258,8 @@ export class TaskHistoryStore {
 							[firstId, firstDiskSnapshot, persistedHistoryItem(writtenFirst), firstFileLock],
 						]
 						if (secondDiskSnapshot) {
-							const expectedSecond = mergeWithDisk(secondDelta)(
-								secondDiskSnapshot,
-								mergedSecond,
-							) as HistoryItem
+							const mergeSecond = mergeWithDisk(secondDelta)
+							const expectedSecond = mergeSecond(secondDiskSnapshot, mergedSecond) as HistoryItem
 							restorations.unshift([
 								secondId,
 								secondDiskSnapshot,
