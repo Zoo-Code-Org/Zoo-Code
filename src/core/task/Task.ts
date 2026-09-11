@@ -1672,34 +1672,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Wait for askResponse to be set. Status timers belong to this ask and
 		// must not survive cancellation, supersession, or a rejected wait.
-		try {
-			await pWaitFor(
-				() => {
-					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
-						return true
-					}
+		await pWaitFor(
+			() => {
+				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+					return true
+				}
 
-					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
-					// suggestion click that was incorrectly queued due to UI state), consume it
-					// immediately so the task doesn't hang.
-					if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-						const message = this.messageQueueService.claimNextMessage()
-						const resolution = message ? queuedResponseForAsk(type, text) : undefined
-						if (message && resolution) {
-							queuedMessageId = this.handleQueuedAskResponse(message, resolution)
-						}
+				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
+				// suggestion click that was incorrectly queued due to UI state), consume it
+				// immediately so the task doesn't hang.
+				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
+					const message = this.messageQueueService.claimNextMessage()
+					const resolution = message ? queuedResponseForAsk(type, text) : undefined
+					if (message && resolution) {
+						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
 					}
+				}
 
-					return false
-				},
-				{ interval: 100 },
-			)
-		} finally {
+				return false
+			},
+			{ interval: 100 },
+		).finally(() => {
 			for (const timeout of timeouts) clearTimeout(timeout)
 			if (this.autoApprovalTimeoutRef && timeouts.includes(this.autoApprovalTimeoutRef)) {
 				this.autoApprovalTimeoutRef = undefined
 			}
-		}
+		})
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {

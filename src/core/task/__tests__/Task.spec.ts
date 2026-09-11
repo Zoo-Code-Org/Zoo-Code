@@ -45,6 +45,8 @@ type TaskTestAccess = {
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	saveApiConversationHistory: () => Promise<boolean>
+	restoreApiHistoryUserMessage: (message: ApiMessage) => Promise<boolean>
+	recordTerminalApiFailure: (text: string) => Promise<boolean>
 	resetAssistantMessagePersistence: () => void
 }
 
@@ -429,6 +431,60 @@ describe("Cline", () => {
 	}
 
 	describe("empty-response retries", () => {
+		it("propagates restore persistence success and bounded retry exhaustion", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+			const message: ApiMessage = {
+				role: "user",
+				content: [{ type: "text", text: "restore me" }],
+				messageId: "restore-id",
+				ts: 1,
+			}
+			const saveSpy = vi.spyOn(access, "saveApiConversationHistory")
+			const retrySpy = vi.spyOn(task, "retrySaveApiConversationHistory")
+
+			saveSpy.mockResolvedValueOnce(true)
+			await expect(access.restoreApiHistoryUserMessage(message)).resolves.toBe(true)
+			expect(retrySpy).not.toHaveBeenCalled()
+
+			task.apiConversationHistory = []
+			task.messageCounts.user = 0
+			saveSpy.mockResolvedValueOnce(false)
+			retrySpy.mockResolvedValueOnce(true)
+			await expect(access.restoreApiHistoryUserMessage(message)).resolves.toBe(true)
+			expect(retrySpy).toHaveBeenCalledTimes(1)
+
+			task.apiConversationHistory = []
+			task.messageCounts.user = 0
+			saveSpy.mockResolvedValueOnce(false)
+			retrySpy.mockResolvedValueOnce(false)
+			await expect(access.restoreApiHistoryUserMessage(message)).resolves.toBe(false)
+			expect(task.apiConversationHistory).toEqual([message])
+			expect(task.messageCounts.user).toBe(1)
+		})
+
+		it("persists or rolls back terminal synthetic failures atomically", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(access, "saveApiConversationHistory")
+			const retrySpy = vi.spyOn(task, "retrySaveApiConversationHistory")
+
+			saveSpy.mockResolvedValueOnce(true)
+			await expect(access.recordTerminalApiFailure("durable failure")).resolves.toBe(true)
+			expect(task.apiConversationHistory.at(-1)).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "durable failure" }],
+			})
+			expect(task.messageCounts.assistant).toBe(1)
+
+			const durableHistory = structuredClone(task.apiConversationHistory)
+			saveSpy.mockResolvedValueOnce(false)
+			retrySpy.mockResolvedValueOnce(false)
+			await expect(access.recordTerminalApiFailure("not durable")).resolves.toBe(false)
+			expect(task.apiConversationHistory).toEqual(durableHistory)
+			expect(task.messageCounts.assistant).toBe(1)
+		})
+
 		it("restores the user message before a confirmed empty-response retry", async () => {
 			const task = await createTaskWithAutoApproval(false)
 			let retryHistory: ApiMessage[] | undefined
