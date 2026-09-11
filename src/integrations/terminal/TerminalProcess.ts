@@ -327,6 +327,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			// and silently drops the first output chunk).
 			let nextChunk = iterator.next()
 			while (true) {
+				let idleTimer: NodeJS.Timeout | undefined
 				const racers: Promise<typeof DONE_SENTINEL | typeof IDLE_SENTINEL | IteratorResult<string>>[] = [
 					nextChunk,
 					shellExecutionComplete.then(() => DONE_SENTINEL as typeof DONE_SENTINEL),
@@ -336,13 +337,17 @@ export class TerminalProcess extends BaseTerminalProcess {
 				// flowing we trust the stream to close normally (or the D-marker path).
 				if (chunkCount === 0) {
 					racers.push(
-						new Promise<typeof IDLE_SENTINEL>((resolve) =>
-							setTimeout(() => resolve(IDLE_SENTINEL as typeof IDLE_SENTINEL), IDLE_TIMEOUT_MS),
-						),
+						new Promise<typeof IDLE_SENTINEL>((resolve) => {
+							idleTimer = setTimeout(
+								() => resolve(IDLE_SENTINEL as typeof IDLE_SENTINEL),
+								IDLE_TIMEOUT_MS,
+							)
+						}),
 					)
 				}
 
 				const raceResult = await Promise.race(racers)
+				clearTimeout(idleTimer)
 
 				if (raceResult === DONE_SENTINEL) {
 					// onDidEndTerminalShellExecution fired — the shell says we're done.

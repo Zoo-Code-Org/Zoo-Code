@@ -1,5 +1,5 @@
 type Phase = "idle" | "waiting" | "running" | "completed" | "closed"
-type Action = "run" | "wait" | "activate" | "output" | "end" | "close"
+type Action = "run" | "wait" | "track-process" | "activate" | "output" | "end" | "close"
 
 interface ModelState {
 	phase: Phase
@@ -12,6 +12,9 @@ interface ModelState {
 	waitsCreated: number
 	pendingWaits: number
 	settledWaits: number
+	processesCreated: number
+	trackedProcesses: number
+	settledProcesses: number
 }
 
 interface TraceStep {
@@ -19,9 +22,9 @@ interface TraceStep {
 	state: ModelState
 }
 
-const actions: Action[] = ["run", "wait", "activate", "output", "end", "close"]
+const actions: Action[] = ["run", "wait", "track-process", "activate", "output", "end", "close"]
 const MAX_DEPTH = 7
-const MAX_STATES = 100
+const MAX_STATES = 500
 
 function initialState(): ModelState {
 	return {
@@ -35,6 +38,9 @@ function initialState(): ModelState {
 		waitsCreated: 0,
 		pendingWaits: 0,
 		settledWaits: 0,
+		processesCreated: 0,
+		trackedProcesses: 0,
+		settledProcesses: 0,
 	}
 }
 
@@ -57,6 +63,14 @@ function transition(state: ModelState, action: Action): ModelState {
 			return state.phase !== "closed" && state.waitsCreated < 2
 				? { ...state, waitsCreated: state.waitsCreated + 1, pendingWaits: state.pendingWaits + 1 }
 				: state
+		case "track-process":
+			return state.phase !== "closed" && state.processesCreated < 2
+				? {
+						...state,
+						processesCreated: state.processesCreated + 1,
+						trackedProcesses: state.trackedProcesses + 1,
+					}
+				: state
 		case "activate":
 			return state.phase === "waiting"
 				? {
@@ -78,6 +92,8 @@ function transition(state: ModelState, action: Action): ModelState {
 						...complete(state, "closed"),
 						pendingWaits: 0,
 						settledWaits: state.settledWaits + state.pendingWaits,
+						trackedProcesses: 0,
+						settledProcesses: state.settledProcesses + state.trackedProcesses,
 					}
 	}
 }
@@ -87,7 +103,11 @@ function violations(state: ModelState): string[] {
 	if (state.completionCount > 1) result.push("a command completed more than once")
 	if (state.phase === "closed" && state.processAttached) result.push("a closed terminal retained its process")
 	if (state.phase === "closed" && state.pendingWaits !== 0) result.push("a closed terminal retained pending waits")
+	if (state.phase === "closed" && state.trackedProcesses !== 0) {
+		result.push("a closed terminal retained tracked processes")
+	}
 	if (state.settledWaits > state.waitsCreated) result.push("more waits settled than were created")
+	if (state.settledProcesses > state.processesCreated) result.push("more processes settled than were created")
 	if (state.phase === "closed" && state.commandSubmitted && !state.iteratorReleased) {
 		result.push("closing a submitted command did not release its stream iterator")
 	}
@@ -126,6 +146,11 @@ const landmarks = {
 		trace.at(-1)?.state.waitsCreated === 2 &&
 		trace.at(-1)?.state.pendingWaits === 0 &&
 		trace.at(-1)?.state.settledWaits === 2,
+	"superseded-process-close": (trace: TraceStep[]) =>
+		trace.at(-1)?.action === "close" &&
+		trace.at(-1)?.state.processesCreated === 2 &&
+		trace.at(-1)?.state.trackedProcesses === 0 &&
+		trace.at(-1)?.state.settledProcesses === 2,
 } satisfies Record<string, (trace: TraceStep[]) => boolean>
 
 const start = initialState()

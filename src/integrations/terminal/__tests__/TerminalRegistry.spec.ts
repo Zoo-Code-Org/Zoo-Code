@@ -446,6 +446,7 @@ describe("TerminalRegistry", () => {
 			await settleWithin(result)
 
 			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
 			expect(completedSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledWith("", process)
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
@@ -489,6 +490,7 @@ describe("TerminalRegistry", () => {
 
 			expect(executeCommand).not.toHaveBeenCalled()
 			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
 			expect(completedSpy).toHaveBeenCalledOnce()
 			expect(completedSpy).toHaveBeenCalledWith("", process)
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
@@ -717,6 +719,84 @@ describe("TerminalRegistry", () => {
 			expect(completionSpies[1]).toHaveBeenCalledWith({ exitCode: undefined }, secondProcess)
 			expect(disposeSpies[0]).toHaveBeenCalledOnce()
 			expect(disposeSpies[1]).toHaveBeenCalledOnce()
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("settles a superseded active stream and the current startup command on close", async () => {
+			vi.useFakeTimers()
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			let nextCall = 0
+			let signalWaitingForNext: () => void = () => {}
+			const waitingForNext = new Promise<void>((resolve) => {
+				signalWaitingForNext = resolve
+			})
+			const returnSpy = vi.fn().mockResolvedValue({ done: true, value: undefined })
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]() {
+					return {
+						next: vi.fn(() => {
+							nextCall++
+							if (nextCall === 1) {
+								return Promise.resolve({ done: false, value: "\x1b]633;C\x07first\n" })
+							}
+							signalWaitingForNext()
+							return new Promise<IteratorResult<string>>(() => {})
+						}),
+						return: returnSpy,
+					}
+				},
+			}
+			const execution = {
+				commandLine: { value: "first" },
+				read: vi.fn().mockReturnValue(stream),
+			} as unknown as vscode.TerminalShellExecution
+			const executeCommand = vi.fn().mockReturnValue(execution)
+			Object.defineProperty(terminal.terminal, "shellIntegration", {
+				value: { executeCommand },
+				configurable: true,
+			})
+			const firstCompleted = vi.fn()
+			const firstCompletion = vi.fn()
+			const firstResult = terminal.runCommand("first", {
+				onLine: vi.fn(),
+				onCompleted: firstCompleted,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: firstCompletion,
+			})
+			const firstProcess = terminal.process
+			await Promise.resolve()
+			await Promise.resolve()
+			expect(executeCommand).toHaveBeenCalledOnce()
+			await startHandler({ terminal: terminal.terminal, execution })
+			await waitingForNext
+
+			Object.defineProperty(terminal.terminal, "shellIntegration", { value: undefined, configurable: true })
+			const disposeSpy = vi.fn()
+			vi.mocked(vscode.window.onDidChangeTerminalShellIntegration).mockImplementationOnce(() => ({
+				dispose: disposeSpy,
+			}))
+			const secondCompleted = vi.fn()
+			const secondCompletion = vi.fn()
+			const secondResult = terminal.runCommand("second", {
+				onLine: vi.fn(),
+				onCompleted: secondCompleted,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: secondCompletion,
+			})
+			const secondProcess = terminal.process
+
+			terminal.handleClose()
+			const settled = vi.fn()
+			void Promise.all([firstResult, secondResult]).then(settled)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(settled).toHaveBeenCalledOnce()
+			expect(firstCompletion).toHaveBeenCalledWith({ exitCode: undefined }, firstProcess)
+			expect(secondCompletion).toHaveBeenCalledWith({ exitCode: undefined }, secondProcess)
+			expect(firstCompleted).toHaveBeenCalledWith("first\n", firstProcess)
+			expect(secondCompleted).toHaveBeenCalledWith("", secondProcess)
+			expect(returnSpy).toHaveBeenCalledOnce()
+			expect(disposeSpy).toHaveBeenCalledOnce()
 			expect(vi.getTimerCount()).toBe(0)
 		})
 
