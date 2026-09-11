@@ -239,4 +239,11 @@ describe("normalizeSuppliedImages", () => {
 
 		expect(result.images).toEqual([])
 	})
+
+	it("should not let duplicates consume the image count or size budgets", () => {
+		const first = `data:image/png;base64,${Buffer.from("first").toString("base64")}`
+		const second = `data:image/png;base64,${Buffer.from("second").toString("base64")}`
+
+		expect(normalizeSuppliedImages([...Array(20).fill(first), second])).toEqual([first, second])
+	})
 })

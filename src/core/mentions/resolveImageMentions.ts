@@ -61,9 +61,11 @@ export function normalizeSuppliedImages(
 	if (!images?.length) return []
 
 	const normalized: string[] = []
+	const accepted = new Set<string>()
 	let totalSize = 0
 
 	for (const image of images) {
+		if (accepted.has(image)) continue
 		if (normalized.length >= MAX_IMAGES_PER_MESSAGE) break
 
 		const match = image.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/)
@@ -76,10 +78,11 @@ export function normalizeSuppliedImages(
 		if (sizeInMB > maxImageFileSize || totalSize + sizeInMB > maxTotalImageSize) continue
 
 		totalSize += sizeInMB
+		accepted.add(image)
 		normalized.push(image)
 	}
 
-	return dedupePreserveOrder(normalized)
+	return normalized
 }
 
 /**
