@@ -1685,7 +1685,12 @@ describe("PR review-state workflow", () => {
 			workflowRunFallback: "ambiguous",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.listPullRequests).toHaveBeenCalledWith({
+			owner: "Zoo-Code-Org",
+			repo: "Zoo-Code",
+			state: "open",
+			per_page: 100,
+		})
 		expect(result.getPullRequest).not.toHaveBeenCalled()
 		expect(result.createCommitStatus).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalled()
