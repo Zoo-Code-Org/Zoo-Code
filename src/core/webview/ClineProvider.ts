@@ -4132,7 +4132,6 @@ export class ClineProvider
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
-			await this.getTaskWithId(parentTaskId)
 			const refreshedParent = this.taskHistoryStore.get(parentTaskId)
 			const childHistory = this.taskHistoryStore.get(childTaskId)
 			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {

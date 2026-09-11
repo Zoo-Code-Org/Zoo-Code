@@ -51,7 +51,7 @@ const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
 type RestoreTaskFilePreImage = (
 	taskId: string,
 	preImage: HistoryItem,
-	expectedWritten: HistoryItem,
+	expectedWritten: readonly HistoryItem[],
 	heldLock?: JsonFileLock,
 ) => Promise<void>
 
