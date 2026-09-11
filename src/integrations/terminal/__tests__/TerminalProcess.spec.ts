@@ -112,6 +112,7 @@ describe("TerminalProcess", () => {
 			const startupError = new Error("terminal startup failed")
 			const runSpy = vi.spyOn(TerminalProcess.prototype, "run").mockRejectedValueOnce(startupError)
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const initialProcessCount = mockTerminalInfo["activeProcesses"].size
 
 			const commandPromise = mockTerminalInfo.runCommand("test command", {
 				onLine: vi.fn(),
@@ -122,6 +123,7 @@ describe("TerminalProcess", () => {
 
 			await expect(commandPromise).rejects.toThrow("terminal startup failed")
 			expect(runSpy).toHaveBeenCalledWith("test command")
+			expect(mockTerminalInfo["activeProcesses"].size).toBe(initialProcessCount)
 
 			runSpy.mockRestore()
 			consoleErrorSpy.mockRestore()

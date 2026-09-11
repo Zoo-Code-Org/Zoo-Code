@@ -632,6 +632,7 @@ describe("TerminalRegistry", () => {
 			})
 			const process = terminal.process
 			expect(process).toBeInstanceOf(TerminalProcess)
+			const emitSpy = vi.spyOn(process!, "emit")
 
 			terminal.handleClose()
 			expect(completedSpy).toHaveBeenCalledOnce()
@@ -642,6 +643,7 @@ describe("TerminalRegistry", () => {
 
 			expect(disposeSpy).toHaveBeenCalledOnce()
 			expect(vi.getTimerCount()).toBe(0)
+			expect(emitSpy).not.toHaveBeenCalledWith("no_shell_integration", expect.anything())
 			for (const event of [
 				"line",
 				"completed",
@@ -822,6 +824,7 @@ describe("TerminalRegistry", () => {
 			expect(completedSpy).toHaveBeenCalledWith("<no shell integration>")
 			expect(continueSpy).toHaveBeenCalledOnce()
 			expect(terminal.process).toBeUndefined()
+			expect(terminal["activeProcesses"].size).toBe(0)
 			expect(terminal.busy).toBe(false)
 			expect(terminal.isStreamClosed).toBe(true)
 			expect(process["finalizedBeforeExecution"]).toBe(true)
