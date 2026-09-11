@@ -221,9 +221,10 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				for await (const chunk of stream) {
 					// The iterator can keep delivering buffered chunks after the abort has already
 					// fired (openai@5.23.2 swallows the mid-stream AbortError), so re-check the
-					// signal before processing each chunk. The yields below are synchronous (there
-					// is no await between this check and them), so nothing is emitted once the
-					// signal aborts.
+					// signal before processing each chunk. A yield is a suspension point, so an
+					// abort can land between two yields of the same chunk: the guarded yields
+					// below re-check before emitting (the first yield of a chunk is covered by
+					// this check alone — no suspension point separates them).
 					if (controller.signal.aborted) {
 						break
 					}
@@ -231,18 +232,24 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 					const delta = chunk.choices[0]?.delta
 
 					// Yield reasoning chunks before content chunks so consumers see them in model order.
+					// No pre-yield guard: this is the first yield of the iteration — the
+					// top-of-loop check runs without a suspension point before it.
 					const reasoningText = extractReasoningFromDelta(delta)
 					if (reasoningText) {
 						yield { type: "reasoning", text: reasoningText }
 					}
 
 					if (delta?.content) {
+						// Re-check before emitting: the consumer may have aborted while
+						// processing a previously yielded part of this chunk.
+						throwIfAborted(controller.signal)
 						yield { type: "text", text: delta.content }
 					}
 
 					// Handle native tool calls
 					if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
 						for (const toolCall of delta.tool_calls) {
+							throwIfAborted(controller.signal)
 							yield {
 								type: "tool_call_partial",
 								index: toolCall.index,

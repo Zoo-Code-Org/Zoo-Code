@@ -910,6 +910,124 @@ describe("RequestyHandler", () => {
 			expect(requestSignal).toBeInstanceOf(AbortSignal)
 			expect(requestSignal).not.toBe(controller.signal)
 		})
+		it("does not yield text or tool calls after the signal aborts mid-chunk (pre-yield guards)", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			// A single chunk carrying reasoning + content + a tool call: each part's yield
+			// is a suspension point, so an abort can land between any two of them within
+			// the same chunk.
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "c1",
+						choices: [
+							{
+								delta: {
+									reasoning_content: "reasoning",
+									content: "content",
+									tool_calls: [
+										{
+											index: 0,
+											id: "1",
+											type: "function",
+											function: { name: "f", arguments: "{}" },
+										},
+									],
+								},
+							},
+						],
+					},
+				]),
+			)
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value?.type).toBe("reasoning")
+			// Abort after the reasoning yield: the text and tool-call yields of the same
+			// chunk must not be emitted.
+			controller.abort()
+
+			await expect(generator.next()).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+		it("does not yield tool calls after the signal aborts between the content and tool-call yields of one chunk", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			// Content + tool calls without reasoning: the content yield comes first, so
+			// the abort lands between it and the tool-call yield.
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "c1",
+						choices: [
+							{
+								delta: {
+									content: "content",
+									tool_calls: [
+										{
+											index: 0,
+											id: "1",
+											type: "function",
+											function: { name: "f", arguments: "{}" },
+										},
+									],
+								},
+							},
+						],
+					},
+				]),
+			)
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			await expect(generator.next()).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+		it("does not process buffered chunks after an abort and surfaces AbortError instead of completing the stream", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			let pulls = 0
+			mockCreate.mockImplementationOnce(async (_params: unknown, _options?: { signal?: AbortSignal }) => {
+				return (async function* () {
+					pulls++
+					yield { id: "c1", choices: [{ delta: { reasoning_content: "first" } }] }
+					pulls++
+					// Reasoning shape: its yield is the first yield of the iteration and
+					// carries no pre-yield guard, so only the top-of-loop break prevents
+					// it from leaking.
+					yield { id: "c2", choices: [{ delta: { reasoning_content: "buffered" } }] }
+					pulls++
+					yield { id: "c3", choices: [{ delta: { content: "third" } }] }
+				})()
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			await expect(generator.next()).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			// The for-await mechanism pulls the already-buffered chunk before the
+			// top-of-loop check runs; the break must ensure it is not processed and
+			// that no chunk beyond it is pulled.
+			expect(pulls).toBe(2)
+		})
 		it("rejects with AbortError when the stream ends normally after a mid-stream abort (swallowed AbortError)", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
