@@ -415,12 +415,11 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		// Delegation metadata written via atomicReadAndUpdate with correct taskId
-		expect(taskHistoryStore.withTaskFileLock).toHaveBeenCalledTimes(1)
-		expect(taskHistoryStore.withTaskFileLock).toHaveBeenCalledWith("parent-1", expect.any(Function))
+		expect(taskHistoryStore.withTaskFileLock).not.toHaveBeenCalled()
 		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
 		const [calledTaskId, updater, updateOptions] = taskHistoryStore.atomicReadAndUpdate.mock.calls[0]
 		expect(calledTaskId).toBe("parent-1")
-		expect(updateOptions).toEqual({ fileLock: expect.any(Function), storeLockAcquired: true })
+		expect(updateOptions).toBeUndefined()
 
 		// The updater must produce the correct delegation fields
 		const result = updater(parentHistoryItem)
