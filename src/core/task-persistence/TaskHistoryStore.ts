@@ -84,8 +84,6 @@ export interface TaskHistoryStoreOptions {
 export interface AtomicUpdatePairOptions {
 	/** Validate the first record against its current on-disk state while its cross-process lock is held. */
 	firstDiskGuard?: (current: HistoryItem) => void
-	/** Restore the first record's exact guarded pre-image if writing the second record fails. */
-	rollbackFirstOnSecondFailure?: boolean
 	/** Restore both exact guarded pre-images if post-write callback work fails. */
 	rollbackBothOnCallbackFailure?: boolean
 	/**
@@ -1187,14 +1185,8 @@ export class TaskHistoryStore {
 				}
 			}
 
-			// Merge with existing cache entries before writing, mirroring upsertCore.
-			const mergedFirst = { ...first, ...updatedFirst }
-			const mergedSecond = { ...second, ...updatedSecond }
 			const holdFirstFileLock = Boolean(
-				options?.firstDiskGuard ||
-				options?.rollbackFirstOnSecondFailure ||
-				options?.rollbackBothOnCallbackFailure ||
-				options?.whileFirstFileLocked,
+				options?.firstDiskGuard || options?.rollbackBothOnCallbackFailure || options?.whileFirstFileLocked,
 			)
 			const suppliedFirstFileLock = options?.firstFileLock
 			const firstFileLock =
@@ -1206,18 +1198,19 @@ export class TaskHistoryStore {
 				let firstDiskSnapshot: HistoryItem | undefined
 				const firstDiskGuard = options?.firstDiskGuard
 				const captureAndGuardFirst =
-					firstDiskGuard || options?.rollbackFirstOnSecondFailure || options?.rollbackBothOnCallbackFailure
+					firstDiskGuard || options?.rollbackBothOnCallbackFailure
 						? (current: HistoryItem) => {
 								if (firstDiskGuard) firstDiskGuard(current)
 								firstDiskSnapshot = structuredClone(current)
 							}
 						: undefined
-				const firstDelta = this.buildDelta(firstId, first, updatedFirst)
-				const writtenFirst = await this.writeTaskFile(mergedFirst, firstDelta, captureAndGuardFirst, {
-					heldLock: firstFileLock,
-				})
+				const writtenFirst = await this.writeTaskFile(
+					{ ...first, ...updatedFirst },
+					this.buildDelta(firstId, first, updatedFirst),
+					captureAndGuardFirst,
+					{ heldLock: firstFileLock },
+				)
 				let secondDiskSnapshot: HistoryItem | undefined
-				const secondDelta = this.buildDelta(secondId, second, updatedSecond)
 				const captureSecond = options?.rollbackBothOnCallbackFailure
 					? (current: HistoryItem) => {
 							secondDiskSnapshot = structuredClone(current)
@@ -1225,15 +1218,18 @@ export class TaskHistoryStore {
 					: undefined
 				let writtenSecond: HistoryItem
 				try {
-					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, captureSecond)
+					writtenSecond = await this.writeTaskFile(
+						{ ...second, ...updatedSecond },
+						this.buildDelta(secondId, second, updatedSecond),
+						captureSecond,
+					)
 				} catch (error) {
-					if (options?.rollbackFirstOnSecondFailure && firstDiskSnapshot) {
+					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
 						try {
-							const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
 							await this.restoreTaskFilePreImage(
 								firstId,
 								firstDiskSnapshot,
-								persistedWrittenFirst,
+								JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem,
 								firstFileLock,
 							)
 						} catch (rollbackError) {
@@ -1263,17 +1259,23 @@ export class TaskHistoryStore {
 					if (!options?.rollbackBothOnCallbackFailure) throw error
 
 					const compensationErrors: unknown[] = []
-					const persistedWrittenSecond = JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem
-					const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
-
 					// Restore second before first, preserving the original compensation order.
-					const restorations: Array<[string, HistoryItem, HistoryItem, JsonFileLock | undefined]> = [
-						[secondId, secondDiskSnapshot as HistoryItem, persistedWrittenSecond, undefined],
-						[firstId, firstDiskSnapshot as HistoryItem, persistedWrittenFirst, firstFileLock],
-					]
-					for (const restoration of restorations) {
+					for (const [id, preImage, expected, heldLock] of [
+						[
+							secondId,
+							secondDiskSnapshot as HistoryItem,
+							JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem,
+							undefined,
+						],
+						[
+							firstId,
+							firstDiskSnapshot as HistoryItem,
+							JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem,
+							firstFileLock,
+						],
+					] as const) {
 						try {
-							await this.restoreTaskFilePreImage(...restoration)
+							await this.restoreTaskFilePreImage(id, preImage, expected, heldLock)
 						} catch (compensationError) {
 							compensationErrors.push(compensationError)
 						}
