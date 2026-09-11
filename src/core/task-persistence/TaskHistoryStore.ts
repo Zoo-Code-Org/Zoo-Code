@@ -861,7 +861,7 @@ export class TaskHistoryStore {
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
 	private async findStaleHistoryBackups(taskDir: string, now: number): Promise<string[]> {
-		const stale: string[] = []
+		const stale = Array.of<string>()
 		for (const entry of await fs.readdir(taskDir)) {
 			const match = /^\.history_item\.json\.bak_(\d+)_([a-z0-9]+)\.tmp$/.exec(entry)
 			if (!match) continue
@@ -972,7 +972,7 @@ export class TaskHistoryStore {
 	}
 
 	private async restoreTaskFilePreImages(restorations: readonly TaskFileRestoration[]): Promise<unknown[]> {
-		const errors: unknown[] = []
+		const errors = Array.of<unknown>()
 		for (const restoration of restorations) {
 			try {
 				await this.restoreTaskFilePreImage(...restoration)
@@ -1250,16 +1250,19 @@ export class TaskHistoryStore {
 					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, captureSecond)
 				} catch (error) {
 					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
-						const restorations: TaskFileRestoration[] = [
-							[firstId, firstDiskSnapshot, [persistedHistoryItem(writtenFirst)], firstFileLock],
-						]
+						const restorations = Array.of<TaskFileRestoration>([
+							firstId,
+							firstDiskSnapshot,
+							Array.of(persistedHistoryItem(writtenFirst)),
+							firstFileLock,
+						])
 						if (secondDiskSnapshot) {
 							const mergeSecond = mergeWithDisk(secondDelta)
 							const expectedSecond = mergeSecond(secondDiskSnapshot, mergedSecond) as HistoryItem
 							restorations.unshift([
 								secondId,
 								secondDiskSnapshot,
-								[secondDiskSnapshot, persistedHistoryItem(expectedSecond)],
+								Array.of(secondDiskSnapshot, persistedHistoryItem(expectedSecond)),
 							])
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
@@ -1291,11 +1294,16 @@ export class TaskHistoryStore {
 
 					// Restore second before first, preserving the original compensation order.
 					const compensationErrors = await this.restoreTaskFilePreImages([
-						[secondId, secondDiskSnapshot as HistoryItem, [persistedHistoryItem(writtenSecond)], undefined],
+						[
+							secondId,
+							secondDiskSnapshot as HistoryItem,
+							Array.of(persistedHistoryItem(writtenSecond)),
+							undefined,
+						],
 						[
 							firstId,
 							firstDiskSnapshot as HistoryItem,
-							[persistedHistoryItem(writtenFirst)],
+							Array.of(persistedHistoryItem(writtenFirst)),
 							firstFileLock,
 						],
 					])
