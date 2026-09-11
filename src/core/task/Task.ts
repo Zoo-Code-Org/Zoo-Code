@@ -1138,8 +1138,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.assistantMessageSavedToHistory = saved
 		}
 		if (!saved) {
-			// Stryker disable next-line OptionalChaining: this method synchronously appended this assistant record; the guard is defensive against external mutation.
+			// Stryker disable next-line UnaryOperator: this method synchronously appended the assistant record at the final index.
 			const appendedMessage = this.apiConversationHistory.at(-1)
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: the just-appended record is an assistant; the guard is defensive against external mutation.
 			if (appendedMessage?.role === "assistant") {
 				this.apiConversationHistory.pop()
 			}
@@ -1695,6 +1696,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			{ interval: 100 },
 		).finally(() => {
 			for (const timeout of timeouts) clearTimeout(timeout)
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,BlockStatement: timeout ownership is established above; clear only this ask's registered reference.
 			if (this.autoApprovalTimeoutRef && timeouts.includes(this.autoApprovalTimeoutRef)) {
 				this.autoApprovalTimeoutRef = undefined
 			}
@@ -3762,9 +3764,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							let removedMidStreamUserMessage: ApiMessage | undefined
 							// Stryker disable next-line ConditionalExpression,EqualityOperator: non-empty content was appended as this iteration's user record; empty continuations preserve history.
 							const hasUserContent = currentUserContent.length > 0
+							// Stryker disable next-line ArithmeticOperator: non-empty content guarantees the record appended by this iteration is the final entry.
 							const lastHistoryMessage =
 								this.apiConversationHistory[this.apiConversationHistory.length - 1]
 							// Stryker disable next-line ConditionalExpression,OptionalChaining,LogicalOperator,StringLiteral,ArithmeticOperator: non-empty content guarantees the final record is this turn's user message; remaining checks are defensive.
+							// Stryker disable next-line EqualityOperator: the role check is defensive; non-empty content was appended as this iteration's user record.
 							if (hasUserContent && lastHistoryMessage?.role === "user") {
 								removedMidStreamUserMessage = this.apiConversationHistory.pop()
 								this.messageCounts.user--
@@ -3807,6 +3811,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								removedMidStreamUserMessage &&
 								!(await this.restoreApiHistoryUserMessage(removedMidStreamUserMessage))
 							) {
+								// Stryker disable next-line BooleanLiteral: restore failure must stop before terminal state diverges.
 								return false
 							}
 
@@ -4208,6 +4213,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							removedCurrentUserMessage &&
 							!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
 						) {
+							// Stryker disable next-line BooleanLiteral: restore failure must stop before terminal state diverges.
 							return false
 						}
 

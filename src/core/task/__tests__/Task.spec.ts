@@ -471,6 +471,7 @@ describe("Cline", () => {
 
 			saveSpy.mockResolvedValueOnce(true)
 			await expect(access.recordTerminalApiFailure("durable failure")).resolves.toBe(true)
+			expect(retrySpy).not.toHaveBeenCalled()
 			expect(task.apiConversationHistory.at(-1)).toMatchObject({
 				role: "assistant",
 				content: [{ type: "text", text: "durable failure" }],
@@ -518,7 +519,9 @@ describe("Cline", () => {
 			const task = await createTaskWithAutoApproval(false)
 			let originalUserMessage: ApiMessage | undefined
 
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
 				// Capture the persisted identity of the user message before the
 				// empty-response path removes and later restores it.
@@ -529,6 +532,9 @@ describe("Cline", () => {
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(result).toBe(false)
+			expect(askSpy.mock.calls[0]?.[1]).toBe(
+				"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
+			)
 			expect(task.apiConversationHistory).toHaveLength(2)
 			expect(task.apiConversationHistory[0]).toMatchObject({
 				role: "user",
