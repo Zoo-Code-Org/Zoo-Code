@@ -72,8 +72,8 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * Copilot's backend enforces its own context window and, for third-party `sendRequest` callers,
  * trims an over-window request in a way that is NOT tool-pair-aware: it can drop the assistant
  * message holding a `tool_use` while keeping the matching `tool_result`, after which Anthropic
- * rejects the request with "unexpected tool_use_id". To keep trimming on OUR side â€” where
- * pairing is preserved â€” we shrink oversized `tool_result` payloads before sending. Only
+ * rejects the request with "unexpected tool_use_id". To keep trimming on OUR side — where
+ * pairing is preserved — we shrink oversized `tool_result` payloads before sending. Only
  * `tool_result` text is truncated (never `tool_use`, assistant text, summaries, or environment
  * details), and only when the request would otherwise exceed the budget.
  */
@@ -85,7 +85,7 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * the tool schemas, image placeholders, or per-message framing the backend adds, so it cannot give
  * the true total for the request we are about to send. It is also an async, per-call RPC, and the
  * budget is needed for every message on every turn. We therefore keep a character estimate here
- * and stay deliberately conservative â€” 3 chars/token rather than the ~4 typical of English â€”
+ * and stay deliberately conservative — 3 chars/token rather than the ~4 typical of English —
  * because the token-dense JSON, logs, and code that dominate oversized tool results tokenize to
  * fewer characters per token than prose. Under-counting biases toward trimming too early, which is
  * recoverable; over-counting sends an over-window request, which is not.
@@ -160,7 +160,7 @@ export function middleOutTruncate(text: string, maxChars: number): string {
 	const headLength = Math.ceil(keep / 2)
 	const tailLength = keep - headLength
 	let head = text.slice(0, headLength)
-	// Don't end the head on a lone high surrogate â€” its low half is in the removed middle, and a lone
+	// Don't end the head on a lone high surrogate — its low half is in the removed middle, and a lone
 	// surrogate cannot be encoded as UTF-8 (the backend 400s the whole request). Drop the split half.
 	if (head.length > 0 && (head.charCodeAt(head.length - 1) & 0xfc00) === 0xd800) {
 		head = head.slice(0, -1)
@@ -206,7 +206,7 @@ function estimateContentChars(content: Anthropic.Messages.MessageParam["content"
 
 /**
  * Shrinks oversized `tool_result` payloads (largest first, middle-out) until the conversation fits
- * `budgetChars`. Mutates the tool_result blocks of the supplied messages in place â€” callers pass a
+ * `budgetChars`. Mutates the tool_result blocks of the supplied messages in place — callers pass a
  * cloned array (see `createMessage`) so stored history is never mutated. A no-op when the
  * conversation already fits.
  */
