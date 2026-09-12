@@ -3121,7 +3121,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// would assign a new messageId/ts, and the merge-on-save would keep
 					// both the on-disk original and the rebuilt copy, duplicating the
 					// user turn after a restart.
-					await this.restoreApiHistoryUserMessage(currentItem.removedUserMessage)
+					if (!(await this.restoreApiHistoryUserMessage(currentItem.removedUserMessage))) {
+						return false
+					}
 				} else {
 					await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 					this.messageCounts.user++

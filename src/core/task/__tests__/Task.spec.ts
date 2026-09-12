@@ -516,6 +516,29 @@ describe("Cline", () => {
 			expect(retryUserMessageCount).toBe(1)
 		})
 
+		it("stops an approved empty-response retry when restoring the user message cannot persist", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+			let originalUserMessage: ApiMessage | undefined
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				originalUserMessage ??= structuredClone(task.apiConversationHistory[0])
+				return stream([])
+			})
+			vi.spyOn(access, "saveApiConversationHistory").mockResolvedValueOnce(true).mockResolvedValue(false)
+			const retrySaveSpy = vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await expect(
+				task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }]),
+			).resolves.toBe(false)
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(retrySaveSpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toEqual([originalUserMessage])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
 		it("restores the user message and records the failure when retry is declined", async () => {
 			const task = await createTaskWithAutoApproval(false)
 			let originalUserMessage: ApiMessage | undefined

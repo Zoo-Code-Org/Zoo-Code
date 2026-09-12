@@ -1,5 +1,5 @@
 type StopReason = "none" | "max_tokens"
-type Phase = "requesting" | "waiting" | "confirming" | "terminal"
+type Phase = "requesting" | "waiting" | "restoring" | "confirming" | "terminal"
 
 interface State {
 	attempt: number
@@ -32,7 +32,10 @@ const initial: State = {
 function transitions(state: State): Transition[] {
 	if (state.phase === "terminal") return []
 	if (state.phase === "waiting") {
-		return [{ name: "finish-visible-delay", next: { ...state, phase: "requesting" } }]
+		return [{ name: "finish-visible-delay", next: { ...state, phase: "restoring" } }]
+	}
+	if (state.phase === "restoring") {
+		return [{ name: "restore-original-user-turn", next: { ...state, phase: "requesting", turnPresent: true } }]
 	}
 	if (state.phase === "confirming") {
 		return [
@@ -44,7 +47,7 @@ function transitions(state: State): Transition[] {
 					attempt: state.attempt >= MAX_RETRIES ? 0 : state.attempt + 1,
 					visibleRetries: state.visibleRetries + 1,
 					phase: "waiting",
-					turnPresent: true,
+					turnPresent: false,
 				},
 			},
 		]
@@ -66,6 +69,7 @@ function transitions(state: State): Transition[] {
 				attempt: state.attempt + 1,
 				visibleRetries: state.visibleRetries + 1,
 				phase: "waiting",
+				turnPresent: false,
 			},
 		},
 		{
@@ -117,6 +121,9 @@ while (queue.length > 0) {
 	if (state.phase === "confirming" && state.attempt === MAX_RETRIES) landmarks.add("bounded-exhaustion")
 	if (state.stopReason === "max_tokens" && state.phase === "terminal") landmarks.add("terminal-max-tokens")
 	if (state.visibleRetries === MAX_RETRIES) landmarks.add("all-retries-visible")
+	if (state.phase === "requesting" && state.attempt > 0 && state.turnPresent) {
+		landmarks.add("automatic-turn-restored")
+	}
 	if (!state.autoApprovalEnabled && state.phase === "confirming" && state.attempt === 0) {
 		landmarks.add("manual-approval-boundary")
 	}
@@ -130,6 +137,7 @@ for (const landmark of [
 	"all-retries-visible",
 	"manual-approval-boundary",
 	"reconstruction-rejected",
+	"automatic-turn-restored",
 ]) {
 	if (!landmarks.has(landmark)) throw new Error(`semantic landmark unreachable: ${landmark}`)
 }
