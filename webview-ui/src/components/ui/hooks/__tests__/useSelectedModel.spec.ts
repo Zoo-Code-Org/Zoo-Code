@@ -972,6 +972,30 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("custom-model")
 			expect(result.current.info).toEqual(customModelInfo)
 		})
+
+		it("resolves the configured model ID even when the router fetch errors", () => {
+			// Regression guard: hasValidRouterData for LiteLLM now only requires
+			// !isLoading, so a failed fetch (isError=true, isLoading=false) must
+			// still resolve the hook and preserve the configured ID rather than
+			// resetting to the provider default.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
+			)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.litellm,
+				litellmModelId: "my-litellm-alias",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// Configured ID preserved — a fetch failure must not reset the user's selection.
+			expect(result.current.id).toBe("my-litellm-alias")
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+			// Callers that surface error banners still see the flag.
+			expect(result.current.isError).toBe(true)
+		})
 	})
 
 	describe("kenari provider", () => {
