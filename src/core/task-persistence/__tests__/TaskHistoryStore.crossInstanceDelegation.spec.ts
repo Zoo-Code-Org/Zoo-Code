@@ -42,7 +42,7 @@ type WriteTaskFile = (
 	options?: { heldLock?: JsonFileLock; capturePreImage?: (preImage: TaskFilePreImage) => void },
 ) => Promise<HistoryItem>
 
-type TaskFilePreImage = { kind: "valid"; item: HistoryItem } | { kind: "absent" } | { kind: "invalid" }
+type TaskFilePreImage = HistoryItem | "absent" | "invalid"
 
 const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
 	const writeTaskFile: unknown = Reflect.get(store, "writeTaskFile")
