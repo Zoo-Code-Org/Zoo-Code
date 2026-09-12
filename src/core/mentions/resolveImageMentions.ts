@@ -141,6 +141,7 @@ export async function resolveImageMentions({
 	for (const image of existingImages) {
 		imageMemoryTracker.addMemoryUsage(getDataUrlSizeInMB(image))
 	}
+	const acceptedImages = new Set(existingImages)
 	const newImages: string[] = []
 
 	for (const mention of imageMentions) {
@@ -174,6 +175,9 @@ export async function resolveImageMentions({
 			}
 
 			const { dataUrl } = await readImageAsDataUrlWithBuffer(absPath)
+			if (acceptedImages.has(dataUrl)) continue
+
+			acceptedImages.add(dataUrl)
 			newImages.push(dataUrl)
 
 			// Track memory usage
