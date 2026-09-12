@@ -665,7 +665,15 @@ export function evaluateReport(report, packageEntry) {
 	return { ...counts, advisories }
 }
 
-export function runManifest(repoRoot, manifest, reportRoot) {
+export function runManifest(
+	repoRoot,
+	manifest,
+	reportRoot,
+	{
+		runMutation = runStryker,
+		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+	} = {},
+) {
 	const rows = []
 	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
@@ -681,7 +689,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			if (packageEntry.discoverRelatedTests) {
 				packageEntry.testFiles = discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory)
 			}
-			const preflightOutput = stripAnsi(runStryker(repoRoot, packageEntry, reportRoot, true))
+			const preflightOutput = stripAnsi(runMutation(repoRoot, packageEntry, reportRoot, true))
 			const mutantMatch = /Instrumented \d+ source file\(s\) with (\d+) mutant\(s\)/.exec(preflightOutput)
 			if (!mutantMatch) throw new Error(`${packageEntry.id} preflight did not report a mutant count`)
 			const generatedMutants = Number(mutantMatch[1])
@@ -711,9 +719,9 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				continue
 			}
 
-			runStryker(repoRoot, packageEntry, reportRoot, false)
+			runMutation(repoRoot, packageEntry, reportRoot, false)
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
-			const report = JSON.parse(fs.readFileSync(jsonReportPath, "utf8"))
+			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
 			counts = evaluateReport(report, packageEntry)
 			for (const annotation of formatAnnotations(

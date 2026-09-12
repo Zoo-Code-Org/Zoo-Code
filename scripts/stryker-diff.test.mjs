@@ -530,23 +530,40 @@ describe("failure output", () => {
 	})
 
 	it("emits one distinguishable annotation per source location", () => {
-		const annotations = formatAnnotations(
-			[
-				...blocking,
-				{
-					filePath: "utils/other.ts",
-					status: "NoCoverage",
-					mutatorName: "ConditionalExpression",
-					replacement: "true",
-					location: { start: { line: 9 } },
-				},
-			],
-			"src",
-		)
+		const mutants = [
+			blocking[2],
+			blocking[1],
+			{
+				filePath: "utils/other.ts",
+				status: "NoCoverage",
+				mutatorName: "ConditionalExpression",
+				replacement: "true",
+				location: { start: { line: 9 } },
+			},
+			blocking[0],
+		]
+		const originalOrder = [...mutants]
+		const annotations = formatAnnotations(mutants, "src")
 
 		assert.equal(annotations.length, 2)
-		assert.match(annotations[0].message, /^src\/core\/value\.ts:4: 2 mutation test gaps; example:/)
-		assert.match(annotations[1].message, /^src\/utils\/other\.ts:9: 2 mutation test gaps; example:/)
+		assert.deepEqual(mutants, originalOrder)
+		assert.match(
+			annotations[0].message,
+			/^src\/core\/value\.ts:4: 2 mutation test gaps; example: NoCoverage StringLiteral mutant \(replacement: "left \| right"\)/,
+		)
+		assert.match(
+			annotations[1].message,
+			/^src\/utils\/other\.ts:9: 2 mutation test gaps; example: Survived BooleanLiteral mutant \(replacement: false\)/,
+		)
+	})
+
+	it("prefixes singleton annotations with their source location", () => {
+		const [annotation] = formatAnnotations([blocking[2]], "src")
+
+		assert.equal(
+			annotation.message,
+			"src/utils/other.ts:9: Survived BooleanLiteral mutant (replacement: false). See the job summary for the complete list and resolution guidance.",
+		)
 	})
 
 	it("shares annotation limits across packages", () => {
@@ -620,6 +637,50 @@ describe("failure output", () => {
 					reportRoot,
 				),
 			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("classifies successful package rows from blocking mutants", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-success-"))
+		const packageEntry = {
+			id: "core",
+			root: "packages/core",
+			vitestConfig: "vitest.unit.config.ts",
+			selectors: ["src/value.ts:1-1"],
+			changedExecutableLines: 1,
+		}
+		const execute = (report) =>
+			runManifest(repo, { packages: [{ ...packageEntry }] }, path.join(repo, "reports"), {
+				runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) =>
+					dryRunOnly ? "Instrumented 1 source file(s) with 1 mutant(s)" : "",
+				readMutationReport: () => report,
+			})[0]
+
+		try {
+			const advisoryRow = execute({
+				files: {
+					"src/value.ts": {
+						mutants: [
+							{
+								status: "Survived",
+								mutatorName: "BooleanLiteral",
+								replacement: "false",
+								location: { start: { line: 1 } },
+							},
+						],
+					},
+				},
+			})
+			assert.equal(advisoryRow.result, "Advisory findings")
+			assert.deepEqual(advisoryRow.advisories, [])
+
+			const passedRow = execute({
+				files: { "src/value.ts": { mutants: [{ status: "Killed", location: { start: { line: 1 } } }] } },
+			})
+			assert.equal(passedRow.result, "Passed")
+			assert.deepEqual(passedRow.advisories, [])
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })
 		}
