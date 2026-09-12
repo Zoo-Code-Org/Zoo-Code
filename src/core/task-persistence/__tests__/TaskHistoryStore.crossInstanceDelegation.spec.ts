@@ -39,8 +39,10 @@ type WriteTaskFile = (
 	item: HistoryItem,
 	delta?: Partial<HistoryItem>,
 	diskGuard?: (current: HistoryItem) => void,
-	options?: { heldLock?: JsonFileLock },
+	options?: { heldLock?: JsonFileLock; capturePreImage?: (preImage: TaskFilePreImage) => void },
 ) => Promise<HistoryItem>
+
+type TaskFilePreImage = { kind: "valid"; item: HistoryItem } | { kind: "absent" } | { kind: "invalid" }
 
 const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
 	const writeTaskFile: unknown = Reflect.get(store, "writeTaskFile")
@@ -50,7 +52,7 @@ const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
 
 type RestoreTaskFilePreImage = (
 	taskId: string,
-	preImage: HistoryItem,
+	preImage: TaskFilePreImage,
 	expectedWritten: readonly HistoryItem[],
 	heldLock?: JsonFileLock,
 ) => Promise<void>
@@ -63,6 +65,25 @@ const getRestoreTaskFilePreImage = (store: TaskHistoryStore): RestoreTaskFilePre
 	return (taskId, preImage, expectedWritten, heldLock) =>
 		Reflect.apply(restoreTaskFilePreImage, store, [taskId, preImage, expectedWritten, heldLock])
 }
+
+const completePairWithFailingCallback = (store: TaskHistoryStore, callbackError: Error) =>
+	store.atomicUpdatePair(
+		"parent",
+		"child",
+		(parent) => ({
+			...parent,
+			status: "active",
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		}),
+		(child) => ({ ...child, status: "completed" }),
+		{
+			rollbackBothOnCallbackFailure: true,
+			whileFirstFileLocked: async () => {
+				throw callbackError
+			},
+		},
+	)
 
 describe("TaskHistoryStore cross-instance delegation", () => {
 	beforeEach(() => {
@@ -281,6 +302,169 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			expect(JSON.parse(await fs.readFile(childFile, "utf8"))).toEqual(childBefore)
 			expect(store.get("parent")).toEqual(parentBefore)
 			expect(store.get("child")).toEqual(childBefore)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("restores an absent second record without serializing null after callback failure", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-absent-preimage-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("completion callback failed")
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			await fs.unlink(childFile)
+
+			await expect(completePairWithFailingCallback(store, callbackError)).rejects.toBe(callbackError)
+
+			await expect(fs.readFile(childFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" })
+			expect(JSON.parse(await fs.readFile(parentFile, "utf8"))).toEqual(parentBefore)
+			expect(store.get("parent")).toEqual(parentBefore)
+			expect(store.get("child")).toBeUndefined()
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it.each([
+		["malformed JSON", (child: HistoryItem) => `{${child.id}`],
+		["a mismatched task ID", (child: HistoryItem) => JSON.stringify({ ...child, id: "other-child" })],
+	])("leaves the new second record intact when its pre-image contains %s", async (_name, invalidContents) => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-invalid-preimage-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("completion callback failed")
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			const child = makeHistoryItem("child", { status: "active", parentTaskId: "parent" })
+			await store.upsert(child)
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			await fs.writeFile(childFile, invalidContents(child))
+
+			let caught: unknown
+			try {
+				await completePairWithFailingCallback(store, callbackError)
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(AggregateError)
+			expect((caught as AggregateError).errors[0]).toBe(callbackError)
+			const persistedChild = JSON.parse(await fs.readFile(childFile, "utf8"))
+			expect(persistedChild).toMatchObject({ id: "child", status: "completed" })
+			expect(store.get("child")).toEqual(persistedChild)
+			expect(JSON.parse(await fs.readFile(parentFile, "utf8"))).toEqual(parentBefore)
+			expect(store.get("parent")).toEqual(parentBefore)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("does not delete a concurrent replacement while restoring an absent second record", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-absent-replaced-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("completion callback failed")
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			const child = makeHistoryItem("child", { status: "active", parentTaskId: "parent" })
+			await store.upsert(child)
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			const replacement = { ...child, tokensIn: 777 }
+			await fs.unlink(childFile)
+			vi.mocked(lockJsonFile).mockImplementation(async (filePath) => {
+				if (path.resolve(filePath) === path.resolve(childFile)) {
+					await fs.writeFile(childFile, JSON.stringify(replacement))
+				}
+				return safeWriteJsonActuals.lockJsonFile!(filePath)
+			})
+
+			await expect(completePairWithFailingCallback(store, callbackError)).rejects.toBeInstanceOf(AggregateError)
+
+			expect(JSON.parse(await fs.readFile(childFile, "utf8"))).toEqual(replacement)
+			expect(store.get("child")).toEqual(replacement)
+			expect(JSON.parse(await fs.readFile(parentFile, "utf8"))).toEqual(parentBefore)
+			expect(store.get("parent")).toEqual(parentBefore)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("does not delete the new second record after compensation lock ownership is compromised", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-absent-compromised-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("completion callback failed")
+		const compromiseError = new Error("compensation lock compromised")
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			const child = makeHistoryItem("child", { status: "active", parentTaskId: "parent" })
+			await store.upsert(child)
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			await fs.unlink(childFile)
+			vi.mocked(lockJsonFile).mockImplementation(async (filePath) => {
+				const release = await safeWriteJsonActuals.lockJsonFile!(filePath)
+				if (path.resolve(filePath) !== path.resolve(childFile)) return release
+				return Object.assign(async () => release(), { getCompromiseError: () => compromiseError })
+			})
+
+			let caught: unknown
+			try {
+				await completePairWithFailingCallback(store, callbackError)
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(AggregateError)
+			expect((caught as AggregateError).errors).toEqual([callbackError, compromiseError])
+			const persistedChild = JSON.parse(await fs.readFile(childFile, "utf8"))
+			expect(persistedChild).toMatchObject({ id: "child", status: "completed" })
+			expect(store.get("child")).toEqual(persistedChild)
+			expect(JSON.parse(await fs.readFile(parentFile, "utf8"))).toEqual(parentBefore)
+			expect(store.get("parent")).toEqual(parentBefore)
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })

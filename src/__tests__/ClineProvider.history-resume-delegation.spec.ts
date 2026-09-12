@@ -98,6 +98,8 @@ function makeTaskHistoryStoreStub(
 		) => {
 			const first = itemMap.get(firstId) as HistoryItem
 			const second = itemMap.get(secondId) as HistoryItem
+			const originalFirst = structuredClone(first)
+			const originalSecond = structuredClone(second)
 			const updatedFirst = firstUpdater(structuredClone(first))
 			const updatedSecond = secondUpdater(structuredClone(second))
 			if (updatedFirst.id !== firstId) {
@@ -111,9 +113,17 @@ function makeTaskHistoryStoreStub(
 				)
 			}
 			options?.firstDiskGuard?.(first)
-			await options?.whileFirstFileLocked?.()
 			itemMap.set(firstId, updatedFirst)
 			itemMap.set(secondId, updatedSecond)
+			try {
+				await options?.whileFirstFileLocked?.()
+			} catch (error) {
+				if (options?.rollbackBothOnCallbackFailure) {
+					itemMap.set(firstId, originalFirst)
+					itemMap.set(secondId, originalSecond)
+				}
+				throw error
+			}
 			return [...itemMap.values()]
 		},
 	)
@@ -141,14 +151,25 @@ function makeStatefulTaskHistoryStore(...items: HistoryItem[]) {
 				secondId: string,
 				firstUpdater: (item: HistoryItem) => HistoryItem,
 				secondUpdater: (item: HistoryItem) => HistoryItem,
-				options?: { whileFirstFileLocked?: () => Promise<void> },
+				options?: {
+					whileFirstFileLocked?: () => Promise<void>
+					rollbackBothOnCallbackFailure?: boolean
+				},
 			) => {
 				const first = itemMap.get(firstId)
 				const second = itemMap.get(secondId)
 				if (!first || !second) throw new Error(`Missing history item for atomic pair: ${firstId}, ${secondId}`)
-				itemMap.set(firstId, firstUpdater(first))
-				itemMap.set(secondId, secondUpdater(second))
-				await options?.whileFirstFileLocked?.()
+				itemMap.set(firstId, firstUpdater(structuredClone(first)))
+				itemMap.set(secondId, secondUpdater(structuredClone(second)))
+				try {
+					await options?.whileFirstFileLocked?.()
+				} catch (error) {
+					if (options?.rollbackBothOnCallbackFailure) {
+						itemMap.set(firstId, first)
+						itemMap.set(secondId, second)
+					}
+					throw error
+				}
 				return [itemMap.get(firstId), itemMap.get(secondId)]
 			},
 		),
