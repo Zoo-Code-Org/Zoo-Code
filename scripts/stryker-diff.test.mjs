@@ -10,11 +10,13 @@ import {
 	MAX_CHANGED_LINES,
 	MAX_MUTANTS,
 	PACKAGE_CONFIGS,
+	appendSummary,
 	buildManifest,
 	discoverRelatedTestFiles,
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
+	formatAdvisoryCommand,
 	formatAnnotationCommand,
 	formatBlockingMutants,
 	formatSummary,
@@ -53,6 +55,11 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
+		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
+		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
+		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
+		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
+		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
 	})
 })
 
@@ -234,7 +241,7 @@ describe("buildManifest", () => {
 			() => "@@ -1 +1 @@\n",
 		)
 
-		assert.deepEqual(manifest, { packages: [] })
+		assert.deepEqual(manifest, { packages: [], advisories: [] })
 	})
 
 	it("fails rather than skipping a package over the changed-line cap", () => {
@@ -248,6 +255,17 @@ describe("buildManifest", () => {
 				),
 			/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
 		)
+	})
+
+	it("reports invalid mutation exclusions without bypassing executable-line accounting", () => {
+		const manifest = buildManifest(
+			[{ status: "A", path: "packages/core/src/value.ts" }],
+			() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
+			() => "",
+		)
+
+		assert.equal(manifest.packages[0].changedExecutableLines, 1)
+		assert.match(manifest.advisories.join("\n"), /broad or unreasoned exclusions are not allowed/)
 	})
 })
 
@@ -536,7 +554,7 @@ describe("failure output", () => {
 		},
 	]
 
-	it("lists every blocking mutant with tests, reproduction, exclusion, and report guidance", () => {
+	it("lists every advisory mutant with tests, reproduction, exclusion, and report guidance", () => {
 		const baseSha = "a".repeat(40)
 		const headSha = "b".repeat(40)
 		const summary = formatSummary(
@@ -554,10 +572,10 @@ describe("failure output", () => {
 					survived: 2,
 					noCoverage: 1,
 					blocking,
-					result: "Failed",
+					result: "Advisory findings",
 				},
 			],
-			["extension has blocking mutants"],
+			["extension has advisory mutants"],
 			{ baseSha, headSha },
 		)
 
@@ -570,6 +588,7 @@ describe("failure output", () => {
 		assert.ok(summary.includes("Stryker disable next-line ConditionalExpression:"))
 		assert.ok(summary.includes("`reports/mutation/extension/mutation.html`"))
 		assert.ok(summary.includes("`changed-code-mutation-report` artifact"))
+		assert.ok(summary.includes("### Advisory findings"))
 	})
 
 	it("caps annotations without truncating the grouped summary", () => {
@@ -627,7 +646,14 @@ describe("failure output", () => {
 
 		assert.equal(
 			command,
-			"::error file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test gap::Survived mutant (replacement: left, right). 100%25 reproducible.",
+			"::warning file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test advisory::Survived mutant (replacement: left, right). 100%25 reproducible.",
+		)
+	})
+
+	it("escapes aggregated advisory warnings", () => {
+		assert.equal(
+			formatAdvisoryCommand("preflight failed: 100%\nretry"),
+			"::warning title=Mutation test advisory::preflight failed: 100%25%0Aretry",
 		)
 	})
 
@@ -637,27 +663,56 @@ describe("failure output", () => {
 
 		try {
 			fs.mkdirSync(path.join(repo, "packages/core"), { recursive: true })
-			assert.throws(
-				() =>
-					runManifest(
-						repo,
-						{
-							packages: [
-								{
-									id: "core",
-									root: "packages/core",
-									vitestConfig: "vitest.unit.config.ts",
-									selectors: ["src/value.ts:1-1"],
-									changedExecutableLines: 1,
-								},
-							],
-						},
-						reportRoot,
-					),
-				/core Stryker preflight could not start:.*ENOENT/,
+			assert.doesNotThrow(() =>
+				runManifest(
+					repo,
+					{
+						packages: [
+							{
+								id: "core",
+								root: "packages/core",
+								vitestConfig: "vitest.unit.config.ts",
+								selectors: ["src/value.ts:1-1"],
+								changedExecutableLines: 1,
+							},
+						],
+					},
+					reportRoot,
+				),
 			)
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("does not fail when the GitHub job summary cannot be written", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const summaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-summary-"))
+		process.env.GITHUB_STEP_SUMMARY = summaryDirectory
+
+		try {
+			assert.doesNotThrow(() => appendSummary([], ["advisory"], {}))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(summaryDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("emits aggregated warnings when the GitHub job summary is unavailable", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		delete process.env.GITHUB_STEP_SUMMARY
+		console.warn = (warning) => warnings.push(warning)
+
+		try {
+			appendSummary([], ["manifest invalid\nreview it"], {})
+			assert.deepEqual(warnings, ["::warning title=Mutation test advisory::manifest invalid%0Areview it"])
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
 		}
 	})
 
@@ -691,7 +746,7 @@ describe("failure output", () => {
 				replacement: "x".repeat(1_000),
 				location: { start: { line: 1 } },
 			})),
-			result: "Failed",
+			result: "Advisory findings",
 		}))
 		const summary = formatSummary(rows, ["mutation failure"], {
 			baseSha: "a".repeat(40),
@@ -706,7 +761,7 @@ describe("failure output", () => {
 describe("report evaluation", () => {
 	const packageEntry = { id: "core", root: "packages/core" }
 
-	it("fails on surviving and uncovered changed-code mutants", () => {
+	it("reports surviving and uncovered changed-code mutants as advisory", () => {
 		const report = {
 			files: {
 				"src/value.ts": {
@@ -728,37 +783,39 @@ describe("report evaluation", () => {
 			},
 		}
 
-		assert.throws(() => evaluateReport(report, packageEntry), /1 surviving and 1 uncovered/)
+		const result = evaluateReport(report, packageEntry)
+		assert.match(result.advisories.join("\n"), /1 surviving and 1 uncovered/)
 		assert.equal(formatAnnotations(mutantCounts(report).blocking, packageEntry.root).length, 2)
 	})
 
-	it("passes only killed or timed-out mutants within the cap", () => {
+	it("has no advisories for killed or limited timed-out mutants within the cap", () => {
 		const mutants = Array.from({ length: MAX_MUTANTS }, (_, index) => ({
 			status: index === 0 ? "Timeout" : "Killed",
 			location: { start: { line: index + 1 } },
 		}))
 		const counts = evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry)
 		assert.equal(counts.valid, MAX_MUTANTS)
+		assert.deepEqual(counts.advisories, [])
 	})
 
-	it("fails when valid mutants exceed the cap", () => {
+	it("reports valid mutants over the cap as advisory", () => {
 		const mutants = Array.from({ length: MAX_MUTANTS + 1 }, (_, index) => ({
 			status: "Killed",
 			location: { start: { line: index + 1 } },
 		}))
-		assert.throws(
-			() => evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry),
+		assert.match(
+			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
 		)
 	})
 
-	it("fails when timeouts could create false confidence", () => {
+	it("reports excessive timeouts as advisory", () => {
 		const mutants = Array.from({ length: 10 }, (_, index) => ({
 			status: index < 2 ? "Timeout" : "Killed",
 			location: { start: { line: index + 1 } },
 		}))
-		assert.throws(
-			() => evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry),
+		assert.match(
+			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/result is inconclusive/,
 		)
 	})

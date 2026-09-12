@@ -1,4 +1,4 @@
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, openAiModelInfoSaneDefaults, type ProviderSettings } from "@roo-code/types"
 import { screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -268,7 +268,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		deniedCommands: [],
 		allowedMaxRequests: undefined,
 		allowedMaxCost: undefined,
-		language: "en",
+		language: "en" as const,
 		alwaysAllowExecute: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
@@ -287,7 +287,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		ttsEnabled: false,
 		ttsSpeed: 1.0,
 		soundVolume: 0.5,
-		telemetrySetting: "unset",
+		telemetrySetting: "unset" as const,
 		terminalOutputLineLimit: 500,
 		terminalOutputCharacterLimit: 50000,
 		terminalShellIntegrationTimeout: 3000,
@@ -678,6 +678,57 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 				nanoGptApiKey: "unsaved-key",
 				nanoGptModelId: "openai/next",
 				nanoGptRoutingPreference: "tools",
+			},
+		})
+	})
+
+	it("keeps OpenAI-compatible reasoning edits cached until Save despite a live state refresh", async () => {
+		const configuration: ProviderSettings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "custom-model",
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "low" },
+		}
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: configuration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<button
+				data-testid="select-compatible-max"
+				onClick={() => {
+					setApiConfigurationField("enableReasoningEffort", true)
+					setApiConfigurationField("openAiCustomModelInfo", {
+						...(apiConfiguration.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults),
+						reasoningEffort: "max",
+					})
+				}}>
+				{apiConfiguration.openAiCustomModelInfo?.reasoningEffort}
+			</button>
+		))
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+		fireEvent.click(await screen.findByTestId("select-compatible-max"))
+
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: { ...configuration },
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} />)
+
+		expect(screen.getByTestId("select-compatible-max")).toHaveTextContent("max")
+		expect(configuration.enableReasoningEffort).toBe(false)
+		expect(configuration.openAiCustomModelInfo?.reasoningEffort).toBe("low")
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				...configuration,
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
 			},
 		})
 	})
