@@ -50,6 +50,8 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 		expect(model.supportsReasoningEffort).toEqual(["disable", "low", "high", "max"])
 		expect(model).toMatchObject({ outputPrice: 1.2, cacheWritesPrice: 0.3, cacheReadsPrice: 0.006 })
 		expect(model.description).toContain("Legacy model name")
+		expect(model).not.toHaveProperty("supportsTemperature")
+		expect(model).not.toHaveProperty("defaultTemperature")
 	})
 
 	// Self-hosted providers retain separate IDs for the preview weights and 0813 checkpoint.

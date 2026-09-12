@@ -408,6 +408,23 @@ describe("DeepSeekHandler", () => {
 			},
 		)
 
+		it("should use the provider default temperature when reasoning is disabled for the vision alias", async () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+				enableReasoningEffort: false,
+			})
+
+			await collectStream(visionHandler.createMessage(systemPrompt, messages))
+
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({
+				model: "deepseek-v4-flash-vision-exp",
+				thinking: { type: "disabled" },
+				temperature: 0,
+			})
+			expect(mockCreate.mock.calls[0][0].reasoning_effort).toBeUndefined()
+		})
+
 		it("should include usage information", async () => {
 			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
