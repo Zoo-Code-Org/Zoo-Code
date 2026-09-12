@@ -3,7 +3,7 @@ import * as os from "os"
 import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
-import type { TaskFilePreImage } from "@roo-code/core"
+import { ABSENT_TASK_FILE_PREIMAGE, INVALID_TASK_FILE_PREIMAGE, type TaskFilePreImage } from "@roo-code/core"
 
 import { lockJsonFile, safeWriteJson, type JsonFileLock } from "../../../utils/safeWriteJson"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
@@ -88,6 +88,89 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 	beforeEach(() => {
 		vi.mocked(lockJsonFile).mockReset().mockImplementation(safeWriteJsonActuals.lockJsonFile!)
 		vi.mocked(safeWriteJson).mockReset().mockImplementation(safeWriteJsonActuals.safeWriteJson!)
+	})
+
+	it("restores explicit absence under an owned record lock", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-restore-absence-"))
+		const store = new TaskHistoryStore(storage)
+		const release = Object.assign(
+			vi.fn(async () => {}),
+			{ getCompromiseError: () => undefined },
+		)
+
+		try {
+			await store.initialize()
+			const item = makeHistoryItem("task", { status: "active" })
+			await store.upsert(item)
+			const taskFile = path.join(storage, "tasks", "task", "history_item.json")
+			const written = JSON.parse(await fs.readFile(taskFile, "utf8"))
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+
+			await getRestoreTaskFilePreImage(store)("task", ABSENT_TASK_FILE_PREIMAGE, [written])
+
+			await expect(fs.readFile(taskFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" })
+			expect(store.get("task")).toBeUndefined()
+			expect(release).toHaveBeenCalledOnce()
+
+			const secondRelease = Object.assign(
+				vi.fn(async () => {}),
+				{ getCompromiseError: () => undefined },
+			)
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(secondRelease)
+			await getRestoreTaskFilePreImage(store)("task", ABSENT_TASK_FILE_PREIMAGE, [written])
+			expect(secondRelease).toHaveBeenCalledOnce()
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps an invalid current file while restoring explicit absence", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-invalid-absence-"))
+		const store = new TaskHistoryStore(storage)
+		const release = Object.assign(
+			vi.fn(async () => {}),
+			{ getCompromiseError: () => undefined },
+		)
+
+		try {
+			await store.initialize()
+			const item = makeHistoryItem("task", { status: "active" })
+			await store.upsert(item)
+			const taskFile = path.join(storage, "tasks", "task", "history_item.json")
+			await fs.writeFile(taskFile, "{invalid")
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+
+			await expect(getRestoreTaskFilePreImage(store)("task", ABSENT_TASK_FILE_PREIMAGE, [item])).rejects.toThrow(
+				"cannot restore absent task task from invalid state",
+			)
+
+			expect(await fs.readFile(taskFile, "utf8")).toBe("{invalid")
+			expect(store.get("task")).toBeUndefined()
+			expect(release).toHaveBeenCalledOnce()
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("reports an invalid pre-image without replacing the current record", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-invalid-preimage-direct-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			const item = makeHistoryItem("task", { status: "active" })
+			await store.upsert(item)
+
+			await expect(getRestoreTaskFilePreImage(store)("task", INVALID_TASK_FILE_PREIMAGE, [item])).rejects.toThrow(
+				"cannot compensate task: pre-image was invalid",
+			)
+			expect(store.get("task")).toEqual(item)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
 	})
 
 	it("unions changed child IDs and preserves them for unrelated updates", async () => {
@@ -411,7 +494,11 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				return safeWriteJsonActuals.lockJsonFile!(filePath)
 			})
 
-			await expect(completePairWithFailingCallback(store, callbackError)).rejects.toBeInstanceOf(AggregateError)
+			const caught = await completePairWithFailingCallback(store, callbackError).catch((error: unknown) => error)
+			expect(caught).toBeInstanceOf(AggregateError)
+			expect((caught as AggregateError).errors[1]).toMatchObject({
+				message: "cannot restore absent task child after concurrent update",
+			})
 
 			expect(JSON.parse(await fs.readFile(childFile, "utf8"))).toEqual(replacement)
 			expect(store.get("child")).toEqual(replacement)

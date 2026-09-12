@@ -19,10 +19,11 @@ export const ABSENT_TASK_FILE_PREIMAGE = "absent" as const
 export const INVALID_TASK_FILE_PREIMAGE = "invalid" as const
 export type TaskFilePreImage = HistoryItem | typeof ABSENT_TASK_FILE_PREIMAGE | typeof INVALID_TASK_FILE_PREIMAGE
 
-export function taskFilePreImage(existing: unknown, taskId: string, fileExists: () => boolean): TaskFilePreImage {
+export function taskFilePreImage(existing: unknown, taskId: string, fileExists: boolean): TaskFilePreImage {
 	const parsed = historyItemSchema.safeParse(existing)
 	if (parsed.success && parsed.data.id === taskId) return structuredClone(existing as HistoryItem)
-	return existing === null && !fileExists() ? ABSENT_TASK_FILE_PREIMAGE : INVALID_TASK_FILE_PREIMAGE
+	if (existing === null && !fileExists) return ABSENT_TASK_FILE_PREIMAGE
+	return INVALID_TASK_FILE_PREIMAGE
 }
 
 export function isValidTaskFilePreImage(preImage: TaskFilePreImage): preImage is HistoryItem {

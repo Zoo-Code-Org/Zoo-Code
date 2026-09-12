@@ -134,13 +134,13 @@ describe("task file pre-images", () => {
 	}
 
 	it("distinguishes validated, absent, and invalid pre-images", () => {
-		const valid = taskFilePreImage(item, item.id, () => true)
+		const valid = taskFilePreImage(item, item.id, true)
 		expect(valid).toEqual(item)
 		expect(valid).not.toBe(item)
-		expect(taskFilePreImage(null, item.id, () => false)).toBe(ABSENT_TASK_FILE_PREIMAGE)
-		expect(taskFilePreImage(null, item.id, () => true)).toBe(INVALID_TASK_FILE_PREIMAGE)
-		expect(taskFilePreImage({ ...item, id: "other" }, item.id, () => true)).toBe(INVALID_TASK_FILE_PREIMAGE)
-		expect(taskFilePreImage({ id: item.id }, item.id, () => true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage(null, item.id, false)).toBe(ABSENT_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage(null, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage({ ...item, id: "other" }, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage({ id: item.id }, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
 	})
 
 	it("recognizes valid snapshots and expected records", () => {

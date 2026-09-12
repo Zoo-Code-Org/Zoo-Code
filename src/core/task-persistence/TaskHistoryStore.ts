@@ -939,7 +939,7 @@ export class TaskHistoryStore {
 			await safeWriteJson(filePath, item, {
 				heldLock: options?.heldLock,
 				merge: (existing, incoming) => {
-					const preImage = taskFilePreImage(existing, item.id, () => fsSync.existsSync(filePath))
+					const preImage = taskFilePreImage(existing, item.id, fsSync.existsSync(filePath))
 					options?.capturePreImage?.(preImage)
 					if (diskGuard) {
 						if (!isValidTaskFilePreImage(preImage)) {
@@ -1010,7 +1010,7 @@ export class TaskHistoryStore {
 			await safeWriteJson(filePath, preImage, {
 				heldLock,
 				merge: (existing) => {
-					const current = taskFilePreImage(existing, taskId, () => fsSync.existsSync(filePath))
+					const current = taskFilePreImage(existing, taskId, fsSync.existsSync(filePath))
 					if (!isValidTaskFilePreImage(current)) {
 						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
 					}
