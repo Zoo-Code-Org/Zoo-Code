@@ -5,8 +5,20 @@
 		"test": {
 			"dependsOn": ["$TURBO_EXTENDS$", "bundle"]
 		},
+		"test:unit": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": ["$TURBO_DEFAULT$", "!__tests__/dist_assets.spec.ts"]
+		},
+		"test:dist": {
+			"dependsOn": ["bundle"]
+		},
 		"test:coverage": {
 			"dependsOn": ["$TURBO_EXTENDS$", "bundle"]
+		},
+		"test:coverage:unit": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": ["$TURBO_DEFAULT$", "!__tests__/dist_assets.spec.ts"],
+			"outputs": ["coverage/unit/**"]
 		},
 		"bundle": {
 			"dependsOn": ["^build", "@roo-code/vscode-webview#build"],
