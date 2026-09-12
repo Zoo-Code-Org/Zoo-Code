@@ -50,15 +50,28 @@ try {
 	if (fs.readdirSync(dist).some((filename) => filename.endsWith(".tmp")))
 		throw new Error("Temporary WASM files remain")
 
-	const warm = run([
-		"turbo",
-		"run",
-		"prepare:tree-sitter-wasms",
-		"--filter=zoo-code",
-		"--cache-dir=.turbo/coverage-contract",
-	])
-	if (!warm.includes("zoo-code:prepare:tree-sitter-wasms: cache hit"))
-		throw new Error("WASM prerequisite did not restore from cache")
+	for (const filename of published) fs.rmSync(path.join(dist, filename), { force: true })
+	const warmGraph = JSON.parse(
+		run(
+			[
+				"turbo",
+				"run",
+				"prepare:tree-sitter-wasms",
+				"--filter=zoo-code",
+				"--cache-dir=.turbo/coverage-contract",
+				"--dry=json",
+			],
+			{ includeStderr: false },
+		),
+	)
+	const warmTask = warmGraph.tasks.find(({ taskId }) => taskId === "zoo-code#prepare:tree-sitter-wasms")
+	if (warmTask?.cache.status !== "HIT") throw new Error("WASM prerequisite is not available in the isolated cache")
+	run(["turbo", "run", "prepare:tree-sitter-wasms", "--filter=zoo-code", "--cache-dir=.turbo/coverage-contract"])
+	const restored = fs
+		.readdirSync(dist)
+		.filter((filename) => /^tree-sitter-.*\.wasm$/.test(filename))
+		.sort()
+	if (JSON.stringify(source) !== JSON.stringify(restored)) throw new Error("WASM cache did not restore exact outputs")
 } finally {
 	fs.rmSync(cacheDir, { recursive: true, force: true })
 }
