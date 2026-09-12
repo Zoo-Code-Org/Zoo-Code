@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 
-import { type ModelInfo, type ModelRecord } from "@roo-code/types"
+import { applyCustomModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
@@ -54,6 +54,44 @@ export abstract class RouterProvider extends BaseProvider {
 	/** Last catalog refresh attempt per missing model id (ms), for negative caching. */
 	private missingModelRefreshAt = new Map<string, number>()
 	private static readonly MISSING_MODEL_RETRY_MS = 5 * 60 * 1000
+
+	/**
+	 * Apply user-supplied `customModelInfo` overrides for gateway providers.
+	 *
+	 * Only vercel-ai-gateway and zoo-gateway opt in here because the other
+	 * RouterProvider subclasses (openrouter, requesty, unbound) apply overrides
+	 * in their own `getModel()` methods — they need to merge with provider-
+	 * specific logic (e.g. specific-provider endpoints, tool preferences) that
+	 * runs before the overlay.  LiteLLM, Kenari, and OpenCode Go don't support
+	 * `customModelInfo` because they have their own discovery mechanisms and
+	 * are not exposed in the settings UI.
+	 *
+	 * See also: `customModelInfoProviders` in @roo-code/types for the full set
+	 * of providers whose UI exposes the override panel.
+	 */
+	private resolveModelInfo(info: ModelInfo | undefined, fallback: ModelInfo): ModelInfo {
+		if (this.name !== "vercel-ai-gateway" && this.name !== "zoo-gateway") {
+			return info ?? fallback
+		}
+
+		const resolvedInfo = applyCustomModelInfo(info, this.options) ?? fallback
+
+		// Gateway request builders forward `info.maxTokens` as max_completion_tokens.
+		// Keep that value within the effective context window so a persisted override
+		// cannot create a request the gateway will reject.
+		if (
+			typeof resolvedInfo.maxTokens === "number" &&
+			Number.isFinite(resolvedInfo.maxTokens) &&
+			resolvedInfo.maxTokens > 0 &&
+			Number.isFinite(resolvedInfo.contextWindow) &&
+			resolvedInfo.contextWindow > 0 &&
+			resolvedInfo.maxTokens > resolvedInfo.contextWindow
+		) {
+			return { ...resolvedInfo, maxTokens: resolvedInfo.contextWindow }
+		}
+
+		return resolvedInfo
+	}
 
 	public async fetchModel() {
 		// Refetch when the selected model is missing — a stale non-empty map
@@ -123,7 +161,7 @@ export abstract class RouterProvider extends BaseProvider {
 
 		// First check instance models (populated by fetchModel)
 		if (this.models[id]) {
-			return { id, info: this.models[id] }
+			return { id, info: this.resolveModelInfo(this.models[id], this.models[id]) }
 		}
 
 		// Fall back to global cache (synchronous disk/memory cache).
@@ -137,25 +175,28 @@ export abstract class RouterProvider extends BaseProvider {
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls
 			this.models = cachedModels
-			return { id, info: cachedModels[id] }
+			return { id, info: this.resolveModelInfo(cachedModels[id], cachedModels[id]) }
 		}
 
 		// Last resort: keep the configured id so we don't swap models, but zero
 		// prices so we don't bill the UI with defaultModelInfo's $/token rates.
+		// Route the fallback through resolveModelInfo so a user-supplied
+		// customModelInfo override (gateway providers) is still applied even when
+		// no fetched or cached metadata exists for the configured model.
 		if (id !== this.defaultModelId) {
 			return {
 				id,
-				info: {
+				info: this.resolveModelInfo(undefined, {
 					...this.defaultModelInfo,
 					inputPrice: 0,
 					outputPrice: 0,
 					cacheWritesPrice: 0,
 					cacheReadsPrice: 0,
-				},
+				}),
 			}
 		}
 
-		return { id, info: this.defaultModelInfo }
+		return { id, info: this.resolveModelInfo(undefined, this.defaultModelInfo) }
 	}
 
 	protected supportsTemperature(modelId: string): boolean {

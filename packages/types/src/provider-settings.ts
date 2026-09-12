@@ -82,6 +82,28 @@ export const isDynamicProvider = (key: string): key is DynamicProvider =>
 	dynamicProviders.includes(key as DynamicProvider)
 
 /**
+ * Providers that accept user-supplied `customModelInfo` overrides in the
+ * settings UI. This is a strict subset of `dynamicProviders` — only providers
+ * whose model metadata can be manually adjusted by the user.
+ *
+ * NOTE: Of these, only vercel-ai-gateway and zoo-gateway apply the overlay
+ * inside `RouterProvider.resolveModelInfo()`. The others (openrouter, requesty,
+ * unbound) apply it in their own overridden `getModel()` methods.
+ */
+export const customModelInfoProviders = [
+	providerIdentifiers.openrouter,
+	providerIdentifiers.requesty,
+	providerIdentifiers.unbound,
+	providerIdentifiers.vercelAiGateway,
+	providerIdentifiers.zooGateway,
+] as const
+
+export type CustomModelInfoProvider = (typeof customModelInfoProviders)[number]
+
+export const isCustomModelInfoProvider = (key: string): key is CustomModelInfoProvider =>
+	customModelInfoProviders.includes(key as CustomModelInfoProvider)
+
+/**
  * LocalProvider
  *
  * Local providers require localhost API calls in order to get the model list.

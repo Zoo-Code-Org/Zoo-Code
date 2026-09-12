@@ -20,6 +20,7 @@ import OpenAI from "openai"
 import { providerIdentifiers } from "@roo-code/types"
 
 import { OpenRouterHandler } from "../openrouter"
+import { getModelEndpoints } from "../fetchers/modelEndpointCache"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -109,13 +110,22 @@ vitest.mock("../fetchers/modelCache", () => ({
 	}),
 }))
 
+vitest.mock("../fetchers/modelEndpointCache", () => ({
+	getModelEndpoints: vitest.fn().mockResolvedValue({}),
+}))
+
 describe("OpenRouterHandler", () => {
 	const mockOptions = makeApiHandlerOptions({
 		openRouterApiKey: "test-key",
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	})
 
-	beforeEach(() => clearAllMocks())
+	beforeEach(() => {
+		clearAllMocks()
+		// Reset getModelEndpoints to its default empty-object return so per-test
+		// overrides (e.g. specific-provider test) don't leak into subsequent tests.
+		vitest.mocked(getModelEndpoints).mockResolvedValue({})
+	})
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)
@@ -147,6 +157,67 @@ describe("OpenRouterHandler", () => {
 			})
 		})
 
+		it("applies custom metadata before deriving request parameters", async () => {
+			const handler = new OpenRouterHandler({
+				...mockOptions,
+				customModelInfo: {
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+					supportsImages: false,
+					supportsPromptCache: false,
+				},
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.info.supportsImages).toBe(false)
+			expect(result.info.supportsPromptCache).toBe(false)
+			expect(result.maxTokens).toBe(10_000)
+		})
+
+		it("applies custom metadata to a discovered specific-provider endpoint", async () => {
+			vitest.mocked(getModelEndpoints).mockResolvedValue({
+				"test-provider": {
+					contextWindow: 128_000,
+					maxTokens: 16_384,
+					supportsImages: true,
+					supportsPromptCache: true,
+				},
+			})
+
+			const handler = new OpenRouterHandler({
+				...mockOptions,
+				openRouterSpecificProvider: "test-provider",
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+		})
+
+		it("synthesizes metadata for an unlisted configured model", async () => {
+			const modelId = "provider/unlisted-model"
+			const handler = new OpenRouterHandler({
+				...mockOptions,
+				openRouterModelId: modelId,
+				customModelInfo: {
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+				},
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.id).toBe(modelId)
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.maxTokens).toBe(10_000)
+		})
+
 		it("returns default model info when options are not provided", async () => {
 			const handler = new OpenRouterHandler({})
 			const result = await handler.fetchModel()
@@ -154,7 +225,7 @@ describe("OpenRouterHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(true)
 		})
 
-		it("honors custom maxTokens for thinking models", async () => {
+		it("clamps maxTokens to 20% of context window for thinking models", async () => {
 			const handler = new OpenRouterHandler(
 				makeApiHandlerOptions({
 					openRouterApiKey: "test-key",

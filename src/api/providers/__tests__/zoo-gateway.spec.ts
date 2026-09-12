@@ -230,6 +230,51 @@ describe("ZooGatewayHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(true)
 		})
 
+		it("applies custom metadata overrides to the discovered model", async () => {
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsPromptCache: false },
+			})
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.info.supportsPromptCache).toBe(false)
+		})
+
+		it("clamps a custom maxTokens override to the context window before requesting", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 1_000, maxTokens: 2_000 },
+			})
+			const result = await handler.fetchModel()
+
+			expect(result.info.maxTokens).toBe(1_000)
+
+			await handler.completePrompt("test")
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 1_000 }))
+		})
+
+		it("propagates customModelInfo maxTokens into the completePrompt request body", async () => {
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "ok" } }],
+			}))
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+			})
+			await handler.completePrompt("test")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					max_completion_tokens: 10_000,
+				}),
+			)
+		})
+
 		it("falls back to the default model when none is configured", async () => {
 			const handler = new ZooGatewayHandler({ zooSessionToken: "zoo_ext_test_token" })
 			const result = await handler.fetchModel()
@@ -268,7 +313,7 @@ describe("ZooGatewayHandler", () => {
 			)
 		})
 
-		it("requires authentication at request time when no session token is available", async () => {
+		it("requires authentication when draining the stream with no session token", async () => {
 			const handler = new ZooGatewayHandler({})
 			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
 

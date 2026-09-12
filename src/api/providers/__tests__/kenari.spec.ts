@@ -81,6 +81,17 @@ describe("KenariHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(false)
 		})
 
+		it("does not apply gateway-only custom metadata overrides", async () => {
+			const handler = new KenariHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+			})
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(1_048_576)
+			expect(result.info.maxTokens).toBe(32_768)
+		})
+
 		it("falls back to the default model id when none is configured", async () => {
 			const handler = new KenariHandler({ kenariApiKey: "test-key" })
 			const result = await handler.fetchModel()

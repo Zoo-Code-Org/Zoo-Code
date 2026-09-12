@@ -2,6 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import {
+	applyCustomModelInfo,
 	type ModelInfo,
 	type ModelRecord,
 	providerIdentifiers,
@@ -86,11 +87,13 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 
 	override getModel() {
 		const id = this.options.requestyModelId ?? requestyDefaultModelId
-		const cachedInfo = this.models[id] ?? requestyDefaultModelInfo
+		const discoveredInfo = this.models[id]
+		const cachedInfo = discoveredInfo ?? requestyDefaultModelInfo
 		let info: ModelInfo = cachedInfo
 
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)
+		info = applyCustomModelInfo(discoveredInfo ? info : undefined, this.options) ?? info
 
 		const params = getModelParams({
 			format: "anthropic",
