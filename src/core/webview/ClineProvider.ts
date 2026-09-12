@@ -211,7 +211,7 @@ export class ClineProvider
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
-	private static readonly delegationLocks = new Map<string, Promise<void>>()
+	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
 	/** Provider-owned transitions that must settle before task cleanup. */
 	private runs?: AsyncTaskTracker
 	private cancelledDelegationChildIds = new Set<string>()
@@ -253,9 +253,8 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		return (this.runs ??= new AsyncTaskTracker()).track(
-			runDelegationTransition(ClineProvider.delegationLocks, parentTaskId, fn),
-		)
+		const tracker = (this.runs ??= new AsyncTaskTracker())
+		return tracker.track(runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn))
 	}
 
 	private runLockedDelegationTransition(
@@ -4412,20 +4411,12 @@ export class ClineProvider
 
 			// Notify the webview of both updated items so its in-memory history stays current.
 			if (this.isViewLaunched) {
+				const postUpdate = (taskHistoryItem: HistoryItem) =>
+					this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem })
 				const updatedChild = this.taskHistoryStore.get(childTaskId)
 				const updatedParent = this.taskHistoryStore.get(parentTaskId)
-				if (updatedChild) {
-					await this.postMessageToWebview({
-						type: "taskHistoryItemUpdated",
-						taskHistoryItem: updatedChild,
-					})
-				}
-				if (updatedParent) {
-					await this.postMessageToWebview({
-						type: "taskHistoryItemUpdated",
-						taskHistoryItem: updatedParent,
-					})
-				}
+				if (updatedChild) await postUpdate(updatedChild)
+				if (updatedParent) await postUpdate(updatedParent)
 			}
 
 			// 6) Emit TaskDelegationCompleted (provider-level)
