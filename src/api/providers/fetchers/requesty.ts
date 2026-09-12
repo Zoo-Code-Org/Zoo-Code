@@ -45,7 +45,7 @@ export async function getRequestyModels(baseUrl?: string, apiKey?: string): Prom
 				cacheReadsPrice: parseApiPrice(rawModel.cached_price),
 			}
 
-			if (rawModel.id === "anthropic/claude-fable-5") {
+			if (rawModel.id === "anthropic/claude-fable-5.1" || rawModel.id === "anthropic/claude-fable-5") {
 				modelInfo.supportsReasoningBudget = true
 				modelInfo.supportsReasoningBinary = true
 				modelInfo.supportsTemperature = false

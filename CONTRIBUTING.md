@@ -134,9 +134,9 @@ pnpm install
 
 ### Review Process
 
-Ready-for-review PRs must pass required CI checks, address actionable review feedback, and receive maintainer approval. Automated review may add a guidance comment and managed state labels; contributors should follow the indicated next step rather than editing those labels directly. New commits may reset the review state for the updated code.
+Ready-for-review PRs must pass required CI checks, address actionable review feedback, and receive fresh maintainer or CODEOWNER approval after automated review completes for the latest commit. Automated review may add a guidance comment and managed state labels; contributors should follow the indicated next step rather than editing those labels directly. New commits reset review state for the updated code.
 
-Automated review supports maintainers but does not replace their judgment. Warnings are advisory unless repository policy says otherwise, and native GitHub required-check and review protections remain authoritative for merging.
+Automated review supports maintainers but does not replace human approval. Outside contributors cannot direct CodeRabbit through comments; eligible reviews restart automatically after required CI passes, and maintainers handle any exceptional restart. Warnings are advisory unless repository policy says otherwise, and native GitHub required-check, CODEOWNER, and review protections remain authoritative for merging.
 
 - **Daily Triage:** Quick checks by maintainers.
 - **Weekly In-depth Review:** Comprehensive assessment.

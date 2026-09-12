@@ -344,9 +344,9 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "🤖 Wypróbuj GLM-5.3-Flash i Gemini 3.7 Flash ze 50% zniżką przez 2 tygodnie oraz MiniMax M3 całkowicie za darmo dla użytkowników z saldem w nowym Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Nowy model — GLM-5.3-Flash jest teraz dostępny przez Z AI.",
-			"highlight3": "Poprawki niezawodności — przywrócono zatwierdzenia podzadań, naprawiono puste dane wyjściowe narzędzi w Vertex Gemini 3.7, błędy uruchamiania terminala i błędy usług w tle oraz poprawiono czytelność w różnych motywach IDE."
+			"highlight1": "🔑 Używaj swojego klucza API Zoo Gateway wszędzie—dodaj go do dowolnego klienta lub workflow zgodnego z OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Przez ograniczony czas korzystaj bezpłatnie z MiniMax-M3 przez Zoo Gateway.",
+			"highlight3": "✨ Już dostępne: zupełnie nowe modele GPT-6 Astra i Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

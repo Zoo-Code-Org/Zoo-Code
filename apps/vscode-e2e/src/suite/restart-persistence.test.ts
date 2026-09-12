@@ -43,11 +43,6 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		})
 		await waitUntilCompleted({ api, taskId })
 		assert.strictEqual(sawMarker, true, `Completion should include ${MARKER}`)
-		const historyItem = await api.getTaskHistoryItem(taskId)
-		assert.ok(historyItem, "Completed task should have a history item")
-		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should include the marker")
-		const conversationLength = await api.getTaskApiConversationHistoryLength(taskId)
-		assert.ok(conversationLength > 0, "Completed task should persist API conversation history")
 
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,
@@ -73,25 +68,60 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 }
 
 async function runVerify(api: RooCodeAPI): Promise<void> {
+	const taskMessages: Array<{ type: string; ask?: string }> = []
+	const messageHandler = ({ taskId, message }: { taskId: string; message: (typeof taskMessages)[number] }) => {
+		if (taskId === verifiedTaskId) taskMessages.push(message)
+	}
+	let verifiedTaskId: string | undefined
 	try {
 		const createResult = await readPhaseResult(getResultsDir(), "create")
 		assert.strictEqual(createResult.status, "passed")
 		const taskId = createResult.values?.taskId
 		assert.ok(taskId, "Create phase should record a task ID")
+		verifiedTaskId = taskId
+		api.on(RooCodeEventName.Message, messageHandler)
 
 		await waitFor(() => api.isReady())
 		assert.strictEqual(await api.isTaskInHistory(taskId), true, "Task should be present after restart")
 		const historyItem = await api.getTaskHistoryItem(taskId)
 		assert.ok(historyItem, "Task history item should be available after restart")
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
-		const conversationLength = await api.getTaskApiConversationHistoryLength(taskId)
-		assert.ok(conversationLength > 0, "API conversation history should be available after restart")
+		const restoredCompletion = await api.hasTaskApiConversationHistorySequence(taskId, {
+			userText: "RESTART_PERSISTENCE_SMOKE",
+			assistantToolName: "attempt_completion",
+			assistantToolInputText: MARKER,
+		})
+		assert.strictEqual(
+			restoredCompletion,
+			true,
+			"Fresh-host history should restore the marked user turn followed by its assistant completion",
+		)
+
+		await api.resumeTask(taskId)
+		await waitFor(() => taskMessages.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task"))
+		assert.strictEqual(await api.isTaskInHistory(taskId), true, "Reopened task should remain in history")
+		const reopenedHistoryItem = await api.getTaskHistoryItem(taskId)
+		assert.ok(reopenedHistoryItem, "Reopened task should retain its history item")
+		assert.ok(
+			reopenedHistoryItem.task.includes("RESTART_PERSISTENCE_SMOKE"),
+			"Reopened task should retain its persisted history title",
+		)
+		const reopenedCompletion = await api.hasTaskApiConversationHistorySequence(taskId, {
+			userText: "RESTART_PERSISTENCE_SMOKE",
+			assistantToolName: "attempt_completion",
+			assistantToolInputText: MARKER,
+		})
+		assert.strictEqual(
+			reopenedCompletion,
+			true,
+			"Reopened-host history should restore the marked user turn followed by its assistant completion",
+		)
 
 		await writePhaseResult(getResultsDir(), {
 			version: PHASE_RESULT_VERSION,
 			phase: "verify",
 			status: "passed",
-			values: { taskId, conversationLength: String(conversationLength) },
+			values: { taskId },
 		})
 		await quitGracefully()
 	} catch (error) {
@@ -102,6 +132,8 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 			error: serializePhaseError(error),
 		})
 		throw error
+	} finally {
+		api.off(RooCodeEventName.Message, messageHandler)
 	}
 }
 

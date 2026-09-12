@@ -722,7 +722,13 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			const batchSize = 2000
 			const totalEvents = 10000
 			const models = ["claude-sonnet-4-20250514", "gpt-4o", "gemini-2.0-flash", "claude-haiku-4", "deepseek-chat"]
-			const providers = ["anthropic", "openai", "gemini", "anthropic", "deepseek"]
+			const providers = [
+				providerIdentifiers.anthropic,
+				providerIdentifiers.openai,
+				providerIdentifiers.gemini,
+				providerIdentifiers.anthropic,
+				providerIdentifiers.deepseek,
+			]
 			const modes = ["code", "architect", "ask", "debug", "code"]
 
 			for (let batch = 0; batch < totalEvents / batchSize; batch++) {

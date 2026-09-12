@@ -148,6 +148,32 @@ describe("DeepSeekHandler", () => {
 		clearAllMocks()
 	})
 
+	describe("completePrompt reasoning", () => {
+		it.each([
+			{ apiModelId: "custom-deepseek-model", enableReasoningEffort: true, expected: undefined },
+			{ apiModelId: "deepseek-v4-flash", enableReasoningEffort: false, expected: undefined },
+			{ apiModelId: "deepseek-v4-flash", enableReasoningEffort: true, expected: "max" },
+		])("respects reasoning support for $apiModelId with enabled=$enableReasoningEffort", async (scenario) => {
+			const completionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: scenario.apiModelId,
+				enableReasoningEffort: scenario.enableReasoningEffort,
+				reasoningEffort: "max",
+			})
+
+			await completionHandler.completePrompt("Hello")
+
+			expect(mockCreate).toHaveBeenCalledOnce()
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.model).toBe(scenario.apiModelId)
+			if (scenario.expected === undefined) {
+				expect(request).not.toHaveProperty("reasoning_effort")
+			} else {
+				expect(request.reasoning_effort).toBe(scenario.expected)
+			}
+		})
+	})
+
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
 			expect(handler).toBeInstanceOf(DeepSeekHandler)
@@ -249,16 +275,23 @@ describe("DeepSeekHandler", () => {
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")
 		})
 
-		it("should return vision model info for deepseek-v4-flash-vision-exp", () => {
-			const handlerWithVision = new DeepSeekHandler({
+		it("should return vision metadata for deepseek-v4-flash-vision-exp", () => {
+			const visionHandler = new DeepSeekHandler({
 				...mockOptions,
 				apiModelId: "deepseek-v4-flash-vision-exp",
 			})
-			const model = handlerWithVision.getModel()
+			const model = visionHandler.getModel()
+
 			expect(model.id).toBe("deepseek-v4-flash-vision-exp")
-			expect(model.info.supportsImages).toBe(true)
-			expect(model.info.supportsPromptCache).toBe(true)
-			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
+			expect(model.info).toMatchObject({
+				maxTokens: 384_000,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				preserveReasoning: true,
+				reasoningEffort: "high",
+				defaultTemperature: 1.0,
+			})
 		})
 
 		it("should return provided model ID with default model info if model does not exist", () => {
@@ -334,6 +367,43 @@ describe("DeepSeekHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it("should send images and V4 thinking controls to deepseek-v4-flash-vision-exp", async () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+			})
+			const visionMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Describe this image." },
+						{
+							type: "image",
+							source: { type: "base64", media_type: "image/png", data: "image-data" },
+						},
+					],
+				},
+			]
+
+			await collectStream(visionHandler.createMessage(systemPrompt, visionMessages))
+
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs).toMatchObject({
+				model: "deepseek-v4-flash-vision-exp",
+				thinking: { type: "enabled" },
+				reasoning_effort: "high",
+				max_completion_tokens: 200_000,
+			})
+			expect(callArgs.temperature).toBeUndefined()
+			expect(callArgs.messages).toContainEqual({
+				role: "user",
+				content: expect.arrayContaining([
+					{ type: "text", text: expect.stringContaining("Describe this image.") },
+					{ type: "image_url", image_url: { url: "data:image/png;base64,image-data" } },
+				]),
+			})
 		})
 
 		it("should include usage information", async () => {
@@ -423,42 +493,6 @@ describe("DeepSeekHandler", () => {
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
-		})
-
-		it("enables thinking and forwards image_url for the vision model", async () => {
-			const visionHandler = new DeepSeekHandler({
-				...mockOptions,
-				apiModelId: "deepseek-v4-flash-vision-exp",
-			})
-			const withImage: Anthropic.Messages.MessageParam[] = [
-				{
-					role: "user",
-					content: [
-						{ type: "text", text: "Describe:" },
-						{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
-					],
-				},
-			]
-
-			await collectStream(visionHandler.createMessage(systemPrompt, withImage))
-
-			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs.thinking).toEqual({ type: "enabled" })
-			expect(callArgs.messages).toEqual(
-				expect.arrayContaining([
-					expect.objectContaining({
-						role: "user",
-						content: expect.arrayContaining([
-							expect.objectContaining({
-								type: "image_url",
-								image_url: expect.objectContaining({
-									url: "data:image/png;base64,abc",
-								}),
-							}),
-						]),
-					}),
-				]),
-			)
 		})
 	})
 

@@ -3,6 +3,7 @@ import * as http from "http"
 import { URL } from "url"
 import type { ExtensionContext } from "vscode"
 import { z } from "zod"
+import { providerIdentifiers } from "@roo-code/types"
 
 /**
  * OpenAI Codex OAuth Configuration
@@ -28,7 +29,7 @@ const OPENAI_CODEX_CREDENTIALS_KEY = "openai-codex-oauth-credentials"
 
 // Credentials schema
 const openAiCodexCredentialsSchema = z.object({
-	type: z.literal("openai-codex"),
+	type: z.literal(providerIdentifiers.openaiCodex),
 	access_token: z.string().min(1),
 	refresh_token: z.string().min(1),
 	// expires is in milliseconds since epoch
@@ -264,7 +265,7 @@ export async function exchangeCodeForTokens(code: string, codeVerifier: string):
 	})
 
 	return {
-		type: "openai-codex",
+		type: providerIdentifiers.openaiCodex,
 		access_token: tokenResponse.access_token,
 		refresh_token: tokenResponse.refresh_token,
 		expires: expiresAt,
@@ -316,7 +317,7 @@ export async function refreshAccessToken(credentials: OpenAiCodexCredentials): P
 	})
 
 	return {
-		type: "openai-codex",
+		type: providerIdentifiers.openaiCodex,
 		access_token: tokenResponse.access_token,
 		refresh_token: tokenResponse.refresh_token ?? credentials.refresh_token,
 		expires: expiresAt,
