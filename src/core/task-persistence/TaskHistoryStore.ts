@@ -1276,10 +1276,8 @@ export class TaskHistoryStore {
 						const restorations = Array.of<TaskFileRestoration>(firstRestoration)
 						if (secondDiskSnapshot) {
 							const mergeSecond = mergeWithDisk(secondDelta)
-							const expectedSecond = mergeSecond(
-								typeof secondDiskSnapshot === "string" ? null : secondDiskSnapshot,
-								mergedSecond,
-							) as HistoryItem
+							const secondPreImage = typeof secondDiskSnapshot === "string" ? null : secondDiskSnapshot
+							const expectedSecond = mergeSecond(secondPreImage, mergedSecond) as HistoryItem
 							const expectedSecondStates = Array.of(
 								JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem,
 							)
@@ -1325,12 +1323,8 @@ export class TaskHistoryStore {
 						}
 					}
 
-					if (compensationErrors.length) {
-						throw new AggregateError(
-							[error, ...compensationErrors],
-							"Task pair callback compensation failed",
-						)
-					}
+					const callbackErrors = [error, ...compensationErrors]
+					if (compensationErrors.length) throw new AggregateError(callbackErrors, "Pair compensation failed")
 					throw error
 				}
 			} finally {
