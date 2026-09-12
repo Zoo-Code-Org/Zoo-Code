@@ -86,6 +86,10 @@ export function getRulesSection(
 	const hasAskFollowupQuestion = policy.tools.has("ask_followup_question")
 	const hasListFiles = policy.tools.has("list_files")
 	const hasReadFile = policy.tools.has("read_file")
+	const hasAttemptCompletion = policy.tools.has("attempt_completion")
+	const hasEditTool = ["apply_diff", "write_to_file", "edit", "search_replace", "edit_file", "apply_patch"].some(
+		(tool) => policy.tools.has(tool),
+	)
 
 	const rules: string[] = []
 
@@ -109,9 +113,11 @@ export function getRulesSection(
 		)
 	}
 
-	rules.push(
-		"Some modes have restrictions on which files they can edit. If you attempt to edit a restricted file, the operation will be rejected with a FileRestrictionError that will specify which file patterns are allowed for the current mode.",
-	)
+	if (hasEditTool && policy.editRestriction) {
+		rules.push(
+			"Some modes have restrictions on which files they can edit. If you attempt to edit a restricted file, the operation will be rejected with a FileRestrictionError that will specify which file patterns are allowed for the current mode.",
+		)
+	}
 
 	rules.push(
 		"Be sure to consider the type of project (e.g. Python, JavaScript, web application) when determining the appropriate structure and files to include. Also consider what files may be most relevant to accomplishing the task, for example looking at a project's manifest file would help you understand the project's dependencies, which you could incorporate into any code you write.",
@@ -122,7 +128,9 @@ export function getRulesSection(
 	)
 
 	rules.push(
-		"Do not ask for more information than necessary. Use the tools provided to accomplish the user's request efficiently and effectively. When you've completed your task, you must use the attempt_completion tool to present the result to the user. The user may provide feedback, which you can use to make improvements and try again.",
+		hasAttemptCompletion
+			? "Do not ask for more information than necessary. Use the tools provided to accomplish the user's request efficiently and effectively. When you've completed your task, you must use the attempt_completion tool to present the result to the user. The user may provide feedback, which you can use to make improvements and try again."
+			: "Do not ask for more information than necessary. Use the tools provided to accomplish the user's request efficiently and effectively. When you've completed your task, present the result to the user. The user may provide feedback, which you can use to make improvements and try again.",
 	)
 
 	if (hasAskFollowupQuestion) {
@@ -158,7 +166,9 @@ export function getRulesSection(
 
 	rules.push(
 		"Your goal is to try to accomplish the user's task, NOT engage in a back and forth conversation.",
-		"NEVER end attempt_completion result with a question or request to engage in further conversation! Formulate the end of your result in a way that is final and does not require further input from the user.",
+		hasAttemptCompletion
+			? "NEVER end attempt_completion result with a question or request to engage in further conversation! Formulate the end of your result in a way that is final and does not require further input from the user."
+			: "NEVER end your result with a question or request to engage in further conversation! Formulate the end of your result in a way that is final and does not require further input from the user.",
 		'You are STRICTLY FORBIDDEN from starting your messages with "Great", "Certainly", "Okay", "Sure". You should NOT be conversational in your responses, but rather direct and to the point. For example you should NOT say "Great, I\'ve updated the CSS" but instead something like "I\'ve updated the CSS". It is important you be clear and technical in your messages.',
 		"When presented with images, utilize your vision capabilities to thoroughly examine them and extract meaningful information. Incorporate these insights into your thought process as you accomplish the user's task.",
 		"At the end of each user message, you will automatically receive environment_details. This information is not written by the user themselves, but is auto-generated to provide potentially relevant context about the project structure and environment. While this information can be valuable for understanding the project context, do not treat it as a direct part of the user's request or response. Use it to inform your actions and decisions, but don't assume the user is explicitly asking about or referring to this information unless they clearly do so in their message. When using environment_details, explain your actions clearly to ensure the user understands, as they may not be aware of these details.",

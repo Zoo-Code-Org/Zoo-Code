@@ -2,8 +2,15 @@ import type { ModeConfig, ToolGroup, ModelInfo, GroupEntry } from "@roo-code/typ
 import { getModeBySlug, defaultModeSlug, getGroupName, getToolsForMode } from "../../../shared/modes"
 import { TOOL_ALIASES, TOOL_GROUPS } from "../../../shared/tools"
 import type { CodeIndexManager } from "../../../services/code-index/manager"
-import type { McpHub } from "../../../services/mcp/McpHub"
 import { isToolAllowedForMode } from "../../../core/tools/validateToolUse"
+
+type EffectiveMcpHub = {
+	getServers(): Array<{
+		name: string
+		resources?: Array<{ uri: string; name?: string }>
+		tools?: Array<{ enabledForPrompt?: boolean }>
+	}>
+}
 
 /**
  * Canonical tool names that participate in the task-completion protocol.
@@ -106,7 +113,7 @@ export function isToolDisabledOrExcluded(
 export interface EffectiveToolPolicyInput {
 	mode: string
 	customModes?: ModeConfig[]
-	mcpHub?: McpHub
+	mcpHub?: EffectiveMcpHub
 	disabledTools?: string[]
 	modelInfo?: ModelInfo
 	experiments?: Record<string, boolean>
@@ -151,7 +158,7 @@ export interface EffectiveToolPolicy {
  *   these servers are considered.
  * @returns True when at least one allowed server exposes a prompt-enabled tool.
  */
-function resolveHasMcpTools(mcpHub?: McpHub, allowedServers?: string[]): boolean {
+function resolveHasMcpTools(mcpHub?: EffectiveMcpHub, allowedServers?: string[]): boolean {
 	if (!mcpHub) {
 		return false
 	}
@@ -175,7 +182,7 @@ function resolveHasMcpTools(mcpHub?: McpHub, allowedServers?: string[]): boolean
  *   these servers are considered.
  * @returns True when at least one allowed server exposes one or more resources.
  */
-function hasAnyMcpResources(mcpHub: McpHub, allowedServers?: string[]): boolean {
+function hasAnyMcpResources(mcpHub: EffectiveMcpHub, allowedServers?: string[]): boolean {
 	let servers = mcpHub.getServers()
 	if (allowedServers) {
 		const allowSet = new Set(allowedServers)
@@ -332,13 +339,11 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
 }
 
 /**
- * Builds the runtime `toolRequirements` map (tool name → false): every entry of
- * the `disabledTools` list, plus any protocol tool suppressed by either list.
+ * Builds the runtime `toolRequirements` map (tool name → false) from every entry
+ * in the user and model exclusion lists.
  * A requirements entry outranks the always-available class in `validateToolUse`,
- * so a disabled or model-excluded `attempt_completion` is rejected at execution
- * with the standard validation error tool_result — matching its removal from
- * the effective policy set. Excluded non-protocol entries stay a
- * policy/declaration-level concern and never reach this map.
+ * so every disabled or model-excluded tool is rejected at execution with the
+ * standard validation error tool_result, matching its removal from the policy.
  *
  * @param disabledTools The raw disabled-tools list (may contain aliases).
  * @param modelInfo The model customization whose `excludedTools` may suppress a
@@ -347,15 +352,10 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
  */
 export function buildToolRequirements(disabledTools?: string[], modelInfo?: ModelInfo): Record<string, boolean> {
 	const requirements: Record<string, boolean> = {}
-	for (const toolName of disabledTools ?? []) {
+	for (const toolName of [...(disabledTools ?? []), ...(modelInfo?.excludedTools ?? [])]) {
 		const canonical = resolveToolAlias(toolName)
 		requirements[toolName] = false
 		requirements[canonical] = false
-	}
-	for (const tool of PROTOCOL_TOOLS) {
-		if (isToolDisabledOrExcluded(tool, disabledTools, modelInfo)) {
-			requirements[tool] = false
-		}
 	}
 	return requirements
 }

@@ -619,7 +619,17 @@ describe("getCapabilitiesSection / getRulesSection fragment gating", () => {
 			const result = getRulesSection(
 				cwd,
 				settings,
-				sectionPolicy(["execute_command", "ask_followup_question", "list_files", "read_file"]),
+				sectionPolicy(
+					[
+						"execute_command",
+						"ask_followup_question",
+						"list_files",
+						"read_file",
+						"write_to_file",
+						"attempt_completion",
+					],
+					{ editRestriction: { fileRegex: "\\.md$" } },
+				),
 			)
 
 			expect(result).toContain("====\n\nRULES\n\n- ")

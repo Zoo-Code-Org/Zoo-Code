@@ -3,9 +3,7 @@
 import type OpenAI from "openai"
 import type { ModeConfig } from "@roo-code/types"
 
-import { TOOL_ALIASES } from "../../../../shared/tools"
 import { filterMcpToolsForMode, filterNativeToolsForMode } from "../filter-tools-for-mode"
-import { isToolDisabledOrExcluded } from "../effective-tool-policy"
 
 function makeTool(name: string): OpenAI.Chat.ChatCompletionTool {
 	return {
@@ -315,23 +313,6 @@ describe("filterMcpToolsForMode", () => {
 			modelInfo: { contextWindow: 128_000, supportsPromptCache: false, excludedTools: ["edit"] },
 		}
 		expect(filterMcpToolsForMode(mcpTools, "code", undefined, undefined, settings)).toBe(mcpTools)
-	})
-
-	it("matches disabled/excluded entries after resolving tool aliases on both sides", () => {
-		// No alias currently maps to use_mcp_tool, so the alias-resolution
-		// semantics of the gate's membership test are proven on an entry the
-		// alias registry actually declares, in both directions.
-		const [alias, canonical] = Object.entries(TOOL_ALIASES)[0]
-		expect(isToolDisabledOrExcluded(alias, [canonical], undefined)).toBe(true)
-		expect(
-			isToolDisabledOrExcluded(canonical, undefined, {
-				contextWindow: 128_000,
-				supportsPromptCache: false,
-				excludedTools: [alias],
-			}),
-		).toBe(true)
-		// An alias of a different tool never matches use_mcp_tool.
-		expect(isToolDisabledOrExcluded("use_mcp_tool", [alias], undefined)).toBe(false)
 	})
 })
 

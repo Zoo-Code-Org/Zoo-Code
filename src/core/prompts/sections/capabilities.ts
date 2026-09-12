@@ -15,6 +15,7 @@ import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
  */
 export function getCapabilitiesSection(policy: EffectiveToolPolicy): string {
 	const tools = policy.tools
+	const hasEditTool = tools.has("write_to_file") || tools.has("apply_diff") || tools.has("edit")
 
 	const clauses: string[] = []
 	if (tools.has("execute_command")) {
@@ -32,7 +33,7 @@ export function getCapabilitiesSection(policy: EffectiveToolPolicy): string {
 	if (tools.has("read_file")) {
 		clauses.push("read files")
 	}
-	if (tools.has("write_to_file") || tools.has("apply_diff")) {
+	if (hasEditTool) {
 		clauses.push("write and edit files")
 	}
 
@@ -47,11 +48,12 @@ export function getCapabilitiesSection(policy: EffectiveToolPolicy): string {
 	// The edit-restriction suffix binds to the capability sentence (not the last
 	// emitted bullet) so its position is deterministic regardless of which
 	// optional bullets follow.
-	const editRestrictionSuffix = policy.editRestriction
-		? ` (in this mode only files matching '${policy.editRestriction.fileRegex}' can be edited${
-				policy.editRestriction.description ? ` — ${policy.editRestriction.description}` : ""
-			})`
-		: ""
+	const editRestrictionSuffix =
+		hasEditTool && policy.editRestriction
+			? ` (in this mode only files matching '${policy.editRestriction.fileRegex}' can be edited${
+					policy.editRestriction.description ? ` — ${policy.editRestriction.description}` : ""
+				})`
+			: ""
 
 	let body = `${capabilitySentence}${editRestrictionSuffix}\n`
 

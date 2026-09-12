@@ -73,16 +73,15 @@ describe("getObjectiveSection", () => {
 		expect(objective).not.toContain("ask_followup_question tool")
 	})
 
-	it("still names attempt_completion unconditionally when the tool is not advertised", () => {
-		// Step 4 names attempt_completion, a protocol tool, so the wording is emitted
-		// even when the policy's tools set does not include it. The local policyFor builds
-		// the policy object directly (no resolver), so policyFor([]) provably excludes
-		// attempt_completion.
+	it("uses tool-neutral completion wording when attempt_completion is not advertised", () => {
 		const policy = policyFor([])
 
 		expect(policy.tools.has("attempt_completion")).toBe(false)
-		expect(getObjectiveSection(policy)).toContain(
-			"you must use the attempt_completion tool to present the result of the task to the user",
-		)
+		expect(getObjectiveSection(policy)).not.toContain("attempt_completion")
+		expect(getObjectiveSection(policy)).toContain("present the result of the task to the user")
+	})
+
+	it("names attempt_completion when it is advertised", () => {
+		expect(getObjectiveSection(policyFor(["attempt_completion"]))).toContain("attempt_completion tool")
 	})
 })

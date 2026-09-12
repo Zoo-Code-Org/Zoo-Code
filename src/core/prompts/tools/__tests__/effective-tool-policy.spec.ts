@@ -7,16 +7,16 @@ import {
 	resolveEffectiveToolPolicy,
 	resolveToolAlias,
 	buildToolRequirements,
+	isToolDisabledOrExcluded,
 } from "../effective-tool-policy"
 import { getModeBySlug, defaultModeSlug } from "../../../../shared/modes"
-import type { McpHub } from "../../../../services/mcp/McpHub"
 import type { CodeIndexManager } from "../../../../services/code-index/manager"
 
 /** Build a policy by giving the custom mode `groups` (derived from a real custom mode config). */
 function policyFor(
 	groups: ModeConfig["groups"],
 	extra: Partial<{
-		mcpHub: McpHub
+		mcpHub: ReturnType<typeof makeMcpHub>
 		disabledTools: string[]
 		modelInfo: ModelInfo
 		experiments: Record<string, boolean>
@@ -39,8 +39,14 @@ function policyFor(
 }
 
 /** Minimal McpHub stub. Mirrors the McpServer shape the resolver reads (getServers, resources). */
-function makeMcpHub(servers: Array<{ name: string; resources?: unknown[]; tools?: unknown[] }>): McpHub {
-	return { getServers: () => servers } as unknown as McpHub
+function makeMcpHub(
+	servers: Array<{
+		name: string
+		resources?: Array<{ uri: string; name?: string }>
+		tools?: Array<{ name: string; description?: string; enabledForPrompt?: boolean }>
+	}>,
+) {
+	return { getServers: () => servers }
 }
 
 /** CodeIndexManager stub with all "ready" flags true. */
@@ -379,11 +385,9 @@ describe("buildToolRequirements", () => {
 		expect(reqs).toEqual({ attempt_completion: false })
 	})
 
-	it("leaves excluded ordinary tools out of the requirements map", () => {
-		// excludedTools stays a policy/declaration-level customization for
-		// non-protocol tools; only the protocol leg reaches the validator.
-		const reqs = buildToolRequirements(undefined, modelInfo({ excludedTools: ["write_to_file"] }))
-		expect(reqs).toEqual({})
+	it("maps ordinary model exclusions to runtime requirements, including aliases", () => {
+		const reqs = buildToolRequirements(undefined, modelInfo({ excludedTools: ["read_file", "write_file"] }))
+		expect(reqs).toEqual({ read_file: false, write_file: false, write_to_file: false })
 	})
 
 	it("returns an empty map for a model customization without exclusions", () => {
@@ -401,6 +405,16 @@ describe("resolveToolAlias", () => {
 	it("returns canonical and unknown names unchanged", () => {
 		expect(resolveToolAlias("read_file")).toBe("read_file")
 		expect(resolveToolAlias("not_a_tool")).toBe("not_a_tool")
+	})
+})
+
+describe("isToolDisabledOrExcluded", () => {
+	it("matches disabled and model-excluded entries through aliases", () => {
+		expect(isToolDisabledOrExcluded("write_file", ["write_to_file"], undefined)).toBe(true)
+		expect(isToolDisabledOrExcluded("write_to_file", undefined, modelInfo({ excludedTools: ["write_file"] }))).toBe(
+			true,
+		)
+		expect(isToolDisabledOrExcluded("use_mcp_tool", ["write_file"], undefined)).toBe(false)
 	})
 })
 

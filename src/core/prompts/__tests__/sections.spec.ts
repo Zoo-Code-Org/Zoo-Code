@@ -8,9 +8,9 @@ import { getSkillsSection } from "../sections/skills"
 import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
 import { resolveEffectiveToolPolicy } from "../tools/effective-tool-policy"
 import type { GroupEntry, ModelInfo } from "@roo-code/types"
-import { McpHub } from "../../../services/mcp/McpHub"
 import type { CodeIndexManager } from "../../../services/code-index/manager"
 import type { SkillsManager } from "../../../services/skills/SkillsManager"
+import type { SkillMetadata } from "../../../shared/skills"
 import * as shellUtils from "../../../utils/shell"
 
 // Mock os-name so getSystemInfoSection never spawns PowerShell on Windows (cold
@@ -29,7 +29,7 @@ vi.mock("os-name", () => ({
 function policyFor(
 	groups: GroupEntry[],
 	extra: Partial<{
-		mcpHub: McpHub
+		mcpHub: ReturnType<typeof makeMcpHub>
 		disabledTools: string[]
 		modelInfo: ModelInfo
 		experiments: Record<string, boolean>
@@ -46,20 +46,30 @@ function policyFor(
 }
 
 /** Minimal McpHub stub. `tools`/`resources` mirror the McpServer shape the resolver reads. */
-function makeMcpHub(servers: Array<{ name: string; tools?: unknown[]; resources?: unknown[] }>): McpHub {
-	return { getServers: () => servers } as unknown as McpHub
+function makeMcpHub(
+	servers: Array<{
+		name: string
+		tools?: Array<{ name: string; description?: string; enabledForPrompt?: boolean }>
+		resources?: Array<{ uri: string; name?: string }>
+	}>,
+) {
+	return { getServers: () => servers }
 }
 
 /** Minimal SkillsManager stub returning a fixed skill list. */
-function makeSkillsManager(n: number): SkillsManager {
+function makeSkillsManager(n: number): Pick<SkillsManager, "getSkillsForMode"> {
 	return {
 		getSkillsForMode: () =>
-			Array.from({ length: n }, (_, i) => ({
-				name: `skill-${i}`,
-				description: `Skill ${i}`,
-				path: `./skills/${i}`,
-			})),
-	} as unknown as SkillsManager
+			Array.from(
+				{ length: n },
+				(_, i): SkillMetadata => ({
+					name: `skill-${i}`,
+					description: `Skill ${i}`,
+					path: `./skills/${i}`,
+					source: "global",
+				}),
+			),
+	}
 }
 
 describe("addCustomInstructions", () => {
@@ -145,6 +155,13 @@ describe("getCapabilitiesSection", () => {
 
 	it("omits the edit-restriction suffix without a fileRegex", () => {
 		const result = getCapabilitiesSection(policyFor(["read", "edit"]))
+		expect(result).not.toContain("only files matching")
+	})
+
+	it("omits the edit-restriction suffix when no edit tool is available", () => {
+		const result = getCapabilitiesSection(
+			policyFor([["edit", { fileRegex: "\\.md$" }]], { disabledTools: ["write_to_file", "apply_diff"] }),
+		)
 		expect(result).not.toContain("only files matching")
 	})
 
@@ -348,11 +365,7 @@ describe("getRulesSection", () => {
 		expect(result).toContain("RULES")
 	})
 
-	it("states the attempt_completion protocol rule unconditionally", () => {
-		// The completion sentence is protocol wording — emitted even when the policy
-		// does not advertise attempt_completion. The raw literal expresses that state
-		// directly; a resolver-backed policyFor reaches it only by suppressing the tool
-		// via disabledTools/excludedTools, coupling this test to the resolver.
+	it("uses tool-neutral completion guidance when attempt_completion is unavailable", () => {
 		const rawPolicy: EffectiveToolPolicy = {
 			tools: new Set<string>(["read_file"]),
 			hasMcpGroup: false,
@@ -361,9 +374,28 @@ describe("getRulesSection", () => {
 		}
 
 		expect(rawPolicy.tools.has("attempt_completion")).toBe(false)
-		expect(getRulesSection(cwd, settings, rawPolicy)).toContain(
-			"you must use the attempt_completion tool to present the result to the user",
-		)
+		const result = getRulesSection(cwd, settings, rawPolicy)
+		expect(result).not.toContain("attempt_completion")
+		expect(result).toContain("present the result to the user")
+	})
+
+	it("only emits file-restriction guidance for an effective restricted edit tool", () => {
+		const restricted = policyFor([["edit", { fileRegex: "\\.md$" }]])
+		expect(getRulesSection(cwd, settings, restricted)).toContain("FileRestrictionError")
+
+		const disabled = policyFor([["edit", { fileRegex: "\\.md$" }]], {
+			disabledTools: ["write_to_file", "apply_diff"],
+		})
+		expect(getRulesSection(cwd, settings, disabled)).not.toContain("FileRestrictionError")
+	})
+
+	it.each([
+		["tools", makeMcpHub([{ name: "s", tools: [{ name: "t" }] }]), true],
+		["resources", makeMcpHub([{ name: "s", resources: [{ uri: "r", name: "r" }] }]), true],
+		["neither", makeMcpHub([{ name: "s" }]), false],
+	] as const)("gates MCP rules for a hub with %s", (_case, mcpHub, expected) => {
+		const result = getRulesSection(cwd, settings, policyFor(["mcp"], { mcpHub }))
+		expect(result.includes("MCP operations should be used one at a time")).toBe(expected)
 	})
 })
 
