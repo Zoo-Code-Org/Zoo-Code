@@ -84,8 +84,8 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-// Built per call, not shared at module scope: the parameter scan abandons its `/g` regex mid-text
-// when a value fails its schema, so a shared instance would resume from that stale `lastIndex`.
+// Built per call, not shared at module scope: the parameter scan returns early from its `/g` exec
+// loop when a value fails its schema, so a shared instance would resume from that stale `lastIndex`.
 const leakedInvokeBlockPattern = () => /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
 const leakedInvokeParamPattern = () =>
 	/<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
@@ -215,7 +215,7 @@ function structuredParamCheck(declaredType: string): ((parsed: unknown) => boole
 	const checks: Record<string, (parsed: unknown) => boolean> = {
 		object: (parsed) => typeof parsed === "object" && !Array.isArray(parsed),
 		array: (parsed) => Array.isArray(parsed),
-		number: (parsed) => typeof parsed === "number" && Number.isFinite(parsed),
+		number: (parsed) => Number.isFinite(parsed),
 		integer: (parsed) => Number.isInteger(parsed),
 		boolean: (parsed) => typeof parsed === "boolean",
 		null: () => false,
@@ -385,10 +385,11 @@ export function extractLeakedToolCalls(
 		lastIndex = match.index + match[0].length
 	}
 	pending += text.slice(lastIndex)
-	const trailing =
-		segments.length > 0 && segments[segments.length - 1].nearRecovery && segments[segments.length - 1].text === ""
-	if (trailing) {
-		segments[segments.length - 1].text = pending
+	// A recovery always ends with an empty placeholder segment reserved for its closing wrapper, so
+	// remaining text belongs there rather than in a segment of its own.
+	const lastSegment = segments.at(-1)
+	if (lastSegment?.nearRecovery) {
+		lastSegment.text = pending
 	} else {
 		segments.push({ text: pending, nearRecovery: false })
 	}

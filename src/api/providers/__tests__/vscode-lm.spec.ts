@@ -1764,6 +1764,22 @@ describe("leaked tool-call parser contracts", () => {
 		it("parses a whitespace-padded JSON array", () => {
 			expect(convert({ value: { type: "array" } }, '  ["a"]  ')[0].input).toEqual({ value: ["a"] })
 		})
+
+		it("rejects a number for a declared object", () => {
+			expect(convert({ value: { type: "object" } }, "5")).toHaveLength(0)
+		})
+
+		it("rejects a number for a declared boolean", () => {
+			expect(convert({ value: { type: "boolean" } }, "5")).toHaveLength(0)
+		})
+
+		it("fails a block closed when an unsupported declared type carries parseable JSON", () => {
+			expect(convert({ value: { type: "date" } }, "5")).toHaveLength(0)
+		})
+
+		it("ignores a non-string member of a declared type union", () => {
+			expect(convert({ value: { type: ["array", 5] } }, '["a"]')[0].input).toEqual({ value: ["a"] })
+		})
 	})
 
 	describe("carry boundaries", () => {
