@@ -114,6 +114,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
+import { BrowserBridgeServer } from "./browserBridge"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
@@ -897,6 +898,10 @@ export class ClineProvider
 		this.customModesManager?.dispose()
 		this.taskHistoryStore.dispose()
 		this.flushGlobalStateWriteThrough()
+
+		// Release the provider-owned browser bridge (socket.io server + port).
+		BrowserBridgeServer.disposeFor(this)
+
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 
@@ -1041,12 +1046,21 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
-			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
-				? await this.getHMRHtmlContent(webviewView.webview)
-				: await this.getHtmlContent(webviewView.webview)
-
+		// When the browser bridge is active the UI runs only in Chrome; render
+		// an informational placeholder inside the real iframe (no React, no
+		// scripts, but with a clickable link back to the browser tab) so the
+		// environments don't run simultaneously. The virtual webview (backed by
+		// socket.io) already has its message listener registered when the
+		// bridge was enabled, so it is not re-registered here.
+		if (BrowserBridgeServer.active(this)) {
+			BrowserBridgeServer.setPlaceholder(this)
+		} else {
+			webviewView.webview.html =
+				this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+				process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
+					? await this.getHMRHtmlContent(webviewView.webview)
+					: await this.getHtmlContent(webviewView.webview)
+		}
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
 		await this.getState().then(
@@ -1078,8 +1092,12 @@ export class ClineProvider
 		)
 
 		// Sets up an event listener to listen for messages passed from the webview view context
-		// and executes code based on the message that is received.
-		this.setWebviewMessageListener(webviewView.webview)
+		// and executes code based on the message that is received. When the bridge is active
+		// the listener was already registered on the virtual webview;
+		// re-registering here would double-handle every message.
+		if (!BrowserBridgeServer.active(this)) {
+			this.setWebviewMessageListener(webviewView.webview)
+		}
 
 		// Initialize code index status subscription for the current workspace.
 		this.updateCodeIndexStatusSubscription()
@@ -1478,8 +1496,13 @@ export class ClineProvider
 			return
 		}
 
+		const webview = BrowserBridgeServer.webviewFor(this) ?? this.view?.webview
+		if (!webview) {
+			return
+		}
+
 		try {
-			await this.view?.webview.postMessage(message)
+			await webview.postMessage(message)
 		} catch {
 			// View disposed, drop message silently
 		}
@@ -4534,8 +4557,9 @@ export class ClineProvider
 			const fileUri = vscode.Uri.file(filePath)
 
 			// Check if we have a webview available
-			if (this.view?.webview) {
-				const webviewUri = this.view.webview.asWebviewUri(fileUri)
+			const activeWebview = BrowserBridgeServer.webviewFor(this) ?? this.view?.webview
+			if (activeWebview) {
+				const webviewUri = activeWebview.asWebviewUri(fileUri)
 				return webviewUri.toString()
 			}
 

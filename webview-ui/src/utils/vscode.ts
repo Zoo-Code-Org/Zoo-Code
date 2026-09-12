@@ -2,6 +2,8 @@ import type { WebviewApi } from "vscode-webview"
 
 import { WebviewMessage } from "@roo/WebviewMessage"
 
+import { BrowserBridgeClient } from "./browserBridgeClient"
+
 /**
  * A utility wrapper around the acquireVsCodeApi() function, which enables
  * message passing and state management between the webview and extension
@@ -19,6 +21,13 @@ class VSCodeAPIWrapper {
 		// context (i.e. VS Code development window or web browser)
 		if (typeof acquireVsCodeApi === "function") {
 			this.vsCodeApi = acquireVsCodeApi()
+		} else if (import.meta.env.DEV) {
+			// Build-time gate: `false` in production makes BrowserBridgeClient
+			// unreachable so the bundler tree-shakes the whole class (and the
+			// lazy socket.io-client import inside it). The client self-gates
+			// again at runtime: it connects only when this dev-server tab was
+			// opened by the "Open in Chrome" command with a ?bridgePort= param.
+			void BrowserBridgeClient.maybeConnect()
 		}
 	}
 
@@ -26,13 +35,17 @@ class VSCodeAPIWrapper {
 	 * Post a message (i.e. send arbitrary data) to the owner of the webview.
 	 *
 	 * @remarks When running webview code inside a web browser, postMessage will instead
-	 * log the given message to the console.
+	 * send the message over the browser bridge (socket.io) to the extension host.
 	 *
 	 * @param message Arbitrary data (must be JSON serializable) to send to the extension context.
 	 */
 	public postMessage(message: WebviewMessage) {
 		if (this.vsCodeApi) {
 			this.vsCodeApi.postMessage(message)
+		} else if (import.meta.env.DEV && BrowserBridgeClient.active()) {
+			// Same build-time gate as the constructor: keeps the bridge class
+			// out of the production bundle entirely.
+			BrowserBridgeClient.postMessage(message)
 		} else {
 			console.log(message)
 		}

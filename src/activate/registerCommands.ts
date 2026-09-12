@@ -4,7 +4,6 @@ import delay from "delay"
 import type { CommandId } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Package } from "../shared/package"
 import { getCommand } from "../utils/commands"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { ContextProxy } from "../core/config/ContextProxy"
@@ -15,6 +14,7 @@ import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
 import { t } from "../i18n"
+import { BrowserBridgeServer } from "../core/webview/browserBridge"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -71,6 +71,9 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 	}
 
 	context.subscriptions.push(registerRipgrepDiagnosticCommand())
+
+	// Dev-only tooling: self-gating no-op in production (see browserBridge.ts).
+	BrowserBridgeServer.registerCommand(context, options.outputChannel, () => ClineProvider.getVisibleInstance())
 }
 
 // `showRipgrepDiagnostic` is registered separately by
