@@ -222,7 +222,7 @@ function resolveTypeUnion(types: string[]): DeclaredType | undefined {
 	// A null-only union has no non-null member; leaving the type unresolved would fall back to the
 	// raw string "null", so name the null type and let convertLeakedParamValue settle it.
 	if (nonNullTypes.length === 0) {
-		return nullable ? { type: "null", nullable: false } : undefined
+		return nullable ? { type: "null", nullable } : undefined
 	}
 	// Two or more non-null members leave the intended type ambiguous; picking one would coerce the
 	// value to a type the tool may not accept, so the raw string is kept instead.
