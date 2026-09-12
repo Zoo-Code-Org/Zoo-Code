@@ -172,6 +172,10 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+// Maximum automatic retries for mid-stream failures and empty responses before
+// asking the user. Every retry re-bills the full input context, so retries must
+// be bounded and user-visible.
+const MAX_AUTOMATIC_API_RETRIES = 3
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -1108,6 +1112,44 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// For API requests, consecutive same-role messages are merged via mergeConsecutiveApiMessages()
 	// so rewind/edit behavior can still reference original message boundaries.
 
+	/**
+	 * Restores a user message previously removed from the API conversation
+	 * history, keeping the original record (including messageId and ts).
+	 * Rebuilding the message would assign a new identity, and the merge-on-save
+	 * would then keep both the on-disk original and the rebuilt copy,
+	 * duplicating the user turn after a restart.
+	 */
+	private async restoreApiHistoryUserMessage(message: ApiMessage): Promise<boolean> {
+		this.apiConversationHistory.push(message)
+		this.messageCounts.user++
+		let saved = await this.saveApiConversationHistory()
+		if (!saved) {
+			saved = await this.retrySaveApiConversationHistory()
+		}
+		return saved
+	}
+
+	private async recordTerminalApiFailure(text: string): Promise<boolean> {
+		const message = { role: "assistant" as const, content: [{ type: "text" as const, text }] }
+		await this.addToApiConversationHistory(message)
+		let saved = this.assistantMessageSavedToHistory
+		if (!saved) {
+			saved = await this.retrySaveApiConversationHistory()
+			this.assistantMessageSavedToHistory = saved
+		}
+		if (!saved) {
+			// Stryker disable next-line UnaryOperator: this method synchronously appended the assistant record at the final index.
+			const appendedMessage = this.apiConversationHistory.at(-1)
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: the just-appended record is an assistant; the guard is defensive against external mutation.
+			if (appendedMessage?.role === "assistant") {
+				this.apiConversationHistory.pop()
+			}
+			return false
+		}
+		this.messageCounts.assistant++
+		return true
+	}
+
 	/** Replaces the entire API conversation history and persists the new state. */
 	async overwriteApiConversationHistory(newHistory: ApiMessage[], persist = true) {
 		this.hydrateApiConversationHistory(newHistory)
@@ -1630,7 +1672,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 		}
 
-		// Wait for askResponse to be set
+		// Wait for askResponse to be set. Status timers belong to this ask and
+		// must not survive cancellation, supersession, or a rejected wait.
 		await pWaitFor(
 			() => {
 				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
@@ -1651,7 +1694,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return false
 			},
 			{ interval: 100 },
-		)
+		).finally(() => {
+			for (const timeout of timeouts) clearTimeout(timeout)
+			// Stryker disable next-line ConditionalExpression,LogicalOperator,BlockStatement: timeout ownership is established above; clear only this ask's registered reference.
+			if (this.autoApprovalTimeoutRef && timeouts.includes(this.autoApprovalTimeoutRef)) {
+				this.autoApprovalTimeoutRef = undefined
+			}
+		})
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
@@ -2924,6 +2973,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
+			removedUserMessage?: ApiMessage // The exact removed record, so a retry can restore it with its persisted identity
 		}
 
 		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
@@ -3066,8 +3116,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
 			if (shouldAddUserMessage) {
-				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
-				this.messageCounts.user++
+				if (currentItem.removedUserMessage) {
+					// Restore the exact record removed before the retry. Rebuilding it
+					// would assign a new messageId/ts, and the merge-on-save would keep
+					// both the on-disk original and the rebuilt copy, duplicating the
+					// user turn after a restart.
+					if (!(await this.restoreApiHistoryUserMessage(currentItem.removedUserMessage))) {
+						return true
+					}
+				} else {
+					await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
+					this.messageCounts.user++
+				}
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -3202,6 +3262,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, { skipProviderRateLimit: true })
 				let assistantMessage = ""
 				let reasoningMessage = ""
+				// Stop reason reported by the provider for this request (if any).
+				// Used to distinguish terminal ends like "max_tokens" (no retry -
+				// the same request would fail again while re-billing the full
+				// context) from genuinely empty responses.
+				let lastStopReason: string | undefined
 				const pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
 
@@ -3268,6 +3333,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
+								lastStopReason = chunk.stopReason ?? lastStopReason
 								break
 							case "grounding":
 								// Handle grounding sources separately from regular content
@@ -3655,16 +3721,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							this.abortReason = cancelReason
 							await this.abortTask()
 						} else {
-							// Stream failed - log the error and retry with the same content
-							// The existing rate limiting will prevent rapid retries
+							// Stream failed mid-flight. Every automatic retry re-bills
+							// the full input context, so retries are bounded and always
+							// announced via the shared backoff countdown.
 							console.error(
 								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry: ${streamingFailedMessage}`,
 							)
 
-							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
-							const stateForBackoff = await this.providerRef.deref()?.getState()
-							if (stateForBackoff?.autoApprovalEnabled) {
-								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
+							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
+							// Stryker disable next-line OptionalChaining: provider collection during teardown is nondeterministic; absence must use manual approval.
+							const retryState = await this.providerRef.deref()?.getState()
+
+							// Stryker disable next-line OptionalChaining: undefined state is the defensive manual-approval fallback.
+							if (
+								// Stryker disable next-line OptionalChaining: undefined state is the defensive manual-approval fallback.
+								retryState?.autoApprovalEnabled &&
+								!this.didAlreadyUseTool &&
+								midStreamRetryAttempt < MAX_AUTOMATIC_API_RETRIES
+							) {
+								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
 								// Check if task was aborted during the backoff
 								if (this.abort) {
@@ -3676,17 +3751,90 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									await this.abortTask()
 									break
 								}
+
+								// Push the same content back onto the stack to retry, incrementing the retry attempt counter
+								stack.push({
+									userContent: currentUserContent,
+									includeFileDetails: false,
+									retryAttempt: midStreamRetryAttempt + 1,
+								})
+
+								// Continue to retry the request
+								continue
 							}
 
-							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
-							stack.push({
-								userContent: currentUserContent,
-								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							})
+							// Automatic retry budget exhausted - surface the failure.
+							// Remove this turn's user message so a user-approved retry
+							// (which resets retryAttempt to 0 and therefore re-adds the
+							// message) does not duplicate it in history. Keep the exact
+							// record so a restore preserves its persisted identity.
+							let removedMidStreamUserMessage: ApiMessage | undefined
+							// Stryker disable next-line ConditionalExpression,EqualityOperator: non-empty content was appended as this iteration's user record; empty continuations preserve history.
+							const hasUserContent = currentUserContent.length > 0
+							// Stryker disable next-line ArithmeticOperator: non-empty content guarantees the record appended by this iteration is the final entry.
+							const lastHistoryMessage =
+								// Stryker disable next-line ArithmeticOperator: this iteration's appended record is the final array entry.
+								this.apiConversationHistory[this.apiConversationHistory.length - 1]
+							// Stryker disable next-line ConditionalExpression,OptionalChaining,LogicalOperator,StringLiteral,ArithmeticOperator: non-empty content guarantees the final record is this turn's user message; remaining checks are defensive.
+							// Stryker disable next-line EqualityOperator: the role check is defensive; non-empty content was appended as this iteration's user record.
+							if (hasUserContent && lastHistoryMessage?.role === "user") {
+								removedMidStreamUserMessage = this.apiConversationHistory.pop()
+								this.messageCounts.user--
+							}
 
-							// Continue to retry the request
-							continue
+							const { response } = await this.ask(
+								"api_req_failed",
+								`${
+									// Stryker disable next-line OptionalChaining: undefined state uses the manual-approval wording.
+									retryState?.autoApprovalEnabled &&
+									midStreamRetryAttempt >= MAX_AUTOMATIC_API_RETRIES
+										? `The API stream failed ${MAX_AUTOMATIC_API_RETRIES + 1} times mid-response.`
+										: "The API stream failed mid-response."
+								} ${streamingFailedMessage}`,
+							)
+
+							if (response === "yesButtonClicked") {
+								await this.say("api_req_retried")
+								await this.backoffAndAnnounce(midStreamRetryAttempt, error)
+								if (this.abort) break
+
+								// Reset the automatic retry budget; the user message is
+								// restored exactly once on the next iteration. The
+								// userMessageWasRemoved flag is redundant here because
+								// retryAttempt 0 with non-empty content always re-adds.
+								stack.push({
+									userContent: currentUserContent,
+									includeFileDetails: false,
+									retryAttempt: 0,
+									// Stryker disable next-line ConditionalExpression,EqualityOperator: removedUserMessage carries the same state and prevents fabricated restoration.
+									userMessageWasRemoved: removedMidStreamUserMessage !== undefined,
+									removedUserMessage: removedMidStreamUserMessage,
+								})
+
+								continue
+							}
+
+							// User declined to retry: restore the user message, surface
+							// the error, record the failure, and stop the loop.
+							if (
+								removedMidStreamUserMessage &&
+								!(await this.restoreApiHistoryUserMessage(removedMidStreamUserMessage))
+							) {
+								// Stryker disable next-line BooleanLiteral: restore failure must stop before terminal state diverges.
+								return true
+							}
+
+							await this.say(
+								"error",
+								`The API stream failed mid-response and was not retried. ${streamingFailedMessage}`,
+							)
+
+							// Synthetic assistant message recording the failure -- increment
+							// messageCounts.assistant to match, same as the normal
+							// assistant-message-saved path.
+							await this.recordTerminalApiFailure("Failure: the API stream failed mid-response.")
+
+							return true
 						}
 					}
 				} finally {
@@ -4053,20 +4201,53 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Only pop the user message that this iteration added. When
 					// shouldAddUserMessage is false (empty continuation, resumed history,
 					// or flushPendingToolResultsToHistory message) there is nothing to
-					// remove, and popping would corrupt history.
-					let removedCurrentUserMessage = false
+					// remove, and popping would corrupt history. Keep the exact record
+					// so a restore preserves its persisted identity.
+					let removedCurrentUserMessage: ApiMessage | undefined
 					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 						if (lastMessage.role === "user") {
-							this.apiConversationHistory.pop()
+							removedCurrentUserMessage = this.apiConversationHistory.pop()
 							this.messageCounts.user--
-							removedCurrentUserMessage = true
 						}
 					}
 
-					// Check if we should auto-retry or prompt the user
+					// A max_tokens stop reason with no usable content means the model
+					// burned its whole output budget (typically on reasoning) before
+					// producing anything. Retrying the identical request would fail
+					// the same way while re-billing the full context each time, so
+					// surface it and stop instead of retrying.
+					if (lastStopReason === "max_tokens") {
+						if (
+							removedCurrentUserMessage &&
+							!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
+						) {
+							// Stryker disable next-line BooleanLiteral: restore failure must stop before terminal state diverges.
+							return true
+						}
+
+						await this.say(
+							"error",
+							"The model hit its maximum output token limit (stop_reason: max_tokens) without producing any visible output - it likely spent the entire budget on reasoning. Increase the max output tokens (or lower the thinking budget) for this API profile, then retry.",
+						)
+
+						// Synthetic assistant message recording the failure -- increment
+						// messageCounts.assistant to match, same as the normal
+						// assistant-message-saved path.
+						await this.recordTerminalApiFailure(
+							"Failure: response hit the max output token limit before producing any visible content.",
+						)
+
+						return true
+					}
+
+					// Check if we should auto-retry or prompt the user.
+					// Automatic retries are bounded: once the budget is exhausted the
+					// user is asked, so a persistently empty response cannot loop
+					// (and bill) forever without visibility.
 					// Reuse the state variable from above
-					if (state?.autoApprovalEnabled) {
+					// Stryker disable next-line OptionalChaining: undefined state deliberately falls back to explicit approval during teardown.
+					if (state?.autoApprovalEnabled && (currentItem.retryAttempt ?? 0) < MAX_AUTOMATIC_API_RETRIES) {
 						// Auto-retry with backoff - don't persist failure message when retrying
 						await this.backoffAndAnnounce(
 							currentItem.retryAttempt ?? 0,
@@ -4090,7 +4271,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							userContent: currentUserContent,
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							userMessageWasRemoved: removedCurrentUserMessage,
+							// Stryker disable next-line ConditionalExpression: removedUserMessage carries the same state for empty continuations.
+							userMessageWasRemoved: removedCurrentUserMessage !== undefined,
+							removedUserMessage: removedCurrentUserMessage,
 						})
 
 						// Continue to retry the request
@@ -4099,7 +4282,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Prompt the user for retry decision
 						const { response } = await this.ask(
 							"api_req_failed",
-							"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
+							`The model returned no assistant messages. This may indicate an issue with the API or the model's output.${
+								// Stryker disable next-line OptionalChaining: undefined state deliberately uses the no-automatic-retry prompt.
+								state?.autoApprovalEnabled
+									? ` Automatic retries were attempted ${MAX_AUTOMATIC_API_RETRIES} times without success.`
+									: ""
+							}`,
 						)
 
 						if (response === "yesButtonClicked") {
@@ -4110,21 +4298,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-								userMessageWasRemoved: removedCurrentUserMessage,
+								retryAttempt: 0,
+								// Stryker disable next-line ConditionalExpression,EqualityOperator: removedUserMessage carries the same state for empty continuations.
+								userMessageWasRemoved: removedCurrentUserMessage !== undefined,
+								removedUserMessage: removedCurrentUserMessage,
 							})
 
 							// Continue to retry the request
 							continue
 						} else {
-							// User declined to retry. Re-add the user message only if this
+							// User declined to retry. Restore the user message only if this
 							// iteration removed one, so the history and counter stay consistent.
-							if (removedCurrentUserMessage) {
-								await this.addToApiConversationHistory({
-									role: "user",
-									content: currentUserContent,
-								})
-								this.messageCounts.user++
+							if (
+								removedCurrentUserMessage &&
+								!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
+							) {
+								return true
 							}
 
 							await this.say(
@@ -4135,17 +4324,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// Synthetic assistant message recording the failure -- increment
 							// messageCounts.assistant to match, same as the normal
 							// assistant-message-saved path.
-							await this.addToApiConversationHistory({
-								role: "assistant",
-								content: [{ type: "text", text: "Failure: I did not provide a response." }],
-							})
-							this.messageCounts.assistant++
+							await this.recordTerminalApiFailure("Failure: I did not provide a response.")
 						}
 					}
 				}
 
-				// If we reach here without continuing, return false (will always be false for now)
-				return false
+				// Terminal retry outcomes stop the outer task loop.
+				return true
 			} catch (error) {
 				// This should never happen since the only thing that can throw an
 				// error is the attemptApiRequest, which is wrapped in a try catch

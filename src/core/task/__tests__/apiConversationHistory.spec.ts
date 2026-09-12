@@ -51,6 +51,97 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
+	it("replays each Anthropic thinking block with its own signature", () => {
+		// Double assertion: the stub only implements the optional history hooks
+		// this path reads, not the full ApiHandler surface.
+		const api = {
+			getThoughtSignature: () => "signature-2",
+			getThinkingBlocks: () => [
+				{ thinking: "first thought", signature: "signature-1" },
+				{ thinking: "second thought", signature: "signature-2" },
+			],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "first thought\nsecond thought",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "thinking", thinking: "first thought", signature: "signature-1" },
+			{ type: "thinking", thinking: "second thought", signature: "signature-2" },
+			{ type: "text", text: "answer" },
+		])
+	})
+
+	it("does not add thinking blocks for non-Anthropic protocols even when getThinkingBlocks exists", () => {
+		// Double assertion: the stub only implements the optional history hooks
+		// this path reads, not the full ApiHandler surface.
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThinkingBlocks: () => [{ thinking: "first thought", signature: "signature-1" }],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "first thought",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "reasoning", text: "first thought", summary: [] },
+			{ type: "text", text: "answer" },
+			{ type: "thoughtSignature", thoughtSignature: "signature-1" },
+		])
+	})
+
+	it("falls back to the single signed block when getThinkingBlocks returns an empty array", () => {
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThinkingBlocks: () => [],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "private reasoning",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "thinking", thinking: "private reasoning", signature: "signature-1" },
+			{ type: "text", text: "answer" },
+		])
+	})
+
+	it("prefers reasoning_details over getThinkingBlocks for Anthropic messages", () => {
+		// Double assertion: the stub only implements the optional history hooks
+		// this path reads, not the full ApiHandler surface.
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThinkingBlocks: () => [{ thinking: "first thought", signature: "signature-1" }],
+			getReasoningDetails: () => [{ type: "reasoning", text: "detail" }],
+		} as unknown as Parameters<typeof prepareApiConversationMessage>[0]["api"]
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "first thought",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.reasoning_details).toEqual([{ type: "reasoning", text: "detail" }])
+		// No thinking or reasoning block is prepended when reasoning_details wins.
+		expect(result.content).toBe("answer")
+	})
+
 	it("falls back to generic reasoning blocks for Anthropic messages without thought signatures", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: "answer" },

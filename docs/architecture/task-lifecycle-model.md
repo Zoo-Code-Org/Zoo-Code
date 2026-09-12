@@ -6,14 +6,15 @@ Zoo Code checks task lifecycle protocols through one compositional verification 
 pnpm lifecycle:model-check
 ```
 
-The command runs six independent bounded submodels in sequence:
+The command runs seven independent bounded submodels in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed provider handoff and scheduler ordering;
 4. the task cleanup protocol;
-5. request-stream parser scoping; and
-6. completion persistence.
+5. request-stream parser scoping;
+6. completion persistence; and
+7. API retry and logical-user-turn persistence.
 
 This umbrella command is the single model-check entry point in the `compile` CI job after type checking. Command-level composition does not merge the submodels' state spaces: each checker retains its own bounds, transitions, invariant ownership, reachability requirements, and counterexample format. In particular, parser state is not part of the persisted lifecycle graph. The focused parser checker remains directly runnable with `pnpm parser-scope:model-check` for debugging.
 
@@ -123,6 +124,8 @@ The completion persistence checker additionally enforces:
 3. Cancellation or disposal settles the modeled readiness wait, clears pending retry state, starts no later retry write, and emits no completion.
 4. Delegated completion crosses the same durability boundary as standalone completion and requires successful parent reopen.
 5. A failed delegated parent reopen cannot emit the delegated completion event.
+
+The API retry/persistence checker additionally enforces that automatic retries are bounded, visible, and gated by auto-approval; terminal `max_tokens` empty responses cannot re-enter automatic retry; and the logical user turn is removed before a retry, then restored with the same `messageId` and timestamp before the next request. Its identity check explicitly rejects reconstruction with replacement identity fields rather than only observing an unchanged record.
 
 These are safety claims within the documented bounds. The checks do not claim liveness, fairness, power-loss durability, filesystem-lock correctness, or exhaustive coverage of arbitrary task counts or retry counts. The completion explorer specifies the event contract rather than importing `Task` or `AttemptCompletionTool`; focused unit tests and the restart E2E verify that concrete production paths implement the modeled guards. Delegated reopen is abstracted as one success-or-failure event after durable child history; fallback from a failed reopen into the normal standalone completion flow remains production-test coverage rather than part of this model. The lifecycle checker also does not distinguish a delayed pre-interruption completion from a legitimate post-resume completion for the same child ID; that requires a persisted attempt/generation token before it can become a sound invariant.
 

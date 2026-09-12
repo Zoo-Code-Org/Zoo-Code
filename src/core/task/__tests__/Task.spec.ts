@@ -26,9 +26,11 @@ import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
+import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import pWaitFor from "p-wait-for"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -42,6 +44,10 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+	saveApiConversationHistory: () => Promise<boolean>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
+	restoreApiHistoryUserMessage: (message: ApiMessage) => Promise<boolean>
+	recordTerminalApiFailure: (text: string) => Promise<boolean>
 	resetAssistantMessagePersistence: () => void
 }
 
@@ -400,32 +406,91 @@ describe("Cline", () => {
 		}))
 	})
 
-	describe("empty-response retries", () => {
-		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
-			return (async function* () {
-				yield* chunks
-			})()
-		}
+	// Shared helpers for the retry suites below.
+	function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+		return (async function* () {
+			yield* chunks
+		})()
+	}
 
-		async function createTaskWithManualRetries() {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
+	async function createTaskWithAutoApproval(autoApprovalEnabled: boolean) {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+		const state = await mockProvider.getState()
+		vi.spyOn(mockProvider, "getState").mockResolvedValue({
+			...state,
+			apiConfiguration: mockApiConfig,
+			autoApprovalEnabled,
+		})
+		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+		vi.spyOn(getTaskTestAccess(task), "saveApiConversationHistory").mockResolvedValue(true)
+		return task
+	}
+
+	describe("empty-response retries", () => {
+		it("propagates restore persistence success and bounded retry exhaustion", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+			const message: ApiMessage = {
+				role: "user",
+				content: [{ type: "text", text: "restore me" }],
+				messageId: "restore-id",
+				ts: 1,
+			}
+			const saveSpy = vi.spyOn(access, "saveApiConversationHistory")
+			const retrySpy = vi.spyOn(task, "retrySaveApiConversationHistory")
+
+			saveSpy.mockResolvedValueOnce(true)
+			await expect(access.restoreApiHistoryUserMessage(message)).resolves.toBe(true)
+			expect(retrySpy).not.toHaveBeenCalled()
+
+			task.apiConversationHistory = []
+			task.messageCounts.user = 0
+			saveSpy.mockResolvedValueOnce(false)
+			retrySpy.mockResolvedValueOnce(true)
+			await expect(access.restoreApiHistoryUserMessage(message)).resolves.toBe(true)
+			expect(retrySpy).toHaveBeenCalledTimes(1)
+
+			task.apiConversationHistory = []
+			task.messageCounts.user = 0
+			saveSpy.mockResolvedValueOnce(false)
+			retrySpy.mockResolvedValueOnce(false)
+			await expect(access.restoreApiHistoryUserMessage(message)).resolves.toBe(false)
+			expect(task.apiConversationHistory).toEqual([message])
+			expect(task.messageCounts.user).toBe(1)
+		})
+
+		it("persists or rolls back terminal synthetic failures atomically", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(access, "saveApiConversationHistory")
+			const retrySpy = vi.spyOn(task, "retrySaveApiConversationHistory")
+
+			saveSpy.mockResolvedValueOnce(true)
+			await expect(access.recordTerminalApiFailure("durable failure")).resolves.toBe(true)
+			expect(retrySpy).not.toHaveBeenCalled()
+			expect(task.apiConversationHistory.at(-1)).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "durable failure" }],
 			})
-			const state = await mockProvider.getState()
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				...state,
-				apiConfiguration: mockApiConfig,
-				autoApprovalEnabled: false,
-			})
-			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-			return task
-		}
+			expect(task.messageCounts.assistant).toBe(1)
+
+			const durableHistory = structuredClone(task.apiConversationHistory)
+			access.resetAssistantMessagePersistence()
+			saveSpy.mockResolvedValueOnce(false)
+			retrySpy.mockResolvedValueOnce(false)
+			await expect(access.recordTerminalApiFailure("not durable")).resolves.toBe(false)
+			expect(retrySpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toEqual(durableHistory)
+			expect(task.messageCounts.assistant).toBe(1)
+		})
 
 		it("restores the user message before a confirmed empty-response retry", async () => {
-			const task = await createTaskWithManualRetries()
+			const task = await createTaskWithAutoApproval(false)
 			let retryHistory: ApiMessage[] | undefined
 			let retryUserMessageCount: number | undefined
 
@@ -451,20 +516,461 @@ describe("Cline", () => {
 			expect(retryUserMessageCount).toBe(1)
 		})
 
-		it("restores the user message and records the failure when retry is declined", async () => {
-			const task = await createTaskWithManualRetries()
+		it("stops an approved empty-response retry when restoring the user message cannot persist", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+			let originalUserMessage: ApiMessage | undefined
 
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
-			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				originalUserMessage ??= structuredClone(task.apiConversationHistory[0])
+				return stream([])
+			})
+			vi.spyOn(access, "saveApiConversationHistory").mockResolvedValueOnce(true).mockResolvedValue(false)
+			const retrySaveSpy = vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await expect(
+				task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }]),
+			).resolves.toBe(true)
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(retrySaveSpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toEqual([originalUserMessage])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
+		it("stops the outer task loop when retry restoration cannot persist", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(access, "saveApiConversationHistory").mockResolvedValueOnce(true).mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await access.initiateTaskLoop([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([{ type: "text", text: "original user request" }]),
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
+		it("restores the user message and records the failure when retry is declined", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			let originalUserMessage: ApiMessage | undefined
+
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				// Capture the persisted identity of the user message before the
+				// empty-response path removes and later restores it.
+				originalUserMessage ??= structuredClone(task.apiConversationHistory[0])
+				return stream([])
+			})
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
-			expect(task.apiConversationHistory).toMatchObject([
-				{ role: "user", content: [{ type: "text", text: "original user request" }] },
-				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
-			])
+			expect(result).toBe(true)
+			expect(askSpy.mock.calls[0]?.[1]).toBe(
+				"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
+			)
+			expect(task.apiConversationHistory).toHaveLength(2)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(task.apiConversationHistory[1]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Failure: I did not provide a response." }],
+			})
+			// The restore must keep the original record identity so the
+			// merge-on-save does not duplicate the user turn on disk.
+			expect(task.apiConversationHistory[0]?.messageId).toBe(originalUserMessage?.messageId)
+			expect(task.apiConversationHistory[0]?.ts).toBe(originalUserMessage?.ts)
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("does not retry when the response ends with stop_reason max_tokens and no usable content", async () => {
+			// Auto-approval is on to prove the max_tokens branch stops instead of
+			// silently auto-retrying (and re-billing the full context).
+			const task = await createTaskWithAutoApproval(true)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi.spyOn(task, "ask")
+			let originalUserMessage: ApiMessage | undefined
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				originalUserMessage ??= structuredClone(task.apiConversationHistory[0])
+				return stream([
+					{ type: "reasoning", text: "reasoning that consumed the whole output budget" },
+					{ type: "usage", inputTokens: 1000, outputTokens: 8192, stopReason: "max_tokens" },
+				])
+			})
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(true)
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy).not.toHaveBeenCalled()
+			expect(
+				saySpy.mock.calls.some(
+					([type, text]) => type === "error" && typeof text === "string" && text.includes("max_tokens"),
+				),
+			).toBe(true)
+			expect(task.apiConversationHistory).toHaveLength(2)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(task.apiConversationHistory[1]).toMatchObject({
+				role: "assistant",
+				content: [
+					{
+						type: "text",
+						text: "Failure: response hit the max output token limit before producing any visible content.",
+					},
+				],
+			})
+			// The restore must keep the original record identity so the
+			// merge-on-save does not duplicate the user turn on disk.
+			expect(task.apiConversationHistory[0]?.messageId).toBe(originalUserMessage?.messageId)
+			expect(task.apiConversationHistory[0]?.ts).toBe(originalUserMessage?.ts)
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("stops the outer task loop when max_tokens restoration cannot persist", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const access = getTaskTestAccess(task)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				stream([
+					{ type: "reasoning", text: "reasoning exhausted the output budget" },
+					{ type: "usage", inputTokens: 1000, outputTokens: 8192, stopReason: "max_tokens" },
+				]),
+			)
+			vi.spyOn(access, "saveApiConversationHistory").mockResolvedValueOnce(true).mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await access.initiateTaskLoop([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([{ type: "text", text: "original user request" }]),
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
+		it("bounds automatic empty-response retries and asks the user after the cap", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(true)
+			// Initial attempt + MAX_AUTOMATIC_API_RETRIES (3) automatic retries.
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+			// Every automatic retry was announced via the visible countdown:
+			// one final (non-partial) announcement per retry.
+			const retryAnnouncements = saySpy.mock.calls.filter(
+				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+			)
+			expect(retryAnnouncements).toHaveLength(3)
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy.mock.calls[0]?.[0]).toBe("api_req_failed")
+			expect(askSpy.mock.calls[0]?.[1]).toContain("Automatic retries were attempted 3 times without success.")
+			expect(task.apiConversationHistory).toHaveLength(2)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(task.apiConversationHistory[1]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Failure: I did not provide a response." }],
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("does not pop pre-existing history when an empty continuation is exhausted", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const priorHistory: ApiMessage[] = [
+				{ role: "user", content: [{ type: "text", text: "prior request" }], messageId: "prior-user", ts: 1 },
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "prior response" }],
+					messageId: "prior-assistant",
+					ts: 2,
+				},
+			]
+			const originalPriorHistory = structuredClone(priorHistory)
+			await task.overwriteApiConversationHistory(priorHistory, false)
+			task.messageCounts = { user: 1, assistant: 1 }
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+
+			const result = await task.recursivelyMakeClineRequests([])
+
+			expect(result).toBe(true)
+			expect(task.apiConversationHistory).toHaveLength(3)
+			expect(task.apiConversationHistory.slice(0, 2)).toEqual(originalPriorHistory)
+			expect(task.apiConversationHistory[2]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Failure: I did not provide a response." }],
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 2 })
+		})
+
+		it("rolls back a terminal failure record when persistence fails", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(getTaskTestAccess(task), "saveApiConversationHistory")
+				.mockResolvedValueOnce(true)
+				.mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await expect(
+				task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }]),
+			).resolves.toBe(true)
+
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]?.role).toBe("user")
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
+		it("keeps the restored user turn and skips terminal recording when restore persistence fails", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(getTaskTestAccess(task), "saveApiConversationHistory")
+				.mockResolvedValueOnce(true)
+				.mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([{ type: "text", text: "original user request" }]),
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+	})
+
+	describe("mid-stream retries", () => {
+		function failingStream(error: Error): AsyncGenerator<ApiStreamChunk> {
+			return (async function* () {
+				// Yield one chunk first so the failure is genuinely mid-stream.
+				yield { type: "text", text: "partial output" }
+				throw error
+			})()
+		}
+
+		it("announces each automatic retry and asks the user after the cap is exhausted", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			vi.mocked(getEnvironmentDetails).mockClear()
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			let originalUserMessage: ApiMessage | undefined
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				originalUserMessage ??= structuredClone(task.apiConversationHistory[0])
+				return failingStream(new Error("overloaded_error"))
+			})
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(true)
+			// Initial attempt + MAX_AUTOMATIC_API_RETRIES (3) automatic retries.
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+			// Retries must not resend file details: no request in the retry
+			// loop includes them.
+			const envDetailCalls = vi.mocked(getEnvironmentDetails).mock.calls
+			expect(envDetailCalls).toHaveLength(4)
+			expect(envDetailCalls.every((call) => call[1] === false)).toBe(true)
+			// Every automatic retry ran through the visible backoff countdown:
+			// one final (non-partial) announcement per retry.
+			const retryAnnouncements = saySpy.mock.calls.filter(
+				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+			)
+			expect(retryAnnouncements).toHaveLength(3)
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy.mock.calls[0]?.[0]).toBe("api_req_failed")
+			expect(askSpy.mock.calls[0]?.[1]).toContain("4 times mid-response")
+			// Declined retry surfaces the error and records the failure without
+			// losing or duplicating the user message.
+			expect(
+				saySpy.mock.calls.some(
+					([type, text]) => type === "error" && typeof text === "string" && text.includes("was not retried"),
+				),
+			).toBe(true)
+			expect(task.apiConversationHistory).toHaveLength(2)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(task.apiConversationHistory[1]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Failure: the API stream failed mid-response." }],
+			})
+			// The restore must keep the original record identity so the
+			// merge-on-save does not duplicate the user turn on disk.
+			expect(task.apiConversationHistory[0]?.messageId).toBe(originalUserMessage?.messageId)
+			expect(task.apiConversationHistory[0]?.ts).toBe(originalUserMessage?.ts)
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("requires approval before retrying when auto-approval is disabled", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const saySpy = vi.spyOn(task, "say")
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => failingStream(new Error("overloaded_error")))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(true)
+			// No request or countdown starts until the user explicitly approves.
+			const retryAnnouncements = saySpy.mock.calls.filter(
+				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+			)
+			expect(retryAnnouncements).toHaveLength(0)
+			expect(askSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy.mock.calls[0]?.[1]).toContain("The API stream failed mid-response.")
+			expect(vi.mocked(task.attemptApiRequest)).toHaveBeenCalledTimes(1)
+		})
+
+		it("requires approval before retrying after a tool has executed", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				(async function* () {
+					yield { type: "text", text: "partial output" } as ApiStreamChunk
+					task.didAlreadyUseTool = true
+					throw new Error("overloaded_error")
+				})(),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("failed mid-response"))
+		})
+
+		it("shows the retry countdown after explicit approval", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const saySpy = vi.spyOn(task, "say")
+			vi.spyOn(task, "ask")
+				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => failingStream(new Error("overloaded_error")))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(task.attemptApiRequest).toHaveBeenCalledTimes(2)
+			expect(vi.mocked(task.attemptApiRequest).mock.calls[1]?.[0]).toBe(0)
+			expect(
+				saySpy.mock.calls.filter(
+					([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
+				),
+			).toHaveLength(1)
+			expect(saySpy).toHaveBeenCalledWith("api_req_retried")
+		})
+
+		it("does not retry after cancellation during an approved backoff", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => failingStream(new Error("overloaded_error")))
+			vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockImplementation(async () => {
+				task.abort = true
+			})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("resets the retry budget without duplicating the user message when the user approves retry", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			vi.mocked(getEnvironmentDetails).mockClear()
+			let askCount = 0
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				askCount++
+				// Approve the first capped-retry prompt; decline the one that
+				// follows after the recovered turn fails again.
+				return { response: askCount === 1 ? "yesButtonClicked" : "noButtonClicked" } as TaskAskResult
+			})
+
+			let attempt = 0
+			let originalUserMessage: ApiMessage | undefined
+			let historyAtSuccess: ApiMessage[] | undefined
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				attempt++
+				originalUserMessage ??= structuredClone(task.apiConversationHistory[0])
+				if (attempt === 5) {
+					historyAtSuccess = structuredClone(task.apiConversationHistory)
+					return stream([{ type: "text", text: "recovered" }])
+				}
+				return failingStream(new Error("overloaded_error"))
+			})
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(true)
+			// Attempts 1-4: first turn fails to the cap and is approved.
+			// Attempt 5: recovered text response. Attempts 6-9: the recovered
+			// turn's no-tool follow-up fails to the cap again and is declined.
+			expect(attempt).toBe(9)
+			expect(askCount).toBe(2)
+			// The retried request restored the user message exactly once, keeping
+			// its original persisted identity so the merge-on-save does not
+			// duplicate the turn on disk.
+			expect(historyAtSuccess).toHaveLength(1)
+			expect(historyAtSuccess?.[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(historyAtSuccess?.[0]?.messageId).toBe(originalUserMessage?.messageId)
+			expect(historyAtSuccess?.[0]?.ts).toBe(originalUserMessage?.ts)
+			expect(vi.mocked(getEnvironmentDetails).mock.calls.every((call) => call[1] === false)).toBe(true)
+			// Final history: original user turn, recovered assistant turn, the
+			// follow-up user turn, and the recorded failure.
+			expect(task.messageCounts).toEqual({ user: 2, assistant: 2 })
+		})
+	})
+
+	describe("ask lifecycle cleanup", () => {
+		it("clears the api_req_failed idle timer before throwing after cancellation", async () => {
+			vi.useFakeTimers()
+			const task = await createTaskWithAutoApproval(false)
+			const idleListener = vi.fn()
+			const clearTimeoutSpy = vi.spyOn(global, "clearTimeout")
+			task.on(RooCodeEventName.TaskIdle, idleListener)
+			vi.mocked(pWaitFor).mockImplementationOnce(async (predicate) => {
+				task.abort = true
+				predicate()
+			})
+
+			await expect(task.ask("api_req_failed", "retry?")).rejects.toThrow("aborted")
+			await vi.advanceTimersByTimeAsync(2_000)
+
+			expect(idleListener).not.toHaveBeenCalled()
+			expect(clearTimeoutSpy).toHaveBeenCalled()
+			vi.useRealTimers()
 		})
 	})
 
@@ -560,12 +1066,7 @@ describe("Cline", () => {
 			// If the scope were shared across retries, the old partial state for
 			// "call_stale" would still be in the WeakMap when the retry runs,
 			// and could corrupt finalization of "call_fresh".
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "retry scope test",
-				startTask: false,
-			})
+			const task = await createTaskWithAutoApproval(true)
 
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)

@@ -1,9 +1,11 @@
 // npx vitest run src/api/providers/__tests__/anthropic.spec.ts
 
 import { AnthropicHandler } from "../anthropic"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { prepareApiConversationMessage } from "../../../core/task/apiConversationHistory"
 
 // Mock TelemetryService
 vitest.mock("@roo-code/telemetry", () => ({
@@ -858,6 +860,463 @@ describe("AnthropicHandler", () => {
 			const calledMessages = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].messages
 			expect(calledMessages.length).toBe(2) // Only the two user messages
 			expect(calledMessages.every((m: any) => m.role === "user")).toBe(true)
+		})
+
+		it("should preserve signed thinking and redacted_thinking blocks unchanged", async () => {
+			handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-5-sonnet-20241022",
+			})
+
+			// Signed thinking blocks must round-trip unmodified so tool-use
+			// continuations pass Anthropic's signature verification.
+			const signedThinkingBlock = {
+				type: "thinking" as const,
+				thinking: "previous reasoning",
+				signature: "abc123",
+			}
+			const redactedThinkingBlock = {
+				type: "redacted_thinking" as const,
+				data: "encrypted-blob",
+			}
+			const messagesWithThinking: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: "Hello",
+				},
+				{
+					role: "assistant",
+					content: [signedThinkingBlock, redactedThinkingBlock, { type: "text", text: "The response" }],
+				},
+				{
+					role: "user",
+					content: "Continue",
+				},
+			]
+
+			const stream = handler.createMessage(systemPrompt, messagesWithThinking)
+			await collectStream(stream)
+
+			const calledMessages = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+				.messages as Anthropic.Messages.MessageParam[]
+			const assistantMessage = calledMessages.find((m) => m.role === "assistant")
+			expect(assistantMessage).toBeDefined()
+			expect(assistantMessage?.content).toEqual([
+				signedThinkingBlock,
+				redactedThinkingBlock,
+				expect.objectContaining({ type: "text", text: "The response" }),
+			])
+		})
+	})
+
+	describe("stop reason and thinking signatures", () => {
+		const systemPrompt = "You are a helpful assistant."
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [{ type: "text" as const, text: "Hi" }],
+			},
+		]
+
+		it("propagates stop_reason from message_delta on the usage chunk", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "burning the budget" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "max_tokens", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+			expect(usageChunks.some((chunk) => chunk.stopReason === "max_tokens")).toBe(true)
+		})
+
+		it("captures signature_delta events and exposes the completed thinking signature", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "deep thought" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "sig-part-1" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "-part-2" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "text", text: "answer" },
+					},
+					{ type: "content_block_stop", index: 1 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([
+				{ type: "thinking_complete", signature: "sig-part-1-part-2" },
+			])
+			expect(handler.getThoughtSignature()).toBe("sig-part-1-part-2")
+		})
+
+		it("keeps each thinking block paired with its own signature across multiple blocks", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "first thought" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "sig-one" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
+					},
+					{ type: "content_block_stop", index: 1 },
+					{
+						type: "content_block_start",
+						index: 2,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 2,
+						delta: { type: "thinking_delta", thinking: "second thought" },
+					},
+					{
+						type: "content_block_delta",
+						index: 2,
+						delta: { type: "signature_delta", signature: "sig-two" },
+					},
+					{ type: "content_block_stop", index: 2 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([
+				{ type: "thinking_complete", signature: "sig-one" },
+				{ type: "thinking_complete", signature: "sig-two" },
+			])
+			expect(handler.getThoughtSignature()).toBe("sig-two")
+			expect(handler.getThinkingBlocks()).toEqual([
+				{ thinking: "first thought", signature: "sig-one" },
+				{ thinking: "second thought", signature: "sig-two" },
+			])
+		})
+
+		it("round-trips multiple signed thinking blocks into a tool-result continuation", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 1 } } },
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "one", signature: "" },
+					},
+					{ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-one" } },
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "thinking", thinking: "two", signature: "" },
+					},
+					{ type: "content_block_delta", index: 1, delta: { type: "signature_delta", signature: "sig-two" } },
+					{ type: "content_block_stop", index: 1 },
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+			const assistant = prepareApiConversationMessage({
+				message: {
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: {} }],
+				},
+				reasoning: "one\ntwo",
+				api: handler,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+				},
+				apiConversationHistory: [],
+			})
+
+			await collectStream(
+				handler.createMessage(systemPrompt, [
+					assistant,
+					{ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "done" }] },
+				]),
+			)
+
+			const continuation = mockCreate.mock.calls.at(-1)?.[0].messages as Anthropic.Messages.MessageParam[]
+			expect(continuation[0]?.content).toEqual([
+				{ type: "thinking", thinking: "one", signature: "sig-one" },
+				{ type: "thinking", thinking: "two", signature: "sig-two" },
+				{ type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
+			])
+		})
+
+		it("ignores thinking deltas that arrive for a different block index", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "real thought" },
+					},
+					// Malformed stream: a thinking delta for a block that is not the
+					// open thinking block must not pollute the signed block text.
+					{
+						type: "content_block_delta",
+						index: 1,
+						delta: { type: "thinking_delta", thinking: "stray" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "sig" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(handler.getThinkingBlocks()).toEqual([{ thinking: "real thought", signature: "sig" }])
+		})
+
+		it("ignores signature deltas that arrive for a different block index", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 1 } } },
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "thought", signature: "" },
+					},
+					{ type: "content_block_delta", index: 1, delta: { type: "signature_delta", signature: "stray" } },
+					{ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "correct" } },
+					{ type: "content_block_stop", index: 0 },
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(handler.getThinkingBlocks()).toEqual([{ thinking: "thought", signature: "correct" }])
+		})
+
+		it("does not complete a thinking block when content_block_stop arrives for a different index", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "unclosed" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "sig" },
+					},
+					// Malformed stream: a stop for another block must not finalize
+					// the open thinking block.
+					{ type: "content_block_stop", index: 1 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([])
+			expect(handler.getThoughtSignature()).toBeUndefined()
+			expect(handler.getThinkingBlocks()).toBeUndefined()
+		})
+
+		it("does not emit a thinking block completed without a signature", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "unsigned thought" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([])
+			expect(handler.getThoughtSignature()).toBeUndefined()
+			expect(handler.getThinkingBlocks()).toBeUndefined()
+		})
+
+		it("clears a previously captured signature when the next response has no signed thinking block", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "", signature: "" },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "stale-signature" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+			expect(handler.getThoughtSignature()).toBe("stale-signature")
+
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: { usage: { input_tokens: 10, output_tokens: 1 } },
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "text", text: "plain answer" },
+					},
+					{ type: "content_block_stop", index: 0 },
+					{
+						type: "message_delta",
+						delta: { stop_reason: "end_turn", stop_sequence: null },
+						usage: { output_tokens: 5 },
+					},
+					{ type: "message_stop" },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks.filter((chunk) => chunk.type === "thinking_complete")).toEqual([])
+			expect(handler.getThoughtSignature()).toBeUndefined()
+			expect(handler.getThinkingBlocks()).toBeUndefined()
 		})
 	})
 
