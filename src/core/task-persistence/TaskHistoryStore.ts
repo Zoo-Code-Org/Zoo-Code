@@ -68,6 +68,12 @@ interface WriteTaskFileOptions {
 	capturePreImage?: (preImage: TaskFilePreImage) => void
 }
 
+interface UpsertCoreOptions {
+	skipTransitionCheck?: boolean
+	existing?: HistoryItem
+	heldLock?: JsonFileLock
+}
+
 /**
  * TaskHistoryStore encapsulates all task history persistence logic.
  *
@@ -239,11 +245,8 @@ export class TaskHistoryStore {
 	 * Pass `skipTransitionCheck: true` only for administrative repairs (reconciliation,
 	 * migration) that need to write corrected state outside the normal task lifecycle.
 	 */
-	private async upsertCore(
-		item: HistoryItem,
-		options: { skipTransitionCheck?: boolean } = {},
-	): Promise<HistoryItem[]> {
-		const existing = this.cache.get(item.id)
+	private async upsertCore(item: HistoryItem, options: UpsertCoreOptions = {}): Promise<HistoryItem[]> {
+		const existing = options.existing ?? this.cache.get(item.id)
 
 		// Enforce transition validity at the write boundary so that any caller
 		// (including fire-and-forget saves) cannot silently stomp a terminal status.
@@ -273,7 +276,7 @@ export class TaskHistoryStore {
 		const delta = existing ? this.buildDelta(item.id, existing, item) : { ...item }
 		let written: HistoryItem
 		try {
-			written = await this.writeTaskFile(merged, delta)
+			written = await this.writeTaskFile(merged, delta, undefined, { heldLock: options.heldLock })
 		} catch (error) {
 			if (error instanceof DeltaRejectedError) {
 				const diskItem = await this.readTaskFile(item.id)
@@ -972,8 +975,6 @@ export class TaskHistoryStore {
 		const filePath = await this.getTaskFilePath(taskId)
 		const fileLock = heldLock ?? (await lockJsonFile(filePath))
 		try {
-			const compromiseError = fileLock.getCompromiseError()
-			if (compromiseError) throw compromiseError
 			const current = await this.readTaskFile(taskId)
 			if (!current && fsSync.existsSync(filePath))
 				throw new Error(`cannot restore absent task ${taskId} from invalid state`)
@@ -1006,13 +1007,15 @@ export class TaskHistoryStore {
 			throw new Error(`cannot compensate ${taskId}: pre-image was invalid`)
 		}
 		try {
-			await safeWriteJson(await this.getTaskFilePath(taskId), preImage, {
+			const filePath = await this.getTaskFilePath(taskId)
+			await safeWriteJson(filePath, preImage, {
 				heldLock,
 				merge: (existing) => {
-					if (!existing || typeof existing !== "object" || !("id" in existing)) {
+					const current = this.toTaskFilePreImage(taskId, filePath, existing)
+					if (typeof current === "string") {
 						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
 					}
-					if (!expectedWritten.some((candidate) => deepEqual(existing, candidate))) {
+					if (!expectedWritten.some((candidate) => deepEqual(current, candidate))) {
 						throw new Error(`cannot compensate ${taskId} after concurrent update`)
 					}
 					return preImage
@@ -1191,21 +1194,7 @@ export class TaskHistoryStore {
 				const current = (await this.readTaskFile(taskId)) ?? cached
 				const updated = updater(structuredClone(current))
 				if (updated.id !== taskId) throw new Error(`Task updater changed id from ${taskId} to ${updated.id}`)
-				if (updated.status !== undefined) {
-					const currentStatus: HistoryItemStatus = current.status ?? "active"
-					if (updated.status !== currentStatus) {
-						assertValidTransition(current.status, updated.status)
-					}
-				}
-
-				const merged = { ...current, ...updated }
-				const written = await this.writeTaskFile(merged, this.buildDelta(taskId, current, updated), undefined, {
-					heldLock: fileLock,
-				})
-				this.cache.set(taskId, written)
-				const all = this.getAll()
-				if (this.onWrite) await this.onWrite(all)
-				return all
+				return this.upsertCore(updated, { existing: current, heldLock: fileLock })
 			} finally {
 				if (!options.fileLock) await fileLock()
 			}
@@ -1279,32 +1268,22 @@ export class TaskHistoryStore {
 			const ownsFirstFileLock = Boolean(firstFileLock && !suppliedFirstFileLock)
 
 			try {
-				let firstDiskSnapshot: TaskFilePreImage | undefined
+				let firstDiskSnapshot!: TaskFilePreImage
 				const firstDiskGuard = options?.firstDiskGuard
-				const captureFirst = options?.rollbackBothOnCallbackFailure
-					? (preImage: TaskFilePreImage) => {
-							firstDiskSnapshot = preImage
-						}
-					: undefined
 				const firstDelta = this.buildDelta(firstId, first, updatedFirst)
 				const writtenFirst = await this.writeTaskFile(mergedFirst, firstDelta, firstDiskGuard, {
 					heldLock: firstFileLock,
-					capturePreImage: captureFirst,
+					capturePreImage: (preImage) => (firstDiskSnapshot = preImage),
 				})
 				let secondDiskSnapshot: TaskFilePreImage | undefined
 				const secondDelta = this.buildDelta(secondId, second, updatedSecond)
-				const captureSecond = options?.rollbackBothOnCallbackFailure
-					? (preImage: TaskFilePreImage) => {
-							secondDiskSnapshot = preImage
-						}
-					: undefined
 				let writtenSecond: HistoryItem
 				try {
 					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, undefined, {
-						capturePreImage: captureSecond,
+						capturePreImage: (preImage) => (secondDiskSnapshot = preImage),
 					})
 				} catch (error) {
-					if (options?.rollbackBothOnCallbackFailure && firstDiskSnapshot) {
+					if (options?.rollbackBothOnCallbackFailure) {
 						const expectedFirst = Array.of(JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem)
 						const firstRestoration: TaskFileRestoration = [
 							firstId,
