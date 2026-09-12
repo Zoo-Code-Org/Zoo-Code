@@ -831,6 +831,7 @@ describe("TerminalRegistry", () => {
 			const process = new TerminalProcess(terminal)
 			terminal.process = process
 			terminal.busy = true
+			terminal.running = true
 			const noShellSpy = vi.fn()
 			const completedSpy = vi.fn()
 			const continueSpy = vi.fn()
@@ -849,6 +850,7 @@ describe("TerminalRegistry", () => {
 			expect(terminal.process).toBeUndefined()
 			expect(terminal["activeProcesses"].size).toBe(0)
 			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
 			expect(terminal.isStreamClosed).toBe(true)
 			expect(process["finalizedBeforeExecution"]).toBe(true)
 			expect(process.eventNames()).toEqual([])

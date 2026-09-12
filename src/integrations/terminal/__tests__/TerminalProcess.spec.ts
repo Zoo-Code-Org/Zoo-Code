@@ -324,9 +324,11 @@ describe("TerminalProcess", () => {
 			const oldExecution = { commandLine: { value: "old" } } as vscode.TerminalShellExecution
 			mockTerminal.shellIntegration.executeCommand.mockReturnValue(oldExecution)
 			vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const oldProcess = new TerminalProcess(mockTerminalInfo)
+			mockTerminalInfo.process = oldProcess
 
-			const oldRun = terminalProcess.run("old command")
-			terminalProcess.emit("stream_available", stream)
+			const oldRun = oldProcess.run("old command")
+			oldProcess.emit("stream_available", stream)
 			await Promise.resolve()
 
 			const currentProcess = new TerminalProcess(mockTerminalInfo)
@@ -344,7 +346,7 @@ describe("TerminalProcess", () => {
 			expect(mockTerminalInfo.activeShellExecution).toBe(currentExecution)
 			expect(mockTerminalInfo.busy).toBe(true)
 			expect(mockTerminalInfo.running).toBe(true)
-			expect(mockTerminalInfo["activeProcesses"]).not.toContain(terminalProcess)
+			expect(mockTerminalInfo["activeProcesses"]).not.toContain(oldProcess)
 			expect(mockTerminalInfo["activeProcesses"]).toContain(currentProcess)
 
 			mockTerminalInfo.handleClose()
