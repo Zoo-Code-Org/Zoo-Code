@@ -84,11 +84,10 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-// Built per call, not shared at module scope: the parameter scan returns early from its `/g` exec
-// loop when a value fails its schema, so a shared instance would resume from that stale `lastIndex`.
-const leakedInvokeBlockPattern = () => /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
-const leakedInvokeParamPattern = () =>
-	/<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
+// Scanned with `matchAll`, which iterates a private clone: these `/g` instances keep a `lastIndex`
+// of 0, so a scan that stops early (a parameter failing its schema) cannot strand the next caller.
+const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
+const LEAKED_INVOKE_PARAM = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
 
 /** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
@@ -98,7 +97,7 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
  * deliberately narrow lexical cue: a quoted invoke that ENDS its line is otherwise
  * indistinguishable from a genuine leak, which is just as often preceded by prose.
  */
-const quotingCuePattern = () =>
+const QUOTING_CUE =
 	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
 
 /**
@@ -196,7 +195,7 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off leading prose
 	// alone regressed genuine recoveries, since a real leak is commonly narrated too, so only an
 	// explicit quoting cue suppresses it.
-	return quotingCuePattern().test(stripTagsCompletely(sameLineBefore))
+	return QUOTING_CUE.test(stripTagsCompletely(sameLineBefore))
 }
 
 /**
@@ -208,8 +207,8 @@ export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | un
 
 /**
  * Non-string JSON Schema types a leaked parameter may be converted into, each paired with the
- * check that a parsed value must satisfy. `null` maps to a never-satisfied check because an
- * explicit null is settled by the nullable test before this table is consulted.
+ * check that a parsed value must satisfy. A null-only declaration is settled by its own branch in
+ * `convertLeakedParamValue` and so has no entry here.
  */
 function structuredParamCheck(declaredType: string): ((parsed: unknown) => boolean) | undefined {
 	const checks: Record<string, (parsed: unknown) => boolean> = {
@@ -218,7 +217,6 @@ function structuredParamCheck(declaredType: string): ((parsed: unknown) => boole
 		number: (parsed) => Number.isFinite(parsed),
 		integer: (parsed) => Number.isInteger(parsed),
 		boolean: (parsed) => typeof parsed === "boolean",
-		null: () => false,
 	}
 	// Own-property only: a schema declaring `"toString"` would otherwise inherit a live function
 	// from Object.prototype and be treated as a supported type.
@@ -292,6 +290,10 @@ function convertLeakedParamValue(raw: string, declared: DeclaredType | undefined
 	if (declared === undefined || declared.type === "string") {
 		return { value: raw }
 	}
+	// A null-only declaration admits the literal null and nothing else, so no parse is needed.
+	if (declared.type === "null") {
+		return raw === "null" ? { value: null } : undefined
+	}
 	const matchesDeclaredType = structuredParamCheck(declared.type)
 	if (!matchesDeclaredType) {
 		return undefined
@@ -321,9 +323,7 @@ function parseLeakedInvokeParams(
 	schema: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
 	const input: Record<string, unknown> = {}
-	const paramPattern = leakedInvokeParamPattern()
-	let match: RegExpExecArray | null
-	while ((match = paramPattern.exec(body)) !== null) {
+	for (const match of body.matchAll(LEAKED_INVOKE_PARAM)) {
 		const name = match[1]
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
 		if (!converted) {
@@ -350,16 +350,12 @@ export function extractLeakedToolCalls(
 	const schemaFor = (name: string) =>
 		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
 	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
-	// Text between recovered/passed-through blocks, kept as segments so the wrapper cleanup below
-	// only touches segments adjacent to a block that was actually recovered.
-	const segments: Array<{ text: string; nearRecovery: boolean }> = []
-	let pending = ""
+	// Text outside recovered blocks, in stream order.
+	let leftover = ""
 	let lastIndex = 0
 
-	const blockPattern = leakedInvokeBlockPattern()
-	let match: RegExpExecArray | null
-	while ((match = blockPattern.exec(text)) !== null) {
-		pending += text.slice(lastIndex, match.index)
+	for (const match of text.matchAll(LEAKED_INVOKE_BLOCK)) {
+		leftover += text.slice(lastIndex, match.index)
 		const name = match[1]
 		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
 		const recoverable =
@@ -374,34 +370,20 @@ export function extractLeakedToolCalls(
 		const input = recoverable ? parseLeakedInvokeParams(match[2], schemaFor(name)) : undefined
 		if (input) {
 			calls.push({ name, input })
-			segments.push({ text: pending, nearRecovery: true })
-			pending = ""
-			// The segment that follows a recovery also holds that call's closing wrapper.
-			segments.push({ text: "", nearRecovery: true })
 		} else {
 			// Not one of our tools, quoted as code, or un-convertible — keep the block as literal text.
-			pending += match[0]
+			leftover += match[0]
 		}
 		lastIndex = match.index + match[0].length
 	}
-	pending += text.slice(lastIndex)
-	// A recovery always ends with an empty placeholder segment reserved for its closing wrapper, so
-	// remaining text belongs there rather than in a segment of its own.
-	const lastSegment = segments.at(-1)
-	if (lastSegment?.nearRecovery) {
-		lastSegment.text = pending
-	} else {
-		segments.push({ text: pending, nearRecovery: false })
-	}
+	leftover += text.slice(lastIndex)
 
-	// Remove the wrapper tags belonging to a recovered call (cosmetic; also avoids re-teaching the
-	// model this format when the turn is sent back as history). Wrappers around blocks that were
-	// NOT recovered are user-visible text and must survive verbatim.
-	const leftover = segments
-		.map((segment) =>
-			segment.nearRecovery ? segment.text.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "") : segment.text,
-		)
-		.join("")
+	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
+	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
+	// With nothing recovered the same tags are user-visible prose and must survive verbatim.
+	if (calls.length > 0) {
+		leftover = leftover.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "")
+	}
 
 	return { calls, leftoverText: leftover }
 }
