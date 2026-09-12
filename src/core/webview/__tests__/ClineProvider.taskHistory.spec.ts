@@ -1,3 +1,4 @@
+import { makeEventEmitter } from "../../../test-utils/vscode"
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.taskHistory.spec.ts
 
 import * as vscode from "vscode"
@@ -99,6 +100,9 @@ vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
 }))
 
 vi.mock("vscode", () => ({
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return makeEventEmitter()
+	}),
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
