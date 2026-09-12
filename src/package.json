@@ -441,8 +441,6 @@
 	"scripts": {
 		"lint": "eslint . --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
-		"pretest": "turbo run bundle --cwd ..",
-		"pretest:coverage": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"format": "prettier --write .",
