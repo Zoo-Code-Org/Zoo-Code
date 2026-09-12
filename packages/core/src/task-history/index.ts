@@ -31,6 +31,10 @@ export function isValidTaskFilePreImage(preImage: TaskFilePreImage): preImage is
 	return preImage !== ABSENT_TASK_FILE_PREIMAGE && preImage !== INVALID_TASK_FILE_PREIMAGE
 }
 
+export function expectedTaskFileStates(written: HistoryItem, preImage: TaskFilePreImage): HistoryItem[] {
+	return isValidTaskFilePreImage(preImage) ? [written, preImage] : [written]
+}
+
 export function matchesExpectedHistoryItem(
 	item: HistoryItem,
 	expected: readonly HistoryItem[],

@@ -7,6 +7,7 @@ import type { HistoryItem } from "@roo-code/types"
 import {
 	ABSENT_TASK_FILE_PREIMAGE,
 	INVALID_TASK_FILE_PREIMAGE,
+	expectedTaskFileStates,
 	isValidTaskFilePreImage,
 	matchesExpectedHistoryItem,
 	readTaskSessionsFromStoragePath,
@@ -148,6 +149,9 @@ describe("task file pre-images", () => {
 		expect(isValidTaskFilePreImage(item)).toBe(true)
 		expect(isValidTaskFilePreImage(ABSENT_TASK_FILE_PREIMAGE)).toBe(false)
 		expect(isValidTaskFilePreImage(INVALID_TASK_FILE_PREIMAGE)).toBe(false)
+		expect(expectedTaskFileStates(item, { ...item })).toEqual([item, item])
+		expect(expectedTaskFileStates(item, ABSENT_TASK_FILE_PREIMAGE)).toEqual([item])
+		expect(expectedTaskFileStates(item, INVALID_TASK_FILE_PREIMAGE)).toEqual([item])
 		expect(matchesExpectedHistoryItem(item, [{ ...item }], (left, right) => left.id === right.id)).toBe(true)
 		expect(matchesExpectedHistoryItem(item, [], (left, right) => left.id === right.id)).toBe(false)
 	})

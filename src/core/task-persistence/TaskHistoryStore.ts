@@ -8,6 +8,7 @@ import type { HistoryItem } from "@roo-code/types"
 import {
 	ABSENT_TASK_FILE_PREIMAGE,
 	INVALID_TASK_FILE_PREIMAGE,
+	expectedTaskFileStates,
 	isValidTaskFilePreImage,
 	matchesExpectedHistoryItem,
 	taskFilePreImage,
@@ -1279,11 +1280,8 @@ export class TaskHistoryStore {
 								? secondDiskSnapshot
 								: null
 							const expectedSecond = mergeSecond(secondPreImage, mergedSecond) as HistoryItem
-							const expectedSecondStates = Array.of(
-								JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem,
-							)
-							if (isValidTaskFilePreImage(secondDiskSnapshot))
-								expectedSecondStates.unshift(secondDiskSnapshot)
+							const persistedSecond = JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem
+							const expectedSecondStates = expectedTaskFileStates(persistedSecond, secondDiskSnapshot)
 							restorations.unshift([secondId, secondDiskSnapshot, expectedSecondStates])
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
