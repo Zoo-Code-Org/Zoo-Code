@@ -1,5 +1,5 @@
-type Phase = "idle" | "waiting" | "running" | "completed" | "closed"
-type Action = "run" | "wait" | "track-process" | "activate" | "output" | "end" | "close"
+type Phase = "idle" | "waiting" | "running" | "completed" | "failed" | "closed"
+type Action = "run" | "wait" | "track-process" | "activate" | "output" | "end" | "error" | "close"
 
 interface ModelState {
 	phase: Phase
@@ -22,8 +22,8 @@ interface TraceStep {
 	state: ModelState
 }
 
-const actions: Action[] = ["run", "wait", "track-process", "activate", "output", "end", "close"]
-const MAX_DEPTH = 8
+const actions: Action[] = ["run", "wait", "track-process", "activate", "output", "end", "error", "close"]
+const MAX_DEPTH = 9
 const MAX_STATES = 500
 
 function initialState(): ModelState {
@@ -85,6 +85,19 @@ function transition(state: ModelState, action: Action): ModelState {
 			return state.phase === "running" && state.output === "" ? { ...state, output: "chunk" } : state
 		case "end":
 			return state.phase === "waiting" || state.phase === "running" ? complete(state, "completed") : state
+		case "error":
+			return state.phase === "waiting" || state.phase === "running"
+				? {
+						...state,
+						phase: "failed",
+						processAttached: false,
+						iteratorReleased: state.iteratorReleased || state.phase === "running",
+						pendingWaits: 0,
+						settledWaits: state.settledWaits + state.pendingWaits,
+						trackedProcesses: Math.max(0, state.trackedProcesses - 1),
+						settledProcesses: state.settledProcesses + (state.trackedProcesses > 0 ? 1 : 0),
+					}
+				: state
 		case "close":
 			return state.phase === "closed"
 				? state
@@ -140,6 +153,11 @@ const landmarks = {
 		trace.some((step) => step.action === "end") &&
 		trace.at(-1)?.action === "close" &&
 		trace.at(-1)?.state.completionCount === 1,
+	"error-then-close": (trace: TraceStep[]) =>
+		trace.some((step) => step.action === "error") &&
+		trace.at(-1)?.action === "close" &&
+		trace.at(-1)?.state.processAttached === false &&
+		trace.at(-1)?.state.completionCount === 0,
 	"duplicate-close": (trace: TraceStep[]) => trace.filter((step) => step.action === "close").length >= 2,
 	"concurrent-waits-close": (trace: TraceStep[]) =>
 		trace.at(-1)?.action === "close" &&

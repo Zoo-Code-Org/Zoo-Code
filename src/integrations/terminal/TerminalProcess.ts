@@ -32,6 +32,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 	public ownExecution?: vscode.TerminalShellExecution
 	private terminalCloseHandled = false
 	private finalizedBeforeExecution = false
+	private errorHandled = false
 
 	constructor(terminal: Terminal) {
 		super()
@@ -44,7 +45,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 			this.terminal.busy = false
 		})
 
-		this.once("error", () => this.terminal.releaseProcess(this))
 		this.once("shell_execution_complete", () => this.terminal.releaseProcess(this))
 
 		this.once("no_shell_integration", () => {
@@ -64,7 +64,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 	/** Completes this process when its terminal closes without an execution-end event. */
 	public handleTerminalClosed(): void {
-		if (this.terminalCloseHandled || this.finalizedBeforeExecution) {
+		if (this.terminalCloseHandled || this.finalizedBeforeExecution || this.errorHandled) {
 			return
 		}
 		this.terminalCloseHandled = true
@@ -83,6 +83,28 @@ export class TerminalProcess extends BaseTerminalProcess {
 		// run() has not installed its completion listener yet, so finish the
 		// startup-wait path directly instead of leaving runCommand() pending.
 		this.completeBeforeExecution("")
+	}
+
+	/** Releases a failed process without allowing terminal closure to complete it later. */
+	public handleError(): void {
+		if (this.errorHandled || this.terminalCloseHandled || this.finalizedBeforeExecution) {
+			return
+		}
+		this.errorHandled = true
+
+		const terminal = this.terminal
+		if (terminal.process === this) {
+			terminal.activeShellExecution = undefined
+			terminal.setActiveStream(undefined)
+			terminal.process = undefined
+			terminal.busy = false
+			terminal.running = false
+		}
+		terminal.releaseProcess(this)
+		this.isHot = false
+		this.stopHotTimer()
+		this.cleanupScriptFile()
+		this.removeAllListeners()
 	}
 
 	private completeBeforeExecution(output: string): void {
@@ -218,6 +240,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			// that misses output: the execution begins after the stream was opened,
 			// VSCode doesn't buffer retroactively, and zero chunks arrive.
 		} catch (error) {
+			cancelStreamWait()
 			this.terminal.activeShellExecution = undefined
 			this.cleanupScriptFile()
 			throw error
@@ -267,6 +290,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 			// Emit continue event to allow execution to proceed
 			this.emit("continue")
+			this.handleError()
 			return
 		}
 
@@ -554,6 +578,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 					`<terminal process error: ${streamProcessingError instanceof Error ? streamProcessingError.message : String(streamProcessingError)}>`,
 				)
 				this.emit("continue")
+				this.handleError()
 			}
 		}
 	}

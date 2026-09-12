@@ -96,7 +96,13 @@ export class Terminal extends BaseTerminal {
 				process.handleTerminalClosed()
 			}
 		} else {
-			this.shellExecutionComplete({ exitCode: undefined })
+			this.busy = false
+			this.running = false
+			this.activeShellExecution = undefined
+			this.setActiveStream(undefined)
+			if (!this.process) {
+				this.shellExecutionComplete({ exitCode: undefined })
+			}
 		}
 	}
 
@@ -125,6 +131,7 @@ export class Terminal extends BaseTerminal {
 			process.once("error", (error) => {
 				console.error(`[Terminal ${this.id}] error:`, error)
 				reject(error)
+				process.handleError()
 			})
 
 			if (this.isClosed()) {
