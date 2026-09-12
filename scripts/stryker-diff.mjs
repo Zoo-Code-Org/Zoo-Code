@@ -454,6 +454,10 @@ export function formatAnnotationCommand(annotation) {
 	return `::warning file=${escapeWorkflowProperty(annotation.file)},line=${annotation.line},title=Mutation test advisory::${escapeWorkflowData(annotation.message)}`
 }
 
+export function formatAdvisoryCommand(advisory) {
+	return `::warning title=Mutation test advisory::${escapeWorkflowData(advisory)}`
+}
+
 export function formatAnnotations(blockingMutants, packageRoot, state = { total: 0, perFile: new Map() }) {
 	const annotations = []
 
@@ -578,7 +582,7 @@ export function formatSummary(rows, advisories, manifest = {}) {
 			"const result = condition ? value : fallback",
 			"```",
 			"",
-			"Broad `all` exclusions and exclusions without a concrete reason are rejected by the gate.",
+			"Broad `all` exclusions and exclusions without a concrete reason are reported as advisories.",
 		)
 	}
 
@@ -622,6 +626,7 @@ export function formatSummary(rows, advisories, manifest = {}) {
 }
 
 export function appendSummary(rows, advisories, manifest) {
+	for (const advisory of advisories) console.warn(formatAdvisoryCommand(advisory))
 	if (!process.env.GITHUB_STEP_SUMMARY) return
 	try {
 		fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatSummary(rows, advisories, manifest))

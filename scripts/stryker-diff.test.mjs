@@ -16,6 +16,7 @@ import {
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
+	formatAdvisoryCommand,
 	formatAnnotationCommand,
 	formatBlockingMutants,
 	formatSummary,
@@ -569,6 +570,13 @@ describe("failure output", () => {
 		)
 	})
 
+	it("escapes aggregated advisory warnings", () => {
+		assert.equal(
+			formatAdvisoryCommand("preflight failed: 100%\nretry"),
+			"::warning title=Mutation test advisory::preflight failed: 100%25%0Aretry",
+		)
+	})
+
 	it("reports a Stryker preflight launch error when the binary is missing", () => {
 		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-launch-"))
 		const reportRoot = path.join(repo, "reports")
@@ -608,6 +616,23 @@ describe("failure output", () => {
 			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
 			else process.env.GITHUB_STEP_SUMMARY = previousSummary
 			fs.rmSync(summaryDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("emits aggregated warnings when the GitHub job summary is unavailable", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		delete process.env.GITHUB_STEP_SUMMARY
+		console.warn = (warning) => warnings.push(warning)
+
+		try {
+			appendSummary([], ["manifest invalid\nreview it"], {})
+			assert.deepEqual(warnings, ["::warning title=Mutation test advisory::manifest invalid%0Areview it"])
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
 		}
 	})
 
