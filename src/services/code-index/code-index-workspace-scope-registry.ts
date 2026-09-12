@@ -1,17 +1,13 @@
 import * as vscode from "vscode"
-import { CodeIndexScope } from "./code-index-scope"
+import { CodeIndexWorkspaceScope } from "./code-index-workspace-scope"
 import { CodeIndexDisposalError } from "./errors/code-index-disposal-error"
 
 /** Creates and retains one code index scope per workspace path. */
-export class CodeIndexScopeRegistry {
-	public static readonly instance = new CodeIndexScopeRegistry()
-
-	private scopesByWorkspacePath = new Map<string, CodeIndexScope>()
+export class CodeIndexWorkspaceScopeRegistry {
+	private scopesByWorkspacePath = new Map<string, CodeIndexWorkspaceScope>()
 	private isDisposing = false
 
-	private constructor() {}
-
-	public getScope(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexScope | undefined {
+	public getScope(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexWorkspaceScope | undefined {
 		if (this.isDisposing) {
 			return undefined
 		}
@@ -30,7 +26,7 @@ export class CodeIndexScopeRegistry {
 		// folder may be undefined when workspacePath was provided but doesn't match
 		// any workspace folder (e.g. cwd passed from a tool). Fall back to file:// URI.
 		const folderUri = folder?.uri ?? vscode.Uri.file(resolvedPath)
-		const scope = new CodeIndexScope(resolvedPath, folderUri, context)
+		const scope = new CodeIndexWorkspaceScope(resolvedPath, folderUri, context)
 		this.scopesByWorkspacePath.set(resolvedPath, scope)
 		return scope
 	}
@@ -51,7 +47,11 @@ export class CodeIndexScopeRegistry {
 		return vscode.workspace.workspaceFolders?.[0]
 	}
 
-	public getAllScopes(): CodeIndexScope[] {
+	public getExistingScope(workspacePath: string): CodeIndexWorkspaceScope | undefined {
+		return this.scopesByWorkspacePath.get(workspacePath)
+	}
+
+	public getAllScopes(): CodeIndexWorkspaceScope[] {
 		return Array.from(this.scopesByWorkspacePath.values())
 	}
 
@@ -76,5 +76,3 @@ export class CodeIndexScopeRegistry {
 		}
 	}
 }
-
-export const codeIndexScopeRegistry = CodeIndexScopeRegistry.instance

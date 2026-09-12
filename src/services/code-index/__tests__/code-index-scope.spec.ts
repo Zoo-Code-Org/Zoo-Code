@@ -1,110 +1,122 @@
-import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+import * as vscode from "vscode"
+
 import type { ContextProxy } from "../../../core/config/ContextProxy"
-import type { CodeIndexStatusConsumer } from "../interfaces/status-consumer"
-import { CodeIndexManager } from "../manager"
+import { makeExtensionContext } from "../../../test-utils/vscode"
+import { CodeIndexWorkspaceScopeRegistry } from "../code-index-workspace-scope-registry"
+import { CodeIndexDisposalError } from "../errors/code-index-disposal-error"
 import { CodeIndexScope } from "../code-index-scope"
-import { CodeIndexScopeStatusManager } from "../code-index-scope-status-manager"
-import { CodeIndexStateManager } from "../state-manager"
 
-vi.mock("../state-manager", () => ({
-	CodeIndexStateManager: vi.fn().mockImplementation(function () {
-		return { init: vi.fn(), dispose: vi.fn() }
-	}),
+vi.mock("vscode", () => ({
+	workspace: {
+		workspaceFolders: [],
+	},
 }))
 
-vi.mock("../manager", () => ({
-	CodeIndexManager: vi.fn().mockImplementation(function () {
-		return { initialize: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) }
+vi.mock("../code-index-workspace-scope-registry", () => ({
+	CodeIndexWorkspaceScopeRegistry: vi.fn().mockImplementation(function () {
+		return { getScope: vi.fn(), disposeAll: vi.fn() }
 	}),
 }))
-
-vi.mock("../code-index-scope-status-manager", () => ({
-	CodeIndexScopeStatusManager: vi.fn().mockImplementation(function () {
+vi.mock("../code-index-status-manager", () => ({
+	CodeIndexStatusManager: vi.fn().mockImplementation(function () {
 		return { init: vi.fn(), dispose: vi.fn() }
 	}),
 }))
 
 describe("CodeIndexScope", () => {
-	const statusConsumer = {} as CodeIndexStatusConsumer
+	const context = makeExtensionContext()
+	const contextProxy = {} as ContextProxy
+	const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+	let service: CodeIndexScope
+	let codeIndexWorkspaceScopeRegistry: CodeIndexWorkspaceScopeRegistry
+	const createService = () => service
 
-	beforeEach(() => vi.clearAllMocks())
-
-	function createScope() {
-		const context = makeExtensionContext()
-		const uri = makeUri("/workspace")
-		const scope = new CodeIndexScope(uri.fsPath, uri, context)
-		return { scope, context, uri }
-	}
-
-	function getManager(scope: CodeIndexScope) {
-		return scope.codeIndexManager
-	}
-
-	it("creates and injects dependencies in the constructor without loading manager configuration", () => {
-		const { scope, context, uri } = createScope()
-		expect(CodeIndexStateManager).toHaveBeenCalledExactlyOnceWith()
-		const codeIndexStateManager = vi.mocked(CodeIndexStateManager).mock.results[0].value
-		expect(codeIndexStateManager.init).not.toHaveBeenCalled()
-		expect(CodeIndexManager).toHaveBeenCalledExactlyOnceWith(uri.fsPath, uri, context, codeIndexStateManager)
-		expect(scope.codeIndexManager).toBe(vi.mocked(CodeIndexManager).mock.results[0].value)
-		expect(getManager(scope).initialize).not.toHaveBeenCalled()
+	beforeEach(() => {
+		vi.clearAllMocks()
+		service = new CodeIndexScope(context, contextProxy, outputChannel)
+		codeIndexWorkspaceScopeRegistry = service.workspaceRegistry
+		vi.mocked(vscode.workspace).workspaceFolders = []
 	})
 
-	it("creates a separate state manager for each scope", () => {
-		createScope()
-		createScope()
-		const calls = vi.mocked(CodeIndexManager).mock.calls
-		expect(CodeIndexStateManager).toHaveBeenCalledTimes(2)
-		expect(calls[0][3]).not.toBe(calls[1][3])
+	it("initializes a scope for every workspace folder in the background", async () => {
+		const init = vi.fn().mockResolvedValue(undefined)
+		const folders = ["/workspace/one", "/workspace/two"].map((fsPath, index) => ({
+			uri: { fsPath },
+			name: `workspace-${index}`,
+			index,
+		})) as vscode.WorkspaceFolder[]
+		vi.mocked(vscode.workspace).workspaceFolders = folders
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue({ init } as never)
+
+		await createService().init()
+
+		expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenNthCalledWith(1, context, "/workspace/one")
+		expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenNthCalledWith(2, context, "/workspace/two")
+		expect(init).toHaveBeenCalledTimes(2)
+		expect(init).toHaveBeenCalledWith(contextProxy)
 	})
 
-	it("initializes its manager", async () => {
-		const { scope } = createScope()
-		const manager = getManager(scope)
-		const contextProxy = {} as ContextProxy
+	it("logs background initialization failures", async () => {
+		vi.mocked(vscode.workspace).workspaceFolders = [
+			{ uri: { fsPath: "/workspace/failing" }, name: "failing", index: 0 },
+		] as vscode.WorkspaceFolder[]
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue({
+			init: vi.fn().mockRejectedValue(new Error("configuration failed")),
+		} as never)
 
-		await scope.init(contextProxy, statusConsumer)
+		await createService().init()
 
-		expect(vi.mocked(CodeIndexStateManager).mock.results[0].value.init).toHaveBeenCalledExactlyOnceWith()
-		expect(manager.initialize).toHaveBeenCalledExactlyOnceWith(contextProxy)
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"[CodeIndexManager] Error during background CodeIndexManager configuration/indexing for /workspace/failing: configuration failed",
+		)
 	})
 
-	it("rethrows initialization failures", async () => {
-		const { scope } = createScope()
-		const error = new Error("initialization failed")
-		vi.mocked(getManager(scope).initialize).mockRejectedValue(error)
+	it("disposes status subscriptions before workspace resources", async () => {
+		const service = createService()
+		await service.init()
+		vi.mocked(codeIndexWorkspaceScopeRegistry.disposeAll).mockImplementation(async () => {
+			expect(service.statusManager.dispose).toHaveBeenCalledOnce()
+		})
+		await service.dispose()
 
-		await expect(scope.init({} as ContextProxy, statusConsumer)).rejects.toBe(error)
+		expect(codeIndexWorkspaceScopeRegistry.disposeAll).toHaveBeenCalledTimes(1)
 	})
 
-	it("disposes its resources", async () => {
-		const { scope } = createScope()
-		const codeIndexManager = getManager(scope)
-		const stateManager = vi.mocked(CodeIndexStateManager).mock.results[0].value
-		const statusManager = vi.mocked(CodeIndexScopeStatusManager).mock.results[0].value
-		await scope.dispose()
-		expect(statusManager.dispose).toHaveBeenCalledExactlyOnceWith()
-		expect(codeIndexManager.dispose).toHaveBeenCalledExactlyOnceWith()
-		expect(stateManager.dispose).toHaveBeenCalledExactlyOnceWith()
+	it("starts status subscriptions only after workspace initialization settles", async () => {
+		vi.mocked(vscode.workspace).workspaceFolders = [
+			{ uri: { fsPath: "/workspace" }, name: "workspace", index: 0 },
+		] as vscode.WorkspaceFolder[]
+		const init = vi.fn(async () => {
+			expect(service.statusManager.init).not.toHaveBeenCalled()
+			await Promise.resolve()
+			expect(service.statusManager.init).not.toHaveBeenCalled()
+		})
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue({ init } as never)
+		await service.init()
+		expect(service.statusManager.init).toHaveBeenCalledOnce()
 	})
 
-	it("continues disposing resources when a disposal rejects", async () => {
-		const { scope } = createScope()
-		const codeIndexManager = getManager(scope)
-		const stateManager = vi.mocked(CodeIndexStateManager).mock.results[0].value
-		const error = new Error("disposal failed")
-		vi.mocked(codeIndexManager.dispose).mockRejectedValue(error)
+	it("logs aggregate disposal failures", async () => {
+		vi.mocked(codeIndexWorkspaceScopeRegistry.disposeAll).mockImplementationOnce(() => {
+			throw new CodeIndexDisposalError([new Error("index cleanup failed")])
+		})
 
-		let caught: unknown
-		try {
-			await scope.dispose()
-		} catch (error) {
-			caught = error
-		}
+		await createService().dispose()
 
-		expect(caught).toBeInstanceOf(AggregateError)
-		expect((caught as AggregateError).errors).toEqual([error])
-		expect(codeIndexManager.dispose).toHaveBeenCalledOnce()
-		expect(stateManager.dispose).toHaveBeenCalledOnce()
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"CodeIndexDisposalError: Failed to dispose code index managers (1 errors):\n1. index cleanup failed",
+		)
+	})
+
+	it("labels unexpected disposal failures", async () => {
+		vi.mocked(codeIndexWorkspaceScopeRegistry.disposeAll).mockImplementationOnce(() => {
+			throw new Error("unexpected cleanup failure")
+		})
+
+		await createService().dispose()
+
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"Unexpected error while disposing code index managers: unexpected cleanup failure",
+		)
 	})
 })

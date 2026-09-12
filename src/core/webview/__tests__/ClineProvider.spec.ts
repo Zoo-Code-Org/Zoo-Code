@@ -27,6 +27,8 @@ import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
+import { makeEventEmitter } from "../../../test-utils/vscode"
+import type { CodeIndexScope } from "../../../services/code-index/code-index-scope"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -565,6 +567,39 @@ describe("ClineProvider", () => {
 		// @ts-ignore - accessing private property for testing
 		provider.view = mockWebviewView
 		expect(ClineProvider.getVisibleInstance()).toBe(provider)
+	})
+
+	test.each(["sidebar", "editor"] as const)(
+		"registers the %s consumer and detaches it on disposal",
+		async (renderContext) => {
+			const registration = { dispose: vi.fn() }
+			const addConsumer = vi.fn(() => registration)
+			// This test exercises only provider registration, not feature initialization.
+			const scope = { statusManager: { addConsumer } } as unknown as CodeIndexScope
+			const consumer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				renderContext,
+				new ContextProxy(mockContext),
+				undefined,
+				scope,
+			)
+			expect(addConsumer).toHaveBeenCalledExactlyOnceWith(consumer)
+			await consumer.dispose()
+			expect(registration.dispose).toHaveBeenCalledOnce()
+		},
+	)
+
+	test("signals webview readiness without installing active-editor listeners", () => {
+		const ready = makeEventEmitter<void>()
+		const listener = vi.fn()
+		ready.event(listener)
+		vi.spyOn(provider["codeIndexWebviewReadyEmitter"], "fire").mockImplementation(() => ready.fire())
+		provider.notifyCodeIndexWebviewReady()
+		provider.notifyCodeIndexWebviewReady()
+		expect(listener).toHaveBeenCalledTimes(2)
+		expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+		ready.dispose()
 	})
 
 	test("loads full model details when preparing an LM Studio task", async () => {
@@ -3206,7 +3241,9 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	})
 
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
-		const { codeIndexScopeRegistry } = await import("../../../services/code-index/code-index-scope-registry")
+		const { CodeIndexWorkspaceScopeRegistry } =
+			await import("../../../services/code-index/code-index-workspace-scope-registry")
+		const codeIndexWorkspaceScopeRegistry = new CodeIndexWorkspaceScopeRegistry()
 		let workspaceEnabled = false
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
@@ -3216,12 +3253,13 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
 		const getAllScopes = vi
-			.spyOn(codeIndexScopeRegistry, "getAllScopes")
+			.spyOn(codeIndexWorkspaceScopeRegistry, "getAllScopes")
 			.mockReturnValue([{ codeIndexManager: manager }] as unknown as ReturnType<
-				typeof codeIndexScopeRegistry.getAllScopes
+				typeof codeIndexWorkspaceScopeRegistry.getAllScopes
 			>)
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue(createIndexScope(manager)),
+			codeIndexScope: { workspaceRegistry: codeIndexWorkspaceScopeRegistry },
 		})
 
 		try {

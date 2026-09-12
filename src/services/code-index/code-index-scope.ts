@@ -1,47 +1,55 @@
-import type * as vscode from "vscode"
+import * as vscode from "vscode"
 
 import type { ContextProxy } from "../../core/config/ContextProxy"
-import type { CodeIndexStatusConsumer } from "./interfaces/status-consumer"
-import { CodeIndexManager } from "./manager"
-import { CodeIndexScopeStatusManager } from "./code-index-scope-status-manager"
-import { CodeIndexStateManager } from "./state-manager"
+import { CodeIndexStatusManager } from "./code-index-status-manager"
+import { CodeIndexWorkspaceScopeRegistry } from "./code-index-workspace-scope-registry"
+import { CodeIndexDisposalError } from "./errors/code-index-disposal-error"
 
-type Disposable = {
-	dispose(): void | Promise<void>
-}
+/** Owns feature resources. The caller must await init() before disposing, and dispose only once. */
+export class CodeIndexScope implements vscode.Disposable {
+	public readonly workspaceRegistry = new CodeIndexWorkspaceScopeRegistry()
+	public readonly statusManager: CodeIndexStatusManager
 
-/** Owns the code-index resources associated with one workspace. */
-export class CodeIndexScope {
-	public readonly codeIndexManager: CodeIndexManager
-	private readonly stateManager: CodeIndexStateManager
-	private readonly statusManager: CodeIndexScopeStatusManager
-
-	public constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
-		this.stateManager = new CodeIndexStateManager()
-		this.codeIndexManager = new CodeIndexManager(workspacePath, folderUri, context, this.stateManager)
-		this.statusManager = new CodeIndexScopeStatusManager(workspacePath, this.codeIndexManager)
+	public constructor(
+		private readonly context: vscode.ExtensionContext,
+		private readonly contextProxy: ContextProxy,
+		private readonly outputChannel: vscode.OutputChannel,
+	) {
+		this.statusManager = new CodeIndexStatusManager(this.workspaceRegistry, outputChannel)
 	}
 
-	public async init(contextProxy: ContextProxy, statusConsumer: CodeIndexStatusConsumer): Promise<void> {
-		this.stateManager.init()
-		await this.codeIndexManager.initialize(contextProxy)
-		this.statusManager.init(statusConsumer)
+	/** Initializes managers for every workspace folder. */
+	public async init(): Promise<void> {
+		await Promise.all((vscode.workspace.workspaceFolders ?? []).map((folder) => this.initWorkspace(folder)))
+		this.statusManager.init()
+	}
+
+	private async initWorkspace(folder: vscode.WorkspaceFolder): Promise<void> {
+		try {
+			const scope = this.workspaceRegistry.getScope(this.context, folder.uri.fsPath)
+			await scope?.init(this.contextProxy)
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			this.outputChannel.appendLine(
+				`[CodeIndexManager] Error during background CodeIndexManager configuration/indexing for ${folder.uri.fsPath}: ${message}`,
+			)
+		}
 	}
 
 	public async dispose(): Promise<void> {
-		const disposables: Disposable[] = [this.statusManager, this.codeIndexManager, this.stateManager]
-		const errors: unknown[] = []
+		this.statusManager.dispose()
 
-		for (const disposable of disposables) {
-			try {
-				await disposable.dispose()
-			} catch (error) {
-				errors.push(error)
+		try {
+			await this.workspaceRegistry.disposeAll()
+		} catch (error) {
+			if (error instanceof CodeIndexDisposalError) {
+				this.outputChannel.appendLine(`CodeIndexDisposalError: ${error.message}`)
+				return
 			}
-		}
 
-		if (errors.length > 0) {
-			throw new AggregateError(errors, "Failed to dispose code index scope resources")
+			this.outputChannel.appendLine(
+				`Unexpected error while disposing code index managers: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
 	}
 }

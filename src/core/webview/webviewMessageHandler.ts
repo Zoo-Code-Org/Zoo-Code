@@ -62,7 +62,6 @@ import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
-import { codeIndexScopeRegistry } from "../../services/code-index/code-index-scope-registry"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
@@ -687,6 +686,7 @@ export const webviewMessageHandler = async (
 			)
 
 			provider.isViewLaunched = true
+			provider.notifyCodeIndexWebviewReady()
 			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
@@ -3311,7 +3311,7 @@ export const webviewMessageHandler = async (
 					return
 				}
 				// Capture prior state for every manager before persisting the global change
-				const allScopes = codeIndexScopeRegistry.getAllScopes()
+				const allScopes = provider.codeIndexScope?.workspaceRegistry.getAllScopes() ?? []
 				const priorStates = new Map(
 					allScopes.map((scope) => [scope, scope.codeIndexManager.isWorkspaceEnabled]),
 				)

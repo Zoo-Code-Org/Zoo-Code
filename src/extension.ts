@@ -34,7 +34,7 @@ import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
-import { CodeIndexLifecycleService } from "./services/code-index/code-index-lifecycle-service"
+import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -62,7 +62,7 @@ import { initZooCodeAuth } from "./services/zoo-code-auth"
 let outputChannel: vscode.OutputChannel
 let extensionContext: vscode.ExtensionContext
 let cloudService: CloudService | undefined
-let codeIndexLifecycleService: CodeIndexLifecycleService | undefined
+let codeIndexScope: CodeIndexScope | undefined
 
 let settingsUpdatedHandler: (() => void) | undefined
 
@@ -197,12 +197,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	)
 
 	// Initialize the provider *before* the Roo Code Cloud service.
-	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
-
-	codeIndexLifecycleService = new CodeIndexLifecycleService(context, contextProxy, outputChannel, provider)
+	codeIndexScope = new CodeIndexScope(context, contextProxy, outputChannel)
+	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService, codeIndexScope)
 	// Initialize in background; do not block extension activation.
-	void codeIndexLifecycleService.init()
-	context.subscriptions.push(codeIndexLifecycleService)
+	void codeIndexScope.init()
+	context.subscriptions.push(codeIndexScope)
 
 	// Initialize Roo Code Cloud service.
 	settingsUpdatedHandler = () => {
@@ -254,7 +253,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	}
 
-	registerCommands({ context, outputChannel, provider })
+	registerCommands({ context, outputChannel, provider, codeIndexScope })
 
 	/**
 	 * We use the text document content provider API to show the left side for diff
@@ -367,8 +366,8 @@ export async function activate(context: vscode.ExtensionContext) {
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
 
-	await codeIndexLifecycleService?.dispose()
-	codeIndexLifecycleService = undefined
+	await codeIndexScope?.dispose()
+	codeIndexScope = undefined
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {

@@ -85,7 +85,7 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
-import { codeIndexScopeRegistry } from "../../services/code-index/code-index-scope-registry"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import type { CodeIndexScope } from "../../services/code-index/code-index-scope"
 import type { CodeIndexStatus, CodeIndexStatusConsumer } from "../../services/code-index/interfaces/status-consumer"
 import { MdmService } from "../../services/mdm/MdmService"
@@ -200,8 +200,8 @@ export class ClineProvider
 	private taskScheduler = new TaskScheduler()
 	private delegationTransitionLocks?: Map<string, Promise<void>>
 	private cancelledDelegationChildIds = new Set<string>()
-	private readonly codeIndexStatusSubscriptionUpdateEmitter = new vscode.EventEmitter<void>()
-	public readonly onDidRequestCodeIndexStatusSubscriptionUpdate = this.codeIndexStatusSubscriptionUpdateEmitter.event
+	private readonly codeIndexWebviewReadyEmitter = new vscode.EventEmitter<void>()
+	public readonly onDidCodeIndexWebviewReady = this.codeIndexWebviewReadyEmitter.event
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
@@ -320,6 +320,7 @@ export class ClineProvider
 		private readonly renderContext: "sidebar" | "editor" = "sidebar",
 		public readonly contextProxy: ContextProxy,
 		mdmService?: MdmService,
+		public readonly codeIndexScope?: CodeIndexScope,
 	) {
 		super()
 		this.currentWorkspacePath = getWorkspacePath()
@@ -327,7 +328,10 @@ export class ClineProvider
 			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
 			(message) => this.log(message),
 		)
-		this.disposables.push(this.codeIndexStatusSubscriptionUpdateEmitter)
+		this.disposables.push(this.codeIndexWebviewReadyEmitter)
+		if (codeIndexScope) {
+			this.disposables.push(codeIndexScope.statusManager.addConsumer(this))
+		}
 
 		ClineProvider.activeInstances.add(this)
 
@@ -1071,15 +1075,6 @@ export class ClineProvider
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView.webview)
-
-		this.codeIndexStatusSubscriptionUpdateEmitter.fire()
-
-		// Listen for active editor changes to update code index status for the
-		// current workspace.
-		const activeEditorSubscription = vscode.window.onDidChangeActiveTextEditor(() => {
-			this.codeIndexStatusSubscriptionUpdateEmitter.fire()
-		})
-		this.webviewDisposables.push(activeEditorSubscription)
 
 		// Listen for when the panel becomes visible.
 		// https://github.com/microsoft/vscode-discussions/discussions/840
@@ -3283,11 +3278,14 @@ export class ClineProvider
 	}
 
 	/**
-	 * Gets the CodeIndexScope for the current active workspace.
-	 * @returns CodeIndexScope instance for the current workspace or the default one
+	 * Gets the workspace scope for the current active workspace or the default one.
 	 */
-	public getCurrentWorkspaceCodeIndexScope(): CodeIndexScope | undefined {
-		return codeIndexScopeRegistry.getScope(this.context)
+	public getCurrentWorkspaceCodeIndexScope(): CodeIndexWorkspaceScope | undefined {
+		return this.codeIndexScope?.workspaceRegistry.getScope(this.context)
+	}
+
+	public notifyCodeIndexWebviewReady(): void {
+		this.codeIndexWebviewReadyEmitter.fire()
 	}
 
 	public async postCodeIndexStatus(status: CodeIndexStatus): Promise<void> {
