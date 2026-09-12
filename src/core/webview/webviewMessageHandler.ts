@@ -62,7 +62,7 @@ import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
-import { CodeIndexManager } from "../../services/code-index/manager"
+import { codeIndexScopeRegistry } from "../../services/code-index/code-index-scope-registry"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
@@ -3267,7 +3267,7 @@ export const webviewMessageHandler = async (
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
 				}
-				manager.stopIndexing()
+				await manager.stopIndexing()
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
 					values: manager.getCurrentStatus(),
@@ -3290,7 +3290,7 @@ export const webviewMessageHandler = async (
 					await manager.initialize(provider.contextProxy)
 					void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 				} else if (!enabled) {
-					manager.stopIndexing()
+					await manager.stopIndexing()
 				}
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
@@ -3311,15 +3311,18 @@ export const webviewMessageHandler = async (
 					return
 				}
 				// Capture prior state for every manager before persisting the global change
-				const allManagers = CodeIndexManager.getAllInstances()
-				const priorStates = new Map(allManagers.map((m) => [m, m.isWorkspaceEnabled]))
+				const allScopes = codeIndexScopeRegistry.getAllScopes()
+				const priorStates = new Map(
+					allScopes.map((scope) => [scope, scope.codeIndexManager.isWorkspaceEnabled]),
+				)
 				await manager.setAutoEnableDefault(message.bool ?? true)
 				// Apply stop/start to every affected manager
-				for (const m of allManagers) {
-					const wasEnabled = priorStates.get(m)!
+				for (const scope of allScopes) {
+					const m = scope.codeIndexManager
+					const wasEnabled = priorStates.get(scope) ?? false
 					const isNowEnabled = m.isWorkspaceEnabled
 					if (wasEnabled && !isNowEnabled) {
-						m.stopIndexing()
+						await m.stopIndexing()
 					} else if (!wasEnabled && isNowEnabled && m.isFeatureEnabled && m.isFeatureConfigured) {
 						await m.initialize(provider.contextProxy)
 						void m.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))

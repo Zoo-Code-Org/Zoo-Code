@@ -130,7 +130,8 @@ vi.mock("p-wait-for", () => ({
 	default: vi.fn().mockImplementation(async () => Promise.resolve()),
 }))
 
-vi.mock("vscode", () => {
+vi.mock("vscode", async () => {
+	const { makeUri } = await import("../../../test-utils/vscode")
 	const mockDisposable = { dispose: vi.fn() }
 	const mockEventEmitter = { event: vi.fn(), fire: vi.fn() }
 	const mockTextDocument = { uri: { fsPath: "/mock/workspace/path/file.ts" } }
@@ -139,6 +140,7 @@ vi.mock("vscode", () => {
 	const mockTabGroup = { tabs: [mockTab] }
 
 	return {
+		Uri: { file: vi.fn((filePath: string) => makeUri(filePath)) },
 		TabInputTextDiff: vi.fn(),
 		CodeActionKind: {
 			QuickFix: { value: "quickfix" },

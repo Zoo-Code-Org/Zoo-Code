@@ -96,8 +96,8 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	const mcpHub = provider.getMcpHub()
 
 	// Get CodeIndexManager for feature checking.
-	const { CodeIndexManager } = await import("../../services/code-index/manager")
-	const codeIndexManager = CodeIndexManager.getInstance(provider.context, cwd)
+	const { codeIndexScopeRegistry } = await import("../../services/code-index/code-index-scope-registry")
+	const codeIndexManager = codeIndexScopeRegistry.getScope(provider.context, cwd)?.codeIndexManager
 
 	// Build settings object for tool filtering.
 	const filterSettings = {

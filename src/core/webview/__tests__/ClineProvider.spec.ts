@@ -3204,7 +3204,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	})
 
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
-		const { CodeIndexManager } = await import("../../../services/code-index/manager")
+		const { codeIndexScopeRegistry } = await import("../../../services/code-index/code-index-scope-registry")
 		let workspaceEnabled = false
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
@@ -3213,9 +3213,11 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("auto-enable failure")),
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
-		const getAllInstances = vi
-			.spyOn(CodeIndexManager, "getAllInstances")
-			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManager.getAllInstances>)
+		const getAllScopes = vi
+			.spyOn(codeIndexScopeRegistry, "getAllScopes")
+			.mockReturnValue([{ codeIndexManager: manager }] as unknown as ReturnType<
+				typeof codeIndexScopeRegistry.getAllScopes
+			>)
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
 		})
@@ -3230,7 +3232,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				expect.objectContaining({ type: "indexingStatusUpdate" }),
 			)
 		} finally {
-			getAllInstances.mockRestore()
+			getAllScopes.mockRestore()
 		}
 	})
 

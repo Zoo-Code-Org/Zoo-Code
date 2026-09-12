@@ -8,11 +8,25 @@ export class CodeIndexStateManager {
 	private _processedItems: number = 0
 	private _totalItems: number = 0
 	private _currentItemUnit: string = "blocks"
-	private _progressEmitter = new vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>>()
+	private _progressEmitter: vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>> | undefined
 
 	// --- Public API ---
 
-	public readonly onProgressUpdate = this._progressEmitter.event
+	public init(): void {
+		this._progressEmitter ??= new vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>>()
+	}
+
+	public get onProgressUpdate(): vscode.Event<ReturnType<typeof this.getCurrentStatus>> {
+		return this.progressEmitter.event
+	}
+
+	private get progressEmitter(): vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>> {
+		if (!this._progressEmitter) {
+			throw new Error("CodeIndexStateManager is not initialized")
+		}
+
+		return this._progressEmitter
+	}
 
 	public get state(): IndexingState {
 		return this._systemStatus
@@ -51,7 +65,7 @@ export class CodeIndexStateManager {
 				if (newState === "Error" && message === undefined) this._statusMessage = "An error occurred."
 			}
 
-			this._progressEmitter.fire(this.getCurrentStatus())
+			this.progressEmitter.fire(this.getCurrentStatus())
 		}
 	}
 
@@ -75,7 +89,7 @@ export class CodeIndexStateManager {
 
 			// Only fire update if status, message or progress actually changed
 			if (oldStatus !== this._systemStatus || oldMessage !== this._statusMessage || progressChanged) {
-				this._progressEmitter.fire(this.getCurrentStatus())
+				this.progressEmitter.fire(this.getCurrentStatus())
 			}
 		}
 	}
@@ -108,12 +122,13 @@ export class CodeIndexStateManager {
 			this._statusMessage = message
 
 			if (oldStatus !== this._systemStatus || oldMessage !== this._statusMessage || progressChanged) {
-				this._progressEmitter.fire(this.getCurrentStatus())
+				this.progressEmitter.fire(this.getCurrentStatus())
 			}
 		}
 	}
 
 	public dispose(): void {
-		this._progressEmitter.dispose()
+		this._progressEmitter?.dispose()
+		this._progressEmitter = undefined
 	}
 }

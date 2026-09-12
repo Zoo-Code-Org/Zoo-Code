@@ -67,12 +67,6 @@ vi.mock("../../core/config/importExport", () => ({
 	importSettingsWithFeedback: vi.fn(),
 }))
 
-vi.mock("../../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn(),
-	},
-}))
-
 vi.mock("../../services/mdm/MdmService", () => ({
 	MdmService: {
 		getInstance: vi.fn(),
