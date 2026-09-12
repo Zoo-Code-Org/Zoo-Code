@@ -2,6 +2,7 @@ import { ClineProvider } from "../../core/webview/ClineProvider"
 import { TaskRegistry } from "../../core/task/TaskRegistry"
 import { type Task } from "../../core/task/Task"
 import type { JsonFileLock } from "../../utils/safeWriteJson"
+import { AsyncTaskTracker } from "@roo-code/core"
 
 export const unlockedJsonFileLock = (): JsonFileLock =>
 	Object.assign(async () => {}, { getCompromiseError: () => undefined })
@@ -20,6 +21,7 @@ type ProviderStubFields = {
 	tasks?: Task[]
 	runDelegationTransition?: unknown
 	runLockedDelegationTransition?: unknown
+	delegationTransitions?: AsyncTaskTracker
 	removeClineFromStack?: unknown
 	evictCurrentTask?: unknown
 }
@@ -55,6 +57,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 		},
 	}
 	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback(unlockedJsonFileLock())
+	s.delegationTransitions ??= new AsyncTaskTracker()
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {

@@ -227,6 +227,29 @@ describe("History resume delegation - parent metadata transitions", () => {
 			),
 		).rejects.toBe(transitionError)
 		expect(afterUnlockError).toHaveBeenCalledOnce()
+		expect(afterUnlock).toHaveBeenCalledOnce()
+
+		Reflect.set(provider, "_disposed", true)
+		await expect(
+			provider.runLockedDelegationTransition(
+				"parent-disposed-success",
+				async () => true,
+				afterUnlock,
+				afterUnlockError,
+			),
+		).resolves.toBe(true)
+		await expect(
+			provider.runLockedDelegationTransition(
+				"parent-disposed-failure",
+				async () => {
+					throw transitionError
+				},
+				afterUnlock,
+				afterUnlockError,
+			),
+		).rejects.toBe(transitionError)
+		expect(afterUnlock).toHaveBeenCalledOnce()
+		expect(afterUnlockError).toHaveBeenCalledOnce()
 	})
 
 	it("rejects a stale restored completion action before changing parent or child state", async () => {
@@ -1788,6 +1811,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 	it.each([
 		{ name: "cancelled child", cancelled: true },
+		{ name: "disposed provider", disposed: true },
 		{ name: "aborted parent instance", instance: { abort: true } },
 		{ name: "abandoned parent instance", instance: { abandoned: true } },
 		{ name: "current parent instance mismatch", currentMismatch: true },
@@ -1798,7 +1822,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		{ name: "new delegated child", persisted: { delegatedToId: "child-c2" } },
 	])(
 		"skips resume for $name during ownership revalidation",
-		async ({ cancelled, instance, currentMismatch, missingPersisted, persisted }) => {
+		async ({ cancelled, disposed, instance, currentMismatch, missingPersisted, persisted }) => {
 			const emit = vi.fn()
 			const log = vi.fn()
 			const parentInstance = {
@@ -1853,6 +1877,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			})
 			const completedParent = taskHistoryStore.get(parentInstance.taskId)
 			if (cancelled) cancelledDelegationChildIds.add("child-c1")
+			if (disposed) Reflect.set(provider, "_disposed", true)
 			if (currentMismatch) currentTask = { taskId: "other-parent-instance" }
 			taskHistoryStore.get.mockImplementation((id: string) =>
 				id === parentInstance.taskId && !missingPersisted
@@ -1867,7 +1892,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 				parentInstance.taskId,
 				"child-c1",
 			)
-			expect(log).toHaveBeenCalledWith(expect.stringContaining("Skipping stale parent continuation"))
+			if (disposed)
+				expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Skipping stale parent continuation"))
+			else expect(log).toHaveBeenCalledWith(expect.stringContaining("Skipping stale parent continuation"))
 		},
 	)
 
@@ -2907,12 +2934,20 @@ describe("History resume delegation - parent metadata transitions", () => {
 					_sId: string,
 					fU: (h: HistoryItem) => HistoryItem,
 					sU: (h: HistoryItem) => HistoryItem,
-					options?: { whileFirstFileLocked?: () => Promise<void> },
+					options?: {
+						whileFirstFileLocked?: () => Promise<void>
+						rollbackBothOnCallbackFailure?: boolean
+					},
 				) => {
 					fU(parentItem)
 					sU(childItem as HistoryItem)
-					await options?.whileFirstFileLocked?.()
 					committed = true
+					try {
+						await options?.whileFirstFileLocked?.()
+					} catch (error) {
+						if (options?.rollbackBothOnCallbackFailure) committed = false
+						throw error
+					}
 					return []
 				},
 			),

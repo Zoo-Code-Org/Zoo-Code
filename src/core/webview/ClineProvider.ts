@@ -68,6 +68,7 @@ import {
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
+import { AsyncTaskTracker } from "@roo-code/core"
 
 import { Package } from "../../shared/package"
 import { findLast } from "../../shared/array"
@@ -211,6 +212,7 @@ export class ClineProvider
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
 	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
+	private delegationTransitions = new AsyncTaskTracker()
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -250,7 +252,8 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
+		const transition = runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
+		return this.delegationTransitions.track(transition)
 	}
 
 	private runLockedDelegationTransition(
@@ -262,11 +265,11 @@ export class ClineProvider
 		return this.runDelegationTransition(parentTaskId, () =>
 			this.taskHistoryStore.withTaskFileLock(parentTaskId, transition).then(
 				async (result) => {
-					await afterUnlock(result)
+					if (!this._disposed) await afterUnlock(result)
 					return result
 				},
 				async (error) => {
-					await afterUnlockError(error)
+					if (!this._disposed) await afterUnlockError(error)
 					throw error
 				},
 			),
@@ -871,6 +874,7 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
+		await this.delegationTransitions.drain()
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
@@ -3874,7 +3878,7 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, params.parentTaskId, () =>
+		return this.runDelegationTransition(params.parentTaskId, () =>
 			ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
 		)
 	}
@@ -4446,7 +4450,7 @@ export class ClineProvider
 				let schedulerAdmitted = false
 				const continuation = this.runDelegationTransition(parentTaskId, async () => {
 					await continuationAdmitted
-					if (!schedulerAdmitted) return {}
+					if (this._disposed || !schedulerAdmitted) return {}
 					await this.taskHistoryStore.invalidate(parentTaskId)
 					const persistedParent = this.taskHistoryStore.get(parentTaskId)
 					const currentTask = this.getCurrentTask()
