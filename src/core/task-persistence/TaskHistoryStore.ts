@@ -1288,7 +1288,7 @@ export class TaskHistoryStore {
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
 						if (rollbackErrors.length)
-							throw new AggregateError([error, ...rollbackErrors], "Task pair rollback failed")
+							throw new AggregateError(Array.of(error, ...rollbackErrors), "Task pair rollback failed")
 					} else {
 						// First record is committed on disk. Update cache so it
 						// reflects disk state before propagating the error.
@@ -1325,7 +1325,7 @@ export class TaskHistoryStore {
 						}
 					}
 
-					const callbackErrors = [error, ...compensationErrors]
+					const callbackErrors = Array.of(error, ...compensationErrors)
 					if (compensationErrors.length) throw new AggregateError(callbackErrors, "Pair compensation failed")
 					throw error
 				}
