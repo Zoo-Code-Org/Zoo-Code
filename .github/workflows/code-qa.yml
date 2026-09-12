@@ -154,6 +154,8 @@ jobs:
               run: pnpm turbo run test:coverage --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
             - name: Run extension unit coverage
               run: pnpm turbo run test:coverage:unit --filter="zoo-code" --log-order grouped --output-logs new-only
+            - name: Verify extension coverage contract
+              run: pnpm --dir src verify:coverage-contract
             - name: Run extension dist smoke test
               run: pnpm turbo run test:dist --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Run core unit coverage
@@ -161,20 +163,7 @@ jobs:
             - name: Run core integration coverage
               run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Verify extension unit coverage report
-              shell: bash
-              run: |
-                  test -s src/coverage/unit/lcov.info
-                  awk '
-                      /^SF:/ { if (in_record) invalid=1; in_record=1; covered=0; next }
-                      /^LH:[1-9][0-9]*$/ { if (!in_record) invalid=1; covered=1; next }
-                      /^end_of_record$/ {
-                          if (!in_record) invalid=1
-                          any_covered = any_covered || covered
-                          in_record=0
-                          covered=0
-                      }
-                      END { exit !(any_covered && !in_record && !invalid) }
-                  ' src/coverage/unit/lcov.info
+              run: node src/scripts/verify-lcov.mjs src/coverage/unit/lcov.info
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
