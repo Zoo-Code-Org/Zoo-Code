@@ -1828,6 +1828,17 @@ describe("leaked tool-call parser contracts", () => {
 
 			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
 		})
+
+		// Two recoveries put a non-last placeholder segment in the middle of the array, where both the
+		// placeholder seeding and the last-segment lookup can silently reorder or leak text.
+		it("keeps interleaved text in order across two recovered calls", () => {
+			const text = `${wrap(`${todo("a")}\nmid\n${todo("b")}`)}\ntail`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
+			expect(leftoverText).toBe("\nmid\n\ntail")
+		})
 	})
 
 	// Tag shapes a real backend varies on: whitespace inside the tags, and the `antml:` prefix.
