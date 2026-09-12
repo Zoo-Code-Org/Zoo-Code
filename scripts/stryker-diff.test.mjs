@@ -529,6 +529,26 @@ describe("failure output", () => {
 		for (const mutant of manyMutants) assert.ok(grouped.includes(mutant.mutatorName))
 	})
 
+	it("emits one distinguishable annotation per source location", () => {
+		const annotations = formatAnnotations(
+			[
+				...blocking,
+				{
+					filePath: "utils/other.ts",
+					status: "NoCoverage",
+					mutatorName: "ConditionalExpression",
+					replacement: "true",
+					location: { start: { line: 9 } },
+				},
+			],
+			"src",
+		)
+
+		assert.equal(annotations.length, 2)
+		assert.match(annotations[0].message, /^src\/core\/value\.ts:4: 2 mutation test gaps; example:/)
+		assert.match(annotations[1].message, /^src\/utils\/other\.ts:9: 2 mutation test gaps; example:/)
+	})
+
 	it("shares annotation limits across packages", () => {
 		const state = { total: 0, perFile: new Map() }
 		const first = formatAnnotations(
@@ -681,7 +701,7 @@ describe("failure output", () => {
 describe("report evaluation", () => {
 	const packageEntry = { id: "core", root: "packages/core" }
 
-	it("reports surviving and uncovered changed-code mutants as advisory", () => {
+	it("reports surviving and uncovered mutants through detailed annotations without a redundant aggregate", () => {
 		const report = {
 			files: {
 				"src/value.ts": {
@@ -704,7 +724,7 @@ describe("report evaluation", () => {
 		}
 
 		const result = evaluateReport(report, packageEntry)
-		assert.match(result.advisories.join("\n"), /1 surviving and 1 uncovered/)
+		assert.deepEqual(result.advisories, [])
 		assert.equal(formatAnnotations(mutantCounts(report).blocking, packageEntry.root).length, 2)
 	})
 

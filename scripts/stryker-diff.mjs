@@ -460,26 +460,36 @@ export function formatAdvisoryCommand(advisory) {
 
 export function formatAnnotations(blockingMutants, packageRoot, state = { total: 0, perFile: new Map() }) {
 	const annotations = []
+	const mutantsByLocation = new Map()
 
-	for (const mutant of blockingMutants.sort((left, right) => {
+	for (const mutant of [...blockingMutants].sort((left, right) => {
 		const pathOrder = left.filePath.localeCompare(right.filePath)
 		return pathOrder || left.location.start.line - right.location.start.line
 	})) {
 		const repositoryPath = path.posix.join(packageRoot, mutant.filePath.replaceAll("\\", "/"))
 		const key = `${repositoryPath}:${mutant.location.start.line}`
-		const fileCount = state.perFile.get(repositoryPath) ?? 0
-		if (annotations.some((annotation) => annotation.key === key) || fileCount >= 7 || state.total >= 20) continue
+		const group = mutantsByLocation.get(key) ?? { repositoryPath, mutants: [] }
+		group.mutants.push(mutant)
+		mutantsByLocation.set(key, group)
+	}
 
+	for (const [key, { repositoryPath, mutants }] of mutantsByLocation) {
+		const fileCount = state.perFile.get(repositoryPath) ?? 0
+		if (fileCount >= 7 || state.total >= 20) continue
+
+		const mutant = mutants[0]
 		const replacement = String(mutant.replacement ?? "")
 			.replace(/\s+/g, " ")
 			.trim()
 			.slice(0, 160)
+		const location = `${repositoryPath}:${mutant.location.start.line}`
+		const detail = `${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}`
 		annotations.push({
 			key,
 			file: repositoryPath,
 			line: mutant.location.start.line,
 			message:
-				`${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}. ` +
+				`${location}: ${mutants.length === 1 ? detail : `${mutants.length} mutation test gaps; example: ${detail}`}. ` +
 				"See the job summary for the complete list and resolution guidance.",
 		})
 		state.perFile.set(repositoryPath, fileCount + 1)
@@ -652,12 +662,6 @@ export function evaluateReport(report, packageEntry) {
 				"The result is inconclusive; consider fixing flaky or slow tests, or reducing the changed scope.",
 		)
 	}
-	if (counts.blocking.length > 0) {
-		advisories.push(
-			`${packageEntry.id} has ${counts.survived} surviving and ${counts.noCoverage} uncovered changed-code mutants. ` +
-				"Consider adding or strengthening focused tests.",
-		)
-	}
 	return { ...counts, advisories }
 }
 
@@ -729,7 +733,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				reportPath,
 				changedLines: packageEntry.changedExecutableLines,
 				...counts,
-				result: counts.advisories.length > 0 ? "Advisory findings" : "Passed",
+				result: counts.blocking.length > 0 || counts.advisories.length > 0 ? "Advisory findings" : "Passed",
 			})
 		} catch (error) {
 			advisories.push(error.message)
