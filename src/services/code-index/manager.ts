@@ -122,15 +122,6 @@ export class CodeIndexManager {
 	 * @returns Object indicating if a restart is needed
 	 */
 	public async initialize(contextProxy: ContextProxy): Promise<{ requiresRestart: boolean }> {
-		try {
-			return await this.initializeInternal(contextProxy)
-		} catch (error) {
-			this._stateManager.setSystemState("Error", error instanceof Error ? error.message : String(error))
-			throw error
-		}
-	}
-
-	private async initializeInternal(contextProxy: ContextProxy): Promise<{ requiresRestart: boolean }> {
 		// 1. ConfigManager Initialization and Configuration Loading
 		if (!this._configManager) {
 			this._configManager = new CodeIndexConfigManager(contextProxy)

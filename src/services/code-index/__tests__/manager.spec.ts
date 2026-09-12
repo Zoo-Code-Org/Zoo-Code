@@ -171,7 +171,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 	})
 
 	describe("initialize", () => {
-		it("records initialization failures and rethrows the original error", async () => {
+		it("rethrows initialization failures without updating lifecycle state", async () => {
 			const error = new Error("configuration failed")
 			manager["_configManager"] = {
 				loadConfiguration: vi.fn().mockRejectedValue(error),
@@ -179,7 +179,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 
 			await expect(manager.initialize({} as never)).rejects.toBe(error)
 
-			expect(manager["_stateManager"].setSystemState).toHaveBeenCalledWith("Error", error.message)
+			expect(manager["_stateManager"].setSystemState).not.toHaveBeenCalled()
 		})
 	})
 
