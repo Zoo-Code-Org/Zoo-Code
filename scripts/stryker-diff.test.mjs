@@ -256,6 +256,28 @@ describe("preferDirectTestFiles", () => {
 
 		assert.deepEqual(preferDirectTestFiles(related, ["src/A.ts", "src/B.ts"]), related)
 	})
+
+	it("adds configured suites only for their mutated source and deduplicates them", () => {
+		const extension = PACKAGE_CONFIGS.find(({ id }) => id === "extension")
+		const related = [
+			"core/webview/__tests__/ClineProvider.spec.ts",
+			"__tests__/ClineProvider.history-resume-delegation.spec.ts",
+			"__tests__/unrelated.spec.ts",
+		]
+
+		assert.deepEqual(
+			preferDirectTestFiles(related, ["core/webview/ClineProvider.ts"], extension.testFilesBySource),
+			[
+				"core/webview/__tests__/ClineProvider.spec.ts",
+				"__tests__/ClineProvider.history-resume-delegation.spec.ts",
+				"__tests__/ClineProvider.delegation.spec.ts",
+			],
+		)
+		assert.deepEqual(
+			preferDirectTestFiles(related, ["core/webview/OtherProvider.ts"], extension.testFilesBySource),
+			related,
+		)
+	})
 })
 
 describe("shouldUseVitestRelated", () => {

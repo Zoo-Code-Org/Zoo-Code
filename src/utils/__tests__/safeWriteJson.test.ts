@@ -465,6 +465,9 @@ describe("safeWriteJson", () => {
 			expect.stringContaining("Failed to restore backup"),
 			expect.objectContaining({ message: "Rollback rename failed" }),
 		)
+		const backupFile = (await fs.readdir(tempDir)).find((file) => file.startsWith(".test-file.json.bak_"))
+		expect(backupFile).toBeDefined()
+		expect(JSON.parse(await fs.readFile(path.join(tempDir, backupFile!), "utf8"))).toEqual(initialData)
 
 		consoleErrorSpy.mockRestore()
 	})

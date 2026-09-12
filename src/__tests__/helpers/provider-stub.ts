@@ -1,22 +1,32 @@
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { TaskRegistry } from "../../core/task/TaskRegistry"
 import { type Task } from "../../core/task/Task"
+import type { JsonFileLock } from "../../utils/safeWriteJson"
+
+export const unlockedJsonFileLock = (): JsonFileLock =>
+	Object.assign(async () => {}, { getCompromiseError: () => undefined })
 
 type ProviderStubFields = {
 	cancelledDelegationChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
-	taskHistoryStore?: { get: (id: string) => unknown; invalidate?: (id: string) => Promise<void> }
+	taskHistoryStore?: {
+		get: (id: string) => unknown
+		invalidate?: (id: string) => Promise<void>
+		withTaskFileLock?: <T>(id: string, callback: (fileLock: JsonFileLock) => Promise<T>) => Promise<T>
+	}
 	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
 	tasks?: Task[]
 	runDelegationTransition?: unknown
+	runLockedDelegationTransition?: unknown
 	removeClineFromStack?: unknown
 	evictCurrentTask?: unknown
 }
 
 type PrivateProviderMethods = {
 	runDelegationTransition: (this: unknown, ...args: unknown[]) => unknown
+	runLockedDelegationTransition: (this: unknown, ...args: unknown[]) => unknown
 	removeClineFromStack: (this: unknown, ...args: unknown[]) => unknown
 	evictCurrentTask: (this: unknown, ...args: unknown[]) => unknown
 }
@@ -38,7 +48,13 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.taskHistoryStore.invalidate ??= async () => {}
-	s.taskScheduler ??= { schedule: async (_task, run) => run() }
+	s.taskScheduler ??= {
+		schedule: async (task, run) => {
+			if (task.abort || task.abandoned) return
+			await run()
+		},
+	}
+	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback(unlockedJsonFileLock())
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {
@@ -50,6 +66,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	delete s.clineStack
 
 	s.runDelegationTransition ??= proto.runDelegationTransition.bind(s)
+	s.runLockedDelegationTransition ??= proto.runLockedDelegationTransition.bind(s)
 	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
 	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)
 	return s as unknown as ClineProvider

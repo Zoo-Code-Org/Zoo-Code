@@ -11,7 +11,7 @@
 	},
 	"__tests__/ClineProvider.history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 70
+			"count": 64
 		}
 	},
 	"__tests__/abandonSubtask.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"utils/tts.ts": {

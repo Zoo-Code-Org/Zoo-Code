@@ -4,7 +4,18 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { TaskHistoryStore } from "../TaskHistoryStore"
+import { lockJsonFile } from "../../../utils/safeWriteJson"
+import { TASK_HISTORY_BACKUP_RETENTION_MS, TaskHistoryStore } from "../TaskHistoryStore"
+
+const safeWriteJsonActuals = vi.hoisted(() => ({
+	lockJsonFile: undefined as typeof import("../../../utils/safeWriteJson").lockJsonFile | undefined,
+}))
+
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../utils/safeWriteJson")>()
+	safeWriteJsonActuals.lockJsonFile = actual.lockJsonFile
+	return { ...actual, lockJsonFile: vi.fn(actual.lockJsonFile) }
+})
 
 type WriteTaskFile = (item: HistoryItem, delta?: Partial<HistoryItem>) => Promise<HistoryItem>
 
@@ -72,29 +83,149 @@ function item(id: string): HistoryItem {
 	}
 }
 
+async function seedHistoryBackup(storagePath: string, taskId: string, ageMs: number): Promise<string> {
+	const taskDir = path.join(storagePath, "tasks", taskId)
+	const historyPath = path.join(taskDir, "history_item.json")
+	const backupPath = path.join(taskDir, `.history_item.json.bak_${Date.now() - ageMs}_backup.tmp`)
+	await fs.mkdir(taskDir, { recursive: true })
+	await fs.writeFile(historyPath, JSON.stringify({ ...item(taskId), status: "completed" }))
+	await fs.writeFile(backupPath, JSON.stringify({ ...item(taskId), status: "active" }))
+	const modified = new Date(Date.now() - ageMs)
+	await fs.utimes(backupPath, modified, modified)
+	return backupPath
+}
+
 describe("TaskHistoryStore real cross-host locking", () => {
+	beforeEach(() => {
+		vi.mocked(lockJsonFile).mockReset().mockImplementation(safeWriteJsonActuals.lockJsonFile!)
+	})
+
+	it("retains recent history backups during initialization", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-recent-backup-"))
+		const store = new TaskHistoryStore(storagePath)
+		try {
+			const backupPath = await seedHistoryBackup(storagePath, "recent-task", TASK_HISTORY_BACKUP_RETENTION_MS / 2)
+			const taskDir = path.dirname(backupPath)
+			const recentTimestamp = path.join(taskDir, `.history_item.json.bak_${Date.now()}_timestamp.tmp`)
+			const recentMtime = path.join(
+				taskDir,
+				`.history_item.json.bak_${Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2}_mtime.tmp`,
+			)
+			await fs.writeFile(recentTimestamp, "recent timestamp")
+			await fs.writeFile(recentMtime, "recent mtime")
+			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			await fs.utimes(recentTimestamp, old, old)
+			await store.initialize()
+			for (const retained of [backupPath, recentTimestamp, recentMtime]) {
+				await expect(fs.access(retained)).resolves.toBeUndefined()
+			}
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("prunes stale history backups during initialization", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-stale-backup-"))
+		const store = new TaskHistoryStore(storagePath)
+		try {
+			const backupPath = await seedHistoryBackup(storagePath, "stale-task", TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			const taskDir = path.dirname(backupPath)
+			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			const lookalikes = [
+				path.join(taskDir, ".0-not-a-history-backup"),
+				path.join(taskDir, `${path.basename(backupPath)}.extra`),
+				path.join(taskDir, `prefix${path.basename(backupPath)}`),
+			]
+			for (const lookalike of lookalikes) {
+				await fs.writeFile(lookalike, "not a managed backup")
+				await fs.utimes(lookalike, old, old)
+			}
+			await store.initialize()
+			await expect(fs.access(backupPath)).rejects.toMatchObject({ code: "ENOENT" })
+			for (const lookalike of lookalikes) await expect(fs.access(lookalike)).resolves.toBeUndefined()
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("prunes a history backup exactly at the retention boundary", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-boundary-backup-"))
+		const store = new TaskHistoryStore(storagePath)
+		const now = 2_000_000_000_000
+		const dateNow = vi.spyOn(Date, "now").mockReturnValue(now)
+		try {
+			const backupPath = await seedHistoryBackup(storagePath, "boundary-task", TASK_HISTORY_BACKUP_RETENTION_MS)
+			await store.initialize()
+			await expect(fs.access(backupPath)).rejects.toMatchObject({ code: "ENOENT" })
+		} finally {
+			dateNow.mockRestore()
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("waits for an active history operation before pruning its stale backup", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-active-backup-"))
+		const store = new TaskHistoryStore(storagePath)
+		const backupPath = await seedHistoryBackup(storagePath, "active-task", TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+		const historyPath = path.join(storagePath, "tasks", "active-task", "history_item.json")
+		const release = await lockJsonFile(historyPath)
+		let released = false
+		try {
+			let signalLockAttempted!: () => void
+			const lockAttempted = new Promise<void>((resolve) => {
+				signalLockAttempted = resolve
+			})
+			vi.mocked(lockJsonFile).mockImplementation(async (target) => {
+				if (target === historyPath) signalLockAttempted()
+				return safeWriteJsonActuals.lockJsonFile!(target)
+			})
+			const initialization = store.initialize()
+			await lockAttempted
+			await expect(fs.access(backupPath)).resolves.toBeUndefined()
+			await release()
+			released = true
+			await initialization
+			await expect(fs.access(backupPath)).rejects.toMatchObject({ code: "ENOENT" })
+		} finally {
+			store.dispose()
+			if (!released) await release().catch(() => {})
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves independent stale-cache deltas through the real per-file lock", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-real-lock-"))
 		const storeA = new TaskHistoryStore(storagePath)
 		const storeB = new TaskHistoryStore(storagePath)
-		let writeBarrier: WriteBarrier | undefined
 
 		try {
 			await storeA.initialize()
 			await storeA.upsert(item("shared-task"))
 			await storeB.initialize()
-			writeBarrier = synchronizeNextWrites([storeA, storeB])
 
+			const historyPath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+			let lockAttempts = 0
+			let releaseAttempts!: () => void
+			const bothAttempted = new Promise<void>((resolve) => {
+				releaseAttempts = resolve
+			})
+			vi.mocked(lockJsonFile).mockImplementation(async (target) => {
+				if (target === historyPath && ++lockAttempts === 2) releaseAttempts()
+				if (target === historyPath) await bothAttempted
+				return safeWriteJsonActuals.lockJsonFile!(target)
+			})
 			await Promise.all([
 				storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, mode: "architect" })),
 				storeB.atomicReadAndUpdate("shared-task", (current) => ({ ...current, totalCost: 42 })),
 			])
+			expect(lockAttempts).toBe(2)
 
-			expect(writeBarrier.arrivals()).toBe(2)
 			await storeA.invalidate("shared-task")
 			expect(storeA.get("shared-task")).toMatchObject({ mode: "architect", totalCost: 42 })
 		} finally {
-			writeBarrier?.dispose()
 			storeA.dispose()
 			storeB.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })

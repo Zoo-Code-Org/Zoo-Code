@@ -68,6 +68,7 @@ import {
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
+import { AsyncTaskTracker } from "@roo-code/core/async-task-tracker"
 
 import { Package } from "../../shared/package"
 import { findLast } from "../../shared/array"
@@ -100,6 +101,7 @@ import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
+import type { JsonFileLock } from "../../utils/safeWriteJson"
 
 import { setPanel } from "../../activate/registerCommands"
 
@@ -210,6 +212,8 @@ export class ClineProvider
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
 	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
+	/** Provider-owned transitions that must settle before task cleanup. */
+	private runs?: AsyncTaskTracker
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -249,7 +253,28 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
+		const tracker = (this.runs ??= new AsyncTaskTracker())
+		return tracker.track(runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn))
+	}
+
+	private runLockedDelegationTransition(
+		parentTaskId: string,
+		transition: (fileLock: JsonFileLock) => Promise<boolean>,
+		afterUnlock: (result: boolean) => Promise<void>,
+		afterUnlockError: (error: unknown) => Promise<void>,
+	): Promise<boolean> {
+		return this.runDelegationTransition(parentTaskId, () =>
+			this.taskHistoryStore.withTaskFileLock(parentTaskId, transition).then(
+				async (result) => {
+					await this.runs!.runIfActive(afterUnlock, result)
+					return result
+				},
+				async (error) => {
+					await this.runs!.runIfActive(afterUnlockError, error)
+					throw error
+				},
+			),
+		)
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -610,7 +635,7 @@ export class ClineProvider
 
 	// Removes and destroys the top Cline instance (the current finished task),
 	// activating the previous one (resuming the parent task).
-	async removeClineFromStack() {
+	async removeClineFromStack(options: { saveMessages?: boolean } = {}) {
 		if (this.taskRegistry.length === 0) {
 			return
 		}
@@ -627,7 +652,11 @@ export class ClineProvider
 			try {
 				// Abort the running task and set isAbandoned to true so
 				// all running promises will exit as well.
-				await task.abortTask(true)
+				if (options.saveMessages === false) {
+					await task.abortTask(true, options)
+				} else {
+					await task.abortTask(true)
+				}
 			} catch (e) {
 				this.log(
 					`[ClineProvider#removeClineFromStack] abortTask() failed ${task.taskId}.${task.instanceId}: ${e.message}`,
@@ -846,6 +875,7 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
+		await this.runs?.closeAndDrain()
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
@@ -3849,9 +3879,8 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, params.parentTaskId, () =>
-			ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
-		)
+		const start = () => ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params)
+		return ClineProvider.prototype.runDelegationTransition.call(this, params.parentTaskId, start) as Promise<Task>
 	}
 
 	private async delegateParentAndOpenChildUnlocked(params: {
@@ -4101,11 +4130,15 @@ export class ClineProvider
 		pendingActionId?: string
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
-		return this.runDelegationTransition(parentTaskId, async () => {
+		let parentToResume: Task | undefined
+		let childToRestore: HistoryItem | undefined
+		const isCurrentDelegation = (parent?: HistoryItem) =>
+			parent?.awaitingChildId === childTaskId && (parent.status === "delegated" || parent.status === "active")
+		const transition = async (firstFileLock: JsonFileLock) => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
-			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			const refreshedParent = this.taskHistoryStore.get(parentTaskId)
 			const childHistory = this.taskHistoryStore.get(childTaskId)
 			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
 				this.log(
@@ -4119,14 +4152,10 @@ export class ClineProvider
 			// (setting status → "active", awaitingChildId → undefined) while the user was
 			// approving the subtask finish.  If the parent no longer awaits this child,
 			// routing output back would corrupt an unrelated task.
-			if (
-				this.cancelledDelegationChildIds.has(childTaskId) ||
-				(historyItem.status !== "delegated" && historyItem.status !== "active") ||
-				historyItem.awaitingChildId !== childTaskId
-			) {
+			if (this.cancelledDelegationChildIds.has(childTaskId) || !isCurrentDelegation(refreshedParent)) {
 				this.log(
 					`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId} ` +
-						`(status=${historyItem.status}, awaitingChildId=${historyItem.awaitingChildId})`,
+						`(status=${refreshedParent?.status}, awaitingChildId=${refreshedParent?.awaitingChildId})`,
 				)
 				return false
 			}
@@ -4143,6 +4172,7 @@ export class ClineProvider
 				)
 				return false
 			}
+			const originalParentClineMessages = structuredClone(parentClineMessages)
 
 			let parentApiMessages: ApiMessage[] = []
 			try {
@@ -4156,14 +4186,12 @@ export class ClineProvider
 				)
 				return false
 			}
+			const originalParentApiMessages = structuredClone(parentApiMessages)
 
 			// 2) Inject synthetic records: UI subtask_result and update API tool_result
 			const ts = Date.now()
 
 			// Defensive: ensure arrays
-			if (!Array.isArray(parentClineMessages)) parentClineMessages = []
-			if (!Array.isArray(parentApiMessages)) parentApiMessages = []
-
 			const subtaskUiMessage: ClineMessage = {
 				messageId: crypto.randomUUID(),
 				type: "say",
@@ -4179,17 +4207,10 @@ export class ClineProvider
 			) {
 				parentClineMessages.push(subtaskUiMessage)
 			}
-			parentClineMessages = await saveTaskMessages({
-				messages: parentClineMessages,
-				taskId: parentTaskId,
-				globalStoragePath,
-				merge: true,
-			})
-
 			// Find the tool_use_id from the last assistant message's new_task tool_use
 			let toolUseId: string | undefined
 			for (let i = parentApiMessages.length - 1; i >= 0; i--) {
-				const msg = parentApiMessages[i]
+				const msg = parentApiMessages[i]!
 				if (msg.role === "assistant" && Array.isArray(msg.content)) {
 					for (const block of msg.content) {
 						if (block.type === "tool_use" && block.name === "new_task") {
@@ -4212,7 +4233,6 @@ export class ClineProvider
 				if (lastMsg?.role === "user" && Array.isArray(lastMsg.content)) {
 					for (const block of lastMsg.content) {
 						if (block.type === "tool_result" && block.tool_use_id === toolUseId) {
-							// Update the existing tool_result content
 							block.content = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
 							alreadyHasToolResult = true
 							break
@@ -4271,63 +4291,132 @@ export class ClineProvider
 				}
 			}
 
-			parentApiMessages = await saveApiMessages({
-				messages: parentApiMessages,
-				taskId: parentTaskId,
-				globalStoragePath,
-				merge: true,
-			})
+			let updatedHistory!: HistoryItem
+			let completingParent!: HistoryItem
+			let completingChild!: HistoryItem
+			const staleDelegationError = new Error("stale cross-instance delegation")
+			const assertCurrentDelegation = (parent: HistoryItem) => {
+				if (!isCurrentDelegation(parent)) throw staleDelegationError
+			}
+			const completionOptions = {
+				firstDiskGuard: assertCurrentDelegation,
+				rollbackBothOnCallbackFailure: true,
+				firstFileLock,
+				storeLockAcquired: true,
+				whileFirstFileLocked: async () => {
+					try {
+						parentClineMessages = await saveTaskMessages({
+							messages: parentClineMessages,
+							taskId: parentTaskId,
+							globalStoragePath,
+							merge: true,
+						})
+						parentApiMessages = await saveApiMessages({
+							messages: parentApiMessages,
+							taskId: parentTaskId,
+							globalStoragePath,
+							merge: true,
+						})
 
-			// 4) Close child instance if still open (single-open-task invariant).
-			//    This MUST happen BEFORE marking the child "completed" because
-			//    removeClineFromStack() → abortTask(true) → saveClineMessages() writes
-			//    the historyItem with initialStatus (typically "active"), which would
-			//    overwrite a "completed" status set later.
-			const current = this.getCurrentTask()
-			if (current?.taskId === childTaskId) {
-				await this.removeClineFromStack()
+						const current = this.getCurrentTask()
+						if (current && current.taskId !== childTaskId) return
+						if (current?.taskId === childTaskId) {
+							childToRestore = completingChild
+							await this.removeClineFromStack({ saveMessages: false })
+						}
+
+						parentToResume = await this.createTaskWithHistoryItem(updatedHistory, {
+							startTask: false,
+						})
+						try {
+							await parentToResume.overwriteClineMessages(parentClineMessages, false)
+						} catch {
+							// non-fatal
+						}
+						try {
+							await parentToResume.overwriteApiConversationHistory(parentApiMessages, false)
+						} catch {
+							// non-fatal
+						}
+					} catch (error) {
+						const restorationResults = await Promise.allSettled([
+							saveTaskMessages({
+								messages: originalParentClineMessages,
+								taskId: parentTaskId,
+								globalStoragePath,
+								merge: false,
+							}),
+							saveApiMessages({
+								messages: originalParentApiMessages,
+								taskId: parentTaskId,
+								globalStoragePath,
+								merge: false,
+							}),
+						])
+						const restorationErrors = restorationResults.flatMap((result) =>
+							result.status === "rejected" ? [result.reason] : [],
+						)
+						if (restorationErrors.length) {
+							throw new AggregateError(
+								[error, ...restorationErrors],
+								`[reopenParentFromDelegation] Failed to restore parent ${parentTaskId} conversation files`,
+							)
+						}
+						throw error
+					}
+				},
 			}
 
-			// 3+5) Atomically mark child completed and parent active in one lock acquisition.
-			//      No intermediate state is ever persisted — no sentinel needed.
-			//      Build the parent update inside the updater from the locked snapshot so
-			//      any concurrent write that landed between step 1 and the lock acquisition
-			//      is preserved rather than silently overwritten.
-			let updatedHistory!: typeof historyItem
-			let completingChild!: HistoryItem
-			await this.taskHistoryStore.atomicUpdatePair(
-				childTaskId,
-				parentTaskId,
-				(child) => {
-					if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
-						throw new Error(`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`)
-					}
-					completingChild = { ...child }
-					const lifecycleUpdate = completeDelegatedChild(historyItem, child, completionResultSummary)
-					return {
-						...lifecycleUpdate.child,
-						pendingAction:
-							child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
-					}
-				},
-				(parent) => {
-					const lifecycleUpdate = completeDelegatedChild(parent, completingChild, completionResultSummary)
-					updatedHistory = lifecycleUpdate.parent
-					return updatedHistory
-				},
-			)
+			try {
+				await this.taskHistoryStore.atomicUpdatePair(
+					parentTaskId,
+					childTaskId,
+					(parent) => {
+						assertCurrentDelegation(parent)
+						completingParent = { ...parent }
+						const reducerChild = { ...parent, id: childTaskId, status: "active" as const }
+						updatedHistory = completeDelegatedChild(parent, reducerChild, completionResultSummary).parent
+						return updatedHistory
+					},
+					(child) => {
+						completingChild = { ...child }
+						if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
+							throw new Error(
+								`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`,
+							)
+						}
+						const completedChild = completeDelegatedChild(
+							completingParent,
+							child,
+							completionResultSummary,
+						).child
+						return {
+							...completedChild,
+							pendingAction:
+								child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
+						}
+					},
+					completionOptions,
+				)
+			} catch (error) {
+				if (error === staleDelegationError) {
+					this.log(
+						`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId}`,
+					)
+					return false
+				}
+				throw error
+			}
 			this.recentTasksCache = undefined
 
 			// Notify the webview of both updated items so its in-memory history stays current.
 			if (this.isViewLaunched) {
+				const postUpdate = (taskHistoryItem: HistoryItem) =>
+					this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem })
 				const updatedChild = this.taskHistoryStore.get(childTaskId)
 				const updatedParent = this.taskHistoryStore.get(parentTaskId)
-				if (updatedChild) {
-					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedChild })
-				}
-				if (updatedParent) {
-					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedParent })
-				}
+				if (updatedChild) await postUpdate(updatedChild)
+				if (updatedParent) await postUpdate(updatedParent)
 			}
 
 			// 6) Emit TaskDelegationCompleted (provider-level)
@@ -4337,34 +4426,23 @@ export class ClineProvider
 				// non-fatal
 			}
 
-			// 7) Reopen the parent from history as the sole active task (restores saved mode)
-			//    IMPORTANT: startTask=false to suppress resume-from-history ask scheduling
-			const parentInstance = await this.createTaskWithHistoryItem(updatedHistory, { startTask: false })
-
-			// 8) Inject restored histories into the in-memory instance before resuming
-			if (parentInstance) {
-				try {
-					await parentInstance.overwriteClineMessages(parentClineMessages, false)
-				} catch {
-					// non-fatal
-				}
-				try {
-					await parentInstance.overwriteApiConversationHistory(parentApiMessages, false)
-				} catch {
-					// non-fatal
-				}
-
+			this.cancelledDelegationChildIds.delete(childTaskId)
+			return true
+		}
+		return this.runLockedDelegationTransition(
+			parentTaskId,
+			transition,
+			async () => {
+				const parentInstance = parentToResume
+				if (!parentInstance) return
 				let admitContinuation!: () => void
 				const continuationAdmitted = new Promise<void>((resolve) => {
 					admitContinuation = resolve
 				})
 				let schedulerAdmitted = false
-				// Reserve the continuation's place in the shared parent queue before this
-				// completion transition releases. Its body waits until scheduler admission,
-				// so the completing child can release its permit without deadlocking.
 				const continuation = this.runDelegationTransition(parentTaskId, async () => {
 					await continuationAdmitted
-					if (!schedulerAdmitted) return {}
+					if (this._disposed || !schedulerAdmitted) return {}
 					await this.taskHistoryStore.invalidate(parentTaskId)
 					const persistedParent = this.taskHistoryStore.get(parentTaskId)
 					const currentTask = this.getCurrentTask()
@@ -4383,9 +4461,6 @@ export class ClineProvider
 						)
 						return {}
 					}
-
-					// Keep the run promise inside an object so the transition queue does not
-					// assimilate it and retain the parent key for the full resumed task loop.
 					return { runPromise: parentInstance.resumeAfterDelegation() }
 				})
 				void this.taskScheduler
@@ -4415,11 +4490,21 @@ export class ClineProvider
 							error,
 						)
 					})
-			}
-
-			this.cancelledDelegationChildIds.delete(childTaskId)
-			return true
-		})
+			},
+			async (error) => {
+				if (!childToRestore) return
+				try {
+					if (this.getCurrentTask()?.taskId === parentTaskId) {
+						await this.removeClineFromStack({ saveMessages: false })
+					}
+					if (!this.getCurrentTask()) {
+						await this.createTaskWithHistoryItem(childToRestore, { startTask: false })
+					}
+				} catch (restoreError) {
+					throw new AggregateError([error, restoreError], `Failed to restore child ${childTaskId}`)
+				}
+			},
+		)
 	}
 
 	/** Emits completion after delegated child disposal through the provider-owned event channel. */
