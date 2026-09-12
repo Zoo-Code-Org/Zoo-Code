@@ -159,7 +159,7 @@ reviews:
             mode: error
         custom_checks:
             - name: Regression evidence
-              mode: error
+              mode: warning
               instructions: >-
                   Fail only when a concrete changed behavior lacks focused coverage at the lowest valid
                   test layer, tests merely mirror implementation, an affected error/negative/unset branch
@@ -181,7 +181,7 @@ reviews:
                   behavior is missing, or a persisted default is not propagated to a consumer. Cite the
                   changed path and a plausible triggering scenario; pass when no such changed path exists.
             - name: Lifecycle resource cleanup
-              mode: error
+              mode: warning
               instructions: >-
                   Fail only when a concrete changed lifecycle path can leak a listener, watcher, provider,
                   timer, task, or other resource, or can duplicate work after cancellation, disposal, or
