@@ -25,6 +25,7 @@ async function importFresh(): Promise<typeof import("../vscode")> {
 describe("vscode (VSCodeAPIWrapper) browser bridge wiring", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals()
+		vi.unstubAllEnvs()
 		bridgeMock.maybeConnect.mockClear()
 		bridgeMock.active.mockReset().mockReturnValue(false)
 		bridgeMock.postMessage.mockClear()
@@ -35,6 +36,16 @@ describe("vscode (VSCodeAPIWrapper) browser bridge wiring", () => {
 
 		// jsdom has no acquireVsCodeApi, so the dev-gated else-branch runs.
 		expect(bridgeMock.maybeConnect).toHaveBeenCalledTimes(1)
+	})
+
+	it("skips the bridge entirely in a production build (DEV false)", async () => {
+		vi.stubEnv("DEV", false)
+
+		await importFresh()
+
+		// With the build-time gate false the else-branch must stay dead even
+		// though acquireVsCodeApi is missing.
+		expect(bridgeMock.maybeConnect).not.toHaveBeenCalled()
 	})
 
 	it("never touches the bridge when acquireVsCodeApi is available", async () => {

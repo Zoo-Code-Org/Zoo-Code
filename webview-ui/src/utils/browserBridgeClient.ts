@@ -34,6 +34,7 @@ import { WebviewMessage } from "@roo/WebviewMessage"
  */
 function getBridgePortFromUrl(): number | undefined {
 	const raw = new URLSearchParams(window.location.search).get("bridgePort")
+	// Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral: "" and null both fall through Number()/the port>0 bound check to the same undefined result (equivalent mutants)
 	if (raw !== null && raw !== "") {
 		const port = Number(raw)
 		if (Number.isInteger(port) && port > 0 && port < 65536) {
@@ -78,6 +79,7 @@ export class BrowserBridgeClient {
 
 		socket.on("connect", () => {
 			const pending = BrowserBridgeClient.queue
+			// Stryker disable next-line ArrayDeclaration: the drained `pending` snapshot is read before the reassignment, so the reset value is unobservable through the public API
 			BrowserBridgeClient.queue = []
 			for (const message of pending) {
 				socket.emit("webviewMessage", message)

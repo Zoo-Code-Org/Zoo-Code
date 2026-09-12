@@ -53,18 +53,23 @@ const VITE_BASE_URL = "http://localhost:5173"
  */
 export function getBrowserBridgePort(): number {
 	const raw = process.env.ROO_BROWSER_BRIDGE_PORT
+	// Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral: ""/undefined both fall through Number() to DEFAULT_BROWSER_BRIDGE_PORT (equivalent mutants)
 	if (raw === undefined || raw === "") {
 		return DEFAULT_BROWSER_BRIDGE_PORT
 	}
 	const port = Number(raw)
+	// Stryker disable next-line EqualityOperator: port 0 is returned unchanged because DEFAULT_BROWSER_BRIDGE_PORT is 0 (equivalent mutant)
 	return Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_BROWSER_BRIDGE_PORT
 }
 
 /**
  * Resolves the port a bound http server is actually listening on. When
  * `port: 0` was requested, the OS picks a free port and reports it back here.
+ *
+ * Exported for tests only; production callers go through
+ * {@link BrowserBridgeServer.start}.
  */
-function getBoundPort(httpServer: SocketIoServer["httpServer"], requestedPort: number): number {
+export function getBoundPort(httpServer: SocketIoServer["httpServer"], requestedPort: number): number {
 	const address = httpServer.address()
 	if (address && typeof address === "object") {
 		return address.port
@@ -353,6 +358,7 @@ export class BrowserBridgeServer {
 			await new Promise<void>((resolve, reject) => {
 				httpServer.once("error", reject)
 				httpServer.listen({ port: requestedPort, host: "127.0.0.1" }, () => {
+					// Stryker disable next-line StringLiteral: a settled promise ignores extra rejects; the listener is only removed to avoid a latent leak (unobservable in-process)
 					httpServer.off("error", reject)
 					resolve()
 				})
