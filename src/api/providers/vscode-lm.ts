@@ -179,12 +179,9 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 	if (stripTagsCompletely(restOfLine).trim().length > 0) {
 		return true
 	}
-	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off leading prose
-	// alone regressed genuine recoveries, since a real leak is commonly narrated too, so only an
-	// explicit quoting cue suppresses it.
-	// Same-line prose that introduces markup as an example rather than invoking it. A deliberately
-	// narrow lexical cue: a quoted invoke that ENDS its line is otherwise indistinguishable from a
-	// genuine leak, which is just as often preceded by prose.
+	// A quoted invoke that ENDS its line leaves no trailing text to judge, and a real leak is
+	// commonly narrated too — keying off leading prose alone regressed genuine recoveries, so only
+	// this narrow cue suppresses it.
 	const quotingCue =
 		/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
 	return quotingCue.test(stripTagsCompletely(sameLineBefore))
@@ -223,9 +220,9 @@ function resolveTypeUnion(types: string[]): DeclaredType | undefined {
 	const nullable = types.includes("null")
 	const nonNullTypes = types.filter((entry) => entry !== "null")
 	// A null-only union has no non-null member; leaving the type unresolved would fall back to the
-	// raw string "null", so declare the null type explicitly to force a JSON parse.
+	// raw string "null", so name the null type and let convertLeakedParamValue settle it.
 	if (nonNullTypes.length === 0) {
-		return nullable ? { type: "null", nullable } : undefined
+		return nullable ? { type: "null", nullable: false } : undefined
 	}
 	// Two or more non-null members leave the intended type ambiguous; picking one would coerce the
 	// value to a type the tool may not accept, so the raw string is kept instead.
