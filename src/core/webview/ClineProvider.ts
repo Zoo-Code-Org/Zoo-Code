@@ -150,7 +150,6 @@ function runDelegationTransition<T>(
 	locks: Map<string, Promise<void>>,
 	parentTaskId: string,
 	fn: () => Promise<T>,
-	tracker?: AsyncTaskTracker,
 ): Promise<T> {
 	const previous = locks.get(parentTaskId) ?? Promise.resolve()
 	// Fail-forward: run fn even if the previous transition rejected. A failed
@@ -170,7 +169,7 @@ function runDelegationTransition<T>(
 		}
 	})
 
-	return tracker ? tracker.track(current) : current
+	return current
 }
 
 function scheduleTask(
@@ -212,9 +211,9 @@ export class ClineProvider
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
-	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
+	private static readonly delegationLocks = new Map<string, Promise<void>>()
 	/** Provider-owned transitions that must settle before task cleanup. */
-	private runs = new AsyncTaskTracker()
+	private runs?: AsyncTaskTracker
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -254,7 +253,9 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn, this.runs)
+		return (this.runs ??= new AsyncTaskTracker()).track(
+			runDelegationTransition(ClineProvider.delegationLocks, parentTaskId, fn),
+		)
 	}
 
 	private runLockedDelegationTransition(
@@ -875,7 +876,7 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
-		await this.runs.drain()
+		await this.runs?.drain()
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
@@ -3879,12 +3880,8 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
-		return runDelegationTransition(
-			ClineProvider.delegationTransitionLocks,
-			params.parentTaskId,
-			() => ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
-			this.runs,
-		)
+		const start = () => ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params)
+		return ClineProvider.prototype.runDelegationTransition.call(this, params.parentTaskId, start) as Promise<Task>
 	}
 
 	private async delegateParentAndOpenChildUnlocked(params: {
