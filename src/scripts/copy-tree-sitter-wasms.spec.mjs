@@ -48,4 +48,20 @@ describe("publishTreeSitterWasms", () => {
 		expect(() => publishTreeSitterWasms(source, destination, filesystem)).toThrow("copy failed")
 		expect(fs.readdirSync(destination)).toEqual([])
 	})
+
+	it("removes published and temporary outputs when an atomic rename fails", () => {
+		const source = path.join(root, "source")
+		const destination = path.join(root, "dist")
+		fs.mkdirSync(source)
+		fs.writeFileSync(path.join(source, "tree-sitter-a.wasm"), "a")
+		const filesystem = {
+			...fs,
+			renameSync() {
+				throw new Error("rename failed")
+			},
+		}
+
+		expect(() => publishTreeSitterWasms(source, destination, filesystem)).toThrow("rename failed")
+		expect(fs.readdirSync(destination)).toEqual([])
+	})
 })

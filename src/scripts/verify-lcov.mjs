@@ -12,7 +12,9 @@ export function verifyLcov(content) {
 			inRecord = true
 		} else if (line.startsWith("LH:")) {
 			if (!inRecord) throw new Error("LCOV hit count is outside a source record")
-			if (Number(line.slice(3)) > 0) anyCovered = true
+			const hits = line.slice(3)
+			if (!/^\d+$/.test(hits)) throw new Error("LCOV hit count is not a decimal integer")
+			if (BigInt(hits) > 0n) anyCovered = true
 		} else if (line === "end_of_record") {
 			if (!inRecord) throw new Error("LCOV terminator is outside a source record")
 			inRecord = false
