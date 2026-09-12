@@ -107,9 +107,9 @@ Seven semantic landmarks keep the intended positive and negative paths reachable
 
 ## Mid-stream provider retry model
 
-`scripts/check-mid-stream-retry.ts` models the independent request-level protocol used when a provider fails after yielding at least one stream chunk. It imports the production `decideMidStreamFailure` decision, exhaustively explores success, failure, backoff, cancellation, user approval, and user decline through one bounded user-approved retry round, and requires every automatic retry to have one visible announcement. Its invariants prevent automatic requests beyond the configured budget, require the user prompt exactly at exhaustion, require approval to reset the budget, and make decline or cancellation terminal.
+`scripts/check-mid-stream-retry.ts` models the independent request-level protocol used when a provider fails after yielding at least one stream chunk. It imports the production `decideMidStreamFailure` decision, exhaustively explores success, failure, backoff cancellation, prompt cancellation, user approval, and user decline through one bounded user-approved retry round, and requires every automatic retry to have one visible announcement. Its invariants prevent automatic requests beyond the configured budget, require the user prompt exactly at exhaustion, require approval to reset the budget, and make decline or either cancellation path terminal.
 
-The model does not claim provider transport liveness or token-billing accuracy. Focused `Task` tests cover conversation-history bookkeeping and both prompt responses; the VS Code E2E suite injects a real partial SSE response followed by a transport failure to verify the extension-host boundary, request count, visible retry handoff, and terminal decline behavior.
+The model does not claim provider transport liveness or token-billing accuracy. Focused `Task` tests cover conversation-history bookkeeping and both prompt responses; the VS Code E2E suite injects a real partial SSE response followed by a transport failure to verify the extension-host boundary, request count, visible retry handoff, and stable waiting at the failure prompt.
 
 ## Invariants
 

@@ -716,9 +716,18 @@ describe("Cline", () => {
 			const task = await createMidStreamRetryTask()
 			task["saveApiConversationHistory"] = vi.fn().mockResolvedValue(true)
 			const streamError = new Error("Overloaded")
+			const summaryMessage = {
+				role: "user" as const,
+				content: [{ type: "text" as const, text: "context summary" }],
+				messageId: "summary-after-request",
+				isSummary: true,
+			}
 			const askSpy = vi
 				.spyOn(task, "ask")
-				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockImplementationOnce(async () => {
+					task.apiConversationHistory.push(summaryMessage)
+					return { response: "yesButtonClicked" } satisfies TaskAskResult
+				})
 				.mockResolvedValueOnce({ response: "noButtonClicked" } satisfies TaskAskResult)
 			const saySpy = vi.spyOn(task, "say")
 			const attemptSpy = vi
@@ -737,6 +746,10 @@ describe("Cline", () => {
 			expect(completedRetryAnnouncements).toHaveLength(6)
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 			expect(task["saveApiConversationHistory"]).toHaveBeenCalledWith(false)
+			expect(task.apiConversationHistory).toContainEqual(summaryMessage)
+			expect(
+				task.apiConversationHistory.findIndex((message) => message.messageId === summaryMessage.messageId),
+			).toBe(0)
 		})
 
 		it("does not remove an earlier user turn when approving an empty continuation retry", async () => {
@@ -745,20 +758,20 @@ describe("Cline", () => {
 			const earlierUserMessage = { role: "user" as const, content: [{ type: "text" as const, text: "earlier" }] }
 			task.apiConversationHistory.push(earlierUserMessage)
 			task.messageCounts.user++
-			vi.spyOn(task, "ask").mockImplementation(async () => {
-				task.abort = true
-				return { response: "yesButtonClicked" } satisfies TaskAskResult
-			})
+			vi.spyOn(task, "ask")
+				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValueOnce({ response: "noButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task, "say")
-			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
-				midStreamFailingRequest(new Error("Overloaded")),
-			)
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => midStreamFailingRequest(new Error("Overloaded")))
 
 			await task.recursivelyMakeClineRequests([])
 
-			expect(task.ask).toHaveBeenCalledTimes(1)
+			expect(task.ask).toHaveBeenCalledTimes(2)
+			expect(attemptSpy).toHaveBeenCalledTimes(8)
 			expect(task.apiConversationHistory).toContainEqual(earlierUserMessage)
-			expect(task.messageCounts.user).toBe(1)
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
 
 		it("stops and restores history when the approved retry deletion cannot be persisted", async () => {

@@ -138,12 +138,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
-import {
-	decideMidStreamFailure,
-	MAX_MID_STREAM_RETRIES,
-	shouldRemoveMidStreamRetryMessage,
-	wasMidStreamRetryMessageAdded,
-} from "./midStreamRetry"
+import { decideMidStreamFailure, MAX_MID_STREAM_RETRIES } from "./midStreamRetry"
 import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
@@ -2931,7 +2926,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
-			userMessageWasAdded?: boolean
+			requestMessageId?: string
 		}
 
 		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
@@ -3073,11 +3068,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				isEmptyUserContent,
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
-			let userMessageWasAdded = wasMidStreamRetryMessageAdded(currentItem.userMessageWasAdded)
+			let requestMessageId = currentItem.requestMessageId
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++
-				userMessageWasAdded = true
+				requestMessageId = this.apiConversationHistory.at(-1)?.messageId
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -3692,13 +3687,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									// The user approved another round of retries, so reset the
 									// automatic retry budget. Remove the user message this request
 									// added first so it is not duplicated in history on retry.
-									const lastMessage = this.apiConversationHistory.at(-1)
-									// Stryker disable next-line ConditionalExpression,OptionalChaining: the pure predicate independently covers absent and non-user history.
-									if (shouldRemoveMidStreamRetryMessage(userMessageWasAdded, lastMessage?.role)) {
-										this.apiConversationHistory.pop()
+									if (requestMessageId) {
+										const requestMessageIndex = this.apiConversationHistory.findIndex(
+											(message) =>
+												message.messageId === requestMessageId && message.role === "user",
+										)
+										if (requestMessageIndex === -1) {
+											await this.say(
+												"error",
+												"Failed to locate the API request in conversation history.",
+											)
+											return false
+										}
+										const [requestMessage] = this.apiConversationHistory.splice(
+											requestMessageIndex,
+											1,
+										)
 										this.messageCounts.user--
 										if (!(await this.saveApiConversationHistory(false))) {
-											this.apiConversationHistory.push(lastMessage!)
+											this.apiConversationHistory.splice(requestMessageIndex, 0, requestMessage!)
 											this.messageCounts.user++
 											await this.say(
 												"error",
@@ -3770,7 +3777,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: midStreamRetryAttempt + 1,
-								userMessageWasAdded,
+								requestMessageId,
 							})
 
 							// Continue to retry the request

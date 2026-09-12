@@ -6,6 +6,7 @@ type Phase = "requesting" | "backoff" | "awaiting-user" | "stopped" | "succeeded
 
 interface ModelState {
 	phase: Phase
+	stopReason?: "decline" | "backoff-abort" | "prompt-abort"
 	retryAttempt: number
 	requests: number
 	announcements: number
@@ -25,13 +26,16 @@ interface TraceStep {
 const MAX_APPROVED_ROUNDS = 1
 const MAX_DEPTH = 16
 const MAX_STATES = 100
-const expectedActions = ["fail", "retry", "approve", "decline", "abort", "succeed"] as const
+const expectedActions = ["fail", "retry", "approve", "decline", "abort-backoff", "abort-prompt", "succeed"] as const
 const landmarks = {
 	"automatic-budget-exhausted": (state: ModelState) =>
 		state.phase === "awaiting-user" && state.requests === MAX_MID_STREAM_RETRIES + 1,
 	"approved-round-reset": (state: ModelState) =>
 		state.roundsApproved === 1 && state.phase === "requesting" && state.retryAttempt === 0,
-	"declined-after-approved-round": (state: ModelState) => state.roundsApproved === 1 && state.phase === "stopped",
+	"declined-after-approved-round": (state: ModelState) =>
+		state.roundsApproved === 1 && state.stopReason === "decline",
+	"backoff-cancelled": (state: ModelState) => state.stopReason === "backoff-abort",
+	"prompt-cancelled": (state: ModelState) => state.stopReason === "prompt-abort",
 } satisfies Record<string, (state: ModelState) => boolean>
 
 function initialState(): ModelState {
@@ -58,11 +62,14 @@ function transitions(state: ModelState): Transition[] {
 					announcements: state.announcements + 1,
 				},
 			},
-			{ name: "abort", next: { ...state, phase: "stopped" } },
+			{ name: "abort-backoff", next: { ...state, phase: "stopped", stopReason: "backoff-abort" } },
 		]
 	}
 	if (state.phase === "awaiting-user") {
-		const result: Transition[] = [{ name: "decline", next: { ...state, phase: "stopped" } }]
+		const result: Transition[] = [
+			{ name: "decline", next: { ...state, phase: "stopped", stopReason: "decline" } },
+			{ name: "abort-prompt", next: { ...state, phase: "stopped", stopReason: "prompt-abort" } },
+		]
 		if (state.roundsApproved < MAX_APPROVED_ROUNDS) {
 			result.push({
 				name: "approve",
