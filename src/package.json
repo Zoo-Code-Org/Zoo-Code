@@ -442,6 +442,7 @@
 		"lint": "eslint . --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
+		"prepare:tree-sitter-wasms": "node scripts/copy-tree-sitter-wasms.mjs",
 		"test:unit": "vitest run --config vitest.unit.config.ts",
 		"test:dist": "vitest run --config vitest.dist.config.ts",
 		"test:coverage": "vitest run --coverage",
