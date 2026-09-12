@@ -101,9 +101,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			terminal.running = false
 		}
 		terminal.releaseProcess(this)
-		this.isHot = false
 		this.stopHotTimer()
-		this.cleanupScriptFile()
 		this.removeAllListeners()
 	}
 

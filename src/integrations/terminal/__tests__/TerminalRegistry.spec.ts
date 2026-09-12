@@ -354,6 +354,28 @@ describe("TerminalRegistry", () => {
 			expect(TerminalRegistry["terminals"]).toEqual([open])
 		})
 
+		it("cleans a stale untracked process without emitting close completion", () => {
+			const terminal = TerminalRegistry.createTerminal("/closed", "vscode") as Terminal
+			const process = new TerminalProcess(terminal)
+			terminal.process = process
+			terminal.releaseProcess(process)
+			terminal.busy = true
+			terminal.running = true
+			terminal.activeShellExecution = { commandLine: { value: "failed" } } as vscode.TerminalShellExecution
+			const completionSpy = vi.fn()
+			process.on("shell_execution_complete", completionSpy)
+
+			terminal.handleClose()
+
+			expect(completionSpy).not.toHaveBeenCalled()
+			expect(terminal.process).toBeUndefined()
+			expect(terminal.activeShellExecution).toBeUndefined()
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
+			expect(terminal.isStreamClosed).toBe(true)
+			expect(process.eventNames()).toEqual([])
+		})
+
 		it("ignores close events from unregistered terminals", () => {
 			const registered = TerminalRegistry.createTerminal("/registered", "vscode") as Terminal
 			const foreign = { name: "foreign" } as vscode.Terminal

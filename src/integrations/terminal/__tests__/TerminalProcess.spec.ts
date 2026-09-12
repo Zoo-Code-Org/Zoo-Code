@@ -198,6 +198,27 @@ describe("TerminalProcess", () => {
 			await secondCommand
 		})
 
+		it("finalizes an error only once", () => {
+			mockTerminalInfo.busy = true
+			mockTerminalInfo.running = true
+			mockTerminalInfo.activeShellExecution = {
+				commandLine: { value: "failed" },
+			} as vscode.TerminalShellExecution
+			const releaseSpy = vi.spyOn(mockTerminalInfo, "releaseProcess")
+
+			terminalProcess.handleError()
+			terminalProcess.handleError()
+
+			expect(releaseSpy).toHaveBeenCalledOnce()
+			expect(terminalProcess["errorHandled"]).toBe(true)
+			expect(mockTerminalInfo.process).toBeUndefined()
+			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+			expect(mockTerminalInfo.busy).toBe(false)
+			expect(mockTerminalInfo.running).toBe(false)
+			expect(mockTerminalInfo.isStreamClosed).toBe(true)
+			expect(terminalProcess.eventNames()).toEqual([])
+		})
+
 		it("emits no_shell_integration with commandSubmitted=false when shell integration startup times out", async () => {
 			vi.useFakeTimers()
 			const previousTimeout = Terminal.getShellIntegrationTimeout()
@@ -221,6 +242,34 @@ describe("TerminalProcess", () => {
 
 				expect(commandSubmitted).toBe(false)
 				expect(mockTerminal.sendText).not.toHaveBeenCalled()
+			} finally {
+				Terminal.setShellIntegrationTimeout(previousTimeout)
+				vi.useRealTimers()
+			}
+		})
+
+		it("releases a command when its shell stream never becomes available", async () => {
+			vi.useFakeTimers()
+			const previousTimeout = Terminal.getShellIntegrationTimeout()
+			Terminal.setShellIntegrationTimeout(10)
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue({})
+
+			try {
+				const commandPromise = mockTerminalInfo.runCommand("test command", {
+					onLine: vi.fn(),
+					onCompleted: vi.fn(),
+					onShellExecutionStarted: vi.fn(),
+					onShellExecutionComplete: vi.fn(),
+				})
+				const process = mockTerminalInfo.process
+
+				await vi.advanceTimersByTimeAsync(10)
+				await commandPromise
+
+				expect(mockTerminalInfo.process).toBeUndefined()
+				expect(mockTerminalInfo["activeProcesses"]).not.toContain(process)
+				expect(process?.eventNames()).toEqual([])
+				expect(vi.getTimerCount()).toBe(0)
 			} finally {
 				Terminal.setShellIntegrationTimeout(previousTimeout)
 				vi.useRealTimers()

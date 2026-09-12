@@ -95,14 +95,12 @@ export class Terminal extends BaseTerminal {
 			for (const process of this.activeProcesses) {
 				process.handleTerminalClosed()
 			}
+		} else if (this.process instanceof TerminalProcess) {
+			this.process.handleError()
 		} else {
-			this.busy = false
-			this.running = false
 			this.activeShellExecution = undefined
 			this.setActiveStream(undefined)
-			if (!this.process) {
-				this.shellExecutionComplete({ exitCode: undefined })
-			}
+			this.shellExecutionComplete({ exitCode: undefined })
 		}
 	}
 
