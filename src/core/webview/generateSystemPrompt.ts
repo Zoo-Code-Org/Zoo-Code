@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import type { ModelInfo } from "@roo-code/types"
 import { WebviewMessage } from "../../shared/WebviewMessage"
 import { defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
@@ -9,6 +10,14 @@ import { Package } from "../../shared/package"
 
 import { ClineProvider } from "./ClineProvider"
 
+// Upper bound on the preview's wait for lazily loaded model metadata. The
+// preview is a user-triggered UI action: some model-catalog fetchers (e.g.
+// OpenRouter's bare axios GET) have no request timeout, so a hung endpoint
+// must not block it indefinitely. On timeout we degrade to the handler's
+// fallback metadata — the same degradation a rejected fetch produces — and
+// the next preview re-attempts after the (persistent) cache refreshes.
+const PREVIEW_MODEL_FETCH_TIMEOUT_MS = 5_000
+
 export const generateSystemPrompt = async (provider: ClineProvider, message: WebviewMessage) => {
 	const {
 		apiConfiguration,
@@ -18,6 +27,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		experiments,
 		language,
 		enableSubfolderRules,
+		disabledTools,
 	} = await provider.getState()
 
 	const diffStrategy = new MultiSearchReplaceDiffStrategy()
@@ -29,14 +39,39 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 
 	const rooIgnoreInstructions = provider.getCurrentTask()?.rooIgnoreController?.getInstructions()
 
-	// Create a temporary API handler to check model info for stealth mode.
+	// Create a temporary API handler to fetch the full model info for the preview.
 	// This avoids relying on an active Cline instance which might not exist during preview.
-	let modelInfo: { isStealthModel?: boolean } | undefined
+	// The full ModelInfo flows into SYSTEM_PROMPT so the preview honors
+	// excludedTools/includedTools exactly like the runtime path.
+	// ensureModelFetched() must be awaited before reading getModel().info:
+	// router providers discover model metadata over the network, and reading the
+	// info beforehand would build the preview from fallback metadata with different
+	// tool guidance than the runtime path (which fetches before tool construction).
+	let modelInfo: ModelInfo | undefined
 	try {
 		const tempApiHandler = buildApiHandler(apiConfiguration)
+		// A failed OR stalled metadata fetch degrades to the handler's fallback
+		// metadata (mirroring Task.safeEnsureModelFetched) rather than dropping
+		// model guidance entirely, so the preview keeps matching the runtime
+		// prompt's failure semantics. Promise.race attaches handlers to both
+		// inputs, so the fetch rejecting after the timeout is already considered
+		// handled — no extra .catch is needed here.
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		try {
+			await Promise.race([
+				tempApiHandler.ensureModelFetched?.(),
+				new Promise<void>((resolve) => {
+					timeoutId = setTimeout(resolve, PREVIEW_MODEL_FETCH_TIMEOUT_MS)
+				}),
+			])
+		} catch (error) {
+			console.error("Error fetching model metadata for system prompt preview:", error)
+		} finally {
+			clearTimeout(timeoutId)
+		}
 		modelInfo = tempApiHandler.getModel().info
 	} catch (error) {
-		console.error("Error fetching model info for system prompt preview:", error)
+		console.error("Error reading model info for system prompt preview:", error)
 	}
 
 	const systemPrompt = await SYSTEM_PROMPT(
@@ -64,6 +99,8 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		undefined, // todoList
 		undefined, // modelId
 		provider.getSkillsManager(),
+		disabledTools,
+		modelInfo,
 	)
 
 	return systemPrompt
