@@ -164,8 +164,17 @@ jobs:
               shell: bash
               run: |
                   test -s src/coverage/unit/lcov.info
-                  grep -q '^SF:' src/coverage/unit/lcov.info
-                  grep -Eq '^LH:[1-9][0-9]*$' src/coverage/unit/lcov.info
+                  awk '
+                      /^SF:/ { if (in_record) invalid=1; in_record=1; covered=0; next }
+                      /^LH:[1-9][0-9]*$/ { if (!in_record) invalid=1; covered=1; next }
+                      /^end_of_record$/ {
+                          if (!in_record) invalid=1
+                          any_covered = any_covered || covered
+                          in_record=0
+                          covered=0
+                      }
+                      END { exit !(any_covered && !in_record && !invalid) }
+                  ' src/coverage/unit/lcov.info
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
