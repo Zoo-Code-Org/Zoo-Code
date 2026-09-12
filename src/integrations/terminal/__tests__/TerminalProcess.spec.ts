@@ -201,6 +201,7 @@ describe("TerminalProcess", () => {
 		it("finalizes an error only once", () => {
 			mockTerminalInfo.busy = true
 			mockTerminalInfo.running = true
+			terminalProcess.isHot = true
 			mockTerminalInfo.activeShellExecution = {
 				commandLine: { value: "failed" },
 			} as vscode.TerminalShellExecution
@@ -216,6 +217,7 @@ describe("TerminalProcess", () => {
 			expect(mockTerminalInfo.busy).toBe(false)
 			expect(mockTerminalInfo.running).toBe(false)
 			expect(mockTerminalInfo.isStreamClosed).toBe(true)
+			expect(terminalProcess.isHot).toBe(false)
 			expect(terminalProcess.eventNames()).toEqual([])
 		})
 
@@ -274,6 +276,40 @@ describe("TerminalProcess", () => {
 				Terminal.setShellIntegrationTimeout(previousTimeout)
 				vi.useRealTimers()
 			}
+		})
+
+		it("releases a command when its active stream throws", async () => {
+			const streamError = new Error("stream failed")
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]: () => ({ next: () => Promise.reject(streamError) }),
+			}
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue({})
+			vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+
+			const commandPromise = mockTerminalInfo.runCommand("test command", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+			const process = mockTerminalInfo.process
+			await Promise.resolve()
+			mockTerminalInfo.setActiveStream(stream)
+
+			await commandPromise
+
+			expect(completedSpy).toHaveBeenCalledWith("<terminal process error: stream failed>", process)
+			expect(mockTerminalInfo.process).toBeUndefined()
+			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+			expect(mockTerminalInfo.busy).toBe(false)
+			expect(mockTerminalInfo.running).toBe(false)
+			expect(mockTerminalInfo["activeProcesses"]).not.toContain(process)
+			expect(process?.eventNames()).toEqual([])
+
+			mockTerminalInfo.handleClose()
+			expect(completionSpy).not.toHaveBeenCalled()
 		})
 
 		it("runs command after shell integration activates via onDidChangeTerminalShellIntegration event", async () => {

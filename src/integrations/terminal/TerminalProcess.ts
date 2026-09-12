@@ -288,7 +288,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 			// Emit continue event to allow execution to proceed
 			this.emit("continue")
-			this.handleError()
 			return
 		}
 

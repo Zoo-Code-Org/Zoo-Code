@@ -350,6 +350,7 @@ describe("TerminalRegistry", () => {
 			expect(closed.isClosed()).toBe(true)
 			expect(closed.busy).toBe(false)
 			expect(closed.running).toBe(false)
+			expect(closed.isStreamClosed).toBe(true)
 			expect(cleanupSpy).toHaveBeenCalledWith(closed.id)
 			expect(TerminalRegistry["terminals"]).toEqual([open])
 		})
