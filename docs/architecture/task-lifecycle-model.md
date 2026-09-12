@@ -6,14 +6,15 @@ Zoo Code checks task lifecycle protocols through one compositional verification 
 pnpm lifecycle:model-check
 ```
 
-The command runs six independent bounded submodels in sequence:
+The command runs seven independent bounded submodels in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed provider handoff and scheduler ordering;
 4. the task cleanup protocol;
 5. request-stream parser scoping; and
-6. completion persistence.
+6. completion persistence; and
+7. mid-stream provider retry budgeting and user handoff.
 
 This umbrella command is the single model-check entry point in the `compile` CI job after type checking. Command-level composition does not merge the submodels' state spaces: each checker retains its own bounds, transitions, invariant ownership, reachability requirements, and counterexample format. In particular, parser state is not part of the persisted lifecycle graph. The focused parser checker remains directly runnable with `pnpm parser-scope:model-check` for debugging.
 
@@ -103,6 +104,12 @@ Six injected legacy transition policies must produce deterministic shortest coun
 The model abstracts restart visibility as the `durable` history phase. It allows an already-started write to finish after cancellation because the filesystem operation itself is not cancellable, but it forbids starting a retry write or emitting completion after cancellation. The retry bound is two write starts (the initial attempt plus one retry), which is sufficient to cover the ordering and cancellation state classes without mirroring the production retry count.
 
 Seven semantic landmarks keep the intended positive and negative paths reachable: delayed completion remains pending, failed completion remains pending, exhausted retries settle without completion, cancellation can win after retry delay but before persistence, delegated reopen failure emits no delegated completion, and both standalone and delegated tasks can complete after durable history. The checker explores all reachable states through depth 10 and fails rather than reporting a truncated pass if an unseen successor remains.
+
+## Mid-stream provider retry model
+
+`scripts/check-mid-stream-retry.ts` models the independent request-level protocol used when a provider fails after yielding at least one stream chunk. It imports the production `decideMidStreamFailure` decision, exhaustively explores success, failure, backoff cancellation, prompt cancellation, user approval, and user decline through one bounded user-approved retry round, and requires every automatic retry to have one visible announcement. Its invariants prevent automatic requests beyond the configured budget, require the user prompt exactly at exhaustion, require approval to reset the budget, and make decline or either cancellation path terminal.
+
+The model does not claim provider transport liveness or token-billing accuracy. Focused `Task` tests cover conversation-history bookkeeping and both prompt responses; the VS Code E2E suite injects a real partial SSE response followed by a transport failure to verify the extension-host boundary, request count, visible retry handoff, and stable waiting at the failure prompt.
 
 ## Invariants
 
