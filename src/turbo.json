@@ -12,11 +12,14 @@
 		"test:dist": {
 			"dependsOn": ["bundle"]
 		},
+		"prepare:tree-sitter-wasms": {
+			"outputs": ["dist/tree-sitter-*.wasm"]
+		},
 		"test:coverage": {
 			"dependsOn": ["$TURBO_EXTENDS$", "bundle"]
 		},
 		"test:coverage:unit": {
-			"dependsOn": ["@roo-code/types#build"],
+			"dependsOn": ["@roo-code/types#build", "prepare:tree-sitter-wasms"],
 			"inputs": ["$TURBO_DEFAULT$", "!__tests__/dist_assets.spec.ts"],
 			"outputs": ["coverage/unit/**"]
 		},
