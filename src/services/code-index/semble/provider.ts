@@ -152,7 +152,7 @@ export class SembleProvider implements ISembleProvider {
 	/**
 	 * Stops indexing (no-op — semble has no background indexing process).
 	 */
-	stopIndexing(): void {
+	async stopIndexing(): Promise<void> {
 		// No-op: semble indexes on-the-fly per search call
 	}
 

@@ -1,3 +1,4 @@
+import { makeEventEmitter } from "../../../test-utils/vscode"
 // npx vitest run core/webview/__tests__/ClineProvider.sticky-profile.spec.ts
 
 import * as vscode from "vscode"
@@ -8,6 +9,9 @@ import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return makeEventEmitter()
+	}),
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),

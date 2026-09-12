@@ -1,6 +1,7 @@
 import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
+import type { CodeIndexScope } from "../../services/code-index/code-index-scope"
 
 import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
@@ -65,12 +66,6 @@ vi.mock("../handleTask", () => ({
 
 vi.mock("../../core/config/importExport", () => ({
 	importSettingsWithFeedback: vi.fn(),
-}))
-
-vi.mock("../../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn(),
-	},
 }))
 
 vi.mock("../../services/mdm/MdmService", () => ({
@@ -412,7 +407,17 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("creates a webview panel with title 'Zoo Code'", async () => {
-		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		// Only identity matters here: the mocked provider owns the consumer registration.
+		const codeIndexScope = {} as CodeIndexScope
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel, codeIndexScope })
+		expect(ClineProvider).toHaveBeenCalledWith(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			undefined,
+			undefined,
+			codeIndexScope,
+		)
 
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
 			"zoo-code.TabPanelProvider",

@@ -1,8 +1,10 @@
-import { CodeIndexManager } from "../manager"
+import type { CodeIndexManager } from "../manager"
+import { CodeIndexWorkspaceScopeRegistry } from "../code-index-workspace-scope-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
 import type { MockedClass } from "vitest"
 import * as path from "path"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { makeExtensionContext } from "../../../test-utils/vscode"
 
 // Helper: create a mock vscode.Uri from an fsPath
 function mockUri(fsPath: string, scheme = "file") {
@@ -93,6 +95,7 @@ vi.mock("ignore", () => ({
 vi.mock("../state-manager", () => ({
 	CodeIndexStateManager: vi.fn().mockImplementation(function () {
 		return {
+			init: vi.fn(),
 			onProgressUpdate: vi.fn(),
 			getCurrentStatus: vi.fn(),
 			dispose: vi.fn(),
@@ -113,6 +116,8 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("../service-factory")
 const MockedCodeIndexServiceFactory = CodeIndexServiceFactory as MockedClass<typeof CodeIndexServiceFactory>
 
+const codeIndexWorkspaceScopeRegistry = new CodeIndexWorkspaceScopeRegistry()
+
 describe("CodeIndexManager - handleSettingsChange regression", () => {
 	let mockContext: any
 	let manager: CodeIndexManager
@@ -124,9 +129,9 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 	const testGlobalStoragePath = path.join(path.sep, "test", "global-storage")
 	const testLogPath = path.join(path.sep, "test", "log")
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		// Clear all instances before each test
-		CodeIndexManager.disposeAll()
+		await codeIndexWorkspaceScopeRegistry.disposeAll()
 
 		const workspaceStateStore: Record<string, any> = {}
 		const globalStateStore: Record<string, any> = {}
@@ -160,11 +165,24 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			languageModelAccessInformation: {} as any,
 		}
 
-		manager = CodeIndexManager.getInstance(mockContext)!
+		manager = codeIndexWorkspaceScopeRegistry.getScope(mockContext)!.codeIndexManager
 	})
 
-	afterEach(() => {
-		CodeIndexManager.disposeAll()
+	afterEach(async () => {
+		await codeIndexWorkspaceScopeRegistry.disposeAll()
+	})
+
+	describe("initialize", () => {
+		it("rethrows initialization failures without updating lifecycle state", async () => {
+			const error = new Error("configuration failed")
+			manager["_configManager"] = {
+				loadConfiguration: vi.fn().mockRejectedValue(error),
+			} as never
+
+			await expect(manager.initialize({} as never)).rejects.toBe(error)
+
+			expect(manager["_stateManager"].setSystemState).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("handleSettingsChange", () => {
@@ -733,7 +751,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 		})
 
 		it("should store enablement per folder URI, not per window", async () => {
-			CodeIndexManager.disposeAll()
+			await codeIndexWorkspaceScopeRegistry.disposeAll()
 
 			const vscode = await import("vscode")
 
@@ -743,20 +761,24 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			const folderBUri = mockUri(folderBPath)
 
 			// Both folders share the same workspaceState (same window)
-			const sharedStore: Record<string, any> = {}
-			const sharedContext = {
-				...mockContext,
+			const sharedStore: Record<string, unknown> = {}
+			const sharedContext = makeExtensionContext({
 				workspaceState: {
-					get: vi.fn((key: string, defaultValue?: any) => sharedStore[key] ?? defaultValue),
-					update: vi.fn(async (key: string, value: any) => {
+					get: vi.fn(
+						<T>(key: string, defaultValue?: T) => (sharedStore[key] as T | undefined) ?? defaultValue,
+					),
+					update: vi.fn(async (key: string, value: unknown) => {
 						sharedStore[key] = value
 					}),
-				} as any,
+					keys: () => Object.keys(sharedStore),
+				},
 				globalState: {
-					get: vi.fn((_key: string, _defaultValue?: any) => false),
+					get: vi.fn(<T>(_key: string, _defaultValue?: T) => false as T),
 					update: vi.fn(),
-				} as any,
-			}
+					keys: () => [],
+					setKeysForSync: vi.fn(),
+				},
+			})
 
 			// Patch workspaceFolders to include both folders
 			;(vscode.workspace as any).workspaceFolders = [
@@ -764,8 +786,8 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				{ uri: folderBUri, name: "folderB", index: 1 },
 			]
 
-			const managerA = CodeIndexManager.getInstance(sharedContext as any, folderAPath)!
-			const managerB = CodeIndexManager.getInstance(sharedContext as any, folderBPath)!
+			const managerA = codeIndexWorkspaceScopeRegistry.getScope(sharedContext, folderAPath)!.codeIndexManager
+			const managerB = codeIndexWorkspaceScopeRegistry.getScope(sharedContext, folderBPath)!.codeIndexManager
 
 			// Both start disabled (autoEnableDefault is false via globalState mock)
 			expect(managerA.isWorkspaceEnabled).toBe(false)
@@ -784,12 +806,12 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			expect(managerA.isWorkspaceEnabled).toBe(false)
 			expect(managerB.isWorkspaceEnabled).toBe(true)
 
-			CodeIndexManager.disposeAll()
+			await codeIndexWorkspaceScopeRegistry.disposeAll()
 		})
 	})
 
 	describe("stopIndexing", () => {
-		it("should delegate to orchestrator.stopIndexing()", () => {
+		it("should delegate to orchestrator.stopIndexing()", async () => {
 			const mockOrchestrator = {
 				stopIndexing: vi.fn(),
 				stopWatcher: vi.fn(),
@@ -797,15 +819,15 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			}
 			;(manager as any)._orchestrator = mockOrchestrator
 
-			manager.stopIndexing()
+			await manager.stopIndexing()
 
 			expect(mockOrchestrator.stopIndexing).toHaveBeenCalled()
 		})
 
-		it("should be safe to call when orchestrator is not set", () => {
+		it("should be safe to call when orchestrator is not set", async () => {
 			;(manager as any)._orchestrator = undefined
 
-			expect(() => manager.stopIndexing()).not.toThrow()
+			await expect(manager.stopIndexing()).resolves.toBeUndefined()
 		})
 	})
 

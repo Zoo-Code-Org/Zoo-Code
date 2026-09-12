@@ -3,7 +3,7 @@ import { ContextProxy } from "../../core/config/ContextProxy"
 import { VectorStoreSearchResult } from "./interfaces"
 import { IndexingState } from "./interfaces/manager"
 import { CodeIndexConfigManager } from "./config-manager"
-import { CodeIndexStateManager } from "./state-manager"
+import type { CodeIndexStateManager } from "./state-manager"
 import { CodeIndexServiceFactory } from "./service-factory"
 import { CodeIndexSearchService } from "./search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
@@ -18,9 +18,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
 export class CodeIndexManager {
-	// --- Singleton Implementation ---
-	private static instances = new Map<string, CodeIndexManager>() // Map workspace path to instance
-
 	// Specialized class instances
 	private _configManager: CodeIndexConfigManager | undefined
 	private readonly _stateManager: CodeIndexStateManager
@@ -33,65 +30,20 @@ export class CodeIndexManager {
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
 
-	public static getInstance(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexManager | undefined {
-		// Resolve the workspace folder to get both fsPath and the real URI
-		let folder: vscode.WorkspaceFolder | undefined
-
-		if (workspacePath) {
-			folder = vscode.workspace.workspaceFolders?.find((f) => f.uri.fsPath === workspacePath)
-		} else {
-			const activeEditor = vscode.window.activeTextEditor
-			if (activeEditor) {
-				folder = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri)
-			}
-			if (!folder) {
-				const workspaceFolders = vscode.workspace.workspaceFolders
-				if (!workspaceFolders || workspaceFolders.length === 0) {
-					return undefined
-				}
-				folder = workspaceFolders[0]
-			}
-			workspacePath = folder.uri.fsPath
-		}
-
-		if (!CodeIndexManager.instances.has(workspacePath)) {
-			// folder may be undefined when workspacePath was provided but doesn't match
-			// any workspace folder (e.g. cwd passed from a tool). Fall back to file:// URI.
-			const folderUri =
-				folder?.uri ??
-				({
-					fsPath: workspacePath,
-					scheme: "file",
-					authority: "",
-					path: workspacePath,
-					toString: () => `file://${workspacePath}`,
-				} as unknown as vscode.Uri)
-			CodeIndexManager.instances.set(workspacePath, new CodeIndexManager(workspacePath, folderUri, context))
-		}
-		return CodeIndexManager.instances.get(workspacePath)!
-	}
-
-	public static getAllInstances(): CodeIndexManager[] {
-		return Array.from(CodeIndexManager.instances.values())
-	}
-
-	public static disposeAll(): void {
-		for (const instance of CodeIndexManager.instances.values()) {
-			instance.dispose()
-		}
-		CodeIndexManager.instances.clear()
-	}
-
 	private readonly workspacePath: string
 	private readonly _folderUri: vscode.Uri
 	private readonly context: vscode.ExtensionContext
 
-	// Private constructor for singleton pattern
-	private constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
+	public constructor(
+		workspacePath: string,
+		folderUri: vscode.Uri,
+		context: vscode.ExtensionContext,
+		stateManager: CodeIndexStateManager,
+	) {
 		this.workspacePath = workspacePath
 		this._folderUri = folderUri
 		this.context = context
-		this._stateManager = new CodeIndexStateManager()
+		this._stateManager = stateManager
 	}
 
 	// --- Public API ---
@@ -179,24 +131,21 @@ export class CodeIndexManager {
 
 		// 2. Check if feature is enabled
 		if (!this.isFeatureEnabled) {
-			if (this._orchestrator) {
-				this._orchestrator.stopWatcher()
-			}
-			if (this._sembleProvider) {
-				this._sembleProvider.stopIndexing()
-			}
+			await this.stopIndexing()
 			return { requiresRestart }
 		}
 
 		// 3. Check if workspace is available
 		const workspacePath = this.workspacePath
 		if (!workspacePath) {
+			await this.stopIndexing()
 			this._stateManager.setSystemState("Standby", "No workspace folder open")
 			return { requiresRestart }
 		}
 
 		// 4. Check workspace-level enablement (before creating expensive services)
 		if (!this.isWorkspaceEnabled) {
+			await this.stopIndexing()
 			this._stateManager.setSystemState("Standby", "Indexing not enabled for this workspace")
 			return { requiresRestart }
 		}
@@ -275,25 +224,13 @@ export class CodeIndexManager {
 	/**
 	 * Stops any in-progress indexing operation and the file watcher.
 	 */
-	public stopIndexing(): void {
+	public async stopIndexing(): Promise<void> {
 		if (this._sembleProvider) {
-			this._sembleProvider.stopIndexing()
+			await this._sembleProvider.stopIndexing()
 			return
 		}
 		if (this._orchestrator) {
-			this._orchestrator.stopIndexing()
-		}
-	}
-
-	/**
-	 * Stops the file watcher and potentially cleans up resources.
-	 */
-	public stopWatcher(): void {
-		if (!this.isFeatureEnabled) {
-			return
-		}
-		if (this._orchestrator) {
-			this._orchestrator.stopWatcher()
+			await this._orchestrator.stopIndexing()
 		}
 	}
 
@@ -341,13 +278,12 @@ export class CodeIndexManager {
 	/**
 	 * Cleans up the manager instance.
 	 */
-	public dispose(): void {
-		this.stopIndexing()
+	public async dispose(): Promise<void> {
+		await this.stopIndexing()
 		if (this._sembleProvider) {
 			this._sembleProvider.dispose()
 			this._sembleProvider = undefined
 		}
-		this._stateManager.dispose()
 	}
 
 	/**
@@ -395,10 +331,9 @@ export class CodeIndexManager {
 	 * Used by both initialize() and handleSettingsChange().
 	 */
 	private async _recreateServices(): Promise<void> {
-		// Stop watcher if it exists
-		if (this._orchestrator) {
-			this.stopWatcher()
-		}
+		// Stop active indexing and watcher before replacing their services.
+		await this.stopIndexing()
+
 		// Dispose existing semble provider if switching away
 		if (this._sembleProvider) {
 			this._sembleProvider.dispose()
@@ -504,7 +439,7 @@ export class CodeIndexManager {
 
 			// If feature is disabled, stop the service (including any active scan)
 			if (!isFeatureEnabled) {
-				this.stopIndexing()
+				await this.stopIndexing()
 				this._stateManager.setSystemState("Standby", "Code indexing is disabled")
 				return
 			}

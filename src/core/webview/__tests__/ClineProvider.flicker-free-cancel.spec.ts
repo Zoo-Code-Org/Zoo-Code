@@ -1,3 +1,4 @@
+import { makeEventEmitter } from "../../../test-utils/vscode"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
@@ -48,10 +49,7 @@ vi.mock("vscode", () => {
 			language: "en",
 		},
 		EventEmitter: vi.fn().mockImplementation(function () {
-			return {
-				event: vi.fn(),
-				fire: vi.fn(),
-			}
+			return makeEventEmitter()
 		}),
 		Disposable: {
 			from: vi.fn(),

@@ -34,7 +34,7 @@ import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
-import { CodeIndexManager } from "./services/code-index/manager"
+import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -62,6 +62,7 @@ import { initZooCodeAuth } from "./services/zoo-code-auth"
 let outputChannel: vscode.OutputChannel
 let extensionContext: vscode.ExtensionContext
 let cloudService: CloudService | undefined
+let codeIndexScope: CodeIndexScope | undefined
 
 let settingsUpdatedHandler: (() => void) | undefined
 
@@ -195,31 +196,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
-	// Initialize code index managers for all workspace folders.
-	const codeIndexManagers: CodeIndexManager[] = []
-
-	if (vscode.workspace.workspaceFolders) {
-		for (const folder of vscode.workspace.workspaceFolders) {
-			const manager = CodeIndexManager.getInstance(context, folder.uri.fsPath)
-
-			if (manager) {
-				codeIndexManagers.push(manager)
-
-				// Initialize in background; do not block extension activation
-				void manager.initialize(contextProxy).catch((error) => {
-					const message = error instanceof Error ? error.message : String(error)
-					outputChannel.appendLine(
-						`[CodeIndexManager] Error during background CodeIndexManager configuration/indexing for ${folder.uri.fsPath}: ${message}`,
-					)
-				})
-
-				context.subscriptions.push(manager)
-			}
-		}
-	}
-
 	// Initialize the provider *before* the Roo Code Cloud service.
-	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
+	codeIndexScope = new CodeIndexScope(context, contextProxy, outputChannel)
+	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService, codeIndexScope)
+	// Initialize in background; do not block extension activation.
+	void codeIndexScope.init()
+	context.subscriptions.push(codeIndexScope)
 
 	// Initialize Roo Code Cloud service.
 	settingsUpdatedHandler = () => {
@@ -271,7 +253,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	}
 
-	registerCommands({ context, outputChannel, provider })
+	registerCommands({ context, outputChannel, provider, codeIndexScope })
 
 	/**
 	 * We use the text document content provider API to show the left side for diff
@@ -383,6 +365,9 @@ export async function activate(context: vscode.ExtensionContext) {
 // This method is called when your extension is deactivated.
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
+
+	await codeIndexScope?.dispose()
+	codeIndexScope = undefined
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {

@@ -139,10 +139,15 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn().mockReturnValue(null),
-	},
+const codeIndexScope = {
+	init: vi.fn().mockResolvedValue(undefined),
+	dispose: vi.fn().mockResolvedValue(undefined),
+}
+
+vi.mock("../services/code-index/code-index-scope", () => ({
+	CodeIndexScope: vi.fn().mockImplementation(function () {
+		return codeIndexScope
+	}),
 }))
 
 vi.mock("../services/mdm/MdmService", () => ({
@@ -457,6 +462,13 @@ describe("extension.ts", () => {
 	describe("deactivate", () => {
 		beforeEach(() => {
 			vi.resetModules()
+		})
+
+		test("disposes the code index lifecycle service on deactivation", async () => {
+			const { activate, deactivate } = await import("../extension")
+			await activate(mockContext)
+			await deactivate()
+			expect(codeIndexScope.dispose).toHaveBeenCalledTimes(1)
 		})
 
 		test("still runs terminal cleanup when telemetry shutdown rejects", async () => {

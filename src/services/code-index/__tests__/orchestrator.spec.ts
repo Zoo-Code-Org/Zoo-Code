@@ -313,7 +313,7 @@ describe("CodeIndexOrchestrator - stopIndexing", () => {
 		await new Promise((resolve) => setTimeout(resolve, 10))
 
 		// Stop indexing
-		orchestrator.stopIndexing()
+		await orchestrator.stopIndexing()
 
 		// Wait for indexing to complete
 		await indexingPromise
@@ -352,7 +352,7 @@ describe("CodeIndexOrchestrator - stopIndexing", () => {
 		const indexingPromise = orchestrator.startIndexing()
 		await new Promise((resolve) => setTimeout(resolve, 10))
 
-		orchestrator.stopIndexing()
+		await orchestrator.stopIndexing()
 		await indexingPromise
 
 		// Should NOT have set Error state — abort is handled gracefully
@@ -390,7 +390,7 @@ describe("CodeIndexOrchestrator - stopIndexing", () => {
 		const indexingPromise = orchestrator.startIndexing()
 		await new Promise((resolve) => setTimeout(resolve, 10))
 
-		orchestrator.stopIndexing()
+		await orchestrator.stopIndexing()
 		await indexingPromise
 
 		// Cache should NOT be cleared on user-initiated stop

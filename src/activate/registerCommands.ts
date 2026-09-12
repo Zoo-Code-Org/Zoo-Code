@@ -10,11 +10,11 @@ import { ClineProvider } from "../core/webview/ClineProvider"
 import { ContextProxy } from "../core/config/ContextProxy"
 import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
-import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
 import { t } from "../i18n"
+import type { CodeIndexScope } from "../services/code-index/code-index-scope"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -60,6 +60,7 @@ export type RegisterCommandOptions = {
 	context: vscode.ExtensionContext
 	outputChannel: vscode.OutputChannel
 	provider: ClineProvider
+	codeIndexScope?: CodeIndexScope
 }
 
 export const registerCommands = (options: RegisterCommandOptions) => {
@@ -89,6 +90,7 @@ const getCommandsMap = ({
 	context,
 	outputChannel,
 	provider,
+	codeIndexScope,
 }: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, CommandCallback> => ({
 	activationCompleted: () => {},
 	plusButtonClicked: async () => {
@@ -110,9 +112,9 @@ const getCommandsMap = ({
 	popoutButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("popout")
 
-		return openClineInNewTab({ context, outputChannel })
+		return openClineInNewTab({ context, outputChannel, codeIndexScope })
 	},
-	openInNewTab: () => openClineInNewTab({ context, outputChannel }),
+	openInNewTab: () => openClineInNewTab({ context, outputChannel, codeIndexScope }),
 	settingsButtonClicked: () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
 
@@ -221,13 +223,16 @@ const getCommandsMap = ({
 	},
 })
 
-export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
+export const openClineInNewTab = async ({
+	context,
+	outputChannel,
+	codeIndexScope,
+}: Omit<RegisterCommandOptions, "provider">) => {
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).
 	// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	const contextProxy = await ContextProxy.getInstance(context)
-	const codeIndexManager = CodeIndexManager.getInstance(context)
 
 	// Get the existing MDM service instance to ensure consistent policy enforcement
 	let mdmService: MdmService | undefined
@@ -238,7 +243,7 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 		mdmService = undefined
 	}
 
-	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
+	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService, codeIndexScope)
 	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
 
 	// Check if there are any visible text editors, otherwise open a new group
