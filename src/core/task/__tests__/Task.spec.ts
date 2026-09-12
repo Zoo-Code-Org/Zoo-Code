@@ -641,6 +641,29 @@ describe("Cline", () => {
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
 
+		it("stops the outer task loop when max_tokens restoration cannot persist", async () => {
+			const task = await createTaskWithAutoApproval(true)
+			const access = getTaskTestAccess(task)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				stream([
+					{ type: "reasoning", text: "reasoning exhausted the output budget" },
+					{ type: "usage", inputTokens: 1000, outputTokens: 8192, stopReason: "max_tokens" },
+				]),
+			)
+			vi.spyOn(access, "saveApiConversationHistory").mockResolvedValueOnce(true).mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await access.initiateTaskLoop([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([{ type: "text", text: "original user request" }]),
+			})
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
 		it("bounds automatic empty-response retries and asks the user after the cap", async () => {
 			const task = await createTaskWithAutoApproval(true)
 			const saySpy = vi.spyOn(task, "say")

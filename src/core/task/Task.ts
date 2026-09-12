@@ -4223,7 +4223,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
 						) {
 							// Stryker disable next-line BooleanLiteral: restore failure must stop before terminal state diverges.
-							return false
+							return true
 						}
 
 						await this.say(
