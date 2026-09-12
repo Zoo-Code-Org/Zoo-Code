@@ -220,10 +220,12 @@ describe("resolveImageMentions", () => {
 	it("should not charge duplicate local images against later unique mentions", async () => {
 		const firstBytes = Buffer.from("first")
 		const secondBytes = Buffer.from("other")
+		const thirdBytes = Buffer.from("third")
 		const first = `data:image/png;base64,${firstBytes.toString("base64")}`
 		const second = `data:image/png;base64,${secondBytes.toString("base64")}`
+		const third = `data:image/png;base64,${thirdBytes.toString("base64")}`
 		const imageSizeInMB = firstBytes.byteLength / (1024 * 1024)
-		const maxTotalImageSize = imageSizeInMB * 2
+		const maxTotalImageSize = imageSizeInMB * 3
 		mockValidateImage.mockImplementation(async (_path, _supportsImages, _maxFileSize, maxTotal, current) => ({
 			isValid: current + imageSizeInMB <= maxTotal,
 			sizeInMB: imageSizeInMB,
@@ -231,15 +233,17 @@ describe("resolveImageMentions", () => {
 		mockReadImageAsDataUrl
 			.mockResolvedValueOnce({ dataUrl: first, buffer: firstBytes })
 			.mockResolvedValueOnce({ dataUrl: second, buffer: secondBytes })
+			.mockResolvedValueOnce({ dataUrl: second, buffer: secondBytes })
+			.mockResolvedValueOnce({ dataUrl: third, buffer: thirdBytes })
 
 		const result = await resolveImageMentions({
-			text: "See @/duplicate.png and @/unique.png",
+			text: "See @/supplied-duplicate.png, @/local.png, @/local-duplicate.png, and @/unique.png",
 			images: [first],
 			cwd: "/workspace",
 			maxTotalImageSize,
 		})
 
-		expect(result.images).toEqual([first, second])
+		expect(result.images).toEqual([first, second, third])
 	})
 })
 
