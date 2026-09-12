@@ -10,7 +10,7 @@ import { ClineProvider } from "../core/webview/ClineProvider"
 import { ContextProxy } from "../core/config/ContextProxy"
 import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
-import { CodeIndexManager } from "../services/code-index/manager"
+import { CodeIndexManagerRegistry } from "../services/code-index/code-index-manager-registry"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
@@ -227,7 +227,7 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 	// don't need to use that event).
 	// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	const contextProxy = await ContextProxy.getInstance(context)
-	const codeIndexManager = CodeIndexManager.getInstance(context)
+	const codeIndexManager = CodeIndexManagerRegistry.getInstance(context)
 
 	// Get the existing MDM service instance to ensure consistent policy enforcement
 	let mdmService: MdmService | undefined

@@ -139,8 +139,8 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/manager", () => ({
-	CodeIndexManager: {
+vi.mock("../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
 		getInstance: vi.fn().mockReturnValue(null),
 	},
 }))

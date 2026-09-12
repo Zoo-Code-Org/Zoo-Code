@@ -8,7 +8,7 @@ import { formatLanguage } from "../../shared/language"
 import { isEmpty } from "../../utils/object"
 
 import { McpHub } from "../../services/mcp/McpHub"
-import { CodeIndexManager } from "../../services/code-index/manager"
+import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import type { SystemPromptSettings } from "./types"
@@ -79,7 +79,7 @@ async function generatePrompt(
 	}
 	const shouldIncludeMcp = hasMcpGroup && hasMcpServers
 
-	const codeIndexManager = CodeIndexManager.getInstance(context, cwd)
+	const codeIndexManager = CodeIndexManagerRegistry.getInstance(context, cwd)
 
 	// Tool calling is native-only.
 	const effectiveProtocol = "native"
