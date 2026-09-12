@@ -119,6 +119,13 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			vi.mocked(lockJsonFile).mockResolvedValueOnce(secondRelease)
 			await getRestoreTaskFilePreImage(store)("task", ABSENT_TASK_FILE_PREIMAGE, [written])
 			expect(secondRelease).toHaveBeenCalledOnce()
+
+			const heldLock = Object.assign(
+				vi.fn(async () => {}),
+				{ getCompromiseError: () => undefined },
+			)
+			await getRestoreTaskFilePreImage(store)("task", ABSENT_TASK_FILE_PREIMAGE, [written], heldLock)
+			expect(heldLock).not.toHaveBeenCalled()
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })
@@ -334,6 +341,58 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			expect(store.get("parent")?.tokensIn).toBe(99)
 			const persistedParent = JSON.parse(await fs.readFile(parentFile, "utf8"))
 			expect(persistedParent).toEqual(store.get("parent"))
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("accepts the valid second pre-image when its write fails before commit", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-precommit-second-failure-"))
+		const store = new TaskHistoryStore(storage)
+		const writeError = new Error("child write failed before commit")
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			const childBefore = JSON.parse(await fs.readFile(childFile, "utf8"))
+			vi.mocked(safeWriteJson).mockImplementation(async (filePath, data, options) => {
+				if (filePath === childFile && (data as HistoryItem).status === "completed") {
+					options?.merge?.(childBefore, data)
+					throw writeError
+				}
+				return safeWriteJsonActuals.safeWriteJson!(filePath, data, options)
+			})
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({
+						...parent,
+						status: "active",
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+					}),
+					(child) => ({ ...child, status: "completed" }),
+					{ rollbackBothOnCallbackFailure: true },
+				),
+			).rejects.toBe(writeError)
+
+			expect(JSON.parse(await fs.readFile(parentFile, "utf8"))).toEqual(parentBefore)
+			expect(JSON.parse(await fs.readFile(childFile, "utf8"))).toEqual(childBefore)
+			expect(store.get("parent")).toEqual(parentBefore)
+			expect(store.get("child")).toEqual(childBefore)
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })

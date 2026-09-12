@@ -140,6 +140,7 @@ describe("task file pre-images", () => {
 		expect(taskFilePreImage(null, item.id, false)).toBe(ABSENT_TASK_FILE_PREIMAGE)
 		expect(taskFilePreImage(null, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
 		expect(taskFilePreImage({ ...item, id: "other" }, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage({ ...item, id: "other" }, item.id, false)).toBe(INVALID_TASK_FILE_PREIMAGE)
 		expect(taskFilePreImage({ id: item.id }, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
 	})
 
