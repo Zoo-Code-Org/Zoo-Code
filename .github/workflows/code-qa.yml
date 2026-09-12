@@ -155,7 +155,7 @@ jobs:
             - name: Run extension unit coverage
               run: pnpm turbo run test:coverage:unit --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Verify extension coverage contract
-              run: pnpm --dir src verify:coverage-contract
+              run: pnpm --dir src run verify:coverage-contract
             - name: Run extension dist smoke test
               run: pnpm turbo run test:dist --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Run core unit coverage
