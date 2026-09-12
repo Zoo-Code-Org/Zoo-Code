@@ -84,21 +84,8 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-// Scanned with `matchAll`, which iterates a private clone: these `/g` instances keep a `lastIndex`
-// of 0, so a scan that stops early (a parameter failing its schema) cannot strand the next caller.
-const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
-const LEAKED_INVOKE_PARAM = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
-
 /** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
-
-/**
- * Same-line prose that introduces markup as an example rather than invoking it. This is a
- * deliberately narrow lexical cue: a quoted invoke that ENDS its line is otherwise
- * indistinguishable from a genuine leak, which is just as often preceded by prose.
- */
-const QUOTING_CUE =
-	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
 
 /**
  * True when `before` ends inside an open Markdown code fence. Tracks the fence character and its
@@ -195,7 +182,12 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off leading prose
 	// alone regressed genuine recoveries, since a real leak is commonly narrated too, so only an
 	// explicit quoting cue suppresses it.
-	return QUOTING_CUE.test(stripTagsCompletely(sameLineBefore))
+	// Same-line prose that introduces markup as an example rather than invoking it. A deliberately
+	// narrow lexical cue: a quoted invoke that ENDS its line is otherwise indistinguishable from a
+	// genuine leak, which is just as often preceded by prose.
+	const quotingCue =
+		/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
+	return quotingCue.test(stripTagsCompletely(sameLineBefore))
 }
 
 /**
@@ -253,7 +245,9 @@ function declaredParamType(schema: Record<string, unknown> | undefined, paramNam
 	const property = properties?.[paramName] as Record<string, unknown> | undefined
 	const type = property?.["type"]
 	if (typeof type === "string") {
-		return { type, nullable: type === "null" }
+		// A bare declaration permits null only when the type IS "null", which convertLeakedParamValue
+		// settles on its own before reading this flag.
+		return { type, nullable: false }
 	}
 	if (Array.isArray(type)) {
 		return resolveTypeUnion(type.filter((entry): entry is string => typeof entry === "string"))
@@ -323,7 +317,8 @@ function parseLeakedInvokeParams(
 	schema: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
 	const input: Record<string, unknown> = {}
-	for (const match of body.matchAll(LEAKED_INVOKE_PARAM)) {
+	const paramPattern = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
+	for (const match of body.matchAll(paramPattern)) {
 		const name = match[1]
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
 		if (!converted) {
@@ -354,7 +349,8 @@ export function extractLeakedToolCalls(
 	let leftover = ""
 	let lastIndex = 0
 
-	for (const match of text.matchAll(LEAKED_INVOKE_BLOCK)) {
+	const blockPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
+	for (const match of text.matchAll(blockPattern)) {
 		leftover += text.slice(lastIndex, match.index)
 		const name = match[1]
 		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
