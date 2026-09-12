@@ -120,6 +120,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 		}
 		this.emit("completed", output)
 		this.continue()
+		this.stopHotTimer()
 		this.removeAllListeners()
 	}
 

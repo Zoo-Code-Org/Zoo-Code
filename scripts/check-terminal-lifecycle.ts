@@ -68,13 +68,21 @@ function complete(state: ModelState, phase: "completed" | "closed"): ModelState 
 function transition(state: ModelState, action: Action): ModelState {
 	switch (action) {
 		case "run":
-			return state.phase === "idle" ? { ...state, phase: "waiting", processAttached: true } : state
+			return state.phase === "idle"
+				? {
+						...state,
+						phase: "waiting",
+						processAttached: true,
+						processesCreated: state.processesCreated + 1,
+						trackedProcesses: state.trackedProcesses + 1,
+					}
+				: state
 		case "wait":
 			return state.phase !== "closed" && state.waitsCreated < 2
 				? { ...state, waitsCreated: state.waitsCreated + 1, pendingWaits: state.pendingWaits + 1 }
 				: state
 		case "track-process":
-			return state.phase !== "closed" && state.processesCreated < 2
+			return state.processAttached && state.processesCreated < 2
 				? {
 						...state,
 						processesCreated: state.processesCreated + 1,
@@ -94,7 +102,13 @@ function transition(state: ModelState, action: Action): ModelState {
 		case "output":
 			return state.phase === "running" && state.output === "" ? { ...state, output: "chunk" } : state
 		case "end":
-			return state.phase === "waiting" || state.phase === "running" ? complete(state, "completed") : state
+			return state.phase === "waiting" || state.phase === "running"
+				? {
+						...complete(state, "completed"),
+						trackedProcesses: state.trackedProcesses - 1,
+						settledProcesses: state.settledProcesses + 1,
+					}
+				: state
 		case "error":
 			return state.phase === "waiting" || state.phase === "running"
 				? {
@@ -139,6 +153,10 @@ function violations(state: ModelState): string[] {
 	}
 	if (state.settledWaits > state.waitsCreated) result.push("more waits settled than were created")
 	if (state.settledProcesses > state.processesCreated) result.push("more processes settled than were created")
+	if (state.trackedProcesses + state.settledProcesses !== state.processesCreated) {
+		result.push("process registration and settlement accounting diverged")
+	}
+	if (state.processAttached && state.trackedProcesses === 0) result.push("the current process was not tracked")
 	if (state.phase === "closed" && state.commandSubmitted && !state.iteratorReleased) {
 		result.push("closing a submitted command did not release its stream iterator")
 	}

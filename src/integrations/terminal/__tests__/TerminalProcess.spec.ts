@@ -292,6 +292,7 @@ describe("TerminalProcess", () => {
 
 				expect(mockTerminalInfo.process).toBeUndefined()
 				expect(mockTerminalInfo["activeProcesses"]).not.toContain(process)
+				expect(process?.isHot).toBe(false)
 				expect(process?.eventNames()).toEqual([])
 				expect(vi.getTimerCount()).toBe(0)
 			} finally {
