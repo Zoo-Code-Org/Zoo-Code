@@ -3122,7 +3122,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// both the on-disk original and the rebuilt copy, duplicating the
 					// user turn after a restart.
 					if (!(await this.restoreApiHistoryUserMessage(currentItem.removedUserMessage))) {
-						return false
+						return true
 					}
 				} else {
 					await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
@@ -3821,7 +3821,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								!(await this.restoreApiHistoryUserMessage(removedMidStreamUserMessage))
 							) {
 								// Stryker disable next-line BooleanLiteral: restore failure must stop before terminal state diverges.
-								return false
+								return true
 							}
 
 							await this.say(
@@ -3834,7 +3834,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// assistant-message-saved path.
 							await this.recordTerminalApiFailure("Failure: the API stream failed mid-response.")
 
-							return false
+							return true
 						}
 					}
 				} finally {
@@ -4238,7 +4238,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							"Failure: response hit the max output token limit before producing any visible content.",
 						)
 
-						return false
+						return true
 					}
 
 					// Check if we should auto-retry or prompt the user.
@@ -4313,7 +4313,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								removedCurrentUserMessage &&
 								!(await this.restoreApiHistoryUserMessage(removedCurrentUserMessage))
 							) {
-								return false
+								return true
 							}
 
 							await this.say(
@@ -4329,8 +4329,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				}
 
-				// If we reach here without continuing, return false (will always be false for now)
-				return false
+				// Terminal retry outcomes stop the outer task loop.
+				return true
 			} catch (error) {
 				// This should never happen since the only thing that can throw an
 				// error is the attemptApiRequest, which is wrapped in a try catch

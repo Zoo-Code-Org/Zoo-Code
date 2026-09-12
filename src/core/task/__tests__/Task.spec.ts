@@ -531,11 +531,31 @@ describe("Cline", () => {
 
 			await expect(
 				task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }]),
-			).resolves.toBe(false)
+			).resolves.toBe(true)
 
 			expect(attemptSpy).toHaveBeenCalledTimes(1)
 			expect(retrySaveSpy).toHaveBeenCalledTimes(1)
 			expect(task.apiConversationHistory).toEqual([originalUserMessage])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
+		})
+
+		it("stops the outer task loop when retry restoration cannot persist", async () => {
+			const task = await createTaskWithAutoApproval(false)
+			const access = getTaskTestAccess(task)
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+			vi.spyOn(access, "saveApiConversationHistory").mockResolvedValueOnce(true).mockResolvedValue(false)
+			vi.spyOn(task, "retrySaveApiConversationHistory").mockResolvedValue(false)
+
+			await access.initiateTaskLoop([{ type: "text", text: "original user request" }])
+
+			expect(attemptSpy).toHaveBeenCalledTimes(1)
+			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([{ type: "text", text: "original user request" }]),
+			})
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 0 })
 		})
 
@@ -555,7 +575,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			expect(askSpy.mock.calls[0]?.[1]).toBe(
 				"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
 			)
@@ -592,7 +612,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			expect(attemptSpy).toHaveBeenCalledTimes(1)
 			expect(askSpy).not.toHaveBeenCalled()
 			expect(
@@ -631,7 +651,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			// Initial attempt + MAX_AUTOMATIC_API_RETRIES (3) automatic retries.
 			expect(attemptSpy).toHaveBeenCalledTimes(4)
 			// Every automatic retry was announced via the visible countdown:
@@ -674,7 +694,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			expect(task.apiConversationHistory).toHaveLength(3)
 			expect(task.apiConversationHistory.slice(0, 2)).toEqual(originalPriorHistory)
 			expect(task.apiConversationHistory[2]).toMatchObject({
@@ -695,7 +715,7 @@ describe("Cline", () => {
 
 			await expect(
 				task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }]),
-			).resolves.toBe(false)
+			).resolves.toBe(true)
 
 			expect(task.apiConversationHistory).toHaveLength(1)
 			expect(task.apiConversationHistory[0]?.role).toBe("user")
@@ -746,7 +766,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			// Initial attempt + MAX_AUTOMATIC_API_RETRIES (3) automatic retries.
 			expect(attemptSpy).toHaveBeenCalledTimes(4)
 			// Retries must not resend file details: no request in the retry
@@ -796,7 +816,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			// No request or countdown starts until the user explicitly approves.
 			const retryAnnouncements = saySpy.mock.calls.filter(
 				([type, , , partial]) => type === "api_req_retry_delayed" && partial === false,
@@ -887,7 +907,7 @@ describe("Cline", () => {
 
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 			// Attempts 1-4: first turn fails to the cap and is approved.
 			// Attempt 5: recovered text response. Attempts 6-9: the recovered
 			// turn's no-tool follow-up fails to the cap again and is declined.
