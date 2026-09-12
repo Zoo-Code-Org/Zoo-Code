@@ -148,6 +148,32 @@ describe("DeepSeekHandler", () => {
 		clearAllMocks()
 	})
 
+	describe("completePrompt reasoning", () => {
+		it.each([
+			{ apiModelId: "custom-deepseek-model", enableReasoningEffort: true, expected: undefined },
+			{ apiModelId: "deepseek-v4-flash", enableReasoningEffort: false, expected: undefined },
+			{ apiModelId: "deepseek-v4-flash", enableReasoningEffort: true, expected: "max" },
+		])("respects reasoning support for $apiModelId with enabled=$enableReasoningEffort", async (scenario) => {
+			const completionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: scenario.apiModelId,
+				enableReasoningEffort: scenario.enableReasoningEffort,
+				reasoningEffort: "max",
+			})
+
+			await completionHandler.completePrompt("Hello")
+
+			expect(mockCreate).toHaveBeenCalledOnce()
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.model).toBe(scenario.apiModelId)
+			if (scenario.expected === undefined) {
+				expect(request).not.toHaveProperty("reasoning_effort")
+			} else {
+				expect(request.reasoning_effort).toBe(scenario.expected)
+			}
+		})
+	})
+
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
 			expect(handler).toBeInstanceOf(DeepSeekHandler)

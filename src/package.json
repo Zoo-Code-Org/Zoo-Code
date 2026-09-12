@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "ZooCodeOrganization",
-	"version": "3.82.0",
+	"version": "3.82.1",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -441,10 +441,11 @@
 	"scripts": {
 		"lint": "eslint . --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
-		"pretest": "turbo run bundle --cwd ..",
-		"pretest:coverage": "turbo run bundle --cwd ..",
 		"test": "vitest run",
+		"test:unit": "vitest run --config vitest.unit.config.ts",
+		"test:dist": "vitest run --config vitest.dist.config.ts",
 		"test:coverage": "vitest run --coverage",
+		"test:coverage:unit": "vitest run --config vitest.unit.config.ts --coverage",
 		"format": "prettier --write .",
 		"bundle": "node esbuild.mjs",
 		"vscode:prepublish": "pnpm bundle --production",
