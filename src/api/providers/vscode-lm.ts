@@ -84,8 +84,8 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-// Built per call rather than shared at module scope: a `/g` regex carries `lastIndex` across
-// callers, so a single shared instance makes concurrent streams resume mid-text.
+// Built per call, not shared at module scope: the parameter scan abandons its `/g` regex mid-text
+// when a value fails its schema, so a shared instance would resume from that stale `lastIndex`.
 const leakedInvokeBlockPattern = () => /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
 const leakedInvokeParamPattern = () =>
 	/<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
@@ -193,11 +193,9 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
 	if (stripTagsCompletely(restOfLine).trim().length > 0) {
 		return true
 	}
-	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off the mere
-	// presence of leading prose was tried and regressed genuine recoveries, because a real leak is
-	// commonly preceded by narration too ("Working on it.\n"), so only an explicit quoting cue
-	// immediately before the markup suppresses it. Heuristic: prose that quotes markup without
-	// such a cue still reads as a live call.
+	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off leading prose
+	// alone regressed genuine recoveries, since a real leak is commonly narrated too, so only an
+	// explicit quoting cue suppresses it.
 	return quotingCuePattern().test(stripTagsCompletely(sameLineBefore))
 }
 

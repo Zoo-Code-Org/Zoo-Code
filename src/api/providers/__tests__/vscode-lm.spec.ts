@@ -1813,4 +1813,57 @@ describe("leaked tool-call parser contracts", () => {
 			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
 		})
 	})
+
+	// Tag shapes a real backend varies on: whitespace inside the tags, and the `antml:` prefix.
+	describe("tag whitespace tolerance", () => {
+		it("recovers an invoke whose opening tag has whitespace before the closing bracket", () => {
+			const spaced = `<in${"voke"} name="update_todo_list" >${param("todos", "x")}</in${"voke"}>`
+
+			expect(callsOf(wrap(spaced))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("recovers an invoke whose closing tag has whitespace before the bracket", () => {
+			const spaced = `<in${"voke"} name="update_todo_list">${param("todos", "x")}</in${"voke"} >`
+
+			expect(callsOf(wrap(spaced))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("keeps a parameter whose closing tag has whitespace before the bracket", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"} >`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("reads a parameter name separated by more than one whitespace character", () => {
+			const body = `<param${"eter"}\t\tname="todos">x</param${"eter"}>`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("arms on a reopened wrapper whose tag carries inner whitespace", () => {
+			const text = `${wrap("")}\n<function${"_calls"} >\n${todo()}`
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("treats a tilde run shorter than three characters as ordinary text, not a fence", () => {
+			expect(callsOf(`<function${"_calls"}>\n~\n${todo()}`)).toHaveLength(1)
+		})
+	})
+
+	describe("chunk-boundary positioning", () => {
+		it("does not hold back an invoke tag that already closed earlier in the chunk", () => {
+			expect(trailingPartialToolMarkerLength("mid <invoke tail> more")).toBe(0)
+		})
+
+		it("locates the quoting cue relative to the preceding chunk, not its mirror image", () => {
+			// The window offset is preceding.length + match.index; subtracting instead lands on an
+			// earlier, cue-free slice and wrongly recovers the quoted block.
+			const { calls } = extractLeakedToolCalls(`see \`${todo()}`, tools, `<function${"_calls"}>`)
+
+			expect(calls).toHaveLength(0)
+		})
+	})
 })
