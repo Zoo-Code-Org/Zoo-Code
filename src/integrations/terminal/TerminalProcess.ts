@@ -42,7 +42,9 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 		this.once("completed", () => {
 			this.terminal.releaseProcess(this)
-			this.terminal.busy = false
+			if (this.terminal.process === this) {
+				this.terminal.busy = false
+			}
 		})
 
 		this.once("shell_execution_complete", () => this.terminal.releaseProcess(this))
@@ -96,9 +98,9 @@ export class TerminalProcess extends BaseTerminalProcess {
 		if (terminal.process === this) {
 			terminal.activeShellExecution = undefined
 			terminal.setActiveStream(undefined)
-			terminal.process = undefined
 			terminal.busy = false
 			terminal.running = false
+			terminal.process = undefined
 		}
 		terminal.releaseProcess(this)
 		this.stopHotTimer()
@@ -112,6 +114,8 @@ export class TerminalProcess extends BaseTerminalProcess {
 		if (terminal.process === this) {
 			terminal.activeShellExecution = undefined
 			terminal.setActiveStream(undefined)
+			terminal.busy = false
+			terminal.running = false
 			terminal.process = undefined
 		}
 		this.emit("completed", output)
@@ -283,7 +287,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 				"<VSCE shell integration stream did not start: terminal output and command execution status is unknown>",
 			)
 
-			this.terminal.busy = false
 			this.cleanupScriptFile()
 
 			// Emit continue event to allow execution to proceed
@@ -566,9 +569,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 			if (streamProcessingError !== undefined) {
 				// Ensure cleanup and caller unblocking happen even when the loop throws.
-				this.terminal.activeShellExecution = undefined
-				this.terminal.busy = false
-				this.isHot = false
 				this.cleanupScriptFile()
 				this.emit(
 					"completed",

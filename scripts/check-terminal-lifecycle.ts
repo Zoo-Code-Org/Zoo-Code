@@ -1,5 +1,5 @@
 type Phase = "idle" | "waiting" | "running" | "completed" | "failed" | "closed"
-type Action = "run" | "wait" | "track-process" | "activate" | "output" | "end" | "error" | "close"
+type Action = "run" | "wait" | "track-process" | "activate" | "output" | "end" | "error" | "error-superseded" | "close"
 
 interface ModelState {
 	phase: Phase
@@ -22,7 +22,17 @@ interface TraceStep {
 	state: ModelState
 }
 
-const actions: Action[] = ["run", "wait", "track-process", "activate", "output", "end", "error", "close"]
+const actions: Action[] = [
+	"run",
+	"wait",
+	"track-process",
+	"activate",
+	"output",
+	"end",
+	"error",
+	"error-superseded",
+	"close",
+]
 const MAX_DEPTH = 9
 const MAX_STATES = 500
 
@@ -98,6 +108,14 @@ function transition(state: ModelState, action: Action): ModelState {
 						settledProcesses: state.settledProcesses + (state.trackedProcesses > 0 ? 1 : 0),
 					}
 				: state
+		case "error-superseded":
+			return state.processAttached && state.trackedProcesses >= 2
+				? {
+						...state,
+						trackedProcesses: state.trackedProcesses - 1,
+						settledProcesses: state.settledProcesses + 1,
+					}
+				: state
 		case "close":
 			return state.phase === "closed"
 				? state
@@ -158,6 +176,11 @@ const landmarks = {
 		trace.at(-1)?.action === "close" &&
 		trace.at(-1)?.state.processAttached === false &&
 		trace.at(-1)?.state.completionCount === 0,
+	"superseded-error-preserves-owner": (trace: TraceStep[]) =>
+		trace.at(-1)?.action === "error-superseded" &&
+		trace.at(-1)?.state.processAttached === true &&
+		trace.at(-1)?.state.phase === "running" &&
+		trace.at(-1)?.state.trackedProcesses === 1,
 	"duplicate-close": (trace: TraceStep[]) => trace.filter((step) => step.action === "close").length >= 2,
 	"concurrent-waits-close": (trace: TraceStep[]) =>
 		trace.at(-1)?.action === "close" &&

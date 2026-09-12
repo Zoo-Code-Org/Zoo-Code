@@ -312,6 +312,44 @@ describe("TerminalProcess", () => {
 			expect(completionSpy).not.toHaveBeenCalled()
 		})
 
+		it("does not clear a newer process when a superseded active stream throws", async () => {
+			const streamError = new Error("old stream failed")
+			let rejectNext: (error: Error) => void = () => undefined
+			const next = new Promise<IteratorResult<string>>((_, reject) => (rejectNext = reject))
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]: () => ({
+					next: () => next,
+				}),
+			}
+			const oldExecution = { commandLine: { value: "old" } } as vscode.TerminalShellExecution
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue(oldExecution)
+			vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+			const oldRun = terminalProcess.run("old command")
+			terminalProcess.emit("stream_available", stream)
+			await Promise.resolve()
+
+			const currentProcess = new TerminalProcess(mockTerminalInfo)
+			const currentExecution = { commandLine: { value: "current" } } as vscode.TerminalShellExecution
+			currentProcess.ownExecution = currentExecution
+			mockTerminalInfo.process = currentProcess
+			mockTerminalInfo.activeShellExecution = currentExecution
+			mockTerminalInfo.busy = true
+			mockTerminalInfo.running = true
+
+			rejectNext(streamError)
+			await oldRun
+
+			expect(mockTerminalInfo.process).toBe(currentProcess)
+			expect(mockTerminalInfo.activeShellExecution).toBe(currentExecution)
+			expect(mockTerminalInfo.busy).toBe(true)
+			expect(mockTerminalInfo.running).toBe(true)
+			expect(mockTerminalInfo["activeProcesses"]).not.toContain(terminalProcess)
+			expect(mockTerminalInfo["activeProcesses"]).toContain(currentProcess)
+
+			mockTerminalInfo.handleClose()
+		})
+
 		it("runs command after shell integration activates via onDidChangeTerminalShellIntegration event", async () => {
 			// Cover Terminal.runCommand's waitForShellIntegration resolve path: shell
 			// integration is initially absent but arrives via the VSCode event before timeout.
