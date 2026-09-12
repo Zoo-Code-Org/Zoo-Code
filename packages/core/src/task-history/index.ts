@@ -1,7 +1,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import type { HistoryItem } from "@roo-code/types"
+import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 const HISTORY_ITEM_FILENAME = "history_item.json"
 const HISTORY_INDEX_FILENAME = "_index.json"
@@ -13,6 +13,28 @@ export interface TaskSessionEntry {
 	workspace?: string
 	mode?: string
 	status?: HistoryItem["status"]
+}
+
+export const ABSENT_TASK_FILE_PREIMAGE = "absent" as const
+export const INVALID_TASK_FILE_PREIMAGE = "invalid" as const
+export type TaskFilePreImage = HistoryItem | typeof ABSENT_TASK_FILE_PREIMAGE | typeof INVALID_TASK_FILE_PREIMAGE
+
+export function taskFilePreImage(existing: unknown, taskId: string, fileExists: () => boolean): TaskFilePreImage {
+	const parsed = historyItemSchema.safeParse(existing)
+	if (parsed.success && parsed.data.id === taskId) return structuredClone(existing as HistoryItem)
+	return existing === null && !fileExists() ? ABSENT_TASK_FILE_PREIMAGE : INVALID_TASK_FILE_PREIMAGE
+}
+
+export function isValidTaskFilePreImage(preImage: TaskFilePreImage): preImage is HistoryItem {
+	return preImage !== ABSENT_TASK_FILE_PREIMAGE && preImage !== INVALID_TASK_FILE_PREIMAGE
+}
+
+export function matchesExpectedHistoryItem(
+	item: HistoryItem,
+	expected: readonly HistoryItem[],
+	equals: (left: HistoryItem, right: HistoryItem) => boolean,
+): boolean {
+	return expected.some((candidate) => equals(item, candidate))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

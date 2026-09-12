@@ -4,7 +4,15 @@ import * as path from "path"
 import crypto from "crypto"
 
 import deepEqual from "fast-deep-equal"
-import { historyItemSchema, type HistoryItem } from "@roo-code/types"
+import type { HistoryItem } from "@roo-code/types"
+import {
+	ABSENT_TASK_FILE_PREIMAGE,
+	INVALID_TASK_FILE_PREIMAGE,
+	isValidTaskFilePreImage,
+	matchesExpectedHistoryItem,
+	taskFilePreImage,
+	type TaskFilePreImage,
+} from "@roo-code/core"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, lockJsonFile, safeWriteJson, type JsonFileLock } from "../../utils/safeWriteJson"
@@ -52,9 +60,6 @@ interface DelegationRepairIntent {
 		parentStatus: "active"
 	}
 }
-
-/** `absent` and `invalid` remain distinct from a validated record pre-image. */
-type TaskFilePreImage = HistoryItem | "absent" | "invalid"
 
 type TaskFileRestoration = readonly [
 	taskId: string,
@@ -934,15 +939,15 @@ export class TaskHistoryStore {
 			await safeWriteJson(filePath, item, {
 				heldLock: options?.heldLock,
 				merge: (existing, incoming) => {
-					const preImage = this.toTaskFilePreImage(item.id, filePath, existing)
+					const preImage = taskFilePreImage(existing, item.id, () => fsSync.existsSync(filePath))
 					options?.capturePreImage?.(preImage)
 					if (diskGuard) {
-						if (typeof preImage === "string") {
+						if (!isValidTaskFilePreImage(preImage)) {
 							throw new Error(`[TaskHistoryStore] guarded write: task ${item.id} not found on disk`)
 						}
 						diskGuard(preImage)
 					}
-					const result = mergeFn(typeof preImage === "string" ? null : preImage, incoming)
+					const result = mergeFn(isValidTaskFilePreImage(preImage) ? preImage : null, incoming)
 					written = result as HistoryItem
 					return result
 				},
@@ -952,12 +957,6 @@ export class TaskHistoryStore {
 			await safeWriteJson(filePath, item)
 			return item
 		}
-	}
-
-	private toTaskFilePreImage(taskId: string, filePath: string, existing: unknown): TaskFilePreImage {
-		const parsed = historyItemSchema.safeParse(existing)
-		if (parsed.success && parsed.data.id === taskId) return structuredClone(existing as HistoryItem)
-		return existing === null && !fsSync.existsSync(filePath) ? "absent" : "invalid"
 	}
 
 	private async reconcileTaskCache(taskId: string): Promise<void> {
@@ -978,7 +977,7 @@ export class TaskHistoryStore {
 			const current = await this.readTaskFile(taskId)
 			if (!current && fsSync.existsSync(filePath))
 				throw new Error(`cannot restore absent task ${taskId} from invalid state`)
-			if (current && !expectedWritten.some((candidate) => deepEqual(current, candidate))) {
+			if (current && !matchesExpectedHistoryItem(current, expectedWritten, deepEqual)) {
 				throw new Error(`cannot restore absent task ${taskId} after concurrent update`)
 			}
 			if (current) {
@@ -1001,8 +1000,8 @@ export class TaskHistoryStore {
 		expectedWritten: readonly HistoryItem[],
 		heldLock?: JsonFileLock,
 	): Promise<void> {
-		if (preImage === "absent") return this.restoreAbsentTaskFile(taskId, expectedWritten, heldLock)
-		if (preImage === "invalid") {
+		if (preImage === ABSENT_TASK_FILE_PREIMAGE) return this.restoreAbsentTaskFile(taskId, expectedWritten, heldLock)
+		if (preImage === INVALID_TASK_FILE_PREIMAGE) {
 			await this.reconcileTaskCache(taskId)
 			throw new Error(`cannot compensate ${taskId}: pre-image was invalid`)
 		}
@@ -1011,11 +1010,11 @@ export class TaskHistoryStore {
 			await safeWriteJson(filePath, preImage, {
 				heldLock,
 				merge: (existing) => {
-					const current = this.toTaskFilePreImage(taskId, filePath, existing)
-					if (typeof current === "string") {
+					const current = taskFilePreImage(existing, taskId, () => fsSync.existsSync(filePath))
+					if (!isValidTaskFilePreImage(current)) {
 						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
 					}
-					if (!expectedWritten.some((candidate) => deepEqual(current, candidate))) {
+					if (!matchesExpectedHistoryItem(current, expectedWritten, deepEqual)) {
 						throw new Error(`cannot compensate ${taskId} after concurrent update`)
 					}
 					return preImage
@@ -1276,12 +1275,15 @@ export class TaskHistoryStore {
 						const restorations = Array.of<TaskFileRestoration>(firstRestoration)
 						if (secondDiskSnapshot) {
 							const mergeSecond = mergeWithDisk(secondDelta)
-							const secondPreImage = typeof secondDiskSnapshot === "string" ? null : secondDiskSnapshot
+							const secondPreImage = isValidTaskFilePreImage(secondDiskSnapshot)
+								? secondDiskSnapshot
+								: null
 							const expectedSecond = mergeSecond(secondPreImage, mergedSecond) as HistoryItem
 							const expectedSecondStates = Array.of(
 								JSON.parse(JSON.stringify(expectedSecond)) as HistoryItem,
 							)
-							if (typeof secondDiskSnapshot !== "string") expectedSecondStates.unshift(secondDiskSnapshot)
+							if (isValidTaskFilePreImage(secondDiskSnapshot))
+								expectedSecondStates.unshift(secondDiskSnapshot)
 							restorations.unshift([secondId, secondDiskSnapshot, expectedSecondStates])
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)

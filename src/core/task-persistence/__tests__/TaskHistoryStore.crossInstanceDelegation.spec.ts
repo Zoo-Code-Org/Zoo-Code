@@ -3,6 +3,7 @@ import * as os from "os"
 import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
+import type { TaskFilePreImage } from "@roo-code/core"
 
 import { lockJsonFile, safeWriteJson, type JsonFileLock } from "../../../utils/safeWriteJson"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
@@ -41,8 +42,6 @@ type WriteTaskFile = (
 	diskGuard?: (current: HistoryItem) => void,
 	options?: { heldLock?: JsonFileLock; capturePreImage?: (preImage: TaskFilePreImage) => void },
 ) => Promise<HistoryItem>
-
-type TaskFilePreImage = HistoryItem | "absent" | "invalid"
 
 const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
 	const writeTaskFile: unknown = Reflect.get(store, "writeTaskFile")
