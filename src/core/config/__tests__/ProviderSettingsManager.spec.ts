@@ -4,6 +4,7 @@ import {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	OpenAiCodexServiceTier,
 	providerIdentifiers,
+	openAiModelInfoSaneDefaults,
 	retiredProviderIdentifiers,
 	type ProviderSettings,
 } from "@roo-code/types"
@@ -481,6 +482,29 @@ describe("ProviderSettingsManager", () => {
 					apiModelId: "gpt-5.6-sol",
 					[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTier,
 				})
+			},
+		)
+
+		it.each([true, false, undefined])(
+			"round-trips OpenAI-compatible reasoning settings through profile storage when enabled is %s",
+			async (enableReasoningEffort) => {
+				const configuration: ProviderSettings = {
+					apiProvider: providerIdentifiers.openai,
+					openAiModelId: "custom-model",
+					enableReasoningEffort,
+					reasoningEffort: "low",
+					openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
+				}
+				await providerSettingsManager.saveConfig("compatible", configuration)
+
+				const serializedProfiles: string = mockSecrets.store.mock.calls.at(-1)![1]
+				mockSecrets.get.mockResolvedValue(serializedProfiles)
+				const reloadedManager = new ProviderSettingsManager(mockContext)
+				const profile = await reloadedManager.getProfile({ name: "compatible" })
+
+				expect(profile.enableReasoningEffort).toBe(enableReasoningEffort)
+				expect(profile.reasoningEffort).toBe("low")
+				expect(profile.openAiCustomModelInfo).toEqual(configuration.openAiCustomModelInfo)
 			},
 		)
 

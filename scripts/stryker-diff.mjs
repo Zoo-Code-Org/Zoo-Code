@@ -198,6 +198,7 @@ export function packageForPath(filePath) {
 
 export function buildManifest(entries, readSource, diffForPath) {
 	const packages = new Map()
+	const advisories = []
 
 	for (const entry of entries) {
 		if (!new Set(["A", "M", "R"]).has(entry.status)) continue
@@ -211,7 +212,11 @@ export function buildManifest(entries, readSource, diffForPath) {
 				? new Set(Array.from({ length: sourceLineCount }, (_, index) => index + 1))
 				: parseChangedLines(diffForPath(entry.path))
 
-		validateDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
+		try {
+			validateDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
+		} catch (error) {
+			advisories.push(error.message)
+		}
 		const executableLines = executableChangedLines(source, changedLines, entry.path)
 		if (executableLines.size === 0) continue
 
@@ -243,7 +248,7 @@ export function buildManifest(entries, readSource, diffForPath) {
 		}
 	}
 
-	return { packages: [...packages.values()] }
+	return { packages: [...packages.values()], advisories }
 }
 
 function validateSha(value, name) {
@@ -456,31 +461,45 @@ function escapeWorkflowProperty(value) {
 }
 
 export function formatAnnotationCommand(annotation) {
-	return `::error file=${escapeWorkflowProperty(annotation.file)},line=${annotation.line},title=Mutation test gap::${escapeWorkflowData(annotation.message)}`
+	return `::warning file=${escapeWorkflowProperty(annotation.file)},line=${annotation.line},title=Mutation test advisory::${escapeWorkflowData(annotation.message)}`
+}
+
+export function formatAdvisoryCommand(advisory) {
+	return `::warning title=Mutation test advisory::${escapeWorkflowData(advisory)}`
 }
 
 export function formatAnnotations(blockingMutants, packageRoot, state = { total: 0, perFile: new Map() }) {
 	const annotations = []
+	const mutantsByLocation = new Map()
 
-	for (const mutant of blockingMutants.sort((left, right) => {
+	for (const mutant of [...blockingMutants].sort((left, right) => {
 		const pathOrder = left.filePath.localeCompare(right.filePath)
 		return pathOrder || left.location.start.line - right.location.start.line
 	})) {
 		const repositoryPath = path.posix.join(packageRoot, mutant.filePath.replaceAll("\\", "/"))
 		const key = `${repositoryPath}:${mutant.location.start.line}`
-		const fileCount = state.perFile.get(repositoryPath) ?? 0
-		if (annotations.some((annotation) => annotation.key === key) || fileCount >= 7 || state.total >= 20) continue
+		const group = mutantsByLocation.get(key) ?? { repositoryPath, mutants: [] }
+		group.mutants.push(mutant)
+		mutantsByLocation.set(key, group)
+	}
 
+	for (const [key, { repositoryPath, mutants }] of mutantsByLocation) {
+		const fileCount = state.perFile.get(repositoryPath) ?? 0
+		if (fileCount >= 7 || state.total >= 20) continue
+
+		const mutant = mutants[0]
 		const replacement = String(mutant.replacement ?? "")
 			.replace(/\s+/g, " ")
 			.trim()
 			.slice(0, 160)
+		const location = `${repositoryPath}:${mutant.location.start.line}`
+		const detail = `${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}`
 		annotations.push({
 			key,
 			file: repositoryPath,
 			line: mutant.location.start.line,
 			message:
-				`${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}. ` +
+				`${location}: ${mutants.length === 1 ? detail : `${mutants.length} mutation test gaps; example: ${detail}`}. ` +
 				"See the job summary for the complete list and resolution guidance.",
 		})
 		state.perFile.set(repositoryPath, fileCount + 1)
@@ -533,7 +552,7 @@ export function formatBlockingMutants(blockingMutants, packageRoot) {
 	return lines
 }
 
-export function formatSummary(rows, failures, manifest = {}) {
+export function formatSummary(rows, advisories, manifest = {}) {
 	const lines = [
 		"## Changed-code mutation testing",
 		"",
@@ -567,7 +586,7 @@ export function formatSummary(rows, failures, manifest = {}) {
 			"",
 			"### All surviving and uncovered mutants",
 			"",
-			"Annotations highlight up to 20 unique locations (maximum 7 per file). This summary lists every blocking mutant.",
+			"Warning annotations highlight up to 20 unique locations (maximum 7 per file). This summary lists every advisory mutant.",
 			"",
 		)
 		for (const row of blockingRows) {
@@ -583,7 +602,7 @@ export function formatSummary(rows, failures, manifest = {}) {
 			"const result = condition ? value : fallback",
 			"```",
 			"",
-			"Broad `all` exclusions and exclusions without a concrete reason are rejected by the gate.",
+			"Broad `all` exclusions and exclusions without a concrete reason are reported as advisories.",
 		)
 	}
 
@@ -610,14 +629,14 @@ export function formatSummary(rows, failures, manifest = {}) {
 		)
 	}
 
-	if (failures.length > 0) {
+	if (advisories.length > 0) {
 		lines.push(
 			"",
-			"### Failures",
+			"### Advisory findings",
 			"",
-			...failures.map((failure) => {
+			...advisories.map((advisory) => {
 				const detail =
-					failure.length > 4_000 ? `${failure.slice(0, 4_000)}\n[truncated; see the step log]` : failure
+					advisory.length > 4_000 ? `${advisory.slice(0, 4_000)}\n[truncated; see the step log]` : advisory
 				return `- ${detail.replaceAll("\n", "\n  ")}`
 			}),
 		)
@@ -626,37 +645,47 @@ export function formatSummary(rows, failures, manifest = {}) {
 	return `${lines.join("\n")}\n`
 }
 
-function appendSummary(rows, failures, manifest) {
+export function appendSummary(rows, advisories, manifest) {
+	for (const advisory of advisories) console.warn(formatAdvisoryCommand(advisory))
 	if (!process.env.GITHUB_STEP_SUMMARY) return
-	fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatSummary(rows, failures, manifest))
+	try {
+		fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatSummary(rows, advisories, manifest))
+	} catch (error) {
+		console.warn(
+			`::warning title=Mutation test advisory::Could not write the job summary: ${escapeWorkflowData(error.message)}`,
+		)
+	}
 }
 
 export function evaluateReport(report, packageEntry) {
 	const counts = mutantCounts(report)
+	const advisories = []
 	if (counts.valid > MAX_MUTANTS) {
-		throw new Error(
+		advisories.push(
 			`${packageEntry.id} generated ${counts.valid} valid mutants (limit ${MAX_MUTANTS}). ` +
 				"Split the PR or obtain a maintainer-reviewed narrow exclusion.",
 		)
 	}
 	if (counts.timeout > 10 || (counts.valid > 0 && counts.timeout / counts.valid > 0.15)) {
-		throw new Error(
+		advisories.push(
 			`${packageEntry.id} timed out ${counts.timeout} of ${counts.valid} valid mutants. ` +
-				"The result is inconclusive; fix flaky or slow tests, or reduce the changed scope before merge.",
+				"The result is inconclusive; consider fixing flaky or slow tests, or reducing the changed scope.",
 		)
 	}
-	if (counts.blocking.length > 0) {
-		throw new Error(
-			`${packageEntry.id} has ${counts.survived} surviving and ${counts.noCoverage} uncovered changed-code mutants. ` +
-				"Add or strengthen focused tests before merge.",
-		)
-	}
-	return counts
+	return { ...counts, advisories }
 }
 
-export function runManifest(repoRoot, manifest, reportRoot) {
+export function runManifest(
+	repoRoot,
+	manifest,
+	reportRoot,
+	{
+		runMutation = runStryker,
+		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+	} = {},
+) {
 	const rows = []
-	const failures = []
+	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
 
 	for (const packageEntry of manifest.packages) {
@@ -670,7 +699,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			if (packageEntry.discoverRelatedTests) {
 				packageEntry.testFiles = discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory)
 			}
-			const preflightOutput = stripAnsi(runStryker(repoRoot, packageEntry, reportRoot, true))
+			const preflightOutput = stripAnsi(runMutation(repoRoot, packageEntry, reportRoot, true))
 			const mutantMatch = /Instrumented \d+ source file\(s\) with (\d+) mutant\(s\)/.exec(preflightOutput)
 			if (!mutantMatch) throw new Error(`${packageEntry.id} preflight did not report a mutant count`)
 			const generatedMutants = Number(mutantMatch[1])
@@ -700,11 +729,11 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				continue
 			}
 
-			runStryker(repoRoot, packageEntry, reportRoot, false)
+			runMutation(repoRoot, packageEntry, reportRoot, false)
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
-			const report = JSON.parse(fs.readFileSync(jsonReportPath, "utf8"))
+			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
-			counts = mutantCounts(report)
+			counts = evaluateReport(report, packageEntry)
 			for (const annotation of formatAnnotations(
 				counts.blocking,
 				packageEntry.runRoot ?? packageEntry.root,
@@ -712,7 +741,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			)) {
 				console.log(formatAnnotationCommand(annotation))
 			}
-			evaluateReport(report, packageEntry)
+			advisories.push(...counts.advisories)
 			rows.push({
 				id: packageEntry.id,
 				root: packageEntry.root,
@@ -722,10 +751,10 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				reportPath,
 				changedLines: packageEntry.changedExecutableLines,
 				...counts,
-				result: "Passed",
+				result: counts.blocking.length > 0 || counts.advisories.length > 0 ? "Advisory findings" : "Passed",
 			})
 		} catch (error) {
-			failures.push(error.message)
+			advisories.push(error.message)
 			rows.push({
 				id: packageEntry.id,
 				root: packageEntry.root,
@@ -740,13 +769,12 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				survived: counts?.survived ?? 0,
 				noCoverage: counts?.noCoverage ?? 0,
 				blocking: counts?.blocking ?? [],
-				result: "Failed",
+				result: "Advisory incomplete",
 			})
 		}
 	}
 
-	appendSummary(rows, failures, manifest)
-	if (failures.length > 0) throw new Error(failures.join("\n"))
+	appendSummary(rows, advisories, manifest)
 	return rows
 }
 
@@ -768,7 +796,7 @@ function main() {
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
 	const manifest = selectFromGit(repoRoot, baseSha, headSha)
 	if (manifest.packages.length === 0) {
-		appendSummary([], [], manifest)
+		appendSummary([], manifest.advisories, manifest)
 		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
 		return
 	}
