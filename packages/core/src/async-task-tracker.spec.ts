@@ -38,4 +38,16 @@ describe("AsyncTaskTracker", () => {
 		await drain
 		expect(drained).toBe(true)
 	})
+
+	it("stops guarded callbacks before draining tracked work", async () => {
+		const tracker = new AsyncTaskTracker()
+		const callback = vi.fn(async (value: string) => value.length)
+		expect(tracker.isActive).toBe(true)
+		await expect(tracker.runIfActive(callback, "active")).resolves.toBe(6)
+
+		await tracker.closeAndDrain()
+		expect(tracker.isActive).toBe(false)
+		await expect(tracker.runIfActive(callback, "closed")).resolves.toBeUndefined()
+		expect(callback).toHaveBeenCalledOnce()
+	})
 })

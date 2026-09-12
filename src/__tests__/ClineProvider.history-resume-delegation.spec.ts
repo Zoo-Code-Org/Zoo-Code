@@ -230,6 +230,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(afterUnlock).toHaveBeenCalledOnce()
 
 		Reflect.set(provider, "_disposed", true)
+		await (Reflect.get(provider, "runs") as { closeAndDrain: () => Promise<void> }).closeAndDrain()
 		await expect(
 			provider.runLockedDelegationTransition(
 				"parent-disposed-success",

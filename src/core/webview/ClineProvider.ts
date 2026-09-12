@@ -266,11 +266,11 @@ export class ClineProvider
 		return this.runDelegationTransition(parentTaskId, () =>
 			this.taskHistoryStore.withTaskFileLock(parentTaskId, transition).then(
 				async (result) => {
-					if (!this._disposed) await afterUnlock(result)
+					await this.runs!.runIfActive(afterUnlock, result)
 					return result
 				},
 				async (error) => {
-					if (!this._disposed) await afterUnlockError(error)
+					await this.runs!.runIfActive(afterUnlockError, error)
 					throw error
 				},
 			),
@@ -875,7 +875,7 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
-		await this.runs?.drain()
+		await this.runs?.closeAndDrain()
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
