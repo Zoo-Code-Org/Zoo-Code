@@ -716,7 +716,7 @@ describe("TaskHistoryStore", () => {
 				}),
 			).rejects.toBe(callbackError)
 			expect(consoleError).toHaveBeenCalledWith(
-				"[TaskHistoryStore] Failed to release lock for callback-release-failure after callback failure:",
+				"[TaskHistoryStore] Lock release failed for callback-release-failure after callback failure:",
 				releaseError,
 			)
 			consoleError.mockRestore()
@@ -850,9 +850,7 @@ describe("TaskHistoryStore", () => {
 					(c) => ({ ...c, id: "wrong-id" }),
 					(p) => p,
 				),
-			).rejects.toThrow(
-				"[TaskHistoryStore] atomicUpdatePair: first updater changed id from child-id-check to wrong-id",
-			)
+			).rejects.toThrow("Pair first updater changed child-id-check to wrong-id")
 		})
 
 		it("throws when second updater returns a different id", async () => {
@@ -870,9 +868,7 @@ describe("TaskHistoryStore", () => {
 					(c) => c,
 					(p) => ({ ...p, id: "wrong-id" }),
 				),
-			).rejects.toThrow(
-				"[TaskHistoryStore] atomicUpdatePair: second updater changed id from parent-id-check2 to wrong-id",
-			)
+			).rejects.toThrow("Pair second updater changed parent-id-check2 to wrong-id")
 		})
 
 		it("throws when first task ID is not in cache", async () => {

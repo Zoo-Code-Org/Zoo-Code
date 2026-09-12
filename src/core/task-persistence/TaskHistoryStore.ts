@@ -1152,16 +1152,11 @@ export class TaskHistoryStore {
 			} catch (error) {
 				releaseError = error
 			}
-			if (releaseFileLock.getCompromiseError()) {
-				const reconciled = await this.readTaskFile(taskId)
-				this.taskFileMtimes.delete(taskId)
-				if (reconciled) this.cache.set(taskId, reconciled)
-				else this.cache.delete(taskId)
-			}
+			if (releaseFileLock.getCompromiseError()) await this.reconcileTaskCache(taskId)
 			if ("error" in outcome) {
 				if (releaseError) {
 					console.error(
-						`[TaskHistoryStore] Failed to release lock for ${taskId} after callback failure:`,
+						`[TaskHistoryStore] Lock release failed for ${taskId} after callback failure:`,
 						releaseError,
 					)
 				}
@@ -1231,16 +1226,10 @@ export class TaskHistoryStore {
 			const updatedFirst = firstUpdater(structuredClone(first))
 			const updatedSecond = secondUpdater(structuredClone(second))
 
-			if (updatedFirst.id !== firstId) {
-				throw new Error(
-					`[TaskHistoryStore] atomicUpdatePair: first updater changed id from ${firstId} to ${updatedFirst.id}`,
-				)
-			}
-			if (updatedSecond.id !== secondId) {
-				throw new Error(
-					`[TaskHistoryStore] atomicUpdatePair: second updater changed id from ${secondId} to ${updatedSecond.id}`,
-				)
-			}
+			if (updatedFirst.id !== firstId)
+				throw new Error(`Pair first updater changed ${firstId} to ${updatedFirst.id}`)
+			if (updatedSecond.id !== secondId)
+				throw new Error(`Pair second updater changed ${secondId} to ${updatedSecond.id}`)
 
 			// Validate status transitions before any disk write — mirrors upsertCore guard.
 			for (const [existing, updated] of [
@@ -1285,13 +1274,8 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (options?.rollbackBothOnCallbackFailure) {
 						const expectedFirst = Array.of(JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem)
-						const firstRestoration: TaskFileRestoration = [
-							firstId,
-							firstDiskSnapshot,
-							expectedFirst,
-							firstFileLock,
-						]
-						const restorations = Array.of(firstRestoration)
+						const firstRestoration = [firstId, firstDiskSnapshot, expectedFirst, firstFileLock] as const
+						const restorations = Array.of<TaskFileRestoration>(firstRestoration)
 						if (secondDiskSnapshot) {
 							const mergeSecond = mergeWithDisk(secondDelta)
 							const expectedSecond = mergeSecond(
