@@ -10,12 +10,18 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 		expect(model?.contextWindow).toBeGreaterThanOrEqual(1_000_000)
 	})
 
-	it("uses peak first-party pricing and unchanged OpenCode Go pricing", () => {
+	it("uses current peak first-party pricing and unchanged OpenCode Go pricing", () => {
+		expect(deepSeekModels["deepseek-flash"]).toMatchObject({
+			supportsImages: true,
+			outputPrice: 1.2,
+			cacheWritesPrice: 0.3,
+			cacheReadsPrice: 0.006,
+		})
 		expect(deepSeekModels["deepseek-v4-flash"]).toMatchObject({
-			supportsImages: false,
-			outputPrice: 1.32,
-			cacheWritesPrice: 0.44,
-			cacheReadsPrice: 0.014,
+			supportsImages: true,
+			outputPrice: 1.2,
+			cacheWritesPrice: 0.3,
+			cacheReadsPrice: 0.006,
 		})
 		expect(deepSeekModels["deepseek-v4-pro"].supportsImages).toBe(false)
 		expect(deepSeekModels["deepseek-v4-pro"]).toMatchObject({
@@ -42,6 +48,8 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 		expect(model.supportsPromptCache).toBe(true)
 		expect(model.contextWindow).toBeGreaterThanOrEqual(1_000_000)
 		expect(model.supportsReasoningEffort).toEqual(["disable", "low", "high", "max"])
+		expect(model).toMatchObject({ outputPrice: 1.2, cacheWritesPrice: 0.3, cacheReadsPrice: 0.006 })
+		expect(model.description).toContain("Legacy model name")
 	})
 
 	// Self-hosted providers retain separate IDs for the preview weights and 0813 checkpoint.

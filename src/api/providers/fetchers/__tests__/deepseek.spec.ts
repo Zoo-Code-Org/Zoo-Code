@@ -29,9 +29,22 @@ describe("getDeepSeekModels", () => {
 		const models = await getDeepSeekModels("http://127.0.0.1:43123/v1", "mock-key")
 
 		expect(globalThis.fetch).toHaveBeenCalledWith("http://127.0.0.1:43123/models", expect.any(Object))
+		expect(models["deepseek-flash"]).toEqual(deepSeekModels["deepseek-flash"])
 		expect(models["deepseek-v4-flash"]).toEqual(deepSeekModels["deepseek-v4-flash"])
 		expect(models["deepseek-v4-pro"]).toEqual(deepSeekModels["deepseek-v4-pro"])
 		expect(models["deepseek-v4-flash-vision-exp"]).toEqual(deepSeekModels["deepseek-v4-flash-vision-exp"])
+	})
+
+	it("applies vision metadata to the canonical Flash model returned by DeepSeek", async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: [{ id: "deepseek-flash" }] }),
+		}) as unknown as typeof fetch
+
+		const models = await getDeepSeekModels(undefined, "test-key")
+
+		expect(models["deepseek-flash"]).toEqual(deepSeekModels["deepseek-flash"])
+		expect(models["deepseek-flash"].supportsImages).toBe(true)
 	})
 
 	it("throws for 404 responses when fallback flag is not enabled", async () => {
