@@ -16,20 +16,22 @@ export function verifyLcov(content) {
 			linesHit = undefined
 		} else if (line.startsWith("LF:")) {
 			if (!inRecord) throw new Error("LCOV line count is outside a source record")
+			if (linesFound !== undefined) throw new Error("LCOV source record has duplicate line counts")
 			const found = line.slice(3)
 			if (!/^\d+$/.test(found)) throw new Error("LCOV line count is not a decimal integer")
 			linesFound = BigInt(found)
 		} else if (line.startsWith("LH:")) {
 			if (!inRecord) throw new Error("LCOV hit count is outside a source record")
+			if (linesHit !== undefined) throw new Error("LCOV source record has duplicate hit counts")
 			const hits = line.slice(3)
 			if (!/^\d+$/.test(hits)) throw new Error("LCOV hit count is not a decimal integer")
 			linesHit = BigInt(hits)
-			if (linesHit > 0n) anyCovered = true
 		} else if (line === "end_of_record") {
 			if (!inRecord) throw new Error("LCOV terminator is outside a source record")
 			if (linesFound === undefined || linesHit === undefined)
 				throw new Error("LCOV source record has incomplete line summaries")
 			if (linesHit > linesFound) throw new Error("LCOV hit count exceeds lines found")
+			if (linesHit > 0n) anyCovered = true
 			inRecord = false
 		}
 	}
