@@ -6,14 +6,15 @@ Zoo Code checks task lifecycle protocols through one compositional verification 
 pnpm lifecycle:model-check
 ```
 
-The command runs six independent bounded submodels in sequence:
+The command runs seven independent bounded submodels in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed provider handoff and scheduler ordering;
 4. the task cleanup protocol;
-5. request-stream parser scoping; and
-6. completion persistence.
+5. request-stream parser scoping;
+6. completion persistence; and
+7. the terminal command lifecycle.
 
 This umbrella command is the single model-check entry point in the `compile` CI job after type checking. Command-level composition does not merge the submodels' state spaces: each checker retains its own bounds, transitions, invariant ownership, reachability requirements, and counterexample format. In particular, parser state is not part of the persisted lifecycle graph. The focused parser checker remains directly runnable with `pnpm parser-scope:model-check` for debugging.
 
@@ -49,6 +50,12 @@ TLA+/PlusCal or Quint with TLC becomes a better fit when the lifecycle needs tem
 The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain. It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion. Named semantic landmarks require the graph to retain interrupted-child re-delegation and nested delegation even when the raw state total changes.
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
+
+## Terminal command lifecycle model
+
+The same command runs a bounded terminal lifecycle explorer for issue #1362. It models command startup, shell activation, one representative buffered output chunk, normal completion, startup or stream failure, concurrent shell-integration waits, tracked superseded processes, and terminal closure. Process registration is atomic with command startup, normal completion and failure release the current process, and a superseded process can only be introduced while a current process exists. Bounding output presence keeps the reachable state space finite without weakening the cleanup property. Its invariants require completion to remain at-most-once, every attached current process to remain tracked, closure to detach the current process and settle every pending wait and tracked process, buffered output to be delivered, and an active stream iterator to be released. Named landmarks retain the important interleavings: closure before command submission, closure after output, closure after a normal end event, closure after an error without a late completion, a superseded process failing without clearing the current owner, duplicate closure, closure with two pending waits, and closure with a superseded process. The checker fails rather than reporting success if the depth boundary still has an unseen enabled successor.
+
+This terminal model is intentionally separate from persisted task delegation state because VS Code terminal events are an extension-host adapter protocol rather than `HistoryItem` transitions. Focused `TerminalRegistry` tests bind the abstract properties to production behavior, including omitted `onDidEndTerminalShellExecution` events and an undefined `exitStatus` during the close callback.
 
 ## Shared-store concurrency model
 

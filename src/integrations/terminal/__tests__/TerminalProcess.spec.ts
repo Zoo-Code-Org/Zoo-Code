@@ -59,10 +59,60 @@ describe("TerminalProcess", () => {
 	})
 
 	describe("run", () => {
+		it("does not execute a command started after the terminal is already closed", async () => {
+			mockTerminalInfo.handleClose()
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+
+			const result = mockTerminalInfo.runCommand("test command", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+			const process = mockTerminalInfo.process
+			expect(process).toBeInstanceOf(TerminalProcess)
+			await result
+
+			expect(mockTerminal.shellIntegration.executeCommand).not.toHaveBeenCalled()
+			expect(completionSpy).toHaveBeenCalledOnce()
+			expect(completionSpy).toHaveBeenCalledWith({ exitCode: undefined }, process)
+			expect(completedSpy).toHaveBeenCalledOnce()
+			expect(completedSpy).toHaveBeenCalledWith("", process)
+		})
+
+		it("emits the startup-close completion sequence once and resets running state", () => {
+			mockTerminalInfo.running = true
+			const emitSpy = vi.spyOn(terminalProcess, "emit")
+
+			terminalProcess.handleTerminalClosed()
+			terminalProcess.handleTerminalClosed()
+
+			expect(emitSpy).toHaveBeenCalledTimes(3)
+			expect(emitSpy).toHaveBeenCalledWith("shell_execution_complete", { exitCode: undefined })
+			expect(emitSpy).toHaveBeenCalledWith("completed", "")
+			expect(emitSpy).toHaveBeenCalledWith("continue")
+			expect(mockTerminalInfo.running).toBe(false)
+		})
+
+		it("delivers only one close signal after shell execution has started", () => {
+			terminalProcess.ownExecution = { commandLine: { value: "test command" } } as vscode.TerminalShellExecution
+			const emitSpy = vi.spyOn(terminalProcess, "emit")
+
+			terminalProcess.handleTerminalClosed()
+			terminalProcess.handleTerminalClosed()
+
+			expect(emitSpy).toHaveBeenCalledOnce()
+			expect(emitSpy).toHaveBeenCalledWith("shell_execution_complete", { exitCode: undefined })
+			expect(terminalProcess["terminalCloseHandled"]).toBe(true)
+			expect(terminalProcess["finalizedBeforeExecution"]).toBe(false)
+		})
+
 		it("rejects the command promise when terminal process startup rejects", async () => {
 			const startupError = new Error("terminal startup failed")
 			const runSpy = vi.spyOn(TerminalProcess.prototype, "run").mockRejectedValueOnce(startupError)
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const initialProcessCount = mockTerminalInfo["activeProcesses"].size
 
 			const commandPromise = mockTerminalInfo.runCommand("test command", {
 				onLine: vi.fn(),
@@ -73,9 +123,124 @@ describe("TerminalProcess", () => {
 
 			await expect(commandPromise).rejects.toThrow("terminal startup failed")
 			expect(runSpy).toHaveBeenCalledWith("test command")
+			expect(mockTerminalInfo["activeProcesses"].size).toBe(initialProcessCount)
 
 			runSpy.mockRestore()
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("cleans up a failed process without completing it when the terminal closes later", async () => {
+			vi.useFakeTimers()
+			const startupError = new Error("terminal startup failed")
+			mockTerminal.shellIntegration.executeCommand.mockImplementationOnce(() => {
+				throw startupError
+			})
+			vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const completionSpy = vi.fn()
+
+			try {
+				const commandPromise = mockTerminalInfo.runCommand("test command", {
+					onLine: vi.fn(),
+					onCompleted: vi.fn(),
+					onShellExecutionStarted: vi.fn(),
+					onShellExecutionComplete: completionSpy,
+				})
+				const process = mockTerminalInfo.process
+				mockTerminalInfo.running = true
+
+				await expect(commandPromise).rejects.toBe(startupError)
+
+				expect(mockTerminalInfo.process).toBeUndefined()
+				expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+				expect(mockTerminalInfo.busy).toBe(false)
+				expect(mockTerminalInfo.running).toBe(false)
+				expect(mockTerminalInfo.isStreamClosed).toBe(true)
+				expect(mockTerminalInfo["activeProcesses"]).not.toContain(process)
+				expect(process?.eventNames()).toEqual([])
+				expect(vi.getTimerCount()).toBe(0)
+
+				mockTerminalInfo.handleClose()
+
+				expect(completionSpy).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not clear a newer process when a superseded process fails", async () => {
+			const startupError = new Error("first process failed")
+			vi.spyOn(TerminalProcess.prototype, "run")
+				.mockRejectedValueOnce(startupError)
+				.mockResolvedValueOnce(undefined)
+			vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const callbacks = {
+				onLine: vi.fn(),
+				onCompleted: vi.fn(),
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			}
+
+			const firstCommand = mockTerminalInfo.runCommand("first", callbacks)
+			const firstProcess = mockTerminalInfo.process
+			const secondCommand = mockTerminalInfo.runCommand("second", callbacks)
+			const secondProcess = mockTerminalInfo.process
+			mockTerminalInfo.running = true
+
+			await expect(firstCommand).rejects.toBe(startupError)
+
+			expect(mockTerminalInfo.process).toBe(secondProcess)
+			expect(mockTerminalInfo.busy).toBe(true)
+			expect(mockTerminalInfo.running).toBe(true)
+			expect(mockTerminalInfo["activeProcesses"]).not.toContain(firstProcess)
+			expect(mockTerminalInfo["activeProcesses"]).toContain(secondProcess)
+
+			mockTerminalInfo.handleClose()
+			await secondCommand
+		})
+
+		it("finalizes an error only once", () => {
+			mockTerminalInfo.busy = true
+			mockTerminalInfo.running = true
+			terminalProcess.isHot = true
+			mockTerminalInfo.activeShellExecution = {
+				commandLine: { value: "failed" },
+			} as vscode.TerminalShellExecution
+			const releaseSpy = vi.spyOn(mockTerminalInfo, "releaseProcess")
+
+			terminalProcess.handleError()
+			terminalProcess.handleError()
+
+			expect(releaseSpy).toHaveBeenCalledOnce()
+			expect(terminalProcess["errorHandled"]).toBe(true)
+			expect(mockTerminalInfo.process).toBeUndefined()
+			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+			expect(mockTerminalInfo.busy).toBe(false)
+			expect(mockTerminalInfo.running).toBe(false)
+			expect(mockTerminalInfo.isStreamClosed).toBe(true)
+			expect(terminalProcess.isHot).toBe(false)
+			expect(terminalProcess.eventNames()).toEqual([])
+		})
+
+		it("clears busy when the matching process completes", () => {
+			const process = new TerminalProcess(mockTerminalInfo)
+			mockTerminalInfo.process = process
+			mockTerminalInfo.busy = true
+
+			process.emit("completed", "")
+
+			expect(mockTerminalInfo.busy).toBe(false)
+		})
+
+		it("keeps a newer owner busy when a superseded process completes", () => {
+			const superseded = new TerminalProcess(mockTerminalInfo)
+			const current = new TerminalProcess(mockTerminalInfo)
+			mockTerminalInfo.process = current
+			mockTerminalInfo.busy = true
+
+			superseded.emit("completed", "")
+
+			expect(mockTerminalInfo.process).toBe(current)
+			expect(mockTerminalInfo.busy).toBe(true)
 		})
 
 		it("emits no_shell_integration with commandSubmitted=false when shell integration startup times out", async () => {
@@ -105,6 +270,109 @@ describe("TerminalProcess", () => {
 				Terminal.setShellIntegrationTimeout(previousTimeout)
 				vi.useRealTimers()
 			}
+		})
+
+		it("releases a command when its shell stream never becomes available", async () => {
+			vi.useFakeTimers()
+			const previousTimeout = Terminal.getShellIntegrationTimeout()
+			Terminal.setShellIntegrationTimeout(10)
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue({})
+
+			try {
+				const commandPromise = mockTerminalInfo.runCommand("test command", {
+					onLine: vi.fn(),
+					onCompleted: vi.fn(),
+					onShellExecutionStarted: vi.fn(),
+					onShellExecutionComplete: vi.fn(),
+				})
+				const process = mockTerminalInfo.process
+
+				await vi.advanceTimersByTimeAsync(10)
+				await commandPromise
+
+				expect(mockTerminalInfo.process).toBeUndefined()
+				expect(mockTerminalInfo["activeProcesses"]).not.toContain(process)
+				expect(process?.isHot).toBe(false)
+				expect(process?.eventNames()).toEqual([])
+				expect(vi.getTimerCount()).toBe(0)
+			} finally {
+				Terminal.setShellIntegrationTimeout(previousTimeout)
+				vi.useRealTimers()
+			}
+		})
+
+		it("releases a command when its active stream throws", async () => {
+			const streamError = new Error("stream failed")
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]: () => ({ next: () => Promise.reject(streamError) }),
+			}
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue({})
+			vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const completedSpy = vi.fn()
+			const completionSpy = vi.fn()
+
+			const commandPromise = mockTerminalInfo.runCommand("test command", {
+				onLine: vi.fn(),
+				onCompleted: completedSpy,
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: completionSpy,
+			})
+			const process = mockTerminalInfo.process
+			await Promise.resolve()
+			mockTerminalInfo.setActiveStream(stream)
+
+			await commandPromise
+
+			expect(completedSpy).toHaveBeenCalledWith("<terminal process error: stream failed>", process)
+			expect(mockTerminalInfo.process).toBeUndefined()
+			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+			expect(mockTerminalInfo.busy).toBe(false)
+			expect(mockTerminalInfo.running).toBe(false)
+			expect(mockTerminalInfo["activeProcesses"]).not.toContain(process)
+			expect(process?.eventNames()).toEqual([])
+
+			mockTerminalInfo.handleClose()
+			expect(completionSpy).not.toHaveBeenCalled()
+		})
+
+		it("does not clear a newer process when a superseded active stream throws", async () => {
+			const streamError = new Error("old stream failed")
+			let rejectNext: (error: Error) => void = () => undefined
+			const next = new Promise<IteratorResult<string>>((_, reject) => (rejectNext = reject))
+			const stream: AsyncIterable<string> = {
+				[Symbol.asyncIterator]: () => ({
+					next: () => next,
+				}),
+			}
+			const oldExecution = { commandLine: { value: "old" } } as vscode.TerminalShellExecution
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue(oldExecution)
+			vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const oldProcess = new TerminalProcess(mockTerminalInfo)
+			mockTerminalInfo.process = oldProcess
+
+			const oldRun = oldProcess.run("old command")
+			oldProcess.emit("stream_available", stream)
+			await Promise.resolve()
+
+			const currentProcess = new TerminalProcess(mockTerminalInfo)
+			const currentExecution = { commandLine: { value: "current" } } as vscode.TerminalShellExecution
+			currentProcess.ownExecution = currentExecution
+			mockTerminalInfo.process = currentProcess
+			mockTerminalInfo.activeShellExecution = currentExecution
+			mockTerminalInfo.busy = true
+			mockTerminalInfo.running = true
+
+			rejectNext(streamError)
+			await oldRun
+
+			expect(mockTerminalInfo.process).toBe(currentProcess)
+			expect(mockTerminalInfo.activeShellExecution).toBe(currentExecution)
+			expect(mockTerminalInfo.busy).toBe(true)
+			expect(mockTerminalInfo.running).toBe(true)
+			expect(mockTerminalInfo["activeProcesses"]).not.toContain(oldProcess)
+			expect(mockTerminalInfo["activeProcesses"]).toContain(currentProcess)
+
+			mockTerminalInfo.handleClose()
 		})
 
 		it("runs command after shell integration activates via onDidChangeTerminalShellIntegration event", async () => {

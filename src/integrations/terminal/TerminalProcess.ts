@@ -30,21 +30,27 @@ export class TerminalProcess extends BaseTerminalProcess {
 	// whatever command is currently running on the same reused terminal -- see the
 	// self-finalize grace period in run()'s finalize().
 	public ownExecution?: vscode.TerminalShellExecution
+	private terminalCloseHandled = false
+	private finalizedBeforeExecution = false
+	private errorHandled = false
 
 	constructor(terminal: Terminal) {
 		super()
 
 		this.terminalRef = new WeakRef(terminal)
+		terminal.trackProcess(this)
 
 		this.once("completed", () => {
-			this.terminal.busy = false
+			this.terminal.releaseProcess(this)
+			if (this.terminal.process === this) {
+				this.terminal.busy = false
+			}
 		})
 
+		this.once("shell_execution_complete", () => this.terminal.releaseProcess(this))
+
 		this.once("no_shell_integration", () => {
-			this.emit("completed", "<no shell integration>")
-			this.terminal.busy = false
-			this.terminal.setActiveStream(undefined)
-			this.continue()
+			this.completeBeforeExecution("<no shell integration>")
 		})
 	}
 
@@ -56,6 +62,66 @@ export class TerminalProcess extends BaseTerminalProcess {
 		}
 
 		return terminal
+	}
+
+	/** Completes this process when its terminal closes without an execution-end event. */
+	public handleTerminalClosed(): void {
+		if (this.terminalCloseHandled || this.finalizedBeforeExecution || this.errorHandled) {
+			return
+		}
+		this.terminalCloseHandled = true
+
+		const executionStarted = this.ownExecution !== undefined
+		if (this.terminal.process === this) {
+			this.terminal.shellExecutionComplete({ exitCode: undefined })
+		} else {
+			this.emit("shell_execution_complete", { exitCode: undefined })
+		}
+
+		if (executionStarted) {
+			return
+		}
+
+		// run() has not installed its completion listener yet, so finish the
+		// startup-wait path directly instead of leaving runCommand() pending.
+		this.completeBeforeExecution("")
+	}
+
+	/** Releases a failed process without allowing terminal closure to complete it later. */
+	public handleError(): void {
+		if (this.errorHandled || this.terminalCloseHandled || this.finalizedBeforeExecution) {
+			return
+		}
+		this.errorHandled = true
+
+		const terminal = this.terminal
+		if (terminal.process === this) {
+			terminal.activeShellExecution = undefined
+			terminal.setActiveStream(undefined)
+			terminal.busy = false
+			terminal.running = false
+			terminal.process = undefined
+		}
+		terminal.releaseProcess(this)
+		this.stopHotTimer()
+		this.removeAllListeners()
+	}
+
+	private completeBeforeExecution(output: string): void {
+		this.finalizedBeforeExecution = true
+
+		const terminal = this.terminal
+		if (terminal.process === this) {
+			terminal.activeShellExecution = undefined
+			terminal.setActiveStream(undefined)
+			terminal.busy = false
+			terminal.running = false
+			terminal.process = undefined
+		}
+		this.emit("completed", output)
+		this.continue()
+		this.stopHotTimer()
+		this.removeAllListeners()
 	}
 
 	public override async run(command: string) {
@@ -76,13 +142,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 				message: "Command was submitted; output is not available, as shell integration is inactive.",
 				commandSubmitted: true,
 			})
-
-			this.emit(
-				"completed",
-				"<shell integration is not available, so terminal output and command execution status is unknown>",
-			)
-
-			this.emit("continue")
 			return
 		}
 
@@ -184,6 +243,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			// that misses output: the execution begins after the stream was opened,
 			// VSCode doesn't buffer retroactively, and zero chunks arrive.
 		} catch (error) {
+			cancelStreamWait()
 			this.terminal.activeShellExecution = undefined
 			this.cleanupScriptFile()
 			throw error
@@ -228,7 +288,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 				"<VSCE shell integration stream did not start: terminal output and command execution status is unknown>",
 			)
 
-			this.terminal.busy = false
 			this.cleanupScriptFile()
 
 			// Emit continue event to allow execution to proceed
@@ -298,6 +357,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			// and silently drops the first output chunk).
 			let nextChunk = iterator.next()
 			while (true) {
+				let idleTimer: NodeJS.Timeout | undefined
 				const racers: Promise<typeof DONE_SENTINEL | typeof IDLE_SENTINEL | IteratorResult<string>>[] = [
 					nextChunk,
 					shellExecutionComplete.then(() => DONE_SENTINEL as typeof DONE_SENTINEL),
@@ -307,13 +367,17 @@ export class TerminalProcess extends BaseTerminalProcess {
 				// flowing we trust the stream to close normally (or the D-marker path).
 				if (chunkCount === 0) {
 					racers.push(
-						new Promise<typeof IDLE_SENTINEL>((resolve) =>
-							setTimeout(() => resolve(IDLE_SENTINEL as typeof IDLE_SENTINEL), IDLE_TIMEOUT_MS),
-						),
+						new Promise<typeof IDLE_SENTINEL>((resolve) => {
+							idleTimer = setTimeout(
+								() => resolve(IDLE_SENTINEL as typeof IDLE_SENTINEL),
+								IDLE_TIMEOUT_MS,
+							)
+						}),
 					)
 				}
 
 				const raceResult = await Promise.race(racers)
+				clearTimeout(idleTimer)
 
 				if (raceResult === DONE_SENTINEL) {
 					// onDidEndTerminalShellExecution fired — the shell says we're done.
@@ -506,15 +570,13 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 			if (streamProcessingError !== undefined) {
 				// Ensure cleanup and caller unblocking happen even when the loop throws.
-				this.terminal.activeShellExecution = undefined
-				this.terminal.busy = false
-				this.isHot = false
 				this.cleanupScriptFile()
 				this.emit(
 					"completed",
 					`<terminal process error: ${streamProcessingError instanceof Error ? streamProcessingError.message : String(streamProcessingError)}>`,
 				)
 				this.emit("continue")
+				this.handleError()
 			}
 		}
 	}
