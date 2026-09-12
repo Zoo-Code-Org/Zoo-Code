@@ -59,22 +59,31 @@ describe("CodeIndexScope", () => {
 		expect(manager.initialize).toHaveBeenCalledExactlyOnceWith(contextProxy)
 	})
 
-	it("disposes its manager", async () => {
+	it("disposes its resources", async () => {
 		const { scope } = createScope()
 		const codeIndexManager = getManager(scope)
+		const stateManager = vi.mocked(CodeIndexStateManager).mock.results[0].value
 		await scope.dispose()
 		expect(codeIndexManager.dispose).toHaveBeenCalledExactlyOnceWith()
+		expect(stateManager.dispose).toHaveBeenCalledExactlyOnceWith()
 	})
 
-	it("disposes state when manager disposal rejects", async () => {
+	it("continues disposing resources when a disposal rejects", async () => {
 		const { scope } = createScope()
 		const codeIndexManager = getManager(scope)
 		const stateManager = vi.mocked(CodeIndexStateManager).mock.results[0].value
 		const error = new Error("disposal failed")
 		vi.mocked(codeIndexManager.dispose).mockRejectedValue(error)
 
-		await expect(scope.dispose()).rejects.toThrow(error)
+		let caught: unknown
+		try {
+			await scope.dispose()
+		} catch (error) {
+			caught = error
+		}
 
+		expect(caught).toBeInstanceOf(AggregateError)
+		expect((caught as AggregateError).errors).toEqual([error])
 		expect(codeIndexManager.dispose).toHaveBeenCalledOnce()
 		expect(stateManager.dispose).toHaveBeenCalledOnce()
 	})
