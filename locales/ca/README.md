@@ -47,12 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.80.1
+## Novetats a la v3.82.0
 
-🤖 Prova GLM-5.3-Flash i Gemini 3.7 Flash amb un 50 % de descompte durant 2 setmanes, i MiniMax M3 totalment GRATUÏT per als usuaris amb saldo al nou Zoo Gateway. https://zoocode.dev/models
-
-- **Model nou** — GLM-5.3-Flash ja està disponible mitjançant Z AI.
-- **Correccions de fiabilitat** — aprovacions de subtasques restaurades, sortida d'eines buida de Vertex Gemini 3.7, errors d'inici del terminal, errors del servei en segon pla i la llegibilitat dels temes.
+- 🔑 **Utilitza la teva clau API de Zoo Gateway a qualsevol lloc** — porta-la a qualsevol client o flux de treball compatible amb OpenAI: https://zoocode.dev/models
+- 🎁 **Accés gratuït al model durant un temps limitat** — obtén accés gratuït a MiniMax-M3 mitjançant Zoo Gateway.
+- ✨ **Models totalment nous** — GPT-6 Astra i Claude Fable 5.1 ja estan disponibles.
 
 ## Què pot fer Zoo Code per TU?
 

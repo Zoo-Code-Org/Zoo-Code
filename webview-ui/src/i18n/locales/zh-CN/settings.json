@@ -460,6 +460,8 @@
 		"headerName": "标头名称",
 		"headerValue": "标头值",
 		"noCustomHeaders": "暂无自定义标头。点击 + 按钮添加。",
+		"extraBody": "附加请求体",
+		"extraBodyDescription": "合并到 API 请求体中的可选 JSON 对象。无法覆盖由 Zoo Code 管理的字段，例如 model、messages、tools 和 stream。请勿包含密钥。",
 		"unboundApiKey": "Unbound API 密钥",
 		"getUnboundApiKey": "获取 Unbound API 密钥",
 		"requestyApiKey": "Requesty API 密钥",
@@ -1036,6 +1038,11 @@
 		"modelId": "您必须提供有效的模型 ID。",
 		"modelSelector": "您必须提供有效的模型选择器。",
 		"openAi": "您必须提供有效的基础 URL、API 密钥和模型 ID。",
+		"openAiExtraBody": {
+			"invalidJson": "附加请求体必须包含有效的 JSON。",
+			"objectRequired": "附加请求体必须是 JSON 对象。",
+			"reservedKeys": "附加请求体无法覆盖由 Zoo Code 管理的字段：{{keys}}。"
+		},
 		"arn": {
 			"invalidFormat": "ARN 格式无效。请检查格式要求。",
 			"regionMismatch": "警告：您的 ARN 中的区域 ({{arnRegion}}) 与您选择的区域 ({{region}}) 不匹配。这可能会导致访问问题。提供程序将使用 ARN 中的区域。"

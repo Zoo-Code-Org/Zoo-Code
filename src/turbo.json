@@ -2,6 +2,12 @@
 	"$schema": "https://turbo.build/schema.json",
 	"extends": ["//"],
 	"tasks": {
+		"test": {
+			"dependsOn": ["$TURBO_EXTENDS$", "bundle"]
+		},
+		"test:coverage": {
+			"dependsOn": ["$TURBO_EXTENDS$", "bundle"]
+		},
 		"bundle": {
 			"dependsOn": ["^build", "@roo-code/vscode-webview#build"],
 			"outputs": ["dist/**"]

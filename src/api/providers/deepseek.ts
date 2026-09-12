@@ -28,7 +28,7 @@ type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsS
 	reasoning_effort?: "low" | "high" | "max"
 }
 
-const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro"])
+const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"])
 const supportsDeepSeekThinkingToggle = (modelId: string) => deepSeekV4ThinkingModels.has(modelId)
 
 // Only known V4 models and the legacy reasoner alias support DeepSeek's
@@ -51,6 +51,7 @@ export const normalizeDeepSeekReasoningEffort = (
 	switch (modelId) {
 		case "deepseek-v4-flash":
 		case "deepseek-v4-pro":
+		case "deepseek-v4-flash-vision-exp":
 			switch (reasoningEffort) {
 				case "low":
 					return "low"
@@ -103,7 +104,13 @@ export class DeepSeekHandler extends OpenAiHandler {
 			settings: this.options,
 			defaultTemperature: DEEP_SEEK_DEFAULT_TEMPERATURE,
 		})
-		return { id, info, ...params }
+		return {
+			id,
+			info,
+			...params,
+			// Unknown IDs use fallback metadata, but must not inherit its V4 request fields.
+			reasoning: supportsDeepSeekThinkingToggle(id) ? params.reasoning : undefined,
+		}
 	}
 
 	override async *createMessage(
@@ -165,19 +172,19 @@ export class DeepSeekHandler extends OpenAiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices?.[0]?.delta ?? {}
 
+			// Handle reasoning_content from DeepSeek's interleaved thinking
+			// This is the proper way DeepSeek sends thinking content in streaming
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
 			// Handle regular text content
 			if (delta.content) {
 				yield {
 					type: "text",
 					text: delta.content,
 				}
-			}
-
-			// Handle reasoning_content from DeepSeek's interleaved thinking
-			// This is the proper way DeepSeek sends thinking content in streaming
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
 			}
 
 			// Handle tool calls

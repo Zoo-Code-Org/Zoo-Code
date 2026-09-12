@@ -46,6 +46,16 @@ vi.mock("../fetchers/modelCache", () => ({
 			"gpt-5o": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"gpt-5.1": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"gpt-5-mini": { ...litellmDefaultModelInfo, maxTokens: 8192 },
+			"gpt-6-astra": {
+				...litellmDefaultModelInfo,
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+				requiresResponsesApi: true,
+			},
 			"gpt-4": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"claude-3-opus": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"llama-3": { ...litellmDefaultModelInfo, maxTokens: 8192 },
@@ -384,6 +394,112 @@ describe("LiteLLMHandler", () => {
 			const createCall = mockCreate.mock.calls[0][0]
 			expect(createCall.max_tokens).toBeUndefined()
 			expect(createCall.max_completion_tokens).toBeUndefined()
+		})
+	})
+
+	describe("GPT-6 Astra handling", () => {
+		it("triggers LiteLLM's Responses bridge with safe request parameters", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "none",
+				modelTemperature: 0.7,
+			})
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({
+					data: asyncStreamFrom([
+						{
+							choices: [{ delta: { content: "Astra response" } }],
+							usage: { prompt_tokens: 10, completion_tokens: 5 },
+						},
+					]),
+				}),
+			})
+
+			await collectStream(
+				handler.createMessage("You are helpful", [{ role: "user", content: "Hello" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "read_file",
+								description: "Read a file",
+								parameters: { type: "object", properties: { path: { type: "string" } } },
+							},
+						},
+					],
+				}),
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request).toMatchObject({
+				model: "gpt-6-astra",
+				max_completion_tokens: 128_000,
+				reasoning_effort: "medium",
+				tools: [{ type: "function", function: { name: "read_file" } }],
+			})
+			expect(request.max_tokens).toBeUndefined()
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("uses safe Astra parameters for completePrompt", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "max",
+				modelTemperature: 0.7,
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "Astra response" } }] })
+
+			await handler.completePrompt("Hello")
+
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({
+				model: "gpt-6-astra",
+				max_completion_tokens: 128_000,
+				reasoning_effort: "max",
+			})
+			expect(mockCreate.mock.calls[0][0].max_tokens).toBeUndefined()
+			expect(mockCreate.mock.calls[0][0].temperature).toBeUndefined()
+		})
+
+		it("uses Astra's required default when reasoning is disabled", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "disable",
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "Astra response" } }] })
+
+			await handler.completePrompt("Hello")
+
+			expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("medium")
+		})
+
+		it("reports nested LiteLLM cache-write tokens", async () => {
+			handler = new LiteLLMHandler({ ...mockOptions, litellmModelId: "gpt-6-astra" })
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({
+					data: asyncStreamFrom([
+						{
+							choices: [{ delta: { content: "Astra response" } }],
+							usage: {
+								prompt_tokens: 100,
+								completion_tokens: 5,
+								prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+							},
+						},
+					]),
+				}),
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("You are helpful", [{ role: "user", content: "Hello" }]),
+			)
+
+			expect(chunks).toContainEqual(
+				expect.objectContaining({ type: "usage", cacheReadTokens: 20, cacheWriteTokens: 30 }),
+			)
 		})
 	})
 
@@ -729,6 +845,31 @@ describe("LiteLLMHandler", () => {
 
 			const textChunk = results.find((c) => c.type === "text")
 			expect(textChunk).toMatchObject({ type: "text", text: "The answer is 42." })
+		})
+
+		it("should yield reasoning chunks BEFORE text chunks when both are present in the exact same delta", async () => {
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: "thinking...", content: "answer" } }],
+					usage: { prompt_tokens: 10, completion_tokens: 10 },
+				},
+			])
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Test simultaneous." }])
+			const results = await collectStream(generator)
+
+			// Filter out usage chunks to focus on ordering of content
+			const contentResults = results.filter((r) => r.type === "reasoning" || r.type === "text")
+
+			// The order is strictly enforced here
+			expect(contentResults).toEqual([
+				{ type: "reasoning", text: "thinking..." },
+				{ type: "text", text: "answer" },
+			])
 		})
 
 		it("should yield reasoning chunks from reasoning delta field", async () => {

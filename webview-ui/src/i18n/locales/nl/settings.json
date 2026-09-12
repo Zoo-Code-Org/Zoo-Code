@@ -460,6 +460,8 @@
 		"headerName": "Headernaam",
 		"headerValue": "Headerwaarde",
 		"noCustomHeaders": "Geen aangepaste headers gedefinieerd. Klik op de + knop om er een toe te voegen.",
+		"extraBody": "Extra body",
+		"extraBodyDescription": "Optioneel JSON-object dat wordt samengevoegd met API-aanvraagbody's. Door Zoo Code beheerde velden zoals model, messages, tools en stream kunnen niet worden overschreven. Voeg geen geheimen toe.",
 		"unboundApiKey": "Unbound API sleutel",
 		"getUnboundApiKey": "Unbound API-sleutel ophalen",
 		"requestyApiKey": "Requesty API-sleutel",
@@ -1036,6 +1038,11 @@
 		"modelId": "Je moet een geldig model-ID opgeven.",
 		"modelSelector": "Je moet een geldige modelselector opgeven.",
 		"openAi": "Je moet een geldige basis-URL, API-sleutel en model-ID opgeven.",
+		"openAiExtraBody": {
+			"invalidJson": "De extra body moet geldige JSON bevatten.",
+			"objectRequired": "De extra body moet een JSON-object zijn.",
+			"reservedKeys": "De extra body kan door Zoo Code beheerde velden niet overschrijven: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Ongeldig ARN-formaat. Controleer de formaatvereisten.",
 			"regionMismatch": "Waarschuwing: De regio in je ARN ({{arnRegion}}) komt niet overeen met je geselecteerde regio ({{region}}). Dit kan toegangsfouten veroorzaken. De provider gebruikt de regio uit de ARN."
