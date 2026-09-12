@@ -21,7 +21,7 @@ type ProviderStubFields = {
 	tasks?: Task[]
 	runDelegationTransition?: unknown
 	runLockedDelegationTransition?: unknown
-	delegationTransitions?: AsyncTaskTracker
+	delegationRuns?: AsyncTaskTracker
 	removeClineFromStack?: unknown
 	evictCurrentTask?: unknown
 }
@@ -57,7 +57,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 		},
 	}
 	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback(unlockedJsonFileLock())
-	s.delegationTransitions ??= new AsyncTaskTracker()
+	s.delegationRuns ??= new AsyncTaskTracker()
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {

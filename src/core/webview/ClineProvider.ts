@@ -211,8 +211,8 @@ export class ClineProvider
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
-	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
-	private delegationTransitions = new AsyncTaskTracker()
+	private static readonly delegationLocks = new Map<string, Promise<void>>()
+	private delegationRuns = new AsyncTaskTracker()
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -252,8 +252,7 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		const transition = runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
-		return this.delegationTransitions.track(transition)
+		return this.delegationRuns.track(runDelegationTransition(ClineProvider.delegationLocks, parentTaskId, fn))
 	}
 
 	private runLockedDelegationTransition(
@@ -874,7 +873,7 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
-		await this.delegationTransitions.drain()
+		await this.delegationRuns.drain()
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
