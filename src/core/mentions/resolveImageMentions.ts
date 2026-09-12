@@ -12,6 +12,11 @@ import {
 
 const MAX_IMAGES_PER_MESSAGE = 20
 
+interface NormalizeSuppliedImagesOptions {
+	maxImageFileSize?: number
+	maxTotalImageSize?: number
+}
+
 export interface ResolveImageMentionsOptions {
 	text: string
 	images?: string[]
@@ -46,6 +51,44 @@ function dedupePreserveOrder(values: string[]): string[] {
 	return result
 }
 
+function getDataUrlSizeInMB(dataUrl: string): number {
+	return Buffer.byteLength(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64") / (1024 * 1024)
+}
+
+export function normalizeSuppliedImages(
+	images?: string[],
+	{
+		maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
+		maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
+	}: NormalizeSuppliedImagesOptions = {},
+): string[] {
+	if (!images?.length) return []
+
+	const normalized: string[] = []
+	const accepted = new Set<string>()
+	let totalSize = 0
+
+	for (const image of images) {
+		if (accepted.has(image)) continue
+		if (normalized.length >= MAX_IMAGES_PER_MESSAGE) break
+
+		const match = image.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/)
+		if (!match || match[2].length % 4 !== 0) continue
+
+		const extension = match[1] === "svg+xml" ? ".svg" : match[1] === "x-icon" ? ".ico" : `.${match[1]}`
+		if (!isSupportedImageFormat(extension)) continue
+
+		const sizeInMB = getDataUrlSizeInMB(image)
+		if (sizeInMB > maxImageFileSize || totalSize + sizeInMB > maxTotalImageSize) continue
+
+		totalSize += sizeInMB
+		accepted.add(image)
+		normalized.push(image)
+	}
+
+	return normalized
+}
+
 /**
  * Resolves local image file mentions like `@/path/to/image.png` found in `text` into `data:image/...;base64,...`
  * and appends them to the outgoing `images` array.
@@ -66,7 +109,7 @@ export async function resolveImageMentions({
 	maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
 	maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
 }: ResolveImageMentionsOptions): Promise<ResolveImageMentionsResult> {
-	const existingImages = Array.isArray(images) ? images : []
+	const existingImages = normalizeSuppliedImages(images, { maxImageFileSize, maxTotalImageSize })
 	if (existingImages.length >= MAX_IMAGES_PER_MESSAGE) {
 		return { text, images: existingImages.slice(0, MAX_IMAGES_PER_MESSAGE) }
 	}
@@ -95,6 +138,10 @@ export async function resolveImageMentions({
 	}
 
 	const imageMemoryTracker = new ImageMemoryTracker()
+	for (const image of existingImages) {
+		imageMemoryTracker.addMemoryUsage(getDataUrlSizeInMB(image))
+	}
+	const acceptedImages = new Set(existingImages)
 	const newImages: string[] = []
 
 	for (const mention of imageMentions) {
@@ -128,6 +175,9 @@ export async function resolveImageMentions({
 			}
 
 			const { dataUrl } = await readImageAsDataUrlWithBuffer(absPath)
+			if (acceptedImages.has(dataUrl)) continue
+
+			acceptedImages.add(dataUrl)
 			newImages.push(dataUrl)
 
 			// Track memory usage

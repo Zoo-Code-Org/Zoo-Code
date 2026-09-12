@@ -1,6 +1,6 @@
 import * as path from "path"
 
-import { resolveImageMentions } from "../resolveImageMentions"
+import { normalizeSuppliedImages, resolveImageMentions } from "../resolveImageMentions"
 
 vi.mock("../../tools/helpers/imageHelpers", () => ({
 	isSupportedImageFormat: vi.fn((ext: string) =>
@@ -11,9 +11,12 @@ vi.mock("../../tools/helpers/imageHelpers", () => ({
 	readImageAsDataUrlWithBuffer: vi.fn(),
 	validateImageForProcessing: vi.fn(),
 	ImageMemoryTracker: vi.fn().mockImplementation(function () {
+		let totalMemoryUsed = 0
 		return {
-			getTotalMemoryUsed: vi.fn().mockReturnValue(0),
-			addMemoryUsage: vi.fn(),
+			getTotalMemoryUsed: vi.fn(() => totalMemoryUsed),
+			addMemoryUsage: vi.fn((sizeInMB: number) => {
+				totalMemoryUsed += sizeInMB
+			}),
 		}
 	}),
 	DEFAULT_MAX_IMAGE_FILE_SIZE_MB: 5,
@@ -191,5 +194,113 @@ describe("resolveImageMentions", () => {
 		})
 
 		expect(mockValidateImage).toHaveBeenCalledWith(expect.any(String), true, 10, 50, 0)
+	})
+
+	it("should count supplied images against the local mention size budget", async () => {
+		const suppliedBytes = Buffer.from("supplied-image")
+		const suppliedImage = `data:image/png;base64,${suppliedBytes.toString("base64")}`
+		mockValidateImage.mockResolvedValue({ isValid: false, reason: "memory_limit" })
+
+		const result = await resolveImageMentions({
+			text: "See @/local.png",
+			images: [suppliedImage],
+			cwd: "/workspace",
+		})
+
+		expect(mockValidateImage).toHaveBeenCalledWith(
+			expect.any(String),
+			true,
+			5,
+			20,
+			suppliedBytes.byteLength / (1024 * 1024),
+		)
+		expect(result.images).toEqual([suppliedImage])
+	})
+
+	it("should not charge duplicate local images against later unique mentions", async () => {
+		const firstBytes = Buffer.from("first")
+		const secondBytes = Buffer.from("other")
+		const thirdBytes = Buffer.from("third")
+		const first = `data:image/png;base64,${firstBytes.toString("base64")}`
+		const second = `data:image/png;base64,${secondBytes.toString("base64")}`
+		const third = `data:image/png;base64,${thirdBytes.toString("base64")}`
+		const imageSizeInMB = firstBytes.byteLength / (1024 * 1024)
+		const maxTotalImageSize = imageSizeInMB * 3
+		mockValidateImage.mockImplementation(async (_path, _supportsImages, _maxFileSize, maxTotal, current) => ({
+			isValid: current + imageSizeInMB <= maxTotal,
+			sizeInMB: imageSizeInMB,
+		}))
+		mockReadImageAsDataUrl
+			.mockResolvedValueOnce({ dataUrl: first, buffer: firstBytes })
+			.mockResolvedValueOnce({ dataUrl: second, buffer: secondBytes })
+			.mockResolvedValueOnce({ dataUrl: second, buffer: secondBytes })
+			.mockResolvedValueOnce({ dataUrl: third, buffer: thirdBytes })
+
+		const result = await resolveImageMentions({
+			text: "See @/supplied-duplicate.png, @/local.png, @/local-duplicate.png, and @/unique.png",
+			images: [first],
+			cwd: "/workspace",
+			maxTotalImageSize,
+		})
+
+		expect(result.images).toEqual([first, second, third])
+	})
+})
+
+describe("normalizeSuppliedImages", () => {
+	it("should accept supported image data URIs and reject malformed or unsupported values", () => {
+		const payload = Buffer.from("image").toString("base64")
+
+		expect(normalizeSuppliedImages()).toEqual([])
+		expect(
+			normalizeSuppliedImages([
+				`data:image/svg+xml;base64,${payload}`,
+				`data:image/x-icon;base64,${payload}`,
+				`data:image/png;base64,${payload}`,
+				`prefix-data:image/png;base64,${payload}`,
+				`data:image/png;base64,${payload}-suffix`,
+				"data:image/png;base64,YQ=",
+				`data:image/unsupported;base64,${payload}`,
+			]),
+		).toEqual([
+			`data:image/svg+xml;base64,${payload}`,
+			`data:image/x-icon;base64,${payload}`,
+			`data:image/png;base64,${payload}`,
+		])
+	})
+
+	it("should enforce per-image and total decoded size limits", () => {
+		const image = `data:image/png;base64,${Buffer.from("four bytes").toString("base64")}`
+		const secondImage = `data:image/png;base64,${Buffer.from("nine bytes").toString("base64")}`
+		const sizeInMB = Buffer.byteLength("four bytes") / (1024 * 1024)
+
+		expect(normalizeSuppliedImages([image], { maxImageFileSize: sizeInMB / 2 })).toEqual([])
+		expect(normalizeSuppliedImages([image], { maxImageFileSize: sizeInMB })).toEqual([image])
+		expect(normalizeSuppliedImages([image, secondImage], { maxTotalImageSize: sizeInMB * 1.5 })).toEqual([image])
+		expect(normalizeSuppliedImages([image], { maxTotalImageSize: sizeInMB })).toEqual([image])
+	})
+
+	it("should apply supplied-image limits through resolveImageMentions", async () => {
+		const image = `data:image/png;base64,${Buffer.from("image").toString("base64")}`
+
+		const result = await resolveImageMentions({
+			text: "No mentions",
+			images: [image],
+			cwd: "/workspace",
+			maxImageFileSize: 0,
+		})
+
+		expect(result.images).toEqual([])
+	})
+
+	it("should not let duplicates consume the image count or size budgets", () => {
+		const first = `data:image/png;base64,${Buffer.from("first").toString("base64")}`
+		const second = `data:image/png;base64,${Buffer.from("second").toString("base64")}`
+		const maxTotalImageSize = Buffer.byteLength("firstsecond") / (1024 * 1024)
+
+		expect(normalizeSuppliedImages([...Array(20).fill(first), second], { maxTotalImageSize })).toEqual([
+			first,
+			second,
+		])
 	})
 })

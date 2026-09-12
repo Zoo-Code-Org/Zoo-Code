@@ -831,7 +831,7 @@
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 18
+			"count": 14
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
@@ -1137,11 +1137,6 @@
 	"extension/__tests__/api-delete-queued-message.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"extension/__tests__/api-send-message.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
 		}
 	},
 	"extension/api.ts": {
