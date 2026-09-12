@@ -777,7 +777,16 @@ describe("Cline", () => {
 		it("stops and restores history when the approved retry deletion cannot be persisted", async () => {
 			const task = await createMidStreamRetryTask()
 			task["saveApiConversationHistory"] = vi.fn().mockImplementation(async (merge = true) => merge)
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const summaryMessage = {
+				role: "user" as const,
+				content: [{ type: "text" as const, text: "context summary" }],
+				messageId: "summary-after-request",
+				isSummary: true,
+			}
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				task.apiConversationHistory.push(summaryMessage)
+				return { response: "yesButtonClicked" } satisfies TaskAskResult
+			})
 			const saySpy = vi.spyOn(task, "say")
 			const attemptSpy = vi
 				.spyOn(task, "attemptApiRequest")
@@ -789,7 +798,28 @@ describe("Cline", () => {
 			expect(attemptSpy).toHaveBeenCalledTimes(4)
 			expect(task["saveApiConversationHistory"]).toHaveBeenCalledWith(false)
 			expect(saySpy).toHaveBeenCalledWith("error", "Failed to persist conversation history before retrying.")
-			expect(task.apiConversationHistory).toHaveLength(1)
+			expect(task.apiConversationHistory).toHaveLength(2)
+			expect(task.apiConversationHistory[0]?.role).toBe("user")
+			expect(task.apiConversationHistory[1]).toEqual(summaryMessage)
+			expect(task.messageCounts.user).toBe(1)
+		})
+
+		it("stops when the owned request message cannot be located by id", async () => {
+			const task = await createMidStreamRetryTask()
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				task.apiConversationHistory[0]!.messageId = "replaced-request-id"
+				return { response: "yesButtonClicked" } satisfies TaskAskResult
+			})
+			const saySpy = vi.spyOn(task, "say")
+			const attemptSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => midStreamFailingRequest(new Error("Overloaded")))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			expect(attemptSpy).toHaveBeenCalledTimes(4)
+			expect(saySpy).toHaveBeenCalledWith("error", "Failed to locate the API request in conversation history.")
 			expect(task.messageCounts.user).toBe(1)
 		})
 

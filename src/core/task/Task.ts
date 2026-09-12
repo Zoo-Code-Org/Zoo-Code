@@ -138,7 +138,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
-import { decideMidStreamFailure, MAX_MID_STREAM_RETRIES } from "./midStreamRetry"
+import { decideMidStreamFailure, findRetryRequestMessageIndex, MAX_MID_STREAM_RETRIES } from "./midStreamRetry"
 import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
@@ -3688,9 +3688,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									// automatic retry budget. Remove the user message this request
 									// added first so it is not duplicated in history on retry.
 									if (requestMessageId) {
-										const requestMessageIndex = this.apiConversationHistory.findIndex(
-											(message) =>
-												message.messageId === requestMessageId && message.role === "user",
+										const requestMessageIndex = findRetryRequestMessageIndex(
+											this.apiConversationHistory,
+											requestMessageId,
 										)
 										if (requestMessageIndex === -1) {
 											await this.say(
