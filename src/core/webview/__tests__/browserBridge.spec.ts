@@ -22,7 +22,7 @@ import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
 
 import { allowNetConnect } from "../../../vitest.setup"
 import type { BridgeHost } from "../browserBridge"
-import { BrowserBridgeServer, getBrowserBridgePort } from "../browserBridge"
+import { BrowserBridgeServer, getBoundPort, getBrowserBridgePort } from "../browserBridge"
 
 // The shared src/__mocks__/vscode.js lacks the ExtensionMode/env/commands/
 // window surface the bridge touches at runtime, so this spec supplies its own
@@ -42,6 +42,33 @@ vi.mock("vscode", () => ({
 // allow net connect for 127.0.0.1 (the websocket upgrade and the polling
 // transport use the same host).
 allowNetConnect(/^127\.0\.0\.1(?::\d+)?$/)
+
+// Capture the Server constructor options the bridge passes through the lazy
+// `import("socket.io")` in BrowserBridgeServer.start, without altering the
+// real server behavior (the round-trip tests still run against socket.io).
+type CapturedServerOptions = {
+	cors: { origin: RegExp[] }
+	transports: string[]
+}
+
+const { socketIoOptions } = vi.hoisted(() => ({
+	socketIoOptions: { current: undefined as CapturedServerOptions | undefined },
+}))
+
+vi.mock("socket.io", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("socket.io")>()
+	return {
+		...actual,
+		Server: class CapturingServer extends actual.Server {
+			constructor(...args: ConstructorParameters<typeof actual.Server>) {
+				super(...args)
+				// The bridge always constructs `new Server(httpServer, options)`.
+				const options = args[1] ?? args[0]
+				socketIoOptions.current = options as CapturedServerOptions | undefined
+			}
+		},
+	}
+})
 
 function connectToBridge(port: number): Promise<Socket> {
 	return new Promise((resolve, reject) => {
@@ -114,6 +141,7 @@ describe("getBrowserBridgePort", () => {
 		["float", "1.5", 0],
 		["zero", "0", 0],
 		["negative", "-1", 0],
+		["upper boundary", "65536", 0],
 		["out of range", "99999", 0],
 	])("%s -> %i", (_label, value, expected) => {
 		if (value === undefined) {
@@ -122,6 +150,70 @@ describe("getBrowserBridgePort", () => {
 			process.env.ROO_BROWSER_BRIDGE_PORT = value
 		}
 		expect(getBrowserBridgePort()).toBe(expected)
+	})
+})
+
+describe("getBoundPort", () => {
+	it("returns the OS-assigned port for an AddressInfo object", () => {
+		const httpServer = { address: () => ({ port: 43210, address: "127.0.0.1", family: "IPv4" }) }
+		expect(getBoundPort(httpServer as never, 0)).toBe(43210)
+	})
+
+	it("falls back to the requested port for a string (pipe) address", () => {
+		const httpServer = { address: () => "\\\\.\\pipe\\bridge" }
+		expect(getBoundPort(httpServer as never, 8080)).toBe(8080)
+	})
+
+	it("falls back to the requested port while unbound (null address)", () => {
+		const httpServer = { address: () => null }
+		expect(getBoundPort(httpServer as never, 8080)).toBe(8080)
+	})
+})
+
+describe("BrowserBridgeServer.start (socket.io options)", () => {
+	beforeEach(() => {
+		socketIoOptions.current = undefined
+	})
+
+	function captureOptions(): CapturedServerOptions {
+		const options = socketIoOptions.current
+		expect(options).toBeDefined()
+		return options!
+	}
+
+	it("passes local-origin CORS and the websocket+polling transports", async () => {
+		const bridge = await startBridge()
+		try {
+			const options = captureOptions()
+			expect(options.cors).toEqual({ origin: [expect.any(RegExp)] })
+			expect(options.transports).toEqual(["websocket", "polling"])
+		} finally {
+			bridge["dispose"]()
+		}
+	})
+
+	it("restricts the CORS origin regex to bare localhost/loopback URLs", async () => {
+		const bridge = await startBridge()
+		try {
+			const origin = captureOptions().cors.origin[0]
+			const allowed = ["http://localhost", "http://127.0.0.1", "http://localhost:5173", "http://127.0.0.1:65535"]
+			const denied = [
+				"http://localhost:5173/path",
+				"xhttp://localhost",
+				"http://evil.com",
+				"http://localhost:abc",
+				"http://localhost:5173x",
+				"https://localhost",
+			]
+			for (const value of allowed) {
+				expect(origin.test(value)).toBe(true)
+			}
+			for (const value of denied) {
+				expect(origin.test(value)).toBe(false)
+			}
+		} finally {
+			bridge["dispose"]()
+		}
 	})
 })
 
@@ -302,6 +394,140 @@ describe("BrowserBridgeServer statics (WeakMap registry)", () => {
 		await webview.postMessage(extensionMessage)
 		const broadcast = await waitFor(() => inbound)
 		expect(broadcast).toEqual(extensionMessage)
+	})
+
+	it("disposeFor disposes the bridge server before dropping the entry", async () => {
+		const host = createHost()
+		hosts.push(host)
+
+		BrowserBridgeServer.enable(host)
+		await waitFor(() => (BrowserBridgeServer.active(host) ? true : undefined))
+		const bridge = BrowserBridgeServer["bridges"].get(host)!
+
+		// Wrap the private dispose so the real server still closes (no leaked port).
+		const originalDispose = bridge["dispose"].bind(bridge)
+		const disposeSpy = vi.fn(() => originalDispose())
+		bridge["dispose"] = disposeSpy
+
+		BrowserBridgeServer.disposeFor(host)
+
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+		expect(BrowserBridgeServer.active(host)).toBe(false)
+	})
+
+	it("the virtual webview mirrors the vscode.Webview contract", async () => {
+		const host = createHost()
+		hosts.push(host)
+		BrowserBridgeServer.enable(host)
+		await waitFor(() => (BrowserBridgeServer.active(host) ? true : undefined))
+
+		const webview = BrowserBridgeServer.webviewFor(host)!
+		expect(webview.options).toEqual({ enableScripts: true })
+		expect(webview.cspSource).toBe("vscode-webview://bridge")
+		expect(webview.html).toBe("")
+		await expect(webview.postMessage({ type: "action", action: "chatButtonClicked" })).resolves.toBe(true)
+		const uri = { toString: () => "file:///test/asset.png" } as never
+		expect(webview.asWebviewUri(uri)).toBe(uri)
+	})
+
+	it("an onWebviewMessage subscription stops delivering after dispose", async () => {
+		const host = createHost()
+		hosts.push(host)
+		BrowserBridgeServer.enable(host)
+		await waitFor(() => (BrowserBridgeServer.active(host) ? true : undefined))
+		const bridge = BrowserBridgeServer["bridges"].get(host)!
+
+		const received: WebviewMessage[] = []
+		const disposable = bridge["onWebviewMessage"]((message) => {
+			received.push(message)
+		})
+		expect(typeof disposable.dispose).toBe("function")
+
+		const client = await connectToBridge(bridge["_port"])
+		sockets.push(client)
+
+		const first: WebviewMessage = { type: "clearTask" }
+		client.emit("webviewMessage", first)
+		await waitFor(() => (received.length > 0 ? received[0] : undefined))
+
+		disposable.dispose()
+		client.emit("webviewMessage", { type: "acceptInput" })
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		expect(received).toEqual([first])
+	})
+})
+
+describe("BrowserBridgeServer occupied-port failure paths", () => {
+	const originalPort = process.env.ROO_BROWSER_BRIDGE_PORT
+	let blocker: ReturnType<typeof createServer>
+	let occupied: number
+
+	beforeEach(async () => {
+		// Occupy a real port and force the bridge to request exactly that one,
+		// so start() deterministically fails with EADDRINUSE.
+		blocker = createServer()
+		await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve))
+		occupied = (blocker.address() as AddressInfo).port
+		process.env.ROO_BROWSER_BRIDGE_PORT = String(occupied)
+	})
+
+	afterEach(async () => {
+		if (originalPort === undefined) {
+			delete process.env.ROO_BROWSER_BRIDGE_PORT
+		} else {
+			process.env.ROO_BROWSER_BRIDGE_PORT = originalPort
+		}
+		await new Promise<void>((resolve) => blocker.close(() => resolve()))
+	})
+
+	it("start without onError resolves undefined instead of rejecting", async () => {
+		await expect(BrowserBridgeServer["start"](() => {})).resolves.toBeUndefined()
+	})
+
+	it("enable leaves the host inert when the bridge fails to start", async () => {
+		const host = createHost()
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		try {
+			BrowserBridgeServer.enable(host)
+			await waitFor(() =>
+				logSpy.mock.calls.some(([message]) => String(message).includes("[BrowserBridge] Failed to start"))
+					? true
+					: undefined,
+			)
+			// Grace for the awaited server.close() and any (mutant) bind attempt.
+			await new Promise((resolve) => setTimeout(resolve, 100))
+
+			expect(BrowserBridgeServer.active(host)).toBe(false)
+			expect(host.setWebviewMessageListener).not.toHaveBeenCalled()
+		} finally {
+			logSpy.mockRestore()
+			BrowserBridgeServer.disposeFor(host)
+		}
+	})
+
+	it("a second enable never starts a second listening server", async () => {
+		const host = createHost()
+		// Port 0 (not the occupied override) so the second start *can* succeed:
+		// without the bridges.has guard its "[BrowserBridge] Listening" log is
+		// the observable proof a second server bound.
+		delete process.env.ROO_BROWSER_BRIDGE_PORT
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		try {
+			BrowserBridgeServer.enable(host)
+			await waitFor(() => (BrowserBridgeServer.active(host) ? true : undefined))
+
+			BrowserBridgeServer.enable(host)
+			// Grace for a would-be second server to bind and log.
+			await new Promise((resolve) => setTimeout(resolve, 250))
+
+			const listening = logSpy.mock.calls.filter(([message]) =>
+				String(message).includes("[BrowserBridge] Listening"),
+			)
+			expect(listening).toHaveLength(1)
+		} finally {
+			logSpy.mockRestore()
+			BrowserBridgeServer.disposeFor(host)
+		}
 	})
 })
 

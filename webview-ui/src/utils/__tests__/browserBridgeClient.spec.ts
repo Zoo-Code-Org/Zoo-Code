@@ -120,6 +120,37 @@ describe("BrowserBridgeClient", () => {
 		})
 	})
 
+	describe("queue initialization", () => {
+		// The static field initializer runs once per module load, so only a
+		// freshly-reset module can observe a corrupted initial queue.
+		it("flushes exactly the posted messages on a freshly-loaded module", async () => {
+			ioMock.mockClear()
+			vi.resetModules()
+			const { BrowserBridgeClient: FreshClient } = await import("../browserBridgeClient")
+			try {
+				const ready = { type: "webviewDidLaunch" } as any
+				const later = { type: "showTaskWithId", text: "task-1" } as any
+				setSearch("?bridgePort=9999")
+
+				FreshClient.maybeConnect()
+				FreshClient.postMessage(ready)
+				FreshClient.postMessage(later)
+
+				await awaitSockets()
+				const socket = createdSocket()
+				for (const listener of socket.handlers["connect"]) {
+					listener()
+				}
+				expect(socket.emit.mock.calls).toEqual([
+					["webviewMessage", ready],
+					["webviewMessage", later],
+				])
+			} finally {
+				FreshClient.resetForTests()
+			}
+		})
+	})
+
 	describe("message flow", () => {
 		const ready = { type: "webviewDidLaunch" } as any
 		const later = { type: "showTaskWithId", text: "task-1" } as any
@@ -171,6 +202,65 @@ describe("BrowserBridgeClient", () => {
 
 			expect(postMessageSpy).toHaveBeenCalledWith(extensionMessage, "*")
 			postMessageSpy.mockRestore()
+		})
+
+		it("registers a connect_error listener that warns with the failure", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			setSearch("?bridgePort=9999")
+
+			BrowserBridgeClient.maybeConnect()
+			await awaitSockets()
+			const socket = createdSocket()
+
+			// The listener must exist under the exact event name socket.io emits.
+			expect(socket.handlers["connect_error"]).toHaveLength(1)
+
+			const failure = new Error("boom")
+			for (const listener of socket.handlers["connect_error"]) {
+				listener(failure)
+			}
+			expect(warnSpy).toHaveBeenCalledWith("[BrowserBridge] socket.io connect error:", failure)
+			warnSpy.mockRestore()
+		})
+	})
+
+	describe("resetForTests before the socket exists", () => {
+		it("tears down an instance whose connect() has not attached a socket yet", () => {
+			setSearch("?bridgePort=9999")
+
+			BrowserBridgeClient.maybeConnect()
+			// The lazy socket.io-client import has not resolved: `socket` is
+			// still undefined, so the optional chaining in resetForTests matters.
+			expect(() => BrowserBridgeClient.resetForTests()).not.toThrow()
+			expect(BrowserBridgeClient.active()).toBe(false)
+		})
+	})
+
+	describe("production-build self-gating (import.meta.env.DEV)", () => {
+		afterEach(() => {
+			vi.unstubAllEnvs()
+		})
+
+		it("maybeConnect stays inert when DEV is false, even with a valid port", async () => {
+			vi.stubEnv("DEV", false)
+			setSearch("?bridgePort=9999")
+
+			BrowserBridgeClient.maybeConnect()
+
+			expect(BrowserBridgeClient.active()).toBe(false)
+			await Promise.resolve()
+			await Promise.resolve()
+			expect(ioMock).not.toHaveBeenCalled()
+		})
+
+		it("active() reports false when DEV flips off, even with a live instance", async () => {
+			setSearch("?bridgePort=9999")
+			BrowserBridgeClient.maybeConnect()
+			await awaitSockets()
+			expect(BrowserBridgeClient.active()).toBe(true)
+
+			vi.stubEnv("DEV", false)
+			expect(BrowserBridgeClient.active()).toBe(false)
 		})
 	})
 
