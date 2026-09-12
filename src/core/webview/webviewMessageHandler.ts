@@ -3078,7 +3078,7 @@ export const webviewMessageHandler = async (
 				await provider.postStateToWebview()
 
 				// Then handle validation and initialization for the current workspace
-				const currentCodeIndexManager = provider.getCurrentWorkspaceCodeIndexManager()
+				const currentCodeIndexManager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (currentCodeIndexManager) {
 					// If embedder provider changed, perform proactive validation
 					if (embedderProviderChanged) {
@@ -3157,7 +3157,7 @@ export const webviewMessageHandler = async (
 		}
 
 		case "requestIndexingStatus": {
-			const manager = provider.getCurrentWorkspaceCodeIndexManager()
+			const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 			if (!manager) {
 				// No workspace open - send error status
 				await provider.postMessageToWebview({
@@ -3221,7 +3221,7 @@ export const webviewMessageHandler = async (
 		}
 		case "startIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					await provider.postMessageToWebview({
 						type: "indexingStatusUpdate",
@@ -3262,7 +3262,7 @@ export const webviewMessageHandler = async (
 		}
 		case "stopIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
@@ -3279,7 +3279,7 @@ export const webviewMessageHandler = async (
 		}
 		case "toggleWorkspaceIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot toggle workspace indexing: No workspace folder open")
 					return
@@ -3305,7 +3305,7 @@ export const webviewMessageHandler = async (
 		}
 		case "setAutoEnableDefault": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot set auto-enable default: No workspace folder open")
 					return
@@ -3341,7 +3341,7 @@ export const webviewMessageHandler = async (
 		}
 		case "clearIndexData": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot clear index data: No workspace folder open")
 					await provider.postMessageToWebview({

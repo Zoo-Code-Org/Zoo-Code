@@ -196,13 +196,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
-	codeIndexLifecycleService = new CodeIndexLifecycleService(context, contextProxy, outputChannel)
+	// Initialize the provider *before* the Roo Code Cloud service.
+	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
+
+	codeIndexLifecycleService = new CodeIndexLifecycleService(context, contextProxy, outputChannel, provider)
 	// Initialize in background; do not block extension activation.
 	void codeIndexLifecycleService.init()
 	context.subscriptions.push(codeIndexLifecycleService)
-
-	// Initialize the provider *before* the Roo Code Cloud service.
-	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
 
 	// Initialize Roo Code Cloud service.
 	settingsUpdatedHandler = () => {

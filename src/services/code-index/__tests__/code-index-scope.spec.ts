@@ -1,7 +1,9 @@
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 import type { ContextProxy } from "../../../core/config/ContextProxy"
+import type { CodeIndexStatusConsumer } from "../interfaces/status-consumer"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexScope } from "../code-index-scope"
+import { CodeIndexScopeStatusManager } from "../code-index-scope-status-manager"
 import { CodeIndexStateManager } from "../state-manager"
 
 vi.mock("../state-manager", () => ({
@@ -16,7 +18,15 @@ vi.mock("../manager", () => ({
 	}),
 }))
 
+vi.mock("../code-index-scope-status-manager", () => ({
+	CodeIndexScopeStatusManager: vi.fn().mockImplementation(function () {
+		return { init: vi.fn(), dispose: vi.fn() }
+	}),
+}))
+
 describe("CodeIndexScope", () => {
+	const statusConsumer = {} as CodeIndexStatusConsumer
+
 	beforeEach(() => vi.clearAllMocks())
 
 	function createScope() {
@@ -53,17 +63,27 @@ describe("CodeIndexScope", () => {
 		const manager = getManager(scope)
 		const contextProxy = {} as ContextProxy
 
-		await scope.init(contextProxy)
+		await scope.init(contextProxy, statusConsumer)
 
 		expect(vi.mocked(CodeIndexStateManager).mock.results[0].value.init).toHaveBeenCalledExactlyOnceWith()
 		expect(manager.initialize).toHaveBeenCalledExactlyOnceWith(contextProxy)
+	})
+
+	it("rethrows initialization failures", async () => {
+		const { scope } = createScope()
+		const error = new Error("initialization failed")
+		vi.mocked(getManager(scope).initialize).mockRejectedValue(error)
+
+		await expect(scope.init({} as ContextProxy, statusConsumer)).rejects.toBe(error)
 	})
 
 	it("disposes its resources", async () => {
 		const { scope } = createScope()
 		const codeIndexManager = getManager(scope)
 		const stateManager = vi.mocked(CodeIndexStateManager).mock.results[0].value
+		const statusManager = vi.mocked(CodeIndexScopeStatusManager).mock.results[0].value
 		await scope.dispose()
+		expect(statusManager.dispose).toHaveBeenCalledExactlyOnceWith()
 		expect(codeIndexManager.dispose).toHaveBeenCalledExactlyOnceWith()
 		expect(stateManager.dispose).toHaveBeenCalledExactlyOnceWith()
 	})

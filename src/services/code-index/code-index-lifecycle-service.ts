@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 
 import type { ContextProxy } from "../../core/config/ContextProxy"
+import type { CodeIndexStatusConsumer } from "./interfaces/status-consumer"
 import { codeIndexScopeRegistry } from "./code-index-scope-registry"
 import { CodeIndexDisposalError } from "./errors/code-index-disposal-error"
 
@@ -12,6 +13,7 @@ export class CodeIndexLifecycleService implements vscode.Disposable {
 		private readonly context: vscode.ExtensionContext,
 		private readonly contextProxy: ContextProxy,
 		private readonly outputChannel: vscode.OutputChannel,
+		private readonly statusConsumer: CodeIndexStatusConsumer,
 	) {}
 
 	/** Initializes managers for every workspace folder. */
@@ -23,7 +25,7 @@ export class CodeIndexLifecycleService implements vscode.Disposable {
 		const scope = codeIndexScopeRegistry.getScope(this.context, folder.uri.fsPath)
 
 		try {
-			await scope?.init(this.contextProxy)
+			await scope?.init(this.contextProxy, this.statusConsumer)
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			this.outputChannel.appendLine(
