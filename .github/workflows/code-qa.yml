@@ -165,7 +165,7 @@ jobs:
               run: |
                   test -s src/coverage/unit/lcov.info
                   grep -q '^SF:' src/coverage/unit/lcov.info
-                  grep -Eq '^LF:[1-9][0-9]*$' src/coverage/unit/lcov.info
+                  grep -Eq '^LH:[1-9][0-9]*$' src/coverage/unit/lcov.info
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
