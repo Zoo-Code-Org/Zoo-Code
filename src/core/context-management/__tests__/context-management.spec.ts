@@ -2044,4 +2044,99 @@ describe("Context Management", () => {
 			summarizeSpy.mockRestore()
 		})
 	})
+
+	/**
+	 * Tests for the zero-progress fallback recovery in manageContext (issue #1254):
+	 * short histories where the fraction-based message calculation removes zero
+	 * messages must never report a successful truncation that leaves the oversized
+	 * context unchanged.
+	 */
+	describe("manageContext fallback recovery for zero-progress truncation", () => {
+		const buildToolPairHistory = (
+			toolResultContent: Anthropic.Messages.ToolResultBlockParam["content"],
+		): ApiMessage[] => [
+			{ role: "user", content: "Initial task", ts: 1000 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "toolu_01", name: "fetch_report", input: {} }],
+				ts: 1100,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_01", content: toolResultContent }],
+				ts: 1200,
+			},
+		]
+
+		it("recovers by shrinking an oversized tool_result when message-level truncation removes zero messages", async () => {
+			// ~4 MB tool result (realistic mixed content, like a large MCP/CLI output),
+			// far above the window budget once counted.
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(
+					4_000_000 / 74,
+				)
+			const messages = buildToolPairHistory(oversizedText)
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 0,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).not.toBe(messages) // the degraded copy must be persisted by the caller
+			expect(result.newContextTokensAfterTruncation).toBeDefined()
+			expect(result.newContextTokensAfterTruncation!).toBeLessThan(result.prevContextTokens)
+
+			// The oversized tool_use/tool_result pair stays intact: same message count,
+			// same tool_use_id, block shape preserved, only the payload is smaller.
+			expect(result.messages).toHaveLength(3)
+			const toolResult = (
+				result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(toolResult.tool_use_id).toBe("toolu_01")
+			const shrunkText =
+				typeof toolResult.content === "string"
+					? toolResult.content
+					: (toolResult.content as Anthropic.TextBlockParam[]).map((item) => item.text).join("")
+			expect(shrunkText.length).toBeLessThan(oversizedText.length)
+			expect(shrunkText).toContain("[Tool result truncated")
+		}, 60000)
+
+		it("returns a controlled error when nothing can be removed and no tool result can shrink", async () => {
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "First message", ts: 1000 },
+				{ role: "assistant", content: "Second message", ts: 1100 },
+				{ role: "user", content: "Third message", ts: 1200 },
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.errorDetails).toBeDefined()
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages) // unchanged history, no fake truncation event
+		})
+	})
 })
