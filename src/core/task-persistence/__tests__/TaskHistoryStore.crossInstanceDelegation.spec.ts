@@ -720,7 +720,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 
 			await expect(result).rejects.toMatchObject({
 				name: "AggregateError",
-				message: "[TaskHistoryStore] atomicUpdatePair: callback and compensation failed",
+				message: "Task pair callback compensation failed",
 				errors: [
 					callbackError,
 					expect.objectContaining({ message: expect.stringContaining("concurrent update") }),
@@ -783,9 +783,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 
 			const aggregate = await result.catch((error: unknown) => error)
 			expect(aggregate).toBeInstanceOf(AggregateError)
-			expect((aggregate as AggregateError).message).toBe(
-				"[TaskHistoryStore] atomicUpdatePair: callback and compensation failed",
-			)
+			expect((aggregate as AggregateError).message).toBe("Task pair callback compensation failed")
 			expect((aggregate as AggregateError).errors[0]).toBe(callbackError)
 			expect((aggregate as AggregateError).errors[1]).toMatchObject({
 				message: "[TaskHistoryStore] atomicUpdatePair: child missing during compensation",
@@ -1042,7 +1040,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			)
 			await expect(result).rejects.toMatchObject({
 				name: "AggregateError",
-				message: "[TaskHistoryStore] atomicUpdatePair: second write and pair rollback failed",
+				message: "Task pair rollback failed",
 				errors: [
 					expect.objectContaining({ message: "child write failed" }),
 					expect.objectContaining({
@@ -1406,7 +1404,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				)
 				await expect(result).rejects.toMatchObject({
 					name: "AggregateError",
-					message: "[TaskHistoryStore] atomicUpdatePair: second write and pair rollback failed",
+					message: "Task pair rollback failed",
 					errors: [
 						expect.objectContaining({ message: "child write failed" }),
 						expect.objectContaining({

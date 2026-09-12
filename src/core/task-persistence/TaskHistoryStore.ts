@@ -1226,10 +1226,8 @@ export class TaskHistoryStore {
 			const updatedFirst = firstUpdater(structuredClone(first))
 			const updatedSecond = secondUpdater(structuredClone(second))
 
-			if (updatedFirst.id !== firstId)
-				throw new Error(`Pair first updater changed ${firstId} to ${updatedFirst.id}`)
-			if (updatedSecond.id !== secondId)
-				throw new Error(`Pair second updater changed ${secondId} to ${updatedSecond.id}`)
+			if (updatedFirst.id !== firstId) throw new Error("First updater changed task id")
+			if (updatedSecond.id !== secondId) throw new Error("Second updater changed task id")
 
 			// Validate status transitions before any disk write — mirrors upsertCore guard.
 			for (const [existing, updated] of [
@@ -1289,12 +1287,8 @@ export class TaskHistoryStore {
 							restorations.unshift([secondId, secondDiskSnapshot, expectedSecondStates])
 						}
 						const rollbackErrors = await this.restoreTaskFilePreImages(restorations)
-						if (rollbackErrors.length) {
-							throw new AggregateError(
-								[error, ...rollbackErrors],
-								`[TaskHistoryStore] atomicUpdatePair: second write and pair rollback failed`,
-							)
-						}
+						if (rollbackErrors.length)
+							throw new AggregateError([error, ...rollbackErrors], "Task pair rollback failed")
 					} else {
 						// First record is committed on disk. Update cache so it
 						// reflects disk state before propagating the error.
@@ -1331,10 +1325,10 @@ export class TaskHistoryStore {
 						}
 					}
 
-					if (compensationErrors.length > 0) {
+					if (compensationErrors.length) {
 						throw new AggregateError(
 							[error, ...compensationErrors],
-							`[TaskHistoryStore] atomicUpdatePair: callback and compensation failed`,
+							"Task pair callback compensation failed",
 						)
 					}
 					throw error

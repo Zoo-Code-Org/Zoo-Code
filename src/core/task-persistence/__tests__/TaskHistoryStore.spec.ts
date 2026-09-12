@@ -850,7 +850,7 @@ describe("TaskHistoryStore", () => {
 					(c) => ({ ...c, id: "wrong-id" }),
 					(p) => p,
 				),
-			).rejects.toThrow("Pair first updater changed child-id-check to wrong-id")
+			).rejects.toThrow("First updater changed task id")
 		})
 
 		it("throws when second updater returns a different id", async () => {
@@ -868,7 +868,7 @@ describe("TaskHistoryStore", () => {
 					(c) => c,
 					(p) => ({ ...p, id: "wrong-id" }),
 				),
-			).rejects.toThrow("Pair second updater changed parent-id-check2 to wrong-id")
+			).rejects.toThrow("Second updater changed task id")
 		})
 
 		it("throws when first task ID is not in cache", async () => {
