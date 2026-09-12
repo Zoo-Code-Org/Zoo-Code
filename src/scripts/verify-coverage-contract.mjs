@@ -5,11 +5,24 @@ import process from "node:process"
 import { fileURLToPath } from "node:url"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
-const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
+const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
+if (!pnpm) throw new Error("pnpm executable path is unavailable")
+const pnpmPrefix = process.platform === "win32" ? [pnpm] : []
 const run = (args, options = {}) => {
 	const { includeStderr = true, ...spawnOptions } = options
-	const result = spawnSync(pnpm, args, { cwd: root, encoding: "utf8", ...spawnOptions })
-	if (result.status !== 0) throw new Error(result.stderr || result.stdout || `${pnpm} failed`)
+	const command = process.platform === "win32" ? process.execPath : pnpm
+	const result = spawnSync(command, [...pnpmPrefix, ...args], { cwd: root, encoding: "utf8", ...spawnOptions })
+	if (result.status !== 0) {
+		const details = [
+			result.error?.message,
+			result.signal ? `terminated by ${result.signal}` : undefined,
+			result.stderr,
+			result.stdout,
+		]
+			.filter(Boolean)
+			.join("\n")
+		throw new Error(details || `pnpm exited with status ${result.status ?? "unknown"}`)
+	}
 	return `${result.stdout || ""}${includeStderr ? result.stderr || "" : ""}`
 }
 
