@@ -221,6 +221,28 @@ describe("TerminalProcess", () => {
 			expect(terminalProcess.eventNames()).toEqual([])
 		})
 
+		it("clears busy when the matching process completes", () => {
+			const process = new TerminalProcess(mockTerminalInfo)
+			mockTerminalInfo.process = process
+			mockTerminalInfo.busy = true
+
+			process.emit("completed", "")
+
+			expect(mockTerminalInfo.busy).toBe(false)
+		})
+
+		it("keeps a newer owner busy when a superseded process completes", () => {
+			const superseded = new TerminalProcess(mockTerminalInfo)
+			const current = new TerminalProcess(mockTerminalInfo)
+			mockTerminalInfo.process = current
+			mockTerminalInfo.busy = true
+
+			superseded.emit("completed", "")
+
+			expect(mockTerminalInfo.process).toBe(current)
+			expect(mockTerminalInfo.busy).toBe(true)
+		})
+
 		it("emits no_shell_integration with commandSubmitted=false when shell integration startup times out", async () => {
 			vi.useFakeTimers()
 			const previousTimeout = Terminal.getShellIntegrationTimeout()
