@@ -25,8 +25,18 @@ import { getModelParams } from "../transform/model-params"
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { handleOpenAIError } from "./utils/error-handler"
+import { handleOpenAIRequestError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	path?: string
+	signal?: AbortSignal
+	/** Per-request SDK timeout; a positive timeoutMs overrides the client default. */
+	timeout?: number
+}
 
 // TODO: Rename this to OpenAICompatibleHandler. Also, I think the
 // `OpenAINativeHandler` can subclass from this, since it's obviously
@@ -87,6 +97,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		throwIfAborted(metadata?.abortSignal)
+
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
@@ -183,10 +195,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				stream = await this.client.chat.completions.create(
 					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(isAzureAiInference, metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const matcher = new TagMatcher(
@@ -201,26 +213,32 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			let lastUsage
 			const activeToolCallIds = new Set<string>()
 
-			for await (const chunk of stream) {
-				const delta = chunk.choices?.[0]?.delta ?? {}
-				const finishReason = chunk.choices?.[0]?.finish_reason
+			try {
+				for await (const chunk of stream) {
+					const delta = chunk.choices?.[0]?.delta ?? {}
+					const finishReason = chunk.choices?.[0]?.finish_reason
 
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
-				}
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
 
-				if (delta.content) {
-					for (const chunk of matcher.update(delta.content)) {
-						yield chunk
+					if (delta.content) {
+						for (const chunk of matcher.update(delta.content)) {
+							yield chunk
+						}
+					}
+
+					yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
-
-				yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
-
-				if (chunk.usage) {
-					lastUsage = chunk.usage
-				}
+			} catch (error) {
+				// The creation-site catch does not cover errors raised by the async
+				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			for (const chunk of matcher.final()) {
@@ -250,10 +268,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(
 					requestOptions,
-					this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(this._isAzureAiInference(modelUrl), metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const message = response.choices?.[0]?.message
@@ -304,6 +322,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+
 		try {
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
@@ -322,14 +342,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(
 					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildCompletePromptRequestConfig(isAzureAiInference, options),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
 			}
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				// Preserve the normalized abort error (name + message contract) as-is.
+				throw error
+			}
 			if (error instanceof Error) {
 				const wrapped = new Error(`${this.providerName} completion error: ${error.message}`, { cause: error })
 				const source = error as Error & { status?: number; errorDetails?: unknown; code?: unknown }
@@ -342,6 +366,45 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			throw error
 		}
+	}
+
+	/**
+	 * Builds the per-request OpenAI SDK options for a chat completions create
+	 * (createMessage paths): the Azure AI Inference path when applicable, plus
+	 * the caller's abort signal, via RequestConfigBuilder adoption.
+	 */
+	private buildChatRequestConfig(
+		isAzureAiInference: boolean,
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): OpenAI.RequestOptions {
+		return (
+			new RequestConfigBuilder<OpenAiRequestConfig>()
+				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
+				.setAbortSignal(metadata)
+				.build() ?? {}
+		)
+	}
+
+	/**
+	 * Builds the per-request options for completePrompt. CompletePromptOptions
+	 * is not ApiHandlerCreateMessageMetadata (required taskId), so the merged
+	 * abort/timeout signal and the per-request SDK timeout (a positive timeoutMs
+	 * overrides the client-level default) go through setOption instead of
+	 * setAbortSignal.
+	 */
+	private buildCompletePromptRequestConfig(
+		isAzureAiInference: boolean,
+		options?: CompletePromptOptions,
+	): OpenAI.RequestOptions {
+		const requestTimeout =
+			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
+		return (
+			new RequestConfigBuilder<OpenAiRequestConfig>()
+				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
+				.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+				.setOption("timeout", requestTimeout)
+				.build() ?? {}
+		)
 	}
 
 	private async *handleO3FamilyMessage(
@@ -385,13 +448,19 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				stream = await this.client.chat.completions.create(
 					requestOptions,
-					methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(methodIsAzureAiInference, metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
-			yield* this.handleStreamResponse(stream)
+			try {
+				yield* this.handleStreamResponse(stream)
+			} catch (error) {
+				// The creation-site catch does not cover errors raised by the async
+				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+			}
 		} else {
 			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
@@ -420,10 +489,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(
 					requestOptions,
-					methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(methodIsAzureAiInference, metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const message = response.choices?.[0]?.message
