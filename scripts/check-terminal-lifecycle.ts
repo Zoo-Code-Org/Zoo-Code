@@ -23,7 +23,7 @@ interface TraceStep {
 }
 
 const actions: Action[] = ["run", "wait", "track-process", "activate", "output", "end", "close"]
-const MAX_DEPTH = 7
+const MAX_DEPTH = 8
 const MAX_STATES = 500
 
 function initialState(): ModelState {
@@ -82,7 +82,7 @@ function transition(state: ModelState, action: Action): ModelState {
 					}
 				: state
 		case "output":
-			return state.phase === "running" ? { ...state, output: `${state.output}chunk` } : state
+			return state.phase === "running" && state.output === "" ? { ...state, output: "chunk" } : state
 		case "end":
 			return state.phase === "waiting" || state.phase === "running" ? complete(state, "completed") : state
 		case "close":
@@ -160,6 +160,7 @@ const queue: Array<{ state: ModelState; trace: TraceStep[] }> = [
 const visited = new Set([JSON.stringify(start)])
 const reachedActions = new Set<Action>()
 const reachedLandmarks = new Set<string>()
+const frontier: ModelState[] = []
 
 for (let index = 0; index < queue.length; index++) {
 	const node = queue[index]!
@@ -168,7 +169,10 @@ for (let index = 0; index < queue.length; index++) {
 	for (const [name, predicate] of Object.entries(landmarks)) {
 		if (predicate(node.trace)) reachedLandmarks.add(name)
 	}
-	if (node.trace.length - 1 === MAX_DEPTH) continue
+	if (node.trace.length - 1 === MAX_DEPTH) {
+		frontier.push(node.state)
+		continue
+	}
 
 	for (const action of actions) {
 		const next = transition(node.state, action)
@@ -184,6 +188,15 @@ for (let index = 0; index < queue.length; index++) {
 		queue.push({ state: next, trace })
 		if (visited.size > MAX_STATES) throw new Error(`Terminal lifecycle exceeded its ${MAX_STATES}-state budget`)
 	}
+}
+
+const unexploredSuccessor = frontier
+	.flatMap((state) => actions.map((action) => ({ action, next: transition(state, action) })))
+	.find(({ next }) => !visited.has(JSON.stringify(next)))
+if (unexploredSuccessor) {
+	throw new Error(
+		`Terminal lifecycle exploration reached depth ${MAX_DEPTH} with an unseen successor (${unexploredSuccessor.action}); increase the depth bound`,
+	)
 }
 
 const missingActions = actions.filter((action) => !reachedActions.has(action))
