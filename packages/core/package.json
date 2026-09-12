@@ -5,6 +5,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./async-task-tracker": "./src/async-task-tracker.ts",
 		"./cli": "./src/cli.ts",
 		"./browser": "./src/browser.ts"
 	},

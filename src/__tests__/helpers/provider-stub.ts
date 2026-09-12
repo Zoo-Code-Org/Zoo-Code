@@ -2,7 +2,7 @@ import { ClineProvider } from "../../core/webview/ClineProvider"
 import { TaskRegistry } from "../../core/task/TaskRegistry"
 import { type Task } from "../../core/task/Task"
 import type { JsonFileLock } from "../../utils/safeWriteJson"
-import { AsyncTaskTracker } from "@roo-code/core"
+import { AsyncTaskTracker } from "@roo-code/core/async-task-tracker"
 
 export const unlockedJsonFileLock = (): JsonFileLock =>
 	Object.assign(async () => {}, { getCompromiseError: () => undefined })

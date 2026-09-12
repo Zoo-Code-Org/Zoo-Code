@@ -68,7 +68,7 @@ import {
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
-import { AsyncTaskTracker } from "@roo-code/core"
+import { AsyncTaskTracker } from "@roo-code/core/async-task-tracker"
 
 import { Package } from "../../shared/package"
 import { findLast } from "../../shared/array"
@@ -150,6 +150,7 @@ function runDelegationTransition<T>(
 	locks: Map<string, Promise<void>>,
 	parentTaskId: string,
 	fn: () => Promise<T>,
+	tracker?: AsyncTaskTracker,
 ): Promise<T> {
 	const previous = locks.get(parentTaskId) ?? Promise.resolve()
 	// Fail-forward: run fn even if the previous transition rejected. A failed
@@ -169,7 +170,7 @@ function runDelegationTransition<T>(
 		}
 	})
 
-	return current
+	return tracker ? tracker.track(current) : current
 }
 
 function scheduleTask(
@@ -253,7 +254,7 @@ export class ClineProvider
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-		return this.runs.track(runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn))
+		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn, this.runs)
 	}
 
 	private runLockedDelegationTransition(
@@ -3878,8 +3879,11 @@ export class ClineProvider
 		mode: string
 		pendingActionId?: string
 	}): Promise<Task> {
-		return this.runDelegationTransition(params.parentTaskId, () =>
-			ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
+		return runDelegationTransition(
+			ClineProvider.delegationTransitionLocks,
+			params.parentTaskId,
+			() => ClineProvider.prototype.delegateParentAndOpenChildUnlocked.call(this, params),
+			this.runs,
 		)
 	}
 
