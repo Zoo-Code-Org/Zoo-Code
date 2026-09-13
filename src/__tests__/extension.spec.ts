@@ -139,9 +139,10 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn().mockReturnValue(null),
+vi.mock("../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getInstance: vi.fn().mockReturnValue(undefined),
+		disposeAll: vi.fn(),
 	},
 }))
 
@@ -457,6 +458,31 @@ describe("extension.ts", () => {
 	describe("deactivate", () => {
 		beforeEach(() => {
 			vi.resetModules()
+		})
+
+		test("disposes the code index registry on deactivation", async () => {
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
+			const { activate, deactivate } = await import("../extension")
+			await activate(mockContext)
+			await deactivate()
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
+		})
+
+		test("continues cleanup when disposing the code index registry fails", async () => {
+			const vscode = await import("vscode")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
+			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { activate, deactivate } = await import("../extension")
+			await activate(mockContext)
+			vi.mocked(CodeIndexManagerRegistry.disposeAll).mockImplementationOnce(() => {
+				throw new Error("index cleanup failed")
+			})
+			await expect(deactivate()).resolves.toBeUndefined()
+			const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+			expect(channel?.appendLine).toHaveBeenCalledWith(
+				"Failed to dispose code index managers: index cleanup failed",
+			)
+			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
 		})
 
 		test("still runs terminal cleanup when telemetry shutdown rejects", async () => {

@@ -90,8 +90,10 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
-import { CodeIndexManager } from "../../services/code-index/manager"
-import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
+import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
+import { CodeIndexWebviewMessageHandler } from "../../services/code-index/code-index-webview-message-handler"
+import type { CodeIndexScope } from "../../services/code-index/code-index-scope"
+import type { CodeIndexManager } from "../../services/code-index/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
@@ -114,6 +116,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
+import { WebviewMessageHandlerRegistry } from "./WebviewMessageHandlerRegistry"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
@@ -323,6 +326,7 @@ export class ClineProvider
 	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
+	private readonly webviewMessageHandlerRegistry: WebviewMessageHandlerRegistry
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -337,6 +341,9 @@ export class ClineProvider
 			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
 			(message) => this.log(message),
 		)
+		this.webviewMessageHandlerRegistry = new WebviewMessageHandlerRegistry([
+			new CodeIndexWebviewMessageHandler(this),
+		])
 
 		ClineProvider.activeInstances.add(this)
 
@@ -1711,7 +1718,7 @@ export class ClineProvider
 	 */
 	private setWebviewMessageListener(webview: vscode.Webview) {
 		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+			webviewMessageHandler(this, message, this.marketplaceManager, this.webviewMessageHandlerRegistry)
 
 		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
 		this.webviewDisposables.push(messageDisposable)
@@ -3307,15 +3314,21 @@ export class ClineProvider
 	 * @returns CodeIndexManager instance for the current workspace or the default one
 	 */
 	public getCurrentWorkspaceCodeIndexManager(): CodeIndexManager | undefined {
-		return CodeIndexManager.getInstance(this.context)
+		return this.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
+	}
+
+	public getCurrentWorkspaceCodeIndexScope(): CodeIndexScope | undefined {
+		return CodeIndexManagerRegistry.getCodeIndexScope(this.context)
 	}
 
 	/**
 	 * Updates the code index status subscription to listen to the current workspace manager
 	 */
 	private updateCodeIndexStatusSubscription(): void {
-		// Get the current workspace manager
-		const currentManager = this.getCurrentWorkspaceCodeIndexManager()
+		// Get the current workspace manager and its interface controller
+		const currentScope = this.getCurrentWorkspaceCodeIndexScope()
+		const currentManager = currentScope?.codeIndexManager
+		const currentController = currentScope?.codeIndexController
 
 		// If the manager hasn't changed, no need to update subscription
 		if (currentManager === this.codeIndexManager) {
@@ -3331,16 +3344,14 @@ export class ClineProvider
 		// Update the current workspace manager reference
 		this.codeIndexManager = currentManager
 
-		// Subscribe to the new manager's progress updates if it exists
-		if (currentManager) {
-			this.codeIndexStatusSubscription = currentManager.onProgressUpdate((update: IndexProgressUpdate) => {
+		// Subscribe to the complete interface state exposed by the controller.
+		if (currentManager && currentController) {
+			this.codeIndexStatusSubscription = currentController.onDidChangeCodeIndexState((codeIndexState) => {
 				// Only send updates if this manager is still the current one
 				if (currentManager === this.getCurrentWorkspaceCodeIndexManager()) {
-					// Get the full status from the manager to ensure we have all fields correctly formatted
-					const fullStatus = currentManager.getCurrentStatus()
 					void this.postMessageToWebview({
 						type: "indexingStatusUpdate",
-						values: fullStatus,
+						values: codeIndexState,
 					})
 				}
 			})
@@ -3352,7 +3363,7 @@ export class ClineProvider
 			// Send initial status for the current workspace
 			void this.postMessageToWebview({
 				type: "indexingStatusUpdate",
-				values: currentManager.getCurrentStatus(),
+				values: currentController.codeIndexState,
 			})
 		}
 	}
