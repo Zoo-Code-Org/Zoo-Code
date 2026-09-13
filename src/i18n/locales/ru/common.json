@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Нет активной задачи для удаления сообщений",
+			"no_active_task_to_roll_back": "Нет активного задания для отката",
+			"no_active_task_to_restore": "Нет активного задания для восстановления",
 			"invalid_timestamp_for_deletion": "Недействительная временная метка сообщения для удаления",
 			"cannot_delete_missing_timestamp": "Невозможно удалить сообщение: отсутствует временная метка",
 			"cannot_delete_invalid_timestamp": "Невозможно удалить сообщение: недействительная временная метка",

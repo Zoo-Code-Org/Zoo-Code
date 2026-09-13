@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Brak aktywnego zadania do usunięcia wiadomości",
+			"no_active_task_to_roll_back": "Brak aktywnego zadania do cofnięcia",
+			"no_active_task_to_restore": "Brak aktywnego zadania do przywrócenia",
 			"invalid_timestamp_for_deletion": "Nieprawidłowy znacznik czasu wiadomości do usunięcia",
 			"cannot_delete_missing_timestamp": "Nie można usunąć wiadomości: brak znacznika czasu",
 			"cannot_delete_invalid_timestamp": "Nie można usunąć wiadomości: nieprawidłowy znacznik czasu",

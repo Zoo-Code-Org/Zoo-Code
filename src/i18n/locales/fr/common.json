@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Aucune tâche active pour supprimer des messages",
+			"no_active_task_to_roll_back": "Aucune tâche active pour annuler les modifications",
+			"no_active_task_to_restore": "Aucune tâche active pour restaurer les modifications",
 			"invalid_timestamp_for_deletion": "Horodatage du message invalide pour la suppression",
 			"cannot_delete_missing_timestamp": "Impossible de supprimer le message : horodatage manquant",
 			"cannot_delete_invalid_timestamp": "Impossible de supprimer le message : horodatage invalide",

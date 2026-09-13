@@ -7,6 +7,8 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
+import { checkpointSave } from "../../checkpoints"
+import { computeDiffStats } from "../../diff/stats"
 import { editFileTool } from "../EditFileTool"
 
 vi.mock("fs/promises", () => ({
@@ -56,7 +58,16 @@ vi.mock("../../../utils/path", () => ({
 
 vi.mock("../../diff/stats", () => ({
 	sanitizeUnifiedDiff: vi.fn((diff) => diff),
-	computeDiffStats: vi.fn(() => ({ additions: 1, deletions: 1 })),
+	// The real computeDiffStats returns { added, removed } (DiffStats) —
+	// keep the mock faithful to the production shape.
+	computeDiffStats: vi.fn(() => ({ added: 1, removed: 1 })),
+}))
+
+vi.mock("../../checkpoints", () => ({
+	getCheckpointService: vi.fn(),
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
+	checkpointRestore: vi.fn(),
+	checkpointDiff: vi.fn(),
 }))
 
 vi.mock("vscode", () => ({
@@ -772,6 +783,125 @@ describe("editFileTool", () => {
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockAskApproval).toHaveBeenCalled()
+		})
+	})
+
+	describe("per-write checkpoints (B1)", () => {
+		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+
+		it("records one suppressed checkpoint after a successful edit (default-on)", async () => {
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: the write info threads the path, operation, and the approval
+			// diff stats into the checkpoint hook. B3a: the approval diff itself is
+			// threaded verbatim for the per-step change card.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diffStats: { additions: 1, deletions: 1 },
+				diff: "mock-diff",
+			})
+		})
+
+		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
+			mockTask.providerRef.deref = vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+					perWriteCheckpoints: false,
+				}),
+			})
+
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("does not record a checkpoint when the edit fails", async () => {
+			mockTask.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeEditFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("records the checkpoint with a create operation for a new file", async () => {
+			await executeEditFileTool({ old_string: "", new_string: "New file content" }, { fileExists: false })
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 1, deletions: 1 },
+				diff: "mock-diff",
+			})
+		})
+
+		it("omits diff stats from the checkpoint write when the diff has no stats", async () => {
+			// A null approval diff produces no diffStats on the journal write.
+			// The diff itself is still threaded for the change card (B3a).
+			vi.mocked(computeDiffStats).mockReturnValueOnce(null)
+
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diff: "mock-diff",
+			})
+		})
+
+		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {
+			// B3a: when the step is auto-approved the checkpoint write carries
+			// autoApproved so checkpointSave can force the compact change card.
+			mockTask.providerRef.deref = vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+					autoApprovalEnabled: true,
+					alwaysAllowWrite: true,
+				}),
+			})
+
+			await executeEditFileTool({})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diffStats: { additions: 1, deletions: 1 },
+				diff: "mock-diff",
+				autoApproved: true,
+			})
+		})
+
+		it("awaits the edit checkpoint before execute settles", async () => {
+			type SaveResult = Awaited<ReturnType<typeof checkpointSave>>
+			let resolveSave: (value: SaveResult | PromiseLike<SaveResult>) => void = () => {}
+			const saveDeferred = new Promise<SaveResult>((resolve) => (resolveSave = resolve))
+			mockedCheckpointSave.mockImplementationOnce(() => saveDeferred)
+
+			const executePromise = executeEditFileTool({})
+
+			// execute must not settle while the checkpoint is still in flight:
+			// a later tool block would otherwise interleave with this edit's staged work.
+			let settled = false
+			void executePromise.finally(() => (settled = true))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(settled).toBe(false)
+
+			resolveSave()
+			await executePromise
+			expect(settled).toBe(true)
 		})
 	})
 })

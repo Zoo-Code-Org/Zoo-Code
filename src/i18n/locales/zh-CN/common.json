@@ -104,6 +104,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "没有可删除消息的活跃任务",
+			"no_active_task_to_roll_back": "没有可回滚的活动任务",
+			"no_active_task_to_restore": "没有可恢复的活动任务",
 			"invalid_timestamp_for_deletion": "删除操作的消息时间戳无效",
 			"cannot_delete_missing_timestamp": "无法删除消息：缺少时间戳",
 			"cannot_delete_invalid_timestamp": "无法删除消息：时间戳无效",

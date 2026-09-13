@@ -98,6 +98,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "沒有可刪除訊息的活躍工作",
+			"no_active_task_to_roll_back": "沒有可還原的活動任務",
+			"no_active_task_to_restore": "沒有可復原的活動任務",
 			"invalid_timestamp_for_deletion": "刪除操作的訊息時間戳無效",
 			"cannot_delete_missing_timestamp": "無法刪除訊息：缺少時間戳",
 			"cannot_delete_invalid_timestamp": "無法刪除訊息：時間戳無效",

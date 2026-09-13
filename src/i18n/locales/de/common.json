@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Keine aktive Aufgabe, aus der Nachrichten gelöscht werden können",
+			"no_active_task_to_roll_back": "Keine aktive Aufgabe, von der aus zurückgerollt werden kann",
+			"no_active_task_to_restore": "Keine aktive Aufgabe, von der aus wiederhergestellt werden kann",
 			"invalid_timestamp_for_deletion": "Ungültiger Nachrichten-Zeitstempel zum Löschen",
 			"cannot_delete_missing_timestamp": "Nachricht kann nicht gelöscht werden: fehlender Zeitstempel",
 			"cannot_delete_invalid_timestamp": "Nachricht kann nicht gelöscht werden: ungültiger Zeitstempel",

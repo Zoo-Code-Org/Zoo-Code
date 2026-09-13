@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Mesaj silinecek aktif görev yok",
+			"no_active_task_to_roll_back": "Geri alınacak etkin görev yok",
+			"no_active_task_to_restore": "Geri yüklenecek etkin görev yok",
 			"invalid_timestamp_for_deletion": "Silme için geçersiz mesaj zaman damgası",
 			"cannot_delete_missing_timestamp": "Mesaj silinemiyor: zaman damgası eksik",
 			"cannot_delete_invalid_timestamp": "Mesaj silinemiyor: geçersiz zaman damgası",
