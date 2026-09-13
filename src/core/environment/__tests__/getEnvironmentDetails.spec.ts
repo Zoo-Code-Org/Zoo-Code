@@ -117,6 +117,7 @@ describe("getEnvironmentDetails", () => {
 				deref: vi.fn().mockReturnValue(mockProvider),
 				[Symbol.toStringTag]: "WeakRef",
 			} as unknown as WeakRef<ClineProvider>,
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 		}
 
 		// Mock other dependencies.
@@ -463,5 +464,30 @@ describe("getEnvironmentDetails", () => {
 
 		const result = await getEnvironmentDetails(mockCline as Task, true)
 		expect(result).toContain("File listing unavailable: unexpected string rejection")
+	})
+
+	// Regression for issue #1623.
+	// Before the fix, the Current Mode block read the shared provider mode.
+	// A child delegated to "architect" mode would report "orchestrator" instead.
+	it("uses the task-local mode in the Current Mode block, not the provider mode", async () => {
+		// Provider mode stays "code"; task was delegated to "architect".
+		mockState.mode = "code"
+		;(mockCline.getTaskMode as Mock).mockResolvedValue("architect")
+		;(getFullModeDetails as Mock).mockResolvedValue({
+			name: "🏗️ Architect",
+			roleDefinition: "You design software.",
+			customInstructions: "",
+		})
+
+		const result = await getEnvironmentDetails(mockCline as Task)
+
+		expect(result).toContain("<slug>architect</slug>")
+		expect(result).not.toContain("<slug>code</slug>")
+		expect(getFullModeDetails).toHaveBeenCalledWith(
+			"architect",
+			[],
+			undefined,
+			expect.objectContaining({ cwd: mockCwd }),
+		)
 	})
 })
