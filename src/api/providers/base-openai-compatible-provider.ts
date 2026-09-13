@@ -15,7 +15,7 @@ import { handleOpenAIError, handleOpenAIRequestError } from "./utils/error-handl
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -125,6 +125,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		throwIfAborted(metadata?.abortSignal)
+		const signal = metadata?.abortSignal
 
 		// Per-request abort wiring (RequestConfigBuilder adoption): subclasses inherit
 		// it by receiving the built config as createStream's requestOptions.
@@ -145,6 +146,12 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		try {
 			for await (const chunk of stream) {
+				// Streaming-loop abort defense: the for-await above already pulled this
+				// chunk; the top-of-loop break stops *processing* (and yielding) buffered
+				// content that arrived after the caller's signal aborted.
+				if (signal?.aborted) {
+					break
+				}
 				// Check for provider-specific error responses (e.g., MiniMax base_resp).
 				// ChatCompletionChunk has no base_resp member, so read it through an
 				// unknown guard instead of casting the whole chunk.
@@ -221,6 +228,13 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			// The creation-site catch does not cover errors raised by the async
 			// iterator itself (e.g. a mid-stream abort); normalize them the same way.
 			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+		}
+
+		// Post-loop abort defense: a signal that aborted while the loop was running must
+		// surface the Task.ts abort contract instead of letting the stream end normally
+		// with the buffered usage / matcher.final() content below.
+		if (signal?.aborted) {
+			throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
 		}
 
 		if (lastUsage) {

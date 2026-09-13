@@ -1193,6 +1193,97 @@ describe("OpenAiHandler", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("should stop yielding buffered chunks and reject with the abort contract when aborted mid-stream", async () => {
+			let releaseSecond = () => {}
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			// The second chunk is deferred: it only becomes available after the caller
+			// aborts, so the loop's next for-await pull is a suspension point only the
+			// top-of-loop break can decide on. Removing the break leaks "world"; removing
+			// the post-loop check ends the stream normally instead of rejecting.
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "hello " } }] }
+					await secondGate
+					yield { choices: [{ delta: { content: "world" } }] }
+				})(),
+			)
+
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = handler.createMessage("system prompt", [], metadata)
+
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "hello " })
+
+			controller.abort()
+			releaseSecond()
+
+			// Anything yielded after the abort is a leak: the deferred second chunk
+			// must not come through an aborted stream — only the top-of-loop break
+			// stops the loop from processing content pulled after the abort.
+			const leaked: string[] = []
+			const result = await captureError(
+				(async () => {
+					for await (const chunk of gen) {
+						if (chunk.type === "text") {
+							leaked.push(chunk.text)
+						}
+					}
+				})(),
+			)
+
+			expect(leaked).toEqual([])
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should stop yielding buffered chunks and reject with the abort contract when aborted mid-stream (o3 family)", async () => {
+			let releaseSecond = () => {}
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "hello " } }] }
+					await secondGate
+					yield { choices: [{ delta: { content: "world" } }] }
+				})(),
+			)
+
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+			const gen = o3Handler.createMessage("system prompt", [], metadata)
+
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "hello " })
+
+			controller.abort()
+			releaseSecond()
+
+			// Anything yielded after the abort is a leak: the deferred second chunk
+			// must not come through an aborted stream — only the top-of-loop break
+			// stops the loop from processing content pulled after the abort.
+			const leaked: string[] = []
+			const result = await captureError(
+				(async () => {
+					for await (const chunk of gen) {
+						if (chunk.type === "text") {
+							leaked.push(chunk.text)
+						}
+					}
+				})(),
+			)
+
+			expect(leaked).toEqual([])
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
 		it("should wrap a non-abort stream error with the provider prefix when no metadata is passed", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				(async function* () {

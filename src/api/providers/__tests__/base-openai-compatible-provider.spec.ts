@@ -444,6 +444,53 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("should stop yielding buffered chunks and reject with the abort contract when aborted mid-stream", async () => {
+			let releaseSecond = () => {}
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			// The second chunk is deferred: it only becomes available after the caller
+			// aborts, so the loop's next for-await pull is a suspension point only the
+			// top-of-loop break can decide on. Removing the break leaks "world"; removing
+			// the post-loop check ends the stream normally instead of rejecting.
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "hello " } }] }
+					await secondGate
+					yield { choices: [{ delta: { content: "world" } }] }
+				})(),
+			)
+
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = handler.createMessage("system prompt", [], metadata)
+
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "hello " })
+
+			controller.abort()
+			releaseSecond()
+
+			// Anything yielded after the abort is a leak: the deferred second chunk
+			// must not come through an aborted stream — only the top-of-loop break
+			// stops the loop from processing content pulled after the abort.
+			const leaked: string[] = []
+			const result = await captureError(
+				(async () => {
+					for await (const chunk of gen) {
+						if (chunk.type === "text") {
+							leaked.push(chunk.text)
+						}
+					}
+				})(),
+			)
+
+			expect(leaked).toEqual([])
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
 		it("should wrap a non-abort base_resp stream error with the provider prefix through the iteration wrapper", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				asyncStreamFrom([

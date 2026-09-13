@@ -28,7 +28,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { handleOpenAIRequestError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 
 /** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
 type OpenAiRequestConfig = {
@@ -98,6 +98,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		throwIfAborted(metadata?.abortSignal)
+		const signal = metadata?.abortSignal
 
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
@@ -215,6 +216,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			try {
 				for await (const chunk of stream) {
+					// Streaming-loop abort defense: the for-await above already pulled this
+					// chunk; the top-of-loop break stops *processing* (and yielding) buffered
+					// content that arrived after the caller's signal aborted.
+					if (signal?.aborted) {
+						break
+					}
 					const delta = chunk.choices?.[0]?.delta ?? {}
 					const finishReason = chunk.choices?.[0]?.finish_reason
 
@@ -239,6 +246,13 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				// The creation-site catch does not cover errors raised by the async
 				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
 				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+			}
+
+			// Post-loop abort defense: a signal that aborted while the loop was running must
+			// surface the Task.ts abort contract instead of letting the stream end normally
+			// with the buffered matcher/usage content below.
+			if (signal?.aborted) {
+				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
 			}
 
 			for (const chunk of matcher.final()) {
@@ -419,6 +433,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): ApiStream {
 		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
+		const signal = metadata?.abortSignal
 
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
@@ -459,11 +474,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			try {
-				yield* this.handleStreamResponse(stream)
+				yield* this.handleStreamResponse(stream, signal)
 			} catch (error) {
 				// The creation-site catch does not cover errors raised by the async
 				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
-				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+				throw handleOpenAIRequestError(error, this.providerName, signal)
+			}
+
+			// Post-loop abort defense: a signal that aborted while the loop was running
+			// must surface the Task.ts abort contract instead of letting the stream end
+			// normally with the buffered content it may have pulled.
+			if (signal?.aborted) {
+				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
 			}
 		} else {
 			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
@@ -521,10 +543,19 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	private async *handleStreamResponse(stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>): ApiStream {
+	private async *handleStreamResponse(
+		stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+		signal?: AbortSignal,
+	): ApiStream {
 		const activeToolCallIds = new Set<string>()
 
 		for await (const chunk of stream) {
+			// Streaming-loop abort defense: the for-await above already pulled this
+			// chunk; the top-of-loop break stops *processing* (and yielding) buffered
+			// content that arrived after the caller's signal aborted.
+			if (signal?.aborted) {
+				break
+			}
 			const delta = chunk.choices?.[0]?.delta
 			const finishReason = chunk.choices?.[0]?.finish_reason
 
