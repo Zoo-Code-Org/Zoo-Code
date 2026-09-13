@@ -128,6 +128,8 @@ describe("publishTreeSitterWasms", () => {
 		).rejects.toThrow(`WASM rollback incomplete; recovery retained at ${transaction}`)
 		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
 		await expect(publishTreeSitterWasms(source, destination)).rejects.toMatchObject({ code: "EEXIST" })
+		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
+		await expect(publishTreeSitterWasms(source, destination)).rejects.toMatchObject({ code: "EEXIST" })
 	})
 
 	it("cleans an incomplete transaction setup", async () => {
