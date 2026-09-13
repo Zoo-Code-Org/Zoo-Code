@@ -34,6 +34,50 @@ export class MissingToolResultError extends Error {
 }
 
 /**
+ * Moves all `tool_result` blocks to the front of a user message's content, preserving
+ * their relative order and the relative order of every other block.
+ *
+ * Anthropic documents this as a hard requirement:
+ * > In the user message containing tool results, the tool_result blocks must come
+ * > FIRST in the content array. Any text must come AFTER all tool results.
+ * https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls#handling-results-from-client-tools
+ *
+ * In practice only the *leading contiguous run* of `tool_result` blocks is recognized, so
+ * any non-`tool_result` block (an image returned by a tool, approval feedback, a queued
+ * user message, environment details, ...) that lands between two results truncates that
+ * run and orphans every result after it, producing:
+ *
+ *   "`tool_use` ids were found without `tool_result` blocks immediately after: <id>.
+ *    Each `tool_use` block must have a corresponding `tool_result` block in the next message."
+ *
+ * This is reachable with parallel tool calls, because each tool appends its result and then
+ * its image blocks, so the second tool's result ends up after the first tool's images.
+ * Once the malformed message is persisted the task rejects every subsequent request, so the
+ * hoist runs before the message is written to the API conversation history.
+ *
+ * See: https://github.com/Zoo-Code-Org/Zoo-Code/issues/1259
+ */
+export function hoistToolResultsToFront(
+	content: Anthropic.Messages.ContentBlockParam[],
+): Anthropic.Messages.ContentBlockParam[] {
+	const firstNonToolResultIndex = content.findIndex((block) => block.type !== "tool_result")
+
+	// Already well-formed when there is no trailing content, or when no tool_result
+	// appears after the first non-tool_result block.
+	if (
+		firstNonToolResultIndex === -1 ||
+		!content.slice(firstNonToolResultIndex + 1).some((block) => block.type === "tool_result")
+	) {
+		return content
+	}
+
+	const toolResults = content.filter((block) => block.type === "tool_result")
+	const otherBlocks = content.filter((block) => block.type !== "tool_result")
+
+	return [...toolResults, ...otherBlocks]
+}
+
+/**
  * Validates and fixes tool_result IDs in a user message against the previous assistant message.
  *
  * This is a centralized validation that catches all tool_use/tool_result issues
@@ -42,6 +86,7 @@ export class MissingToolResultError extends Error {
  * - Message editing scenarios
  * - Resume/delegation scenarios
  * - Missing tool_result blocks for tool_use calls
+ * - tool_result blocks interleaved with other block types
  *
  * @param userMessage - The user message being added to history
  * @param apiConversationHistory - The conversation history to find the previous assistant message from
@@ -99,12 +144,15 @@ export function validateAndFixToolResultIds(
 		return true
 	})
 
+	// Hoist tool_results ahead of any interleaved image/text blocks.
+	const hoistedContent = hoistToolResultsToFront(deduplicatedContent)
+
 	userMessage = {
 		...userMessage,
-		content: deduplicatedContent,
+		content: hoistedContent,
 	}
 
-	toolResults = deduplicatedContent.filter(
+	toolResults = hoistedContent.filter(
 		(block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result",
 	)
 
