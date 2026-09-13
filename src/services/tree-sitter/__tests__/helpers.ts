@@ -34,12 +34,12 @@ export async function initializeTreeSitter() {
 		// Initialize directly using the default export or the module itself
 		await Parser.init()
 
-		// Override the Parser.Language.load to use dist directory
+		// Use the cacheable test prerequisite rather than the bundled extension output.
 		const originalLoad = Language.load
 
 		Language.load = async (wasmPath: string) => {
 			const filename = path.basename(wasmPath)
-			const correctPath = path.join(process.cwd(), "dist", filename)
+			const correctPath = path.join(process.cwd(), "generated", "tree-sitter-wasms", filename)
 			// console.log(`Redirecting WASM load from ${wasmPath} to ${correctPath}`)
 			return originalLoad(correctPath)
 		}
@@ -84,7 +84,7 @@ export async function testParseSourceCodeDefinitions(
 	const parser = new Parser()
 
 	// Load language and configure parser
-	const wasmPath = path.join(process.cwd(), `dist/${wasmFile}`)
+	const wasmPath = path.join(process.cwd(), "generated", "tree-sitter-wasms", wasmFile)
 	const lang = await Language.load(wasmPath)
 	parser.setLanguage(lang)
 
@@ -113,7 +113,7 @@ export async function testParseSourceCodeDefinitions(
 export async function inspectTreeStructure(content: string, language: string = "typescript"): Promise<string> {
 	const { Parser, Language } = await initializeTreeSitter()
 	const parser = new Parser()
-	const wasmPath = path.join(process.cwd(), `dist/tree-sitter-${language}.wasm`)
+	const wasmPath = path.join(process.cwd(), "generated", "tree-sitter-wasms", `tree-sitter-${language}.wasm`)
 	const lang = await Language.load(wasmPath)
 	parser.setLanguage(lang)
 

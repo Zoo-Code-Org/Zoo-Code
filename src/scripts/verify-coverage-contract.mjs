@@ -5,7 +5,6 @@ import process from "node:process"
 import { fileURLToPath } from "node:url"
 
 import { assertMatchingFiles } from "./verify-wasm-files.mjs"
-import { createDistSandbox } from "./dist-sandbox.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
@@ -37,24 +36,12 @@ const preparationTask = graph.tasks.find(({ taskId }) => taskId === "zoo-code#pr
 if (!coverageTask?.dependencies.includes("zoo-code#prepare:tree-sitter-wasms"))
 	throw new Error("WASM prerequisite missing")
 if (coverageTask.dependencies.includes("zoo-code#bundle")) throw new Error("Unit coverage must not depend on bundle")
-if (JSON.stringify(preparationTask?.outputs) !== JSON.stringify(["dist/tree-sitter-*.wasm"]))
+if (JSON.stringify(preparationTask?.outputs) !== JSON.stringify(["generated/tree-sitter-wasms/**"]))
 	throw new Error("WASM prerequisite outputs changed")
 
-const dist = path.join(root, "src", "dist")
+const generated = path.join(root, "src", "generated", "tree-sitter-wasms")
 const cacheDir = path.join(root, ".turbo", "coverage-contract")
 fs.rmSync(cacheDir, { recursive: true, force: true })
-const state = { sandbox: undefined }
-for (const signal of ["SIGINT", "SIGTERM"]) {
-	process.once(signal, () => {
-		try {
-			state.sandbox?.restore()
-		} finally {
-			fs.rmSync(cacheDir, { recursive: true, force: true })
-		}
-		process.exit(1)
-	})
-}
-state.sandbox = createDistSandbox(dist)
 
 try {
 	run(["turbo", "run", "prepare:tree-sitter-wasms", "--filter=zoo-code", "--cache-dir=.turbo/coverage-contract"])
@@ -64,23 +51,21 @@ try {
 		.readdirSync(path.join(root, "src", "node_modules", "tree-sitter-wasms", "out"))
 		.filter((filename) => /^tree-sitter-.*\.wasm$/.test(filename))
 		.sort()
-	const published = fs
-		.readdirSync(dist)
+	const prepared = fs
+		.readdirSync(generated)
 		.filter((filename) => /^tree-sitter-.*\.wasm$/.test(filename))
 		.sort()
 	if (source.length === 0) throw new Error("Dependency contains no tree-sitter WASMs")
-	if (JSON.stringify(source) !== JSON.stringify(published))
-		throw new Error("Published WASM set does not match dependency")
+	if (JSON.stringify(source) !== JSON.stringify(prepared))
+		throw new Error("Prepared WASM set does not match dependency")
 	assertMatchingFiles(
 		path.join(root, "src", "node_modules", "tree-sitter-wasms", "out"),
-		dist,
+		generated,
 		source,
-		"Published WASM content does not match dependency",
+		"Prepared WASM content does not match dependency",
 	)
-	if (fs.readdirSync(dist).some((filename) => filename.endsWith(".tmp")))
-		throw new Error("Temporary WASM files remain")
 
-	for (const filename of published) fs.rmSync(path.join(dist, filename), { force: true })
+	fs.rmSync(generated, { recursive: true, force: true })
 	const warmGraph = JSON.parse(
 		run(
 			[
@@ -98,20 +83,16 @@ try {
 	if (warmTask?.cache.status !== "HIT") throw new Error("WASM prerequisite is not available in the isolated cache")
 	run(["turbo", "run", "prepare:tree-sitter-wasms", "--filter=zoo-code", "--cache-dir=.turbo/coverage-contract"])
 	const restored = fs
-		.readdirSync(dist)
+		.readdirSync(generated)
 		.filter((filename) => /^tree-sitter-.*\.wasm$/.test(filename))
 		.sort()
 	if (JSON.stringify(source) !== JSON.stringify(restored)) throw new Error("WASM cache did not restore exact outputs")
 	assertMatchingFiles(
 		path.join(root, "src", "node_modules", "tree-sitter-wasms", "out"),
-		dist,
+		generated,
 		source,
 		"WASM cache restored corrupted output",
 	)
 } finally {
-	try {
-		state.sandbox.restore()
-	} finally {
-		fs.rmSync(cacheDir, { recursive: true, force: true })
-	}
+	fs.rmSync(cacheDir, { recursive: true, force: true })
 }
