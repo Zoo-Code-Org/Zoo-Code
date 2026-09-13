@@ -12,14 +12,22 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import type { GenerateContentResponse } from "@google/genai"
+
 import { type ModelInfo, geminiDefaultModelId, ApiProviderError } from "@roo-code/types"
 
 import { t } from "i18next"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { GeminiHandler } from "../gemini"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 const GEMINI_MODEL_NAME = geminiDefaultModelId
+
+// @google/genai's GenerateContentResponse exposes `text` via a getter backed by
+// `candidates`, so the stub only carries the field the provider reads; the double
+// cast is the least-friction way to satisfy the class type in mocks.
+const stubGenerateContentResponse = (text: string) => ({ text }) as unknown as GenerateContentResponse
 
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
@@ -381,6 +389,186 @@ describe("GeminiHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
 		})
+
+		it("should pass abort signal through to client via config.abortSignal", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					abortSignal: controller.signal,
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted, before the request is built", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			// The fast-fail must run before the client is touched.
+			expect(handler["client"].models.generateContent).not.toHaveBeenCalled()
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should pass timeoutMs through to client via httpOptions with abortSignal on config", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					abortSignal: controller.signal,
+					httpOptions: { timeout: 10000 },
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should pass only timeoutMs when no signal is provided", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: { timeout: 5000 },
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should omit httpOptions entirely for timeoutMs=0 (0 disables the timeout)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {
+			const controller = new AbortController()
+			// The request stays pending until the external signal aborts it; the
+			// mock rejects with a plain (non-abort) error once the signal has
+			// aborted, so the catch block must classify it via signal.aborted.
+			vi.mocked(handler["client"].models.generateContent).mockImplementationOnce(() => {
+				return new Promise<GenerateContentResponse>((_resolve, reject) => {
+					const fail = () => reject(new Error("Gemini API error"))
+					if (controller.signal.aborted) {
+						fail()
+						return
+					}
+					controller.signal.addEventListener("abort", fail, { once: true })
+				})
+			})
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			// Abort after entry — the pre-abort fast-fail must not apply, and the
+			// catch block handles the failure.
+			controller.abort()
+			const error = await promise.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rethrows non-Error completion failures as-is after capturing telemetry", async () => {
+			// The instanceof branch only covers Error instances; a non-Error rejection
+			// must be rethrown untouched (wrapping it would lose the original value).
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValueOnce("Gemini: not an error object")
+
+			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
+			expect(error).toBe("Gemini: not an error object")
+			expect(error).not.toBeInstanceOf(Error)
+		})
+
+		it("wraps completion failures in a new error before rethrowing", async () => {
+			// The consumer-facing error must be the provider's wrap (a NEW Error
+			// built from the localized template), not the raw SDK error instance:
+			// this is what the instanceof branch is for (and what makes the branch
+			// observable to the mutation gate). Unit tests cannot assert the i18n
+			// string itself (i18next is not initialized with resources here).
+			const mockError = new Error("Gemini completion failure")
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValueOnce(mockError)
+
+			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect(error).not.toBe(mockError)
+		})
+
+		it("should surface a standard AbortError when the SDK throws an abort error before the signal flag propagates", async () => {
+			// The signal flag has not propagated yet, but the SDK rejects with its
+			// own abort error: isRequestAborted must catch the error-name branch.
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(
+				Object.assign(new Error("Request was aborted."), { name: "AbortError" }),
+			)
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("should surface the wrapped provider error when the request fails without options", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(new Error("Gemini API error"))
+
+			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// The catch must take the non-abort wrapping path (not the abort
+			// DOMException path) and must not crash reading a missing signal.
+			// The i18n message itself is asserted by the error telemetry tests.
+			expect((error as Error).message).not.toContain("Cannot read properties")
+		})
+
+		it("should surface the wrapped provider error when the request fails with options but no signal", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(new Error("Gemini API error"))
+
+			const error = await handler.completePrompt("Test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// Options exist but no signal: exercises the second optional-chain
+			// position, which would crash here if the `?.` were removed.
+			expect((error as Error).message).not.toContain("Cannot read properties")
+		})
 	})
 
 	describe("getModel", () => {
@@ -514,6 +702,609 @@ describe("GeminiHandler", () => {
 		})
 	})
 
+	describe("completePrompt request options", () => {
+		it("applies the explicit model temperature when the model supports temperature", async () => {
+			const temperatureHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				modelTemperature: 0.5,
+			})
+			temperatureHandler["client"] = handler["client"]
+			const baseInfo = temperatureHandler.getModel()
+			// Explicit supportsTemperature: true makes the `!== false` check observable —
+			// with the default model info (undefined) the literal cannot be mutated.
+			vi.spyOn(temperatureHandler, "getModel").mockReturnValue({
+				...baseInfo,
+				info: {
+					...baseInfo.info,
+					supportsTemperature: true,
+					defaultTemperature: 1,
+				},
+			})
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await temperatureHandler.completePrompt("Test prompt")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({ temperature: 0.5 }),
+				}),
+			)
+		})
+
+		it("ignores the explicit model temperature when the model does not support temperature", async () => {
+			const noTemperatureHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				modelTemperature: 0.5,
+			})
+			noTemperatureHandler["client"] = handler["client"]
+			const baseInfo = noTemperatureHandler.getModel()
+			vi.spyOn(noTemperatureHandler, "getModel").mockReturnValue({
+				...baseInfo,
+				info: {
+					...baseInfo.info,
+					supportsTemperature: false,
+					defaultTemperature: 0.3,
+				},
+			})
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await noTemperatureHandler.completePrompt("Test prompt")
+
+			// supportsTemperature: false forces the fallback to the model default —
+			// the user's explicit modelTemperature must not be applied.
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({ temperature: 0.3 }),
+				}),
+			)
+		})
+
+		it("should pass timeout and baseUrl through httpOptions", async () => {
+			const handlerWithBaseUrl = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				googleGeminiBaseUrl: "https://gemini.example.test",
+			})
+			handlerWithBaseUrl["client"] = handler["client"]
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			const result = await handlerWithBaseUrl.completePrompt("Test prompt", { timeoutMs: 1234 })
+
+			expect(result).toBe("Response")
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: {
+							timeout: 1234,
+							baseUrl: "https://gemini.example.test",
+						},
+					}),
+				}),
+			)
+		})
+
+		it("should pass abortSignal on config instead of httpOptions", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						abortSignal: controller.signal,
+						httpOptions: undefined,
+					}),
+				}),
+			)
+		})
+
+		it("should omit httpOptions when timeoutMs and baseUrl are not provided", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await handler.completePrompt("Test prompt")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: undefined,
+					}),
+				}),
+			)
+		})
+		describe("googleGeminiBaseUrl security (CWE-319)", () => {
+			it("should reject a non-HTTPS non-loopback googleGeminiBaseUrl in completePrompt", async () => {
+				const insecureHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://gemini.example.test",
+				})
+				insecureHandler["client"] = handler["client"]
+				vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+					stubGenerateContentResponse("Response"),
+				)
+
+				await expect(insecureHandler.completePrompt("Test prompt")).rejects.toThrow(
+					t("common:errors.gemini.generate_complete_prompt", {
+						error: "Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+					}),
+				)
+				expect(handler["client"].models.generateContent).not.toHaveBeenCalled()
+			})
+
+			it("should allow a loopback HTTP googleGeminiBaseUrl in completePrompt", async () => {
+				const loopbackHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://127.0.0.1:8080",
+				})
+				loopbackHandler["client"] = handler["client"]
+				vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+					stubGenerateContentResponse("Response"),
+				)
+
+				const result = await loopbackHandler.completePrompt("Test prompt")
+
+				expect(result).toBe("Response")
+				expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+					expect.objectContaining({
+						config: expect.objectContaining({
+							httpOptions: {
+								baseUrl: "http://127.0.0.1:8080",
+							},
+						}),
+					}),
+				)
+			})
+
+			it("should reject a non-HTTPS non-loopback googleGeminiBaseUrl in createMessage", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const insecureHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://insecure.example.com",
+				})
+				insecureHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const stream = insecureHandler.createMessage("You are a helpful assistant", messages)
+
+				const error = await collectStream(stream).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect((error as ApiProviderError).operation).toBe("createMessage")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			it("should allow a loopback HTTP googleGeminiBaseUrl in createMessage", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const loopbackHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://127.0.0.1:8080",
+				})
+				loopbackHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				await collectStream(loopbackHandler.createMessage("You are a helpful assistant", messages))
+
+				const config = stub.mock.calls[0][0].config
+				expect(config.httpOptions).toEqual({ baseUrl: "http://127.0.0.1:8080" })
+			})
+
+			it("should allow an http://localhost googleGeminiBaseUrl in createMessage", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const localhostHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://localhost:8080",
+				})
+				localhostHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				await collectStream(localhostHandler.createMessage("You are a helpful assistant", messages))
+
+				expect(stub.mock.calls[0][0].config.httpOptions).toEqual({ baseUrl: "http://localhost:8080" })
+			})
+
+			it("should allow an http://[::1] googleGeminiBaseUrl (IPv6 loopback host)", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const ipv6Handler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://[::1]:8080",
+				})
+				ipv6Handler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				await collectStream(ipv6Handler.createMessage("You are a helpful assistant", messages))
+
+				expect(stub.mock.calls[0][0].config.httpOptions).toEqual({ baseUrl: "http://[::1]:8080" })
+			})
+
+			it("should reject hostnames that only resemble the 127. range", async () => {
+				// "127a.b" is not a four-part 127.0.0.0/8 literal, so it must not
+				// pass the loopback check. A prefix-style "starts with 127." test
+				// would have matched it and wrongly allowed cleartext. (Hosts such
+				// as a127.0.0.1 are rejected by new URL() outright — its mixed
+				// digit-led/letter-led label rule — so they never reach the check.)
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const restrictedHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://127a.b:8080",
+				})
+				restrictedHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					restrictedHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			it("should reject a valid hostname containing the 127. substring that is not loopback", async () => {
+				// "foo127.bar" is accepted by new URL() (a syntactically valid
+				// hostname) and contains the "127." substring, yet is not a
+				// loopback address: its first label is "foo127", not the literal
+				// 127 octet, so the four-part 127.0.0.0/8 check rejects it.
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const restrictedHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://foo127.bar:8080",
+				})
+				restrictedHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					restrictedHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			const INSECURE_BASE_URL_CASES = [
+				// "127.example.test" is a syntactically valid hostname (a digit-led
+				// first label is legal DNS) that new URL() accepts, but it is a
+				// public domain — not a literal 127.0.0.0/8 address — so cleartext
+				// must be rejected. A "starts with 127." prefix check would wrongly
+				// allow it and leak the API key in cleartext.
+				["a public hostname whose first label is 127", "http://127.example.test:8080"],
+				// "127.0.0.a" is accepted by new URL() (a non-digit last label
+				// skips IPv4 validation), but the last label is not a decimal
+				// octet, so the host is not loopback and cleartext must be
+				// rejected.
+				["a four-part host with a non-numeric last octet", "http://127.0.0.a:8080"],
+				// "127.0.a.b" is accepted by new URL(), but its third label is
+				// not a decimal octet, so the host is not loopback and cleartext
+				// must be rejected even though the first and fourth labels are
+				// numeric.
+				["a four-part host with a non-numeric middle octet", "http://127.0.a.b:8080"],
+				// "127.0.0.1.a" is a hostname (not an IPv4 literal) that new
+				// URL() accepts: its five labels mean it must not pass the
+				// four-part 127.0.0.0/8 check, so cleartext must be rejected.
+				["a five-part host that starts with a loopback address", "http://127.0.0.1.a:8080"],
+				// "10.0.0.1" is a valid IPv4 literal that new URL() accepts, but its
+				// first octet is not 127, so it is not loopback and cleartext must
+				// be rejected. This pins the 127 label comparison itself.
+				["a four-part IPv4 host outside the 127.0.0.0/8 range", "http://10.0.0.1:8080"],
+			] as const
+
+			it.each(INSECURE_BASE_URL_CASES)("should reject %s", async (_name, googleGeminiBaseUrl) => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const restrictedHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl,
+				})
+				restrictedHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					restrictedHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			it("should allow the full 127.0.0.0/8 range including 127.255.255.255", async () => {
+				// The octet boundary is inclusive: 255 is the largest valid decimal
+				// octet and must be accepted as loopback. A < instead of <= (or a
+				// lowered boundary) would wrongly reject valid loopback endpoints.
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const loopbackHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://127.255.255.255:8080",
+				})
+				loopbackHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				await collectStream(loopbackHandler.createMessage("You are a helpful assistant", messages))
+
+				const config = stub.mock.calls[0][0].config
+				expect(config.httpOptions).toEqual({ baseUrl: "http://127.255.255.255:8080" })
+			})
+
+			it("should reject a non-HTTP loopback scheme such as ftp://localhost", async () => {
+				// The protocol operand (left of the && in the loopback exception) must
+				// still be enforced: a non-HTTP scheme aimed at a loopback host is not
+				// a local test proxy and must be rejected like any other non-HTTPS URL.
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const ftpHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "ftp://localhost:8080",
+				})
+				ftpHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					ftpHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			it("should reject an invalid googleGeminiBaseUrl in createMessage", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const invalidHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "not a valid url",
+				})
+				invalidHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const error = await collectStream(
+					invalidHandler.createMessage("You are a helpful assistant", messages),
+				).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe("Invalid Google Gemini base URL (not a valid URL)")
+				expect((error as ApiProviderError).provider).toBe("Gemini")
+				expect((error as ApiProviderError).operation).toBe("createMessage")
+				expect(stub).not.toHaveBeenCalled()
+			})
+		})
+	})
+
+	describe("createMessage abort signal (bridging)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			expect(handler["client"].models.generateContentStream).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight request when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			let capturedSignal: AbortSignal | undefined
+			const stub = vi.fn().mockImplementation(async (params: { config?: { abortSignal?: AbortSignal } }) => {
+				capturedSignal = params.config?.abortSignal
+				return (async function* () {
+					yield { text: "partial" }
+					if (capturedSignal?.aborted) {
+						throw new DOMException("aborted", "AbortError")
+					}
+					await new Promise((_resolve, reject) => {
+						capturedSignal?.addEventListener(
+							"abort",
+							() => reject(new DOMException("aborted", "AbortError")),
+							{ once: true },
+						)
+					})
+				})()
+			})
+			handler["client"].models.generateContentStream = stub
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			// Bound the wait so a broken abort bridge fails this test fast (and fails
+			// the Stryker mutant) instead of hanging until the runner timeout.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+			expect(capturedSignal).toBeDefined()
+			// The in-flight request must run against a request-local merged signal, not
+			// the external one forwarded by reference.
+			expect(capturedSignal).not.toBe(controller.signal)
+			expect(capturedSignal?.aborted).toBe(true)
+			// The bridge (RequestConfigBuilder.addMergedSignal) uses AbortSignal.any,
+			// so the external signal must never be managed with manual listeners.
+			expect(addEventListenerSpy).not.toHaveBeenCalled()
+			expect(removeEventListenerSpy).not.toHaveBeenCalled()
+		})
+
+		it("should set a live request-local config.abortSignal when no external signal is provided", async () => {
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(handler.createMessage("You are a helpful assistant", messages))
+
+			const config = stub.mock.calls[0][0].config
+			// The request-local controller signal is always present so the provider
+			// keeps its own abort handle; with no external signal it never aborts.
+			expect(config.abortSignal).toBeInstanceOf(AbortSignal)
+			expect(config.abortSignal?.aborted).toBe(false)
+		})
+
+		it("should wrap a non-abort stream failure with the i18n message and capture telemetry", async () => {
+			const mockError = new Error("Gemini stream failure")
+			handler["client"].models.generateContentStream = vi.fn().mockRejectedValue(mockError)
+
+			const stream = handler.createMessage("You are a helpful assistant", messages, makeCreateMessageMetadata())
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// The catch must take the non-abort wrapping path (not the abort
+			// DOMException path) and must not crash reading a missing signal.
+			expect((error as Error).message).not.toContain("Cannot read properties")
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Gemini stream failure",
+					provider: "Gemini",
+					operation: "createMessage",
+				}),
+			)
+		})
+
+		it("should wrap a stream failure when no metadata is provided at all", async () => {
+			const mockError = new Error("Gemini stream failure")
+			handler["client"].models.generateContentStream = vi.fn().mockRejectedValue(mockError)
+
+			const stream = handler.createMessage("You are a helpful assistant", messages)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// No metadata at all: exercises the first optional-chain position,
+			// which would crash here if the `?.` were removed.
+			expect((error as Error).message).not.toContain("Cannot read properties")
+		})
+	})
+
 	describe("error telemetry", () => {
 		const mockMessages: Anthropic.Messages.MessageParam[] = [
 			{
@@ -546,6 +1337,46 @@ describe("GeminiHandler", () => {
 			// Verify it's an ApiProviderError
 			const capturedError = mockCaptureException.mock.calls[0][0]
 			expect(capturedError).toBeInstanceOf(ApiProviderError)
+		})
+
+		it("rethrows non-Error stream failures as-is after capturing telemetry", async () => {
+			// The instanceof branch only covers Error instances; a non-Error throw
+			// must be rethrown untouched (wrapping it would lose the original value).
+			handler["client"].models.generateContentStream = vi.fn().mockReturnValue(
+				(async function* () {
+					yield { candidates: [] }
+					throw "Gemini stream: not an error object"
+				})(),
+			)
+
+			const error = await collectStream(handler.createMessage(systemPrompt, mockMessages)).catch(
+				(e: unknown) => e,
+			)
+			expect(error).toBe("Gemini stream: not an error object")
+			expect(error).not.toBeInstanceOf(Error)
+			// Telemetry still captures the stringified failure.
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Gemini stream: not an error object",
+					operation: "createMessage",
+				}),
+			)
+		})
+
+		it("wraps stream failures in a new error before rethrowing", async () => {
+			// The consumer-facing error must be the provider's wrap (a NEW Error
+			// built from the localized template), not the raw SDK error instance:
+			// this is what the instanceof branch is for (and what makes the branch
+			// observable to the mutation gate). Unit tests cannot assert the i18n
+			// string itself (i18next is not initialized with resources here).
+			const mockError = new Error("Gemini stream failure")
+			handler["client"].models.generateContentStream = vi.fn().mockRejectedValue(mockError)
+
+			const error = await collectStream(handler.createMessage(systemPrompt, mockMessages)).catch(
+				(e: unknown) => e,
+			)
+			expect(error).toBeInstanceOf(Error)
+			expect(error).not.toBe(mockError)
 		})
 
 		it("should capture telemetry on completePrompt error", async () => {
@@ -581,6 +1412,161 @@ describe("GeminiHandler", () => {
 
 			// Telemetry should have been captured before the error was thrown
 			expect(mockCaptureException).toHaveBeenCalled()
+		})
+	})
+
+	describe("createMessage responseId capture", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("captures the final response's responseId so api history can store it", async () => {
+			handler["client"].models.generateContentStream = vi.fn().mockReturnValue(
+				asyncStreamFrom([
+					{
+						candidates: [
+							{
+								content: { parts: [{ text: "final" }] },
+								finishReason: "STOP",
+							},
+						],
+						responseId: "resp-123",
+					},
+				]),
+			)
+
+			await collectStream(handler.createMessage("You are a helpful assistant", messages))
+
+			expect(handler["lastResponseId"]).toBe("resp-123")
+		})
+	})
+
+	describe("createMessage streaming loop abort defense", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		function makePartsChunk(parts: Array<Record<string, unknown>>) {
+			return {
+				candidates: [
+					{
+						content: { parts },
+					},
+				],
+			}
+		}
+
+		function startStream(signal: AbortSignal, generator: AsyncGenerator<unknown>) {
+			handler["client"].models.generateContentStream = vi.fn().mockReturnValue(generator)
+			return handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: signal }),
+			)
+		}
+
+		it("rejects with AbortError instead of yielding text content after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([makePartsChunk([{ thought: true, text: "reasoning" }, { text: "content" }])]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding reasoning after a mid-chunk abort (text-first chunk)", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([makePartsChunk([{ text: "content" }, { thought: true, text: "reasoning" }])]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding a tool-call name after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([makePartsChunk([{ text: "content" }, { functionCall: { name: "f", args: {} } }])]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding tool-call arguments after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([
+					makePartsChunk([
+						{ functionCall: { name: "f", args: {} } },
+						{ functionCall: { name: "g", args: {} } },
+					]),
+				]),
+			)
+			const name = await stream.next()
+			expect(name.value?.type).toBe("tool_call_partial")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("does not process or pull chunks beyond the aborted point and surfaces AbortError instead of completing the stream", async () => {
+			const controller = new AbortController()
+			let pulls = 0
+			const generator = (async function* () {
+				pulls++
+				yield makePartsChunk([{ text: "first chunk" }])
+				pulls++
+				// Fallback shape (no candidates): its text yield is the first yield
+				// of the iteration and carries no pre-yield guard, so only the
+				// top-of-loop break prevents it from leaking.
+				yield { text: "buffered chunk" }
+				pulls++
+				yield makePartsChunk([{ text: "third chunk" }])
+			})()
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+			// The for-await mechanism pulls the already-buffered chunk before the
+			// top-of-loop check runs; the break must ensure it is not processed and
+			// that no chunk beyond it is pulled.
+			expect(pulls).toBe(2)
 		})
 	})
 })

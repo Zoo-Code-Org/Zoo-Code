@@ -27,6 +27,9 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
+import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -172,6 +175,59 @@ function sanitizeSchemaForGemini(
 	return result
 }
 
+// googleGeminiBaseUrl is user-editable and can reach non-HTTPS values (settings,
+// imported profiles). The @google/genai client keeps API-key authentication for
+// custom endpoints, so reject cleartext base URLs before any request — with a
+// narrow loopback exception for local test proxies.
+// A decimal octet is a 1-3 digit string; a non-numeric part also fails the
+// range check, because Number() of a non-numeric string is NaN, which is not
+// <= 255.
+function isOctet(octet: string): boolean {
+	// Stryker disable next-line Regex,LogicalOperator,ConditionalExpression: a malformed octet newly accepted by a mutated regex or operand is non-numeric (Number() is NaN, failing <= 255), out of range (e.g. 256), or 4+ digits, all of which are unreachable because new URL() rejects the all-digit host; the ->false and stricter-regex variants are killed by the 127.0.0.1 and 127.255.255.255 accept tests
+	return /^\d{1,3}$/.test(octet) && Number(octet) <= 255
+}
+
+// Only literal IPv4 loopback (127.0.0.0/8) qualifies: public hostnames may
+// start with a "127." label (e.g. 127.example.test), which a prefix test would
+// misclassify as loopback and allow cleartext. assertSecureGeminiBaseUrl has
+// already parsed the URL and only reaches this for the HTTP exception, so the
+// parsed hostname is passed directly; `new URL` keeps the brackets in IPv6
+// hostnames, so `[::1]` is the loopback host form to compare against.
+function isLoopbackHostname(hostname: string): boolean {
+	if (hostname === "localhost" || hostname === "[::1]") {
+		return true
+	}
+	const parts = hostname.split(".")
+	// Stryker disable next-line ConditionalExpression: the ->true variants of isOctet(parts[1]) and isOctet(parts[2]) are unobservable because any four-part host with a non-numeric or out-of-range middle octet is rejected by new URL() before reaching this check; the remaining variants are killed by the 127.0.0.1, 127.255.255.255, 10.0.0.1, 127.0.0.a and 127.0.0.1.a tests
+	return parts.length === 4 && parts[0] === "127" && isOctet(parts[1]) && isOctet(parts[2]) && isOctet(parts[3])
+}
+
+// Throws an ApiProviderError when baseUrl is not HTTPS (loopback HTTP is the
+// narrow exception, for local test proxies). The provider/model/operation
+// arguments keep the structured error context consistent with the request-path
+// ApiProviderError instances in this file.
+function assertSecureGeminiBaseUrl(baseUrl: string, modelId: string, operation: string): void {
+	let parsed: URL
+	try {
+		parsed = new URL(baseUrl)
+	} catch {
+		throw new ApiProviderError("Invalid Google Gemini base URL (not a valid URL)", "Gemini", modelId, operation)
+	}
+	if (parsed.protocol === "https:") {
+		return
+	}
+	if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
+		// Loopback endpoints (localhost/127.x/::1) are allowed for local test proxies.
+		return
+	}
+	throw new ApiProviderError(
+		"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+		"Gemini",
+		modelId,
+		operation,
+	)
+}
+
 export class GeminiHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 
@@ -296,6 +352,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 			: info.defaultTemperature
 
+		// Reject cleartext (non-loopback) base URLs before building the request so the
+		// API key is never sent over an insecure endpoint.
+		if (this.options.googleGeminiBaseUrl) {
+			assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "createMessage")
+		}
+
 		const config: GenerateContentConfig = {
 			systemInstruction,
 			httpOptions: this.options.googleGeminiBaseUrl ? { baseUrl: this.options.googleGeminiBaseUrl } : undefined,
@@ -344,7 +406,22 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 		}
 
-		const params: GenerateContentParameters = { model, contents, config }
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(metadata?.abortSignal)
+
+		// The request-local controller is the provider-owned abort handle; the
+		// signal the SDK receives merges it with the external Task signal
+		// (AbortSignal.any inside RequestConfigBuilder), so external aborts
+		// cancel the in-flight request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
+
+		const params: GenerateContentParameters = {
+			model,
+			contents,
+			config: requestSignal ? { ...config, abortSignal: requestSignal } : config,
+		}
 
 		try {
 			const result = await this.client.models.generateContentStream(params)
@@ -355,10 +432,15 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			let finishReason: string | undefined
 
 			let toolCallCounter = 0
-			let hasContent = false
-			let hasReasoning = false
 
 			for await (const chunk of result) {
+				// Stop consuming buffered chunks once the request is aborted (the
+				// SDK iterator may keep delivering buffered content after abort).
+				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				// Track the final structured response (per SDK pattern: candidate.finishReason)
 				if (chunk.candidates && chunk.candidates[0]?.finishReason) {
 					finalResponse = chunk as { responseId?: string }
@@ -391,17 +473,19 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 							if (part.thought) {
 								// This is a thinking/reasoning part
 								if (part.text) {
-									hasReasoning = true
+									// Re-check before emitting: the consumer may have aborted
+									// while processing a previously yielded part of this chunk.
+									throwIfAborted(requestSignal)
 									yield { type: "reasoning", text: part.text }
 								}
 							} else if (part.functionCall) {
-								hasContent = true
 								// Gemini sends complete function calls in a single chunk
 								// Emit as partial chunks for consistent handling with NativeToolCallParser
 								const callId = `${part.functionCall.name}-${toolCallCounter}`
 								const args = JSON.stringify(part.functionCall.args)
 
 								// Emit name first
+								throwIfAborted(requestSignal)
 								yield {
 									type: "tool_call_partial",
 									index: toolCallCounter,
@@ -411,6 +495,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 								}
 
 								// Then emit arguments
+								throwIfAborted(requestSignal)
 								yield {
 									type: "tool_call_partial",
 									index: toolCallCounter,
@@ -423,7 +508,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 							} else {
 								// This is regular content
 								if (part.text) {
-									hasContent = true
+									throwIfAborted(requestSignal)
 									yield { type: "text", text: part.text }
 								}
 							}
@@ -432,8 +517,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 
 				// Fallback to the original text property if no candidates structure
+				// (no pre-yield guard here: this is the only yield of a fallback
+				// chunk, and the top-of-loop check runs without a suspension point
+				// before it).
 				else if (chunk.text) {
-					hasContent = true
 					yield { type: "text", text: chunk.text }
 				}
 
@@ -441,6 +528,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 					lastUsageMetadata = chunk.usageMetadata
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 
 			if (finalResponse?.responseId) {
 				// Capture responseId so Task.addToApiConversationHistory can store it
@@ -477,6 +569,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("Gemini")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
 			TelemetryService.instance.captureException(apiError)
@@ -578,6 +675,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: model, info } = this.getModel()
 
 		try {
@@ -585,12 +685,29 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			const temperatureConfig: number | undefined = supportsTemperature
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
+			const httpOpts: { timeout?: number; baseUrl?: string } = {}
+			// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely (some SDKs treat 0 as an
+			// immediate timeout).
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				httpOpts.timeout = timeoutMs
+			}
+			if (this.options.googleGeminiBaseUrl) {
+				// Stryker disable next-line StringLiteral: completePrompt's catch reads only .message from the thrown error before building its own telemetry error, so this operation argument is unobservable
+				assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "completePrompt")
+				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
+			}
 
 			const promptConfig: GenerateContentConfig = {
-				httpOptions: this.options.googleGeminiBaseUrl
-					? { baseUrl: this.options.googleGeminiBaseUrl }
-					: undefined,
+				httpOptions: Object.keys(httpOpts).length > 0 ? httpOpts : undefined,
 				temperature: temperatureConfig,
+			}
+
+			// @google/genai expects request cancellation on config.abortSignal
+			// (not httpOptions.signal), so the signal is passed directly to the config.
+			if (options?.abortSignal) {
+				promptConfig.abortSignal = options.abortSignal
 			}
 
 			const request = {
@@ -613,6 +730,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 			return text
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("Gemini")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
