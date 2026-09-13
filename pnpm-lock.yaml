@@ -564,7 +564,7 @@ importers:
         version: 1.1.4
       pretty-bytes:
         specifier: ^7.0.0
-        version: 7.0.0
+        version: 7.1.3
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
@@ -811,7 +811,7 @@ importers:
         version: 1.393.4
       pretty-bytes:
         specifier: ^7.0.0
-        version: 7.0.0
+        version: 7.1.3
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -7244,8 +7244,8 @@ packages:
     engines: {node: '>=14'}
     hasBin: true
 
-  pretty-bytes@7.0.0:
-    resolution: {integrity: sha512-U5otLYPR3L0SVjHGrkEUx5mf7MxV2ceXeE7VwWPk+hyzC5drNohsOGNPDZqxCqyX1lkbEN4kl1LiI8QFd7r0ZA==}
+  pretty-bytes@7.1.3:
+    resolution: {integrity: sha512-U2KZ675nqba6XSBppSjU2pRgc9Ffx9+uUtd/RTWYmOawVkZuUbBYuwdtFZQmLv+yMgQ2TQxWWuOpyNje67J9tg==}
     engines: {node: '>=20'}
 
   pretty-format@27.5.1:
@@ -16134,7 +16134,7 @@ snapshots:
 
   prettier@3.8.4: {}
 
-  pretty-bytes@7.0.0: {}
+  pretty-bytes@7.1.3: {}
 
   pretty-format@27.5.1:
     dependencies:
