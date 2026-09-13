@@ -837,8 +837,7 @@ items:
         placeholder: your_esignatures_api_secret_token
   - id: exa
     name: Exa Search
-    description: Enables AI assistants to perform real-time web searches using Exa's AI Search API, providing structured
-      results with titles, URLs, and content snippets.
+    description: Enables AI assistants to search the web and fetch page content through Exa's free hosted MCP server.
     author: exa-labs
     url: https://github.com/exa-labs/exa-mcp-server
     tags:
@@ -847,51 +846,13 @@ items:
       - real-time-data
       - content-discovery
       - information-retrieval
-    prerequisites:
-      - Exa account
     content:
-      - name: NPX
-        prerequisites:
-          - Node.js
+      - name: Hosted MCP
         content: |
           {
-            "command": "npx",
-            "args": ["-y", "exa-mcp-server"],
-            "env": {
-              "EXA_API_KEY": "{{EXA_API_KEY}}"
-            }
+            "type": "streamable-http",
+            "url": "https://mcp.exa.ai/mcp"
           }
-      - name: NPX with Specific Tools
-        prerequisites:
-          - Node.js
-        content: |
-          {
-            "command": "npx",
-            "args": ["-y", "exa-mcp-server", "--tools=web_search_exa,research_paper_search,company_research"],
-            "env": {
-              "EXA_API_KEY": "{{EXA_API_KEY}}"
-            }
-          }
-      - name: Remote MCP
-        prerequisites:
-          - Node.js
-        content: |
-          {
-            "command": "npx",
-            "args": ["-y", "mcp-remote", "https://mcp.exa.ai/mcp?exaApiKey={{EXA_API_KEY}}"]
-          }
-      - name: Smithery Installation
-        prerequisites:
-          - Node.js
-        content: |
-          {
-            "command": "npx",
-            "args": ["-y", "@smithery/cli", "install", "exa", "--client", "claude"]
-          }
-    parameters:
-      - name: Exa API Key
-        key: EXA_API_KEY
-        placeholder: your_exa_api_key_here
   - id: figma-dev-mode
     name: Figma Dev Mode
     description: Brings Figma directly into your workflow by providing important design information and context to AI agents

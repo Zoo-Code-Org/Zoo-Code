@@ -1,4 +1,6 @@
 import * as fs from "fs/promises"
+import * as path from "path"
+import * as vscode from "vscode"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
@@ -8,6 +10,7 @@ import type { ClineProvider } from "../../../core/webview/ClineProvider"
 import type { McpHub as McpHubType, McpConnection, ConnectedMcpConnection, DisconnectedMcpConnection } from "../McpHub"
 import { ServerConfigSchema, McpHub } from "../McpHub"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
+import { EXA_MCP_PROMPT_SHOWN_KEY, promptToInstallExaMcp } from "../promptToInstallExaMcp"
 import { t } from "../../../i18n"
 
 type McpHubPrivate = {
@@ -34,10 +37,18 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock safeWriteJson
 vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn(async (filePath, data) => {
+	safeWriteJson: vi.fn(async (filePath, data, options?: { createOnly?: boolean }) => {
 		// Instead of trying to write to the file system, just call fs.writeFile mock
 		// This avoids the complex file locking and temp file operations
 		const fs = await import("fs/promises")
+		if (options?.createOnly) {
+			try {
+				await fs.access(filePath)
+				return
+			} catch {
+				// The target is missing, so initialization may create it.
+			}
+		}
 		return fs.writeFile(filePath, JSON.stringify(data), "utf8")
 	}),
 }))
@@ -185,6 +196,7 @@ describe("McpHub", () => {
 
 		mcpHub = new McpHub(mockProvider as ClineProvider)
 		await mcpHub.waitUntilReady()
+		vi.mocked(safeWriteJson).mockClear()
 	})
 
 	afterEach(() => {
@@ -210,6 +222,333 @@ describe("McpHub", () => {
 		expect(console.error).toHaveBeenCalledWith("[McpHub] Failed to watch MCP settings file:", watcherError)
 		await failingHub.dispose()
 		watchSpy.mockRestore()
+	})
+
+	describe("Exa MCP", () => {
+		const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+		it("creates an empty settings file when one does not exist", async () => {
+			vi.mocked(fs.access).mockRejectedValueOnce(new Error("ENOENT"))
+
+			const settingsPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(settingsPath).toBe(path.join("/mock/settings/path", "mcp_settings.json"))
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				settingsPath,
+				{ mcpServers: {} },
+				{ createOnly: true, prettyPrint: true },
+			)
+		})
+
+		it("detects Exa configured under a custom server name", () => {
+			mcpHub.connections = [
+				{
+					type: "disconnected",
+					server: {
+						name: "web-search",
+						config: JSON.stringify({ type: "streamable-http", url: "https://mcp.exa.ai/mcp" }),
+						status: "disconnected",
+						source: "global",
+					},
+					client: null,
+					transport: null,
+				},
+			]
+
+			expect(mcpHub.hasExaServer()).toBe(true)
+		})
+
+		it("detects Exa by server name without parsing its config", () => {
+			mcpHub.connections = [
+				{
+					type: "disconnected",
+					server: {
+						name: "EXA",
+						config: "not-json",
+						status: "disconnected",
+						source: "project",
+					},
+					client: null,
+					transport: null,
+				},
+			]
+
+			expect(mcpHub.hasExaServer()).toBe(true)
+		})
+
+		it("ignores malformed non-Exa server configs", () => {
+			mcpHub.connections = [
+				{
+					type: "disconnected",
+					server: {
+						name: "other",
+						config: "not-json",
+						status: "disconnected",
+						source: "global",
+					},
+					client: null,
+					transport: null,
+				},
+			]
+
+			expect(mcpHub.hasExaServer()).toBe(false)
+		})
+
+		it("installs Exa without replacing existing servers", async () => {
+			const existingConfig = {
+				mcpServers: {
+					existing: { type: "stdio", command: "node" },
+				},
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(existingConfig))
+			const updateConnectionsSpy = vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+
+			await mcpHub.installExaServer()
+
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				settingsPath,
+				{
+					mcpServers: {
+						existing: { type: "stdio", command: "node" },
+						exa: {
+							type: "streamable-http",
+							url: "https://mcp.exa.ai/mcp",
+							alwaysAllow: [],
+						},
+					},
+				},
+				expect.objectContaining({ prettyPrint: true, merge: expect.any(Function) }),
+			)
+			expect(updateConnectionsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					existing: expect.objectContaining({
+						type: "stdio",
+						command: "node",
+						timeout: 60,
+						alwaysAllow: [],
+						disabledTools: [],
+					}),
+					exa: expect.objectContaining({
+						url: "https://mcp.exa.ai/mcp",
+						timeout: 60,
+						alwaysAllow: [],
+						disabledTools: [],
+					}),
+				}),
+				"global",
+			)
+		})
+
+		it("does not install Exa when the hub already contains it", async () => {
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(true)
+			const readCount = vi.mocked(fs.readFile).mock.calls.length
+			const writeCount = vi.mocked(safeWriteJson).mock.calls.length
+
+			await mcpHub.installExaServer()
+
+			expect(fs.readFile).toHaveBeenCalledTimes(readCount)
+			expect(safeWriteJson).toHaveBeenCalledTimes(writeCount)
+		})
+
+		it("does not overwrite an Exa entry found directly in the settings file", async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						ExA: { type: "streamable-http", url: "https://custom.example.com/mcp" },
+					},
+				}),
+			)
+
+			await mcpHub.installExaServer()
+
+			expect(safeWriteJson).not.toHaveBeenCalled()
+		})
+
+		it("does not add Exa when the locked merge finds its endpoint under a custom name", async () => {
+			const initialServers = { existing: { type: "stdio", command: "node" } }
+			const serversAtMerge = {
+				...initialServers,
+				"web-search": { type: "streamable-http", url: "https://mcp.exa.ai/mcp" },
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: initialServers }))
+			vi.mocked(safeWriteJson).mockImplementationOnce(async (_filePath, data, options) => {
+				const merged = options?.merge?.({ mcpServers: serversAtMerge }, data)
+				expect(merged).toEqual({ mcpServers: serversAtMerge })
+			})
+			const updateConnectionsSpy = vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+
+			await mcpHub.installExaServer()
+
+			expect(updateConnectionsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					existing: expect.objectContaining({ timeout: 60, alwaysAllow: [], disabledTools: [] }),
+					"web-search": expect.objectContaining({ timeout: 60, alwaysAllow: [], disabledTools: [] }),
+				}),
+				"global",
+			)
+			expect(updateConnectionsSpy).not.toHaveBeenCalledWith(
+				expect.objectContaining({ exa: expect.anything() }),
+				"global",
+			)
+		})
+
+		it("creates the MCP servers object when installing into a valid empty config", async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({}))
+			vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+
+			await mcpHub.installExaServer()
+
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				settingsPath,
+				{ mcpServers: { exa: expect.objectContaining({ url: "https://mcp.exa.ai/mcp" }) } },
+				expect.objectContaining({ prettyPrint: true, merge: expect.any(Function) }),
+			)
+		})
+
+		it("rejects invalid settings structures", async () => {
+			vi.mocked(fs.readFile).mockResolvedValue("null")
+
+			await expect(mcpHub.installExaServer()).rejects.toThrow("Invalid config structure")
+			expect(safeWriteJson).not.toHaveBeenCalled()
+		})
+
+		it.each([[], "invalid", 42])("rejects invalid MCP server containers (%j)", async (mcpServers) => {
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers }))
+
+			await expect(mcpHub.installExaServer()).rejects.toThrow("Invalid MCP servers structure")
+			expect(safeWriteJson).not.toHaveBeenCalled()
+		})
+
+		it("suppresses file-watcher handling during the settings write", async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: {} }))
+			let releaseWrite: (() => void) | undefined
+			vi.mocked(safeWriteJson).mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						releaseWrite = resolve
+					}),
+			)
+			vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+
+			const installation = mcpHub.installExaServer()
+			await vi.waitFor(() => expect(safeWriteJson).toHaveBeenCalled())
+
+			expect(mcpHub["isProgrammaticUpdate"]).toBe(true)
+			releaseWrite?.()
+			await installation
+		})
+	})
+
+	describe("Exa MCP installation prompt", () => {
+		const createPromptContext = (wasPrompted = false) => ({
+			globalState: {
+				get: vi.fn().mockReturnValue(wasPrompted),
+				update: vi.fn().mockResolvedValue(undefined),
+			},
+		})
+
+		it("does not prompt when Exa is already configured", async () => {
+			const context = createPromptContext()
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(true)
+
+			await promptToInstallExaMcp(context, mcpHub)
+
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
+			expect(context.globalState.update).not.toHaveBeenCalled()
+		})
+
+		it("does not prompt after it has already been shown", async () => {
+			const context = createPromptContext(true)
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+
+			await promptToInstallExaMcp(context, mcpHub)
+
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
+		})
+
+		it("records dismissal so the prompt is only shown once", async () => {
+			const context = createPromptContext()
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(undefined)
+			const installSpy = vi.spyOn(mcpHub, "installExaServer").mockResolvedValue(undefined)
+
+			await promptToInstallExaMcp(context, mcpHub)
+
+			expect(context.globalState.update).toHaveBeenCalledWith(EXA_MCP_PROMPT_SHOWN_KEY, true)
+			expect(installSpy).not.toHaveBeenCalled()
+		})
+
+		it("shows only one notification for concurrent prompt attempts", async () => {
+			let releaseUpdate: (() => void) | undefined
+			const context = {
+				globalState: {
+					get: vi.fn().mockReturnValue(false),
+					update: vi.fn(
+						() =>
+							new Promise<void>((resolve) => {
+								releaseUpdate = resolve
+							}),
+					),
+				},
+			}
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(undefined)
+
+			const firstPrompt = promptToInstallExaMcp(context, mcpHub)
+			await vi.waitFor(() => expect(context.globalState.update).toHaveBeenCalledOnce())
+			const secondPrompt = promptToInstallExaMcp(context, mcpHub)
+			releaseUpdate?.()
+
+			await Promise.all([firstPrompt, secondPrompt])
+			expect(vscode.window.showInformationMessage).toHaveBeenCalledOnce()
+		})
+
+		it("installs Exa when the user accepts", async () => {
+			const context = createPromptContext()
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce({
+				title: t("mcp:info.exa_install_action"),
+			})
+			const installSpy = vi.spyOn(mcpHub, "installExaServer").mockResolvedValue(undefined)
+
+			await promptToInstallExaMcp(context, mcpHub)
+
+			expect(installSpy).toHaveBeenCalledOnce()
+			expect(context.globalState.update).toHaveBeenCalledWith(EXA_MCP_PROMPT_SHOWN_KEY, true)
+		})
+
+		it("shows the installation error when installation fails", async () => {
+			const context = createPromptContext()
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce({
+				title: t("mcp:info.exa_install_action"),
+			})
+			vi.spyOn(mcpHub, "installExaServer").mockRejectedValue(new Error("network unavailable"))
+
+			await promptToInstallExaMcp(context, mcpHub)
+
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				t("mcp:errors.exa_install_failed", { errorMessage: "network unavailable" }),
+			)
+			expect(context.globalState.update).toHaveBeenNthCalledWith(1, EXA_MCP_PROMPT_SHOWN_KEY, true)
+			expect(context.globalState.update).toHaveBeenNthCalledWith(2, EXA_MCP_PROMPT_SHOWN_KEY, false)
+		})
+
+		it("formats non-Error installation failures", async () => {
+			const context = createPromptContext()
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce({
+				title: t("mcp:info.exa_install_action"),
+			})
+			vi.spyOn(mcpHub, "installExaServer").mockRejectedValue("installation failed")
+
+			await promptToInstallExaMcp(context, mcpHub)
+
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				t("mcp:errors.exa_install_failed", { errorMessage: "installation failed" }),
+			)
+			expect(context.globalState.update).toHaveBeenLastCalledWith(EXA_MCP_PROMPT_SHOWN_KEY, false)
+		})
 	})
 
 	describe("Discriminated union type handling", () => {
