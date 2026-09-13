@@ -62,6 +62,48 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 	return modelInfo
 }
 
+/**
+ * Determines whether an Ollama endpoint is safe to carry an API key.
+ *
+ * Ollama's default installation listens on loopback, where plaintext HTTP is
+ * the norm. API keys are secrets, though, and must not be sent in cleartext to
+ * a remote host (CWE-319). Only HTTPS or a loopback host is considered safe
+ * enough to attach the Authorization header.
+ *
+ * Shared by the axios fetcher (getOllamaModels) and the native provider
+ * (NativeOllamaHandler), so this strict check gates credentials on both paths.
+ */
+export function isSecureOllamaEndpoint(baseUrl: string): boolean {
+	if (!URL.canParse(baseUrl)) {
+		return false
+	}
+	const url = new URL(baseUrl)
+	if (url.protocol === "https:") {
+		return true
+	}
+	const host = url.hostname
+	return host === "localhost" || host === "[::1]" || isIpv4LoopbackHost(host)
+}
+
+/**
+ * Strict 127.0.0.0/8 IPv4-loopback literal check. `host` comes from
+ * `URL.hostname`, which is WHATWG-normalized (IPv4 literals carry no brackets
+ * and no leading zeros), so the anchored octet check is exact. A loose
+ * /^127\./ prefix would also match DNS names like `127.example.com`, letting
+ * the key leak over cleartext HTTP (CWE-319).
+ */
+export function isIpv4LoopbackHost(host: string): boolean {
+	const octets = host.split(".")
+	if (octets.length !== 4) {
+		return false
+	}
+	if (!octets.every((octet) => /^\d{1,3}$/.test(octet))) {
+		return false
+	}
+	const values = octets.map((octet) => Number(octet))
+	return values[0] === 127 && values.every((value) => value <= 255)
+}
+
 export async function getOllamaModels(
 	baseUrl = "http://localhost:11434",
 	apiKey?: string,
@@ -76,13 +118,24 @@ export async function getOllamaModels(
 			return models
 		}
 
-		// Prepare headers with optional API key
+		// Prepare headers with optional API key. The credential is only attached
+		// when the endpoint is HTTPS or loopback; sending it over plaintext HTTP
+		// to a remote host would leak it (CWE-319).
+		const credentialGated = Boolean(apiKey && isSecureOllamaEndpoint(baseUrl))
 		const headers: Record<string, string> = {}
-		if (apiKey) {
+		if (credentialGated) {
 			headers["Authorization"] = `Bearer ${apiKey}`
 		}
 
-		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers })
+		// A loopback HTTP endpoint carrying the key must bypass any HTTP proxy,
+		// otherwise the proxy would see the bearer token in cleartext (CWE-319).
+		// HTTPS endpoints keep normal proxy behavior (traffic stays encrypted).
+		// Parsing is safe here: baseUrl is normalized ("" → default) above and
+		// the !URL.canParse(baseUrl) guard returned early.
+		const cleartextLoopback = credentialGated && new URL(baseUrl).protocol === "http:"
+		const proxyConfig: { proxy?: false } = cleartextLoopback ? { proxy: false } : {}
+
+		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers, ...proxyConfig })
 		const parsedResponse = OllamaModelsResponseSchema.safeParse(response.data)
 		const modelInfoPromises = []
 
@@ -95,7 +148,7 @@ export async function getOllamaModels(
 							{
 								model: ollamaModel.model,
 							},
-							{ headers },
+							{ headers, ...proxyConfig },
 						)
 						.then((ollamaModelInfo) => {
 							const modelInfo = parseOllamaModel(ollamaModelInfo.data)
