@@ -73,6 +73,7 @@ interface MockTask {
 	say: ReturnType<typeof vi.fn>
 	ask: ReturnType<typeof vi.fn>
 	pushToolResultToUserContent: ReturnType<typeof vi.fn>
+	getTaskMode: ReturnType<typeof vi.fn>
 }
 
 describe("presentAssistantMessage - tool usage attribution", () => {
@@ -115,6 +116,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 			pushToolResultToUserContent: vi.fn(),
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 		}
 
 		mockTask.pushToolResultToUserContent = vi
@@ -314,6 +316,44 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			// no success attempt is recorded for a call that was never permitted to execute.
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("mode delegation regression", () => {
+		// Regression for issue #1623.
+		// Before the fix, validateToolUse received the shared provider mode instead
+		// of the task-local mode, so a child delegated to "architect" mode would have
+		// its tools validated against "orchestrator".
+		it("passes the task-local mode to validateToolUse, not the provider mode", async () => {
+			// Provider says "orchestrator"; task was delegated to "architect".
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "orchestrator",
+						customModes: [],
+					}),
+				}),
+			}
+			mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_delegation",
+					name: "read_file",
+					params: { path: "test.ts" },
+					nativeArgs: { path: "test.ts" },
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			// The key assertion: task-local mode "architect" was passed, not "orchestrator".
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[0][0]).toBe("read_file")
+			expect(calls[0][1]).toBe("architect")
 		})
 	})
 })
