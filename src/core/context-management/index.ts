@@ -4,7 +4,13 @@ import crypto from "crypto"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ApiHandler, ApiHandlerCreateMessageMetadata } from "../../api"
-import { MAX_CONDENSE_THRESHOLD, MIN_CONDENSE_THRESHOLD, summarizeConversation, SummarizeResponse } from "../condense"
+import {
+	getEffectiveApiHistory,
+	MAX_CONDENSE_THRESHOLD,
+	MIN_CONDENSE_THRESHOLD,
+	summarizeConversation,
+	SummarizeResponse,
+} from "../condense"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -167,6 +173,13 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 const TOOL_RESULT_SHRINK_FLOOR_CHARS = 200
 
 /**
+ * Notice appended to a degraded tool_result. Built through one helper so the characters it
+ * costs can be reserved before deciding how much of the payload to keep.
+ */
+const buildTruncationNotice = (removedChars: number): string =>
+	`\n[Tool result truncated: ${removedChars} characters removed to fit the context budget]`
+
+/**
  * A textual tool_result block eligible for degradation, located by index so the edit can
  * be applied without mutating the input history. `textIndex` is the position of the text
  * inside the tool_result's content array, or -1 when the content is a plain string.
@@ -183,13 +196,22 @@ type ShrinkingToolResult = {
  * Collects the textual tool_result blocks that can still be shrunk, with their token
  * estimates. Only blocks above the floor are returned; images and other non-textual
  * content are never touched.
+ *
+ * Candidates are restricted to the messages the API actually receives: `Task` passes the
+ * full persisted history to `manageContext`, but condense/truncation hide messages from
+ * `getEffectiveApiHistory`. Shrinking a hidden message would lower the token estimate
+ * without changing the request, which is the same false progress this recovery exists to
+ * prevent. Returned indexes stay indexes into the persisted history so the edits below
+ * target the right messages.
  */
 async function findShrinkableToolResults(
 	messages: ApiMessage[],
 	apiHandler: ApiHandler,
 ): Promise<ShrinkingToolResult[]> {
 	const results: ShrinkingToolResult[] = []
+	const apiVisibleMessages = new Set(getEffectiveApiHistory(messages))
 	for (const [messageIndex, message] of messages.entries()) {
+		if (!apiVisibleMessages.has(message)) continue
 		if (message.truncationParent || message.isTruncationMarker) continue
 		if (!Array.isArray(message.content)) continue
 		for (const [blockIndex, block] of message.content.entries()) {
@@ -299,16 +321,26 @@ async function shrinkOversizedToolResults({
 		// to the intended token reduction whatever the content's tokenizer density is.
 		const charsPerToken = candidate.text.length / Math.max(candidate.tokens, 1)
 		const keepTokens = Math.max(candidate.tokens - remaining, 1)
-		const keepChars = Math.max(TOOL_RESULT_SHRINK_FLOOR_CHARS, Math.floor(keepTokens * charsPerToken))
-		if (keepChars >= candidate.text.length) continue
-		const removed = candidate.text.length - keepChars
+		const targetChars = Math.max(TOOL_RESULT_SHRINK_FLOOR_CHARS, Math.floor(keepTokens * charsPerToken))
+		if (targetChars >= candidate.text.length) continue
+		// The notice costs characters of its own, so reserve room for it: for a small
+		// tokensToFree the slice target sits within a notice's length of the original, and the
+		// appended notice would then grow the block while still reporting a removal.
+		const noticeReserve = buildTruncationNotice(candidate.text.length).length
+		const keepChars = Math.max(TOOL_RESULT_SHRINK_FLOOR_CHARS, targetChars - noticeReserve)
+		const newText = `${candidate.text.slice(0, keepChars)}${buildTruncationNotice(
+			candidate.text.length - keepChars,
+		)}`
+		// A block that is already at the floor cannot absorb the notice. Leave it untouched
+		// instead of rewriting it into a longer body and reporting success on a no-op edit.
+		if (newText.length >= candidate.text.length) continue
 		edits.push({
 			messageIndex: candidate.messageIndex,
 			blockIndex: candidate.blockIndex,
 			textIndex: candidate.textIndex,
-			newText: `${candidate.text.slice(0, keepChars)}\n[Tool result truncated: ${removed} characters removed to fit the context budget]`,
+			newText,
 		})
-		remaining -= Math.floor(removed / charsPerToken)
+		remaining -= Math.floor((candidate.text.length - newText.length) / charsPerToken)
 	}
 	if (edits.length === 0) return null
 	return applyToolResultEdits(messages, edits)

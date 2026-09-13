@@ -2112,6 +2112,169 @@ describe("Context Management", () => {
 			expect(shrunkText).toContain("[Tool result truncated")
 		}, 60000)
 
+		it("shrinks only the oversized text item of an array-form tool_result", async () => {
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const headerItem: Anthropic.Messages.TextBlockParam = { type: "text", text: "Report header: 128 rows" }
+			const imageItem: Anthropic.Messages.ImageBlockParam = {
+				type: "image",
+				source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
+			}
+			const payloadItem: Anthropic.Messages.TextBlockParam = { type: "text", text: oversizedText }
+			const footerItem: Anthropic.Messages.TextBlockParam = { type: "text", text: "END OF REPORT" }
+			const toolResultContent: Anthropic.Messages.ToolResultBlockParam["content"] = [
+				headerItem,
+				imageItem,
+				payloadItem,
+				footerItem,
+			]
+			const messages = buildToolPairHistory(toolResultContent)
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			const toolResult = (
+				result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(toolResult.tool_use_id).toBe("toolu_01")
+
+			const items = toolResult.content as Anthropic.Messages.ContentBlockParam[]
+			// Order, block types and the ineligible items survive the edit untouched: only the
+			// oversized text item is degraded.
+			expect(items).toHaveLength(4)
+			expect(items[0]).toEqual(headerItem)
+			expect(items[1]).toEqual(imageItem)
+			expect(items[3]).toEqual(footerItem)
+			const degradedItem = items[2] as Anthropic.Messages.TextBlockParam
+			expect(degradedItem.type).toBe("text")
+			expect(degradedItem.text).toContain("[Tool result truncated")
+			expect(degradedItem.text.length).toBeLessThan(oversizedText.length)
+
+			// The caller's history is never mutated.
+			const originalBlock = (
+				messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(originalBlock.content).toEqual(toolResultContent)
+		}, 60000)
+
+		it("does not treat a tool_result hidden by a condensation summary as a shrink candidate", async () => {
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const condenseId = "condense-1"
+			// Fresh-start condense: every earlier message is tagged with condenseParent and the
+			// summary is the only message `getEffectiveApiHistory` keeps.
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000, condenseParent: condenseId },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_01", name: "fetch_report", input: {} }],
+					ts: 1100,
+					condenseParent: condenseId,
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_01", content: oversizedText }],
+					ts: 1200,
+					condenseParent: condenseId,
+				},
+				{
+					role: "user",
+					content: "## Conversation Summary\nEarlier work was condensed.",
+					ts: 1300,
+					isSummary: true,
+					condenseId,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// Degrading the condensed-away result would lower the token estimate without changing
+			// the request the API receives, so it must not be reported as recovery.
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages)
+		}, 60000)
+
+		it("leaves a tool_result that is already at the shrink floor untouched", async () => {
+			// One result large enough to absorb the whole budget deficit, one sitting just above
+			// the 200-character floor (long enough to be a candidate, too short to absorb the
+			// notice the degradation appends).
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(300)
+			const floorText = "small tool output\n".repeat(15)
+			expect(floorText.length).toBeGreaterThan(200)
+
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000 },
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "toolu_big", name: "fetch_report", input: {} },
+						{ type: "tool_use", id: "toolu_small", name: "fetch_summary", input: {} },
+					],
+					ts: 1100,
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_big", content: oversizedText },
+						{ type: "tool_result", tool_use_id: "toolu_small", content: floorText },
+					],
+					ts: 1200,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined() // the oversized result alone covers the deficit
+			const blocks = result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			const degraded = blocks[0] as Anthropic.ToolResultBlockParam
+			expect(degraded.tool_use_id).toBe("toolu_big")
+			expect(degraded.content as string).toContain("[Tool result truncated")
+
+			// Rewriting the short block would append a notice longer than the characters it frees,
+			// growing the block while reporting a removal that never happened.
+			const untouched = blocks[1] as Anthropic.ToolResultBlockParam
+			expect(untouched.tool_use_id).toBe("toolu_small")
+			expect(untouched.content).toBe(floorText)
+		}, 60000)
+
 		it("returns a controlled error when nothing can be removed and no tool result can shrink", async () => {
 			const messages: ApiMessage[] = [
 				{ role: "user", content: "First message", ts: 1000 },
@@ -2133,8 +2296,10 @@ describe("Context Management", () => {
 				currentProfileId: "default",
 			})
 
-			expect(result.error).toBeDefined()
-			expect(result.errorDetails).toBeDefined()
+			// The controlled error must name the actual failure, not just be defined: a stale or
+			// unrelated error would satisfy a `toBeDefined()` assertion.
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.errorDetails).toContain("removed 0 messages and no eligible textual tool_result")
 			expect(result.truncationId).toBeUndefined()
 			expect(result.messages).toBe(messages) // unchanged history, no fake truncation event
 		})
