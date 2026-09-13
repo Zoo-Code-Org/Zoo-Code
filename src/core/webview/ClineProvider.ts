@@ -1542,7 +1542,7 @@ export class ClineProvider
 			console.error("[ClineProvider:Vite] Failed to read Vite port file:", err)
 		}
 
-		const localServerUrl = `localhost:${localPort}`
+		const localServerUrl = `127.0.0.1:${localPort}`
 
 		// Check if local dev server is running.
 		try {
@@ -1581,7 +1581,7 @@ export class ClineProvider
 
 		const reactRefresh = /*html*/ `
 			<script nonce="${nonce}" type="module">
-				import RefreshRuntime from "http://localhost:${localPort}/@react-refresh"
+				import RefreshRuntime from "http://127.0.0.1:${localPort}/@react-refresh"
 				RefreshRuntime.injectIntoGlobalHook(window)
 				window.$RefreshReg$ = () => {}
 				window.$RefreshSig$ = () => (type) => type
