@@ -159,6 +159,8 @@ CI runs `pnpm lifecycle:model-check` in `.github/workflows/code-qa.yml` after li
 
 This is the authoritative active tracker. It is behavior-led and self-contained; issue links are historical provenance rather than specifications. Coverage status uses these evidence classes:
 
+The exhaustive repository inventory, ranked stable burn-down register, source-based methodology, and follow-up checklist live in the [Task lifecycle verification GAP report](./task-lifecycle-gap-report.md). This page remains the executable model-suite specification.
+
 - **Production-backed bounded:** exhaustive only for the declared state space while executing production functions.
 - **Abstract bounded:** exhaustive only for model-authored transitions; refinement depends on separate adapter tests.
 - **Known-unsafe witness:** CI preserves a reproducible violation and does not claim the property holds.
