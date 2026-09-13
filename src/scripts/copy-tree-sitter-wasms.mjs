@@ -69,7 +69,9 @@ export async function publishTreeSitterWasms(
 			publishedFiles.push(filename)
 			await step("published", filename)
 		}
-		for (const filename of await filesystem.readdir(destinationDir)) {
+		const destinationFiles = await filesystem.readdir(destinationDir)
+		await step("inspected-temporaries", destinationDir)
+		for (const filename of destinationFiles) {
 			if (temporaryPattern.test(filename)) {
 				await filesystem.rm(path.join(destinationDir, filename), { force: true })
 				await step("removed-temporary", filename)

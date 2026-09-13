@@ -183,6 +183,26 @@ describe("publishTreeSitterWasms", () => {
 		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
 	})
 
+	it("observes a signal after inspecting a destination without temporary files", async () => {
+		const source = path.join(root, "source")
+		const destination = path.join(root, "dist")
+		fs.mkdirSync(source)
+		fs.mkdirSync(destination)
+		fs.writeFileSync(path.join(source, "tree-sitter-a.wasm"), "new-a")
+		fs.writeFileSync(path.join(destination, "tree-sitter-a.wasm"), "previous-a")
+		const signalState = { requested: undefined }
+
+		await expect(
+			publishTreeSitterWasms(source, destination, {
+				signalState,
+				onStep(name) {
+					if (name === "inspected-temporaries") signalState.requested = "SIGTERM"
+				},
+			}),
+		).rejects.toThrow("WASM publication cancelled")
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
+	})
+
 	it("keeps committed outputs when transaction cleanup fails", async () => {
 		const source = path.join(root, "source")
 		const destination = path.join(root, "dist")

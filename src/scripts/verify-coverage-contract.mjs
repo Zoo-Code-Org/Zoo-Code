@@ -5,6 +5,7 @@ import process from "node:process"
 import { fileURLToPath } from "node:url"
 
 import { assertMatchingFiles } from "./verify-wasm-files.mjs"
+import { createWasmOutputSnapshot } from "./wasm-output-snapshot.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
@@ -41,16 +42,14 @@ if (JSON.stringify(preparationTask?.outputs) !== JSON.stringify(["dist/tree-sitt
 
 const dist = path.join(root, "src", "dist")
 const cacheDir = path.join(root, ".turbo", "coverage-contract")
+fs.rmSync(cacheDir, { recursive: true, force: true })
+const outputSnapshot = createWasmOutputSnapshot(dist)
 for (const signal of ["SIGINT", "SIGTERM"]) {
 	process.once(signal, () => {
+		outputSnapshot?.restore()
 		fs.rmSync(cacheDir, { recursive: true, force: true })
 		process.exit(1)
 	})
-}
-fs.mkdirSync(dist, { recursive: true })
-fs.rmSync(cacheDir, { recursive: true, force: true })
-for (const filename of fs.readdirSync(dist)) {
-	if (/^tree-sitter-.*\.wasm(?:\.\d+\.tmp)?$/.test(filename)) fs.rmSync(path.join(dist, filename), { force: true })
 }
 
 try {
@@ -106,5 +105,6 @@ try {
 		"WASM cache restored corrupted output",
 	)
 } finally {
+	outputSnapshot.restore()
 	fs.rmSync(cacheDir, { recursive: true, force: true })
 }
