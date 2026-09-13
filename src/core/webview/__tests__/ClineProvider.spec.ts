@@ -569,6 +569,18 @@ describe("ClineProvider", () => {
 		expect(ClineProvider.getVisibleInstance()).toBe(provider)
 	})
 
+	describe("getInstanceForView", () => {
+		it("returns the instance that owns the given view", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBe(provider)
+		})
+
+		it("returns undefined when no live instance owns the view", () => {
+			expect(ClineProvider.getInstanceForView({} as vscode.WebviewView)).toBeUndefined()
+		})
+	})
+
 	test("loads full model details when preparing an LM Studio task", async () => {
 		await provider.performPreparationTasks({
 			apiConfiguration: {
