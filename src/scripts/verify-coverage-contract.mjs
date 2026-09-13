@@ -43,14 +43,15 @@ if (JSON.stringify(preparationTask?.outputs) !== JSON.stringify(["dist/tree-sitt
 const dist = path.join(root, "src", "dist")
 const cacheDir = path.join(root, ".turbo", "coverage-contract")
 fs.rmSync(cacheDir, { recursive: true, force: true })
-const outputSnapshot = createWasmOutputSnapshot(dist)
+const state = { outputSnapshot: undefined }
 for (const signal of ["SIGINT", "SIGTERM"]) {
 	process.once(signal, () => {
-		outputSnapshot?.restore()
+		state.outputSnapshot?.restore()
 		fs.rmSync(cacheDir, { recursive: true, force: true })
 		process.exit(1)
 	})
 }
+state.outputSnapshot = createWasmOutputSnapshot(dist)
 
 try {
 	run(["turbo", "run", "prepare:tree-sitter-wasms", "--filter=zoo-code", "--cache-dir=.turbo/coverage-contract"])
@@ -105,6 +106,6 @@ try {
 		"WASM cache restored corrupted output",
 	)
 } finally {
-	outputSnapshot.restore()
+	state.outputSnapshot.restore()
 	fs.rmSync(cacheDir, { recursive: true, force: true })
 }

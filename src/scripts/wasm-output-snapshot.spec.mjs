@@ -48,4 +48,22 @@ describe("createWasmOutputSnapshot", () => {
 		expect(() => snapshot.restore()).toThrow("restore interrupted")
 		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous")
 	})
+
+	it("restores files when snapshot creation fails during a later move", () => {
+		fs.writeFileSync(path.join(destination, "tree-sitter-b.wasm"), "previous-b")
+		let moves = 0
+		const filesystem = {
+			...fs,
+			renameSync(source, target) {
+				if (source.startsWith(destination) && ++moves === 2) throw new Error("snapshot failed")
+				return fs.renameSync(source, target)
+			},
+		}
+
+		expect(() => createWasmOutputSnapshot(destination, filesystem)).toThrow("snapshot failed")
+		expect(fs.readdirSync(destination)).toEqual(["tree-sitter-a.wasm", "tree-sitter-b.wasm"])
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("previous")
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-b.wasm"), "utf8")).toBe("previous-b")
+		expect(fs.existsSync(`${destination}.coverage-contract-backup`)).toBe(false)
+	})
 })
