@@ -3,6 +3,7 @@
 import React from "react"
 import {
 	makeExtensionState,
+	hydrateExtensionState,
 	mockVscodePostMessage,
 	renderWithExtensionState,
 	waitFor,
@@ -144,12 +145,13 @@ vi.mock("react-virtuoso", () => ({
 }))
 
 // Mock VersionIndicator - returns null by default to prevent rendering in tests
-vi.mock("../../common/VersionIndicator", () => ({
-	default: vi.fn(() => null),
-}))
+const mockVersionIndicator = vi.hoisted(() =>
+	vi.fn((_props?: { onClick?: () => void; className?: string }): React.ReactNode => null),
+)
 
-// Get the mock function after the module is mocked
-const mockVersionIndicator = vi.mocked((await import("../../common/VersionIndicator")).default)
+vi.mock("../../common/VersionIndicator", () => ({
+	default: mockVersionIndicator,
+}))
 
 vi.mock("../Announcement", () => ({
 	default: function MockAnnouncement({ hideAnnouncement }: { hideAnnouncement: () => void }) {
@@ -352,13 +354,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 const vscodePostMessageMock = mockVscodePostMessage(vi.mocked(vscode.postMessage))
 
 const mockPostMessage = (state: Record<string, unknown>) => {
-	window.postMessage(
-		{
-			type: "state",
-			state: makeExtensionState(state),
-		},
-		"*",
-	)
+	hydrateExtensionState(makeExtensionState({ currentTaskId: "test-task-id", ...state }))
 }
 
 const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
@@ -368,29 +364,31 @@ const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
 }
 
 const dispatchTaskState = async (id: string, taskTs: number, childIds: string[] = []) => {
-	await dispatchExtensionMessage({
-		type: "state",
-		state: makeExtensionState({
-			clineMessages: [
-				{
-					type: "say",
-					say: "task",
+	await act(async () => {
+		hydrateExtensionState(
+			makeExtensionState({
+				clineMessages: [
+					{
+						type: "say",
+						say: "task",
+						ts: taskTs,
+						text: id,
+					},
+				],
+				currentTaskId: id,
+				currentTaskItem: {
+					id,
+					number: 1,
 					ts: taskTs,
-					text: id,
+					task: id,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					childIds,
 				},
-			],
-			currentTaskId: id,
-			currentTaskItem: {
-				id,
-				number: 1,
-				ts: taskTs,
-				task: id,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-				childIds,
-			},
-		}),
+			}),
+			{ taskId: id },
+		)
 	})
 }
 
@@ -796,6 +794,7 @@ describe("ChatView - Version Indicator Tests", () => {
 		// Hydrate state with no active task
 		mockPostMessage({
 			version: "1.0.0",
+			currentTaskId: null,
 			clineMessages: [],
 		})
 
@@ -805,7 +804,7 @@ describe("ChatView - Version Indicator Tests", () => {
 
 	it("opens announcement modal when version indicator is clicked", async () => {
 		// Mock VersionIndicator to return a button with onClick
-		mockVersionIndicator.mockImplementation(({ onClick }: { onClick?: () => void }) =>
+		mockVersionIndicator.mockImplementation(({ onClick } = {}) =>
 			React.createElement("button", {
 				"data-testid": "version-indicator",
 				onClick,
@@ -817,6 +816,7 @@ describe("ChatView - Version Indicator Tests", () => {
 		// Hydrate state
 		mockPostMessage({
 			version: "1.0.0",
+			currentTaskId: null,
 			clineMessages: [],
 		})
 
@@ -851,6 +851,7 @@ describe("ChatView - Version Indicator Tests", () => {
 		// Hydrate state
 		mockPostMessage({
 			version: "1.0.0",
+			currentTaskId: null,
 			clineMessages: [],
 		})
 
@@ -876,6 +877,7 @@ describe("ChatView - Version Indicator Tests", () => {
 		// Hydrate state
 		mockPostMessage({
 			version: "1.0.0",
+			currentTaskId: null,
 			clineMessages: [],
 		})
 
@@ -916,6 +918,7 @@ describe("ChatView - Version Indicator Tests", () => {
 		// Hydrate state with no active task
 		mockPostMessage({
 			version: "1.0.0",
+			currentTaskId: null,
 			clineMessages: [],
 		})
 
@@ -931,6 +934,7 @@ describe("ChatView - Welcome Screen Display Tests", () => {
 		const { getByTestId, queryByTestId } = renderChatView()
 
 		mockPostMessage({
+			currentTaskId: null,
 			cloudIsAuthenticated: false,
 			taskHistory: [
 				{ id: "1", ts: Date.now() - 6000 },
@@ -1019,17 +1023,10 @@ describe("ChatView - Message Queueing Tests", () => {
 	it("shows sending is enabled when no task is active", async () => {
 		const { getByTestId } = renderChatView()
 
-		// Hydrate state with completed task
+		// Hydrate the authoritative no-task state.
 		mockPostMessage({
-			clineMessages: [
-				{
-					type: "ask",
-					ask: "completion_result",
-					ts: Date.now(),
-					text: "Task completed",
-					partial: false,
-				},
-			],
+			currentTaskId: null,
+			clineMessages: [],
 		})
 
 		// Wait for state to be updated

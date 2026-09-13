@@ -3,6 +3,66 @@ import { expectContrast } from "../../../../playwright/contrast"
 import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
 
+test("settles theme transitions without waiting for looping animations", async ({ mount, page }) => {
+	const component = mountedStory(await mount("accessibility-contrast"))
+	const input = component.getByRole("textbox", { name: "API endpoint" })
+	await input.evaluate((element) => {
+		element.style.transitionDuration = "1s"
+		element.style.transitionDelay = "100ms"
+	})
+	await page.addStyleTag({
+		content: `
+			@keyframes theme-test-spin { to { transform: rotate(360deg); } }
+			[data-testid="unsupported-gradient"] { animation: theme-test-spin 1s linear infinite; }
+		`,
+	})
+
+	for (const theme of visualThemes) {
+		await applyVisualTheme(page, theme)
+		// Do not retry: the helper must return with final colors, not an intermediate frame.
+		expect(
+			await input.evaluate(
+				(element) => element.getAnimations().filter((animation) => animation instanceof CSSTransition).length,
+			),
+		).toBe(0)
+		await expectContrast(input, { background: input, label: `${theme.name} settled input text` })
+	}
+
+	expect(
+		await component
+			.getByTestId("unsupported-gradient")
+			.evaluate((element) =>
+				element
+					.getAnimations()
+					.some(
+						(animation) =>
+							animation instanceof CSSAnimation &&
+							animation.animationName === "theme-test-spin" &&
+							animation.playState === "running",
+					),
+			),
+	).toBe(true)
+})
+
+test("allows theme transitions to be canceled while settling", async ({ mount, page }) => {
+	const component = mountedStory(await mount("accessibility-contrast"))
+	const input = component.getByRole("textbox", { name: "API endpoint" })
+	await input.evaluate((element) => {
+		element.style.transitionDuration = "1s"
+		element.addEventListener(
+			"transitionrun",
+			() => {
+				element.style.transitionProperty = "none"
+			},
+			{ once: true },
+		)
+	})
+
+	await applyVisualTheme(page, visualThemes[1])
+	expect(await input.evaluate((element) => getComputedStyle(element).transitionProperty)).toBe("none")
+	await expectContrast(input, { background: input, label: "input text after a canceled transition" })
+})
+
 for (const theme of visualThemes) {
 	test(`audits representative controls in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
 		const component = mountedStory(await mount("accessibility-contrast"))

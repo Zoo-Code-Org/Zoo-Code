@@ -187,6 +187,9 @@ vi.mock("vscode", () => {
 		Disposable: {
 			from: vi.fn(),
 		},
+		RelativePattern: vi.fn().mockImplementation(function (base: string, pattern: string) {
+			return { base, pattern }
+		}),
 		TabInputText: vi.fn(),
 	}
 })
@@ -371,6 +374,9 @@ describe("Cline", () => {
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebviewThrottled = vi.fn().mockResolvedValue(undefined)
 		mockProvider.flushPostStateToWebviewThrottled = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postClineMessageAppended = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postClineMessageUpdated = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postClineMessagesSnapshot = vi.fn().mockResolvedValue(undefined)
 		mockProvider.getTaskWithId = vi.fn().mockImplementation(async (id) => ({
 			historyItem: {
 				id,
@@ -1476,6 +1482,9 @@ describe("Cline", () => {
 					postStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
 					flushPostStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
 					postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+					postClineMessageAppended: vi.fn().mockResolvedValue(undefined),
+					postClineMessageUpdated: vi.fn().mockResolvedValue(undefined),
+					postClineMessagesSnapshot: vi.fn().mockResolvedValue(undefined),
 					updateTaskHistory: vi.fn().mockResolvedValue(undefined),
 					// Task receives a full ClineProvider at runtime; this focused unit test only exercises these methods.
 				} as unknown as MockedClineProvider
@@ -2164,8 +2173,186 @@ describe("Cline", () => {
 		})
 	})
 
-	describe("webview state throttling", () => {
-		it("schedules a complete new message without forcing an immediate state push", async () => {
+	describe("webview transcript transport", () => {
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		it("waits for persistence before posting a bumped snapshot after overwriting the transcript", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			let releaseSave!: (saved: boolean) => void
+			const pendingSave = new Promise<boolean>((resolve) => {
+				releaseSave = resolve
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockReturnValueOnce(pendingSave)
+			const messages = [
+				{
+					ts: 1,
+					type: "say" as const,
+					say: "text" as const,
+					text: "replacement transcript",
+				},
+			]
+
+			const overwritePromise = task.overwriteClineMessages(messages)
+
+			await Promise.resolve()
+			expect(task.clineMessages).toEqual(messages)
+			expect(saveSpy).toHaveBeenCalledWith(false)
+			expect(mockProvider.postClineMessagesSnapshot).not.toHaveBeenCalled()
+
+			releaseSave(true)
+			await overwritePromise
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(mockProvider.postClineMessagesSnapshot).toHaveBeenCalledOnce()
+			expect(mockProvider.postClineMessagesSnapshot).toHaveBeenCalledWith(task.taskId, {
+				bumpSeq: true,
+				taskInstanceId: task.instanceId,
+			})
+		})
+
+		it.each([true, false])("awaits the overwrite snapshot when persist is %s", async (persist) => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			let releaseSnapshot!: () => void
+			const pendingSnapshot = new Promise<void>((resolve) => {
+				releaseSnapshot = resolve
+			})
+			const snapshotSpy = vi.mocked(mockProvider.postClineMessagesSnapshot).mockReturnValueOnce(pendingSnapshot)
+			const messages = [{ ts: 1, type: "say" as const, say: "text" as const, text: "replacement" }]
+			let overwriteFinished = false
+			const overwritePromise = task.overwriteClineMessages(messages, persist).then(() => {
+				overwriteFinished = true
+			})
+
+			await vi.waitFor(() =>
+				expect(snapshotSpy).toHaveBeenCalledWith(task.taskId, {
+					bumpSeq: true,
+					taskInstanceId: task.instanceId,
+				}),
+			)
+			expect(task.clineMessages).toEqual(messages)
+			expect(saveSpy).toHaveBeenCalledTimes(persist ? 1 : 0)
+			expect(overwriteFinished).toBe(false)
+
+			releaseSnapshot()
+			await overwritePromise
+
+			expect(snapshotSpy).toHaveBeenCalledOnce()
+			expect(overwriteFinished).toBe(true)
+		})
+
+		it.each([true, false])("cancels stale partial updates before an overwrite with persist %s", async (persist) => {
+			vi.useFakeTimers()
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			let releaseSave!: (saved: boolean) => void
+			const pendingSave = new Promise<boolean>((resolve) => {
+				releaseSave = resolve
+			})
+			vi.spyOn(taskAccess, "saveClineMessages").mockReturnValueOnce(pendingSave)
+			const staleMessage = {
+				ts: 1,
+				type: "say" as const,
+				say: "text" as const,
+				text: "removed partial",
+				partial: true,
+			}
+			const replacement = { ...staleMessage, ts: 2, text: "replacement partial" }
+			const firstMessage = { ...staleMessage, text: "first partial" }
+			const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+			task.clineMessages = [staleMessage]
+			await taskAccess.updateClineMessage(firstMessage)
+			await taskAccess.updateClineMessage(staleMessage)
+			expect(updatePostSpy.mock.calls).toEqual([[task.taskId, firstMessage, task.instanceId]])
+
+			const overwritePromise = task.overwriteClineMessages([replacement], persist)
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(task.clineMessages).toEqual([replacement])
+			expect(updatePostSpy.mock.calls).toEqual([[task.taskId, firstMessage, task.instanceId]])
+			expect(mockProvider.postClineMessagesSnapshot).toHaveBeenCalledTimes(persist ? 0 : 1)
+
+			releaseSave(true)
+			await overwritePromise
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(mockProvider.postClineMessagesSnapshot).toHaveBeenCalledOnce()
+			expect(mockProvider.postClineMessagesSnapshot).toHaveBeenCalledWith(task.taskId, {
+				bumpSeq: true,
+				taskInstanceId: task.instanceId,
+			})
+			expect(updatePostSpy.mock.calls).toEqual([[task.taskId, firstMessage, task.instanceId]])
+
+			await taskAccess.updateClineMessage(replacement)
+			expect(updatePostSpy.mock.calls).toEqual([
+				[task.taskId, firstMessage, task.instanceId],
+				[task.taskId, replacement, task.instanceId],
+			])
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(updatePostSpy).toHaveBeenCalledTimes(2)
+		})
+
+		it("propagates an overwrite snapshot failure after persistence", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			const snapshotError = new Error("snapshot failed")
+			vi.mocked(mockProvider.postClineMessagesSnapshot).mockRejectedValueOnce(snapshotError)
+			const messages = [{ ts: 1, type: "say" as const, say: "text" as const, text: "replacement" }]
+
+			await expect(task.overwriteClineMessages(messages)).rejects.toThrow(snapshotError)
+
+			expect(task.clineMessages).toEqual(messages)
+			expect(saveSpy).toHaveBeenCalledWith(false)
+			expect(mockProvider.postClineMessagesSnapshot).toHaveBeenCalledWith(task.taskId, {
+				bumpSeq: true,
+				taskInstanceId: task.instanceId,
+			})
+		})
+
+		it("still overwrites the transcript when the provider reference is unavailable", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: () => undefined },
+				configurable: true,
+			})
+			const messages = [{ ts: 1, type: "say" as const, say: "text" as const, text: "replacement" }]
+
+			await expect(task.overwriteClineMessages(messages)).resolves.toBeUndefined()
+
+			expect(task.clineMessages).toEqual(messages)
+			expect(saveSpy).toHaveBeenCalledOnce()
+		})
+
+		it("posts a complete new message through the incremental transport", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2182,13 +2369,41 @@ describe("Cline", () => {
 
 			await getTaskTestAccess(task).addToClineMessages(message)
 
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledOnce()
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
+			expect(mockProvider.postClineMessageAppended).toHaveBeenCalledOnce()
+			expect(mockProvider.postClineMessageAppended).toHaveBeenCalledWith(task.taskId, message, task.instanceId)
+			expect(mockProvider.postStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(mockProvider.postStateToWebviewWithoutTaskHistory).not.toHaveBeenCalled()
 		})
 
-		it("waits for an unanswered ask flush before emitting the message", async () => {
+		it("creates a message without a transport error when the provider reference is unavailable", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
+			const messageListener = vi.fn()
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: () => undefined },
+				configurable: true,
+			})
+			task.on(RooCodeEventName.Message, messageListener)
+			const message = { ts: 1, type: "say" as const, say: "text" as const, text: "message" }
+
+			await expect(taskAccess.addToClineMessages(message)).resolves.toBeUndefined()
+
+			expect(consoleErrorSpy).not.toHaveBeenCalled()
+			expect(task.clineMessages).toEqual([message])
+			expect(messageListener).toHaveBeenCalledWith({ action: "created", message })
+			expect(saveSpy).toHaveBeenCalledOnce()
+
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("waits for an incremental append before emitting the message", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2197,11 +2412,11 @@ describe("Cline", () => {
 			})
 			const taskAccess = getTaskTestAccess(task)
 			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
-			let releaseFlush!: () => void
-			const pendingFlush = new Promise<void>((resolve) => {
-				releaseFlush = resolve
+			let releasePost!: () => void
+			const pendingPost = new Promise<void>((resolve) => {
+				releasePost = resolve
 			})
-			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockReturnValueOnce(pendingFlush)
+			const postSpy = vi.mocked(mockProvider.postClineMessageAppended).mockReturnValueOnce(pendingPost)
 			const messageListener = vi.fn()
 			task.on(RooCodeEventName.Message, messageListener)
 			const message = {
@@ -2213,20 +2428,17 @@ describe("Cline", () => {
 			const addPromise = taskAccess.addToClineMessages(message)
 
 			await Promise.resolve()
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledOnce()
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(flushSpy).toHaveBeenCalledOnce()
-			expect(flushSpy).toHaveBeenCalledWith()
+			expect(postSpy).toHaveBeenCalledWith(task.taskId, message, task.instanceId)
 			expect(messageListener).not.toHaveBeenCalled()
 
-			releaseFlush()
+			releasePost()
 			await addPromise
 
-			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(messageListener.mock.invocationCallOrder[0])
+			expect(postSpy.mock.invocationCallOrder[0]).toBeLessThan(messageListener.mock.invocationCallOrder[0])
 			expect(messageListener).toHaveBeenCalledWith({ action: "created", message })
 		})
 
-		it("continues the message lifecycle when throttled state scheduling and flushing fail", async () => {
+		it("continues the message lifecycle when an incremental append fails", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2234,10 +2446,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			const taskAccess = getTaskTestAccess(task)
-			const postError = new Error("state schedule failed")
-			const flushError = new Error("state flush failed")
-			const postSpy = vi.mocked(mockProvider.postStateToWebviewThrottled).mockRejectedValueOnce(postError)
-			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockRejectedValueOnce(flushError)
+			const postError = new Error("incremental append failed")
+			const postSpy = vi.mocked(mockProvider.postClineMessageAppended).mockRejectedValueOnce(postError)
 			const saveSpy = vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
 			const messageListener = vi.fn()
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -2251,25 +2461,19 @@ describe("Cline", () => {
 			await expect(taskAccess.addToClineMessages(message)).resolves.toBeUndefined()
 
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[Task#addToClineMessages] postStateToWebviewThrottled failed:",
+				"[Task#addToClineMessages] incremental post failed:",
 				postError,
 			)
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[Task#addToClineMessages] flushPostStateToWebviewThrottled failed:",
-				flushError,
-			)
 			expect(postSpy).toHaveBeenCalledOnce()
-			expect(flushSpy).toHaveBeenCalledOnce()
 			expect(messageListener).toHaveBeenCalledWith({ action: "created", message })
 			expect(saveSpy).toHaveBeenCalledOnce()
-			expect(postSpy.mock.invocationCallOrder[0]).toBeLessThan(flushSpy.mock.invocationCallOrder[0])
-			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(messageListener.mock.invocationCallOrder[0])
+			expect(postSpy.mock.invocationCallOrder[0]).toBeLessThan(messageListener.mock.invocationCallOrder[0])
 			expect(messageListener.mock.invocationCallOrder[0]).toBeLessThan(saveSpy.mock.invocationCallOrder[0])
 
 			consoleErrorSpy.mockRestore()
 		})
 
-		it("keeps an already answered ask on the throttled path", async () => {
+		it("posts an already answered ask through the incremental transport", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2278,19 +2482,19 @@ describe("Cline", () => {
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
 
-			await getTaskTestAccess(task).addToClineMessages({
+			const message = {
 				ts: 1,
-				type: "ask",
-				ask: "tool",
+				type: "ask" as const,
+				ask: "tool" as const,
 				isAnswered: true,
-			})
+			}
+			await getTaskTestAccess(task).addToClineMessages(message)
 
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledOnce()
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
+			expect(mockProvider.postClineMessageAppended).toHaveBeenCalledWith(task.taskId, message, task.instanceId)
 		})
 
-		it("waits for a new partial message flush before a following message update", async () => {
+		it("serializes a new partial message before its immediate leading update", async () => {
+			vi.useFakeTimers()
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2299,12 +2503,12 @@ describe("Cline", () => {
 			})
 			const taskAccess = getTaskTestAccess(task)
 			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
-			let releaseFlush!: () => void
-			const pendingFlush = new Promise<void>((resolve) => {
-				releaseFlush = resolve
+			let releaseAppend!: () => void
+			const pendingAppend = new Promise<void>((resolve) => {
+				releaseAppend = resolve
 			})
-			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockReturnValueOnce(pendingFlush)
-			const updatePostSpy = vi.mocked(mockProvider.postMessageToWebview)
+			const appendSpy = vi.mocked(mockProvider.postClineMessageAppended).mockReturnValueOnce(pendingAppend)
+			const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
 			const partialMessage = {
 				ts: 1,
 				type: "say" as const,
@@ -2319,22 +2523,288 @@ describe("Cline", () => {
 			})
 
 			await Promise.resolve()
-			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(flushSpy).toHaveBeenCalledWith()
+			expect(appendSpy).toHaveBeenCalledWith(task.taskId, partialMessage, task.instanceId)
 			expect(partialAddSettled).toBe(false)
 			expect(updatePostSpy).not.toHaveBeenCalled()
 
-			releaseFlush()
+			releaseAppend()
 			await addThenUpdate
 
-			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(updatePostSpy.mock.invocationCallOrder[0])
-			expect(updatePostSpy).toHaveBeenCalledWith({
-				type: "messageUpdated",
-				clineMessage: {
-					...partialMessage,
-					text: "updated partial",
-				},
+			expect(updatePostSpy).toHaveBeenCalledOnce()
+			expect(appendSpy.mock.invocationCallOrder[0]).toBeLessThan(updatePostSpy.mock.invocationCallOrder[0])
+			expect(updatePostSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ ...partialMessage, text: "updated partial" },
+				task.instanceId,
+			)
+
+			await vi.advanceTimersByTimeAsync(500)
+			expect(updatePostSpy).toHaveBeenCalledOnce()
+		})
+
+		it("posts the first partial update immediately without duplicating it on the trailing edge", async () => {
+			vi.useFakeTimers()
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
 			})
+			const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+			const message = { ts: 1, type: "say" as const, say: "text" as const, text: "first partial", partial: true }
+
+			const updatePromise = getTaskTestAccess(task).updateClineMessage(message)
+
+			expect(updatePostSpy.mock.calls).toEqual([[task.taskId, message, task.instanceId]])
+			await updatePromise
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(updatePostSpy).toHaveBeenCalledOnce()
+		})
+
+		it("coalesces partial updates after the leading post and flushes the latest revision on the trailing edge", async () => {
+			vi.useFakeTimers()
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+
+			const first = {
+				ts: 1,
+				type: "say" as const,
+				say: "text" as const,
+				text: "first partial",
+				partial: true,
+			}
+			const latest = { ...first, text: "latest partial" }
+			await taskAccess.updateClineMessage(first)
+			await vi.advanceTimersByTimeAsync(100)
+			await taskAccess.updateClineMessage({ ...first, text: "superseded partial" })
+			await vi.advanceTimersByTimeAsync(150)
+			await taskAccess.updateClineMessage(latest)
+
+			await vi.advanceTimersByTimeAsync(249)
+			expect(updatePostSpy.mock.calls).toEqual([[task.taskId, first, task.instanceId]])
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(updatePostSpy.mock.calls).toEqual([
+				[task.taskId, first, task.instanceId],
+				[task.taskId, latest, task.instanceId],
+			])
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(updatePostSpy).toHaveBeenCalledTimes(2)
+		})
+
+		it("bounds ongoing partial delivery by maxWait without posting every revision", async () => {
+			vi.useFakeTimers()
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+			const first = { ts: 1, type: "say" as const, say: "text" as const, text: "partial 0", partial: true }
+			await taskAccess.updateClineMessage(first)
+
+			// Updates never pause for the debounce interval, so a trailing-only debounce would starve the webview.
+			for (let elapsed = 100; elapsed <= 1_400; elapsed += 100) {
+				await vi.advanceTimersByTimeAsync(100)
+				await taskAccess.updateClineMessage({ ...first, text: `partial ${elapsed}` })
+				expect(updatePostSpy).toHaveBeenCalledTimes(1 + Math.floor(elapsed / 500))
+			}
+
+			await vi.advanceTimersByTimeAsync(100)
+			expect(updatePostSpy.mock.calls).toEqual([
+				[task.taskId, first, task.instanceId],
+				[task.taskId, { ...first, text: "partial 400" }, task.instanceId],
+				[task.taskId, { ...first, text: "partial 900" }, task.instanceId],
+				[task.taskId, { ...first, text: "partial 1400" }, task.instanceId],
+			])
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(updatePostSpy).toHaveBeenCalledTimes(4)
+		})
+
+		it.each(["leading", "trailing"] as const)(
+			"drops the %s partial update when the provider reference expires",
+			async (edge) => {
+				vi.useFakeTimers()
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const taskAccess = getTaskTestAccess(task)
+				const first = {
+					ts: 1,
+					type: "say" as const,
+					say: "text" as const,
+					text: "first partial",
+					partial: true,
+				}
+				if (edge === "trailing") {
+					await taskAccess.updateClineMessage(first)
+					await taskAccess.updateClineMessage({ ...first, text: "queued partial" })
+				}
+				Object.defineProperty(task, "providerRef", {
+					value: { deref: () => undefined },
+					configurable: true,
+				})
+
+				if (edge === "leading") {
+					await taskAccess.updateClineMessage(first)
+				}
+				await vi.advanceTimersByTimeAsync(500)
+
+				expect(vi.mocked(mockProvider.postClineMessageUpdated).mock.calls).toEqual(
+					edge === "leading" ? [] : [[task.taskId, first, task.instanceId]],
+				)
+			},
+		)
+
+		it("emits a complete update when the provider reference is unavailable", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: () => undefined },
+				configurable: true,
+			})
+			const messageListener = vi.fn()
+			task.on(RooCodeEventName.Message, messageListener)
+			const message = { ts: 1, type: "say" as const, say: "text" as const, text: "complete" }
+
+			await expect(getTaskTestAccess(task).updateClineMessage(message)).resolves.toBeUndefined()
+
+			expect(messageListener).toHaveBeenCalledWith({ action: "updated", message })
+		})
+
+		it.each(["dispose", "abortTask"] as const)(
+			"cancels a queued trailing partial update on %s",
+			async (cleanup) => {
+				vi.useFakeTimers()
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const taskAccess = getTaskTestAccess(task)
+				vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
+				const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+				const first = {
+					ts: 1,
+					type: "say" as const,
+					say: "text" as const,
+					text: "first partial",
+					partial: true,
+				}
+
+				await taskAccess.updateClineMessage(first)
+				await vi.advanceTimersByTimeAsync(100)
+				await taskAccess.updateClineMessage({ ...first, text: "queued partial" })
+				expect(updatePostSpy.mock.calls).toEqual([[task.taskId, first, task.instanceId]])
+
+				await task[cleanup]()
+				await vi.advanceTimersByTimeAsync(1_000)
+
+				expect(updatePostSpy.mock.calls).toEqual([[task.taskId, first, task.instanceId]])
+			},
+		)
+
+		it.each([
+			["false", { ts: 1, type: "say" as const, say: "text" as const, text: "complete", partial: false }],
+			["absent", { ts: 1, type: "say" as const, say: "text" as const, text: "complete" }],
+		])(
+			"cancels a pending partial update and posts completion immediately when partial is %s",
+			async (_case, complete) => {
+				vi.useFakeTimers()
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const taskAccess = getTaskTestAccess(task)
+				const updatePostSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+
+				const first = {
+					ts: 1,
+					type: "say" as const,
+					say: "text" as const,
+					text: "first partial",
+					partial: true,
+				}
+				await taskAccess.updateClineMessage(first)
+				await vi.advanceTimersByTimeAsync(100)
+				await taskAccess.updateClineMessage({ ...first, text: "superseded partial" })
+				expect(updatePostSpy.mock.calls).toEqual([[task.taskId, first, task.instanceId]])
+
+				let releasePost!: () => void
+				const pendingPost = new Promise<void>((resolve) => {
+					releasePost = resolve
+				})
+				updatePostSpy.mockReturnValueOnce(pendingPost)
+				const messageListener = vi.fn()
+				task.on(RooCodeEventName.Message, messageListener)
+				const completionPromise = taskAccess.updateClineMessage(complete)
+
+				expect(updatePostSpy.mock.calls).toEqual([
+					[task.taskId, first, task.instanceId],
+					[task.taskId, complete, task.instanceId],
+				])
+				expect(messageListener).not.toHaveBeenCalled()
+
+				// A queued partial must not arrive after the final post, even while that post is still pending.
+				await vi.advanceTimersByTimeAsync(1_000)
+				expect(updatePostSpy).toHaveBeenCalledTimes(2)
+				expect(messageListener).not.toHaveBeenCalled()
+
+				releasePost()
+				await completionPromise
+				expect(messageListener).toHaveBeenCalledExactlyOnceWith({ action: "updated", message: complete })
+				await vi.advanceTimersByTimeAsync(1_000)
+				expect(updatePostSpy).toHaveBeenCalledTimes(2)
+			},
+		)
+
+		it.each(["leading", "trailing"] as const)("handles a rejected %s partial update", async (edge) => {
+			vi.useFakeTimers()
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const first = { ts: 1, type: "say" as const, say: "text" as const, text: "first partial", partial: true }
+			if (edge === "trailing") {
+				await taskAccess.updateClineMessage(first)
+			}
+			const postError = new Error("incremental update failed")
+			vi.mocked(mockProvider.postClineMessageUpdated).mockRejectedValueOnce(postError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await taskAccess.updateClineMessage({ ...first, text: "rejected partial" })
+				await vi.advanceTimersByTimeAsync(500)
+
+				expect(
+					consoleErrorSpy.mock.calls.filter(
+						([message]) => message === "[Task#updateClineMessage] incremental post failed:",
+					),
+				).toEqual([["[Task#updateClineMessage] incremental post failed:", postError]])
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 	})
 
@@ -2688,6 +3158,114 @@ describe("Cline", () => {
 				expect(cancelSpy).toHaveBeenCalled()
 			})
 			describe("abortSignal", () => {
+				it("finalizes partial transcript messages and the API request before persisting cancellation", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+					const taskAccess = getTaskTestAccess(task)
+					const saveSpy = vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
+					vi.spyOn(taskAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+					vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+					vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+					const postedUpdates: import("@roo-code/types").ClineMessage[] = []
+					const updateSpy = vi
+						.mocked(mockProvider.postClineMessageUpdated)
+						.mockImplementation(async (_taskId, message) => {
+							postedUpdates.push(structuredClone(message))
+						})
+					const partialMessage: import("@roo-code/types").ClineMessage = {
+						ts: 2,
+						type: "say",
+						say: "text",
+						text: "partial response",
+						partial: true,
+					}
+					vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+						(async function* (): AsyncGenerator<ApiStreamChunk> {
+							await taskAccess.addToClineMessages(partialMessage)
+							task.abort = true
+							yield { type: "usage", inputTokens: 0, outputTokens: 0 }
+						})(),
+					)
+
+					await expect(
+						task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this request" }]),
+					).resolves.toBe(true)
+
+					expect(partialMessage.partial).toBe(false)
+					expect(postedUpdates).toContainEqual(
+						expect.objectContaining({ ts: partialMessage.ts, partial: false }),
+					)
+					expect(postedUpdates).toContainEqual(
+						expect.objectContaining({
+							say: "api_req_started",
+							text: expect.stringContaining('"cancelReason":"user_cancelled"'),
+						}),
+					)
+					expect(task.didFinishAbortingStream).toBe(true)
+					expect(Math.max(...updateSpy.mock.invocationCallOrder)).toBeLessThan(
+						Math.max(...saveSpy.mock.invocationCallOrder),
+					)
+				})
+
+				it("finishes cancellation when the API request message has already been removed", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+					const taskAccess = getTaskTestAccess(task)
+					const saveSpy = vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
+					vi.spyOn(taskAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+					vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+					vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+					const updateSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+					vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+						(async function* (): AsyncGenerator<ApiStreamChunk> {
+							// Simulate another transcript operation removing the request row while
+							// cancellation is racing with the active stream.
+							task.clineMessages = []
+							updateSpy.mockClear()
+							task.abort = true
+							yield { type: "usage", inputTokens: 0, outputTokens: 0 }
+						})(),
+					)
+
+					await expect(
+						task.recursivelyMakeClineRequests([{ type: "text", text: "cancel without request row" }]),
+					).resolves.toBe(true)
+
+					expect(updateSpy).not.toHaveBeenCalled()
+					expect(saveSpy).toHaveBeenCalled()
+					expect(task.didFinishAbortingStream).toBe(true)
+				})
+
 				it("should pass AbortController signal to condenseContext metadata when a current request exists", async () => {
 					const task = new Task({
 						provider: mockProvider,
@@ -3329,6 +3907,72 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("recursivelyMakeClineRequests", () => {
+		it.each([
+			["publishes an API request row that remains after persistence", false, 1],
+			["does not publish a stale API request row removed during persistence", true, 0],
+		])("%s", async (_description, removeRequestDuringSave, expectedUpdateCount) => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+
+			vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+				content: [{ type: "text", text: "hello" }],
+				mode: undefined,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+			vi.spyOn(taskAccess, "addToApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(taskAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				throw new Error("stop after request-row update")
+			})
+			vi.spyOn(task, "say").mockImplementation(async (type) => {
+				if (type === "api_req_started") {
+					task.clineMessages.push({
+						ts: Date.now(),
+						type: "say",
+						say: "api_req_started",
+						text: "{}",
+					})
+				}
+				return undefined as never
+			})
+			vi.spyOn(taskAccess, "saveClineMessages").mockImplementation(async () => {
+				if (removeRequestDuringSave) {
+					// Simulate a concurrent delete/edit truncating the transcript while persistence is awaited.
+					task.clineMessages = []
+				}
+				return true
+			})
+			const updateSpy = vi.mocked(mockProvider.postClineMessageUpdated)
+			updateSpy.mockClear()
+
+			await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])).resolves.toBe(true)
+
+			expect(updateSpy).toHaveBeenCalledTimes(expectedUpdateCount)
+			if (!removeRequestDuringSave) {
+				expect(updateSpy).toHaveBeenCalledWith(
+					task.taskId,
+					expect.objectContaining({ say: "api_req_started" }),
+					task.instanceId,
+				)
+			}
+		})
+	})
+
 	describe("safeEnsureModelFetched", () => {
 		it("loads model metadata before getModel is used", async () => {
 			const task = new Task({
@@ -3556,7 +4200,7 @@ describe("Cline", () => {
 	})
 
 	describe("startTask", () => {
-		it("posts a clean state immediately before adding the first task message", async () => {
+		it("posts an empty transcript snapshot before adding the first task message", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -3567,16 +4211,14 @@ describe("Cline", () => {
 
 			task.clineMessages = [{ ts: 1, type: "say", say: "text", text: "stale message" }]
 
-			let resolvePostState: (() => void) | undefined
-			const pendingPostState = new Promise<void>((resolve) => {
-				resolvePostState = resolve
+			let resolveSnapshot: (() => void) | undefined
+			const pendingSnapshot = new Promise<void>((resolve) => {
+				resolveSnapshot = resolve
 			})
-			const postStateSpy = vi
-				.mocked(mockProvider.postStateToWebviewWithoutTaskHistory)
-				.mockImplementationOnce(async () => {
-					expect(task.clineMessages).toEqual([])
-					await pendingPostState
-				})
+			const snapshotSpy = vi.mocked(mockProvider.postClineMessagesSnapshot).mockImplementationOnce(async () => {
+				expect(task.clineMessages).toEqual([])
+				await pendingSnapshot
+			})
 			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
 			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
 				enabledToolCount: 0,
@@ -3586,14 +4228,39 @@ describe("Cline", () => {
 
 			const startPromise = taskAccess.startTask("new task")
 
-			expect(postStateSpy).toHaveBeenCalledTimes(1)
+			expect(snapshotSpy).toHaveBeenCalledWith(task.taskId, { bumpSeq: true, taskInstanceId: task.instanceId })
 			expect(mockProvider.postStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(saySpy).not.toHaveBeenCalled()
 
-			resolvePostState?.()
+			resolveSnapshot?.()
 			await startPromise
 
 			expect(saySpy).toHaveBeenCalledOnce()
+			expect(saySpy).toHaveBeenCalledWith("text", "new task", undefined)
+			expect(initiateTaskLoopSpy).toHaveBeenCalledOnce()
+		})
+
+		it("starts without a snapshot when the provider reference is unavailable", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "new task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: () => undefined },
+				configurable: true,
+			})
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
+				enabledToolCount: 0,
+				enabledServerCount: 0,
+			})
+			const initiateTaskLoopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
+
+			await expect(taskAccess.startTask("new task")).resolves.toBeUndefined()
+
 			expect(saySpy).toHaveBeenCalledWith("text", "new task", undefined)
 			expect(initiateTaskLoopSpy).toHaveBeenCalledOnce()
 		})
@@ -4019,6 +4686,36 @@ describe("Cline", () => {
 			expect(updateSpy).toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				"[Task#handleWebviewAskResponse] updateClineMessage failed:",
+				boom,
+			)
+		})
+
+		it("marks a follow-up answered and logs when its incremental update rejects", async () => {
+			const boom = new Error("follow-up update boom")
+			const updateSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage").mockRejectedValue(boom)
+			vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const followUp: import("@roo-code/types").ClineMessage = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "followup" as const,
+				text: "question",
+				partial: false,
+			}
+			task.clineMessages.push(followUp)
+
+			task.handleWebviewAskResponse("messageResponse", "answer")
+			await flushMicrotasks()
+
+			expect(followUp.isAnswered).toBe(true)
+			expect(updateSpy).toHaveBeenCalledWith(followUp)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#handleWebviewAskResponse] follow-up delta failed:",
 				boom,
 			)
 		})

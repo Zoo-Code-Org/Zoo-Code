@@ -1,10 +1,17 @@
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { TaskRegistry } from "../../core/task/TaskRegistry"
 import { type Task } from "../../core/task/Task"
+import { TranscriptTransport } from "../../core/webview/transcriptTransport"
 
 type ProviderStubFields = {
 	cancelledDelegationChildIds?: Set<string>
+	clineMessagesTransport?: TranscriptTransport
 	log?: ReturnType<typeof vi.fn>
+	syncFocusedTaskToWebview?: ReturnType<typeof vi.fn>
+	getCurrentTask?: ClineProvider["getCurrentTask"]
+	postMessageToWebview?: ClineProvider["postMessageToWebview"]
+	publishFocusedTaskScope?: () => Promise<number>
+	invalidateClineMessagesTransport?: () => number
 	taskHistoryStore?: { get: (id: string) => unknown; invalidate?: (id: string) => Promise<void> }
 	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
@@ -16,6 +23,7 @@ type ProviderStubFields = {
 }
 
 type PrivateProviderMethods = {
+	publishFocusedTaskScope: (this: unknown) => Promise<number>
 	runDelegationTransition: (this: unknown, ...args: unknown[]) => unknown
 	removeClineFromStack: (this: unknown, ...args: unknown[]) => unknown
 	evictCurrentTask: (this: unknown, ...args: unknown[]) => unknown
@@ -35,7 +43,16 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	const s = stub as T & ProviderStubFields
 	const proto = ClineProvider.prototype as unknown as PrivateProviderMethods
 	s.cancelledDelegationChildIds ??= new Set()
+	s.clineMessagesTransport ??= new TranscriptTransport(
+		() => s.getCurrentTask?.()?.taskId,
+		async (message) => {
+			await s.postMessageToWebview?.(message)
+		},
+		() => {},
+		() => s.getCurrentTask?.()?.instanceId,
+	)
 	s.log ??= vi.fn()
+	s.syncFocusedTaskToWebview ??= vi.fn().mockResolvedValue(undefined)
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.taskHistoryStore.invalidate ??= async () => {}
 	s.taskScheduler ??= { schedule: async (_task, run) => run() }
@@ -49,6 +66,10 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	}
 	delete s.clineStack
 
+	s.getCurrentTask ??= () => s.taskRegistry?.current
+	s.postMessageToWebview ??= vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined)
+	s.invalidateClineMessagesTransport ??= () => s.clineMessagesTransport!.invalidate()
+	s.publishFocusedTaskScope ??= proto.publishFocusedTaskScope.bind(s)
 	s.runDelegationTransition ??= proto.runDelegationTransition.bind(s)
 	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
 	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)

@@ -1,6 +1,7 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
 import * as path from "path"
+import fs from "fs/promises"
 import { TaskRegistry } from "../../task/TaskRegistry"
 
 import Anthropic from "@anthropic-ai/sdk"
@@ -35,9 +36,21 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
+import { ShadowCheckpointService } from "../../../services/checkpoints/ShadowCheckpointService"
+import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 
-// Mock setup must come before imports.
-vi.mock("../../prompts/sections/custom-instructions")
+const { mockAddCustomInstructions, mockTaskConstructor } = vi.hoisted(() => ({
+	mockAddCustomInstructions: vi.fn().mockResolvedValue("Combined instructions"),
+	mockTaskConstructor: vi.fn(),
+}))
+
+vi.mock("../../prompts/sections/custom-instructions", () => ({
+	addCustomInstructions: mockAddCustomInstructions,
+}))
+
+vi.mock("../../task/Task", () => ({
+	Task: mockTaskConstructor,
+}))
 
 vi.mock("p-wait-for", () => ({
 	__esModule: true,
@@ -110,13 +123,6 @@ vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
 	},
 }))
 
-// Remove duplicate mock - it's already defined below.
-
-const mockAddCustomInstructions = vi.fn().mockResolvedValue("Combined instructions")
-
-;(vi.mocked(await import("../../prompts/sections/custom-instructions")) as any).addCustomInstructions =
-	mockAddCustomInstructions
-
 vi.mock("delay", () => {
 	const delayFn = (_ms: number) => Promise.resolve()
 	delayFn.createDelay = () => delayFn
@@ -175,6 +181,7 @@ vi.mock("vscode", () => ({
 		showErrorMessage: vi.fn(),
 		showSaveDialog: vi.fn(),
 		showOpenDialog: vi.fn(),
+		createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
 		activeTextEditor: undefined,
 		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
 	},
@@ -236,6 +243,7 @@ vi.mock("../../../integrations/openai-codex/oauth", () => ({
 	openAiCodexOAuthManager: {
 		getAccessToken: vi.fn(),
 		getAccountId: vi.fn(),
+		isAuthenticated: vi.fn().mockResolvedValue(false),
 	},
 }))
 
@@ -262,27 +270,6 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 		}),
 	}
 })
-
-vi.mock("../../task/Task", () => ({
-	Task: vi.fn().mockImplementation(function (options: any) {
-		return {
-			api: undefined,
-			abortTask: vi.fn(),
-			dispose: vi.fn().mockResolvedValue(undefined),
-			handleWebviewAskResponse: vi.fn(),
-			clineMessages: [],
-			apiConversationHistory: [],
-			overwriteClineMessages: vi.fn(),
-			overwriteApiConversationHistory: vi.fn(),
-			getTaskNumber: vi.fn().mockReturnValue(0),
-			setTaskNumber: vi.fn(),
-			setParentTask: vi.fn(),
-			setRootTask: vi.fn(),
-			taskId: options?.historyItem?.id || "test-task-id",
-			emit: vi.fn(),
-		}
-	}),
-}))
 
 vi.mock("../../../integrations/misc/extract-text", () => ({
 	extractTextFromFile: vi.fn().mockImplementation(async (_filePath: string) => {
@@ -412,7 +399,7 @@ afterAll(() => {
 
 describe("ClineProvider", () => {
 	beforeAll(() => {
-		vi.mocked(Task).mockImplementation(function (options: any) {
+		mockTaskConstructor.mockImplementation(function (options: any) {
 			const task: any = {
 				api: undefined,
 				abortTask: vi.fn(),
@@ -449,6 +436,7 @@ describe("ClineProvider", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		delete process.env.ROO_CLI_RUNTIME
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -760,7 +748,8 @@ describe("ClineProvider", () => {
 		}
 		await provider.postMessageToWebview(message)
 
-		expect(mockPostMessage).toHaveBeenCalledWith(message)
+		const { clineMessages: _messages, clineMessagesSeq: _seq, ...metadataState } = mockState
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "state", state: metadataState })
 	})
 
 	test("postMessageToWebview does not throw when webview is disposed", async () => {
@@ -862,6 +851,1112 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "action" }))
 	})
 
+	test("postMessageToWebview strips transcript fields from every generic state message", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockClear()
+		const transcript = [{ ts: 1, type: "say", say: "text", text: "secret transcript" }] as ClineMessage[]
+
+		await provider.postMessageToWebview({
+			type: "state",
+			state: {
+				version: "1.0.0",
+				clineMessages: transcript,
+				clineMessagesSeq: 17,
+			} as Partial<ExtensionState>,
+		})
+
+		expect(mockPostMessage).toHaveBeenCalledOnce()
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "state", state: { version: "1.0.0" } })
+	})
+
+	test("postMessageToWebview forwards non-state messages unchanged", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockClear()
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+
+		await provider.postMessageToWebview(message)
+
+		expect(mockPostMessage).toHaveBeenCalledOnce()
+		expect(mockPostMessage).toHaveBeenCalledWith(message)
+	})
+
+	test("postMessageToWebview preserves state-shaped payloads on non-state messages", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockClear()
+		const message: ExtensionMessage = {
+			type: "action",
+			action: "chatButtonClicked",
+			state: {
+				clineMessages: [{ ts: 1, type: "say", say: "text", text: "preserved" }],
+				clineMessagesSeq: 3,
+			},
+		}
+
+		await provider.postMessageToWebview(message)
+
+		expect(mockPostMessage).toHaveBeenCalledOnce()
+		expect(mockPostMessage).toHaveBeenCalledWith(message)
+	})
+
+	describe("transcript transport", () => {
+		const setCurrentTask = (
+			task: { taskId: string; instanceId?: string; clineMessages: ClineMessage[] } | undefined,
+		) => {
+			vi.spyOn(provider, "getCurrentTask").mockImplementation(() => task as Task | undefined)
+		}
+		const setSequence = (taskId: string, seq: number) => {
+			const transport = provider["clineMessagesTransport"]
+			transport["state"] = {
+				...transport["state"],
+				sequences: new Map([...transport["state"].sequences, [taskId, seq]]),
+			}
+		}
+		// Hold an actual snapshot start, not a private Promise-chain replacement. This
+		// leaves the production drain and its physical-send barrier in control.
+		const holdTransport = () => {
+			let release!: () => void
+			const held = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			vi.spyOn(provider, "postMessageToWebview").mockImplementationOnce(() => held)
+			const active = provider.postClineMessagesSnapshot()
+			return { active, release }
+		}
+
+		test.each(["0", "1"])(
+			"rejects stale and unscoped producers before cloning in CLI runtime %s",
+			async (runtime) => {
+				vi.stubEnv("ROO_CLI_RUNTIME", runtime)
+				try {
+					const readText = vi.fn(() => "must not be cloned")
+					const message: ClineMessage = {
+						ts: 1,
+						type: "say",
+						get text() {
+							return readText()
+						},
+					}
+					const readTranscript = vi.fn(() => [message])
+					setCurrentTask({
+						taskId: "task-1",
+						instanceId: "new",
+						get clineMessages() {
+							return readTranscript()
+						},
+					})
+					const post = vi.spyOn(provider, "postMessageToWebview")
+					const state = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory")
+					const transport = provider["clineMessagesTransport"]
+					const before = transport["state"]
+					for (const taskInstanceId of ["old", undefined]) {
+						await provider.postClineMessageAppended("task-1", message, taskInstanceId)
+						await provider.postClineMessageUpdated("task-1", message, taskInstanceId)
+						await provider.postClineMessagesSnapshot("task-1", {
+							taskInstanceId,
+							generation: transport.generation,
+							bumpSeq: true,
+						})
+					}
+					expect(readText).not.toHaveBeenCalled()
+					expect(readTranscript).not.toHaveBeenCalled()
+					expect(post).not.toHaveBeenCalled()
+					expect(state).not.toHaveBeenCalled()
+					expect(transport["state"]).toBe(before)
+				} finally {
+					vi.unstubAllEnvs()
+				}
+			},
+		)
+
+		test.each([
+			["postStateToWebview", "0"],
+			["postStateToWebviewWithoutTaskHistory", "0"],
+			["postStateToWebview", "1"],
+			["postStateToWebviewWithoutTaskHistory", "1"],
+		] as const)("drops stale asynchronous %s metadata in CLI runtime %s", async (method, runtime) => {
+			vi.stubEnv("ROO_CLI_RUNTIME", runtime)
+			provider["view"] = mockWebviewView
+			const oldTask = {
+				taskId: "task-1",
+				instanceId: "old",
+				clineMessages: [{ ts: 1, type: "say" as const, text: "old" }],
+			}
+			const replacement = { ...oldTask, instanceId: "new", clineMessages: [] }
+			setCurrentTask(oldTask)
+			let release!: (value: boolean) => void
+			let started!: () => void
+			const held = new Promise<boolean>((resolve) => {
+				release = resolve
+			})
+			const metadataCaptured = new Promise<void>((resolve) => {
+				started = resolve
+			})
+			vi.mocked(openAiCodexOAuthManager.isAuthenticated).mockImplementationOnce(() => {
+				started()
+				return held
+			})
+			const stalePost = provider[method]()
+			try {
+				await metadataCaptured
+				setCurrentTask(replacement)
+				await provider.syncFocusedTaskToWebview()
+				const beforeRelease = mockPostMessage.mock.calls.length
+				expect(mockPostMessage).toHaveBeenCalledWith({
+					type: "clineMessagesFocus",
+					taskId: "task-1",
+					taskInstanceId: "new",
+				})
+				release(false)
+				await stalePost
+				expect(mockPostMessage.mock.calls).toHaveLength(beforeRelease)
+				const currentState = await provider.getStateToPostToWebview()
+				expect(currentState.currentTaskInstanceId).toBe("new")
+				setCurrentTask(undefined)
+				await provider[method]()
+				expect(mockPostMessage).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						type: "state",
+						state: expect.objectContaining({ currentTaskId: null, currentTaskInstanceId: null }),
+					}),
+				)
+				// Unscoped metadata must still be deliverable, not stamped with new focus.
+				await provider.postMessageToWebview({ type: "state", state: { version: "metadata only" } })
+				expect(mockPostMessage).toHaveBeenLastCalledWith({ type: "state", state: { version: "metadata only" } })
+			} finally {
+				release(false)
+				await stalePost
+				vi.unstubAllEnvs()
+			}
+		})
+
+		test("publishes focus before generic metadata assembly can yield", async () => {
+			setCurrentTask({ taskId: "task-1", instanceId: "new", clineMessages: [] })
+			const post = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockImplementation(async () => {
+				expect(post.mock.calls).toEqual([
+					[
+						{
+							type: "clineMessagesFocus",
+							taskId: "task-1",
+							taskInstanceId: "new",
+						},
+					],
+				])
+			})
+			await provider.syncFocusedTaskToWebview()
+			expect(post.mock.calls.slice(1).map(([frame]) => frame.taskInstanceId)).toEqual(["new", "new"])
+		})
+
+		test.each([
+			{ currentTaskId: "old-task" },
+			{ currentTaskId: null },
+			{ currentTaskInstanceId: "old-instance" },
+			{ currentTaskInstanceId: null },
+		])("rejects obsolete explicit generic scope %j", async (state) => {
+			provider["view"] = mockWebviewView
+			setCurrentTask({ taskId: "task-1", instanceId: "current-instance", clineMessages: [] })
+			await provider.postMessageToWebview({ type: "state", state })
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		test.each([undefined, "cli-instance"])("preserves legacy CLI messages with instance %s", async (instanceId) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const previousCliRuntime = process.env.ROO_CLI_RUNTIME
+			process.env.ROO_CLI_RUNTIME = "1"
+			try {
+				const task = {
+					taskId: "task-1",
+					instanceId,
+					clineMessages: [{ ts: 1, type: "say", say: "text", text: "first" }] as ClineMessage[],
+				}
+				setCurrentTask(task)
+				mockPostMessage.mockClear()
+
+				await provider.postClineMessageAppended("task-1", task.clineMessages[0], instanceId)
+				await provider.postClineMessageUpdated(
+					"task-1",
+					{ ...task.clineMessages[0], text: "updated" },
+					instanceId,
+				)
+				await provider.postClineMessagesSnapshot("task-1", { bumpSeq: true, taskInstanceId: instanceId })
+
+				expect(mockPostMessage).toHaveBeenNthCalledWith(
+					1,
+					expect.objectContaining({
+						type: "state",
+						state: expect.objectContaining({ clineMessages: task.clineMessages }),
+					}),
+				)
+				expect(mockPostMessage).toHaveBeenNthCalledWith(2, {
+					type: "messageUpdated",
+					clineMessage: expect.objectContaining({ text: "updated" }),
+				})
+				expect(mockPostMessage).toHaveBeenNthCalledWith(
+					3,
+					expect.objectContaining({
+						type: "state",
+						state: expect.objectContaining({ clineMessages: task.clineMessages }),
+					}),
+				)
+			} finally {
+				if (previousCliRuntime === undefined) {
+					delete process.env.ROO_CLI_RUNTIME
+				} else {
+					process.env.ROO_CLI_RUNTIME = previousCliRuntime
+				}
+			}
+		})
+
+		test("posts cloned append and update deltas in sequence", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+			setCurrentTask(task)
+			mockPostMessage.mockClear()
+			const appended: ClineMessage = {
+				ts: 1,
+				type: "say",
+				say: "text",
+				text: "original",
+				images: ["original-image"],
+			}
+			const updated = { ...appended, text: "updated", images: ["updated-image"] }
+			const held = holdTransport()
+			const appendPost = provider.postClineMessageAppended("task-1", appended)
+			const updatePost = provider.postClineMessageUpdated("task-1", updated)
+			appended.text = "mutated after enqueue"
+			updated.text = "also mutated"
+			appended.images?.push("late-image")
+			updated.images[0] = "late-replacement"
+			held.release()
+			await Promise.all([held.active, appendPost, updatePost])
+
+			expect(
+				mockPostMessage.mock.calls
+					.map(([message]: [ExtensionMessage]) => message)
+					.filter(
+						({ type }: ExtensionMessage) =>
+							type === "clineMessageAppended" || type === "clineMessageUpdated",
+					),
+			).toEqual([
+				{
+					type: "clineMessageAppended",
+					taskId: "task-1",
+					clineMessage: expect.objectContaining({ text: "original", images: ["original-image"] }),
+					clineMessagesSeq: 1,
+				},
+				{
+					type: "clineMessageUpdated",
+					taskId: "task-1",
+					clineMessage: expect.objectContaining({ text: "updated", images: ["updated-image"] }),
+					clineMessagesSeq: 2,
+				},
+			])
+		})
+
+		test.each(["0", "1"])("ignores unfocused transcript work with CLI runtime %s", async (cliRuntime) => {
+			vi.stubEnv("ROO_CLI_RUNTIME", cliRuntime)
+			try {
+				const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+				setCurrentTask(task)
+				const message = { ts: 1, type: "say", say: "text", text: "ignored" } as ClineMessage
+				const postSpy = vi.spyOn(provider, "postMessageToWebview")
+				const stateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+				const previousGeneration = provider["clineMessagesTransport"].generation
+				const previousSnapshotId = provider["clineMessagesTransport"]["state"].nextSnapshotId
+
+				await Promise.all([
+					provider.postClineMessageAppended("task-2", message),
+					provider.postClineMessageUpdated("task-2", message),
+					provider.postClineMessagesSnapshot("task-2"),
+					provider.resyncClineMessagesToWebview("task-2"),
+				])
+
+				expect(postSpy).not.toHaveBeenCalled()
+				expect(stateSpy).not.toHaveBeenCalled()
+				expect(provider["clineMessagesTransport"]["state"].sequences.has("task-2")).toBe(false)
+				expect(provider["clineMessagesTransport"].generation).toBe(previousGeneration)
+				expect(provider["clineMessagesTransport"]["state"].nextSnapshotId).toBe(previousSnapshotId)
+			} finally {
+				vi.unstubAllEnvs()
+			}
+		})
+
+		test("safely rejects transcript work when no task is focused", async () => {
+			setCurrentTask(undefined)
+			const message = { ts: 1, type: "say", say: "text", text: "ignored" } as ClineMessage
+			const previousGeneration = provider["clineMessagesTransport"].generation
+
+			await expect(provider.postClineMessageAppended("task-1", message)).resolves.toBeUndefined()
+			await expect(provider.postClineMessageUpdated("task-1", message)).resolves.toBeUndefined()
+			await expect(provider.resyncClineMessagesToWebview("task-1")).resolves.toBeUndefined()
+
+			expect(provider["clineMessagesTransport"]["state"].sequences.has("task-1")).toBe(false)
+			expect(provider["clineMessagesTransport"].generation).toBe(previousGeneration)
+		})
+
+		test("logs a failed delta post and continues processing the queue", async () => {
+			const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+			setCurrentTask(task)
+			const failure = new Error("post failed")
+			const postSpy = vi
+				.spyOn(provider, "postMessageToWebview")
+				.mockRejectedValueOnce(failure)
+				.mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			const message = { ts: 1, type: "say", say: "text", text: "message" } as ClineMessage
+
+			await expect(provider.postClineMessageAppended("task-1", message)).rejects.toThrow("post failed")
+			await provider.postClineMessageUpdated("task-1", { ...message, text: "recovered" })
+
+			expect(logSpy).toHaveBeenCalledWith("[clineMessages] transport failure: post failed")
+			expect(postSpy).toHaveBeenLastCalledWith(
+				expect.objectContaining({ type: "clineMessageUpdated", clineMessagesSeq: 2 }),
+			)
+		})
+
+		test("posts ordered snapshot chunks followed by the end marker", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messages = Array.from({ length: 401 }, (_, index) => ({
+				ts: index,
+				type: "say",
+				say: "text",
+				text: `message ${index}`,
+			})) as ClineMessage[]
+			setCurrentTask({ taskId: "task-1", clineMessages: messages })
+			mockPostMessage.mockClear()
+
+			await provider.postClineMessagesSnapshot("task-1", { bumpSeq: true })
+
+			const posts: ExtensionMessage[] = mockPostMessage.mock.calls.map(([message]: [ExtensionMessage]) => message)
+			expect(posts.map(({ type }) => type)).toEqual([
+				"clineMessagesSnapshotStart",
+				"clineMessagesSnapshotChunk",
+				"clineMessagesSnapshotChunk",
+				"clineMessagesSnapshotChunk",
+				"clineMessagesSnapshotEnd",
+			])
+			expect(posts.map(({ clineMessagesSeq }) => clineMessagesSeq)).toEqual([1, 1, 1, 1, 1])
+			expect(posts.slice(1, 4).map(({ snapshotStartIndex }) => snapshotStartIndex)).toEqual([0, 200, 400])
+			expect(posts.slice(1, 4).map(({ clineMessages }) => clineMessages?.length)).toEqual([200, 200, 1])
+			expect(posts.slice(1, 4).map(({ clineMessages }) => clineMessages)).toEqual([
+				messages.slice(0, 200),
+				messages.slice(200, 400),
+				messages.slice(400, 401),
+			])
+			expect(new Set(posts.map(({ snapshotId }) => snapshotId)).size).toBe(1)
+		})
+
+		test.each([false, true])(
+			"captures snapshot payload with its sequence before queued deltas (bumpSeq=%s)",
+			async (bumpSeq) => {
+				const messages = Array.from(
+					{ length: 200 },
+					(_, index): ClineMessage => ({
+						ts: index + 1,
+						type: "say",
+						say: "text",
+						text: `message ${index + 1}`,
+						images: ["original-image"],
+					}),
+				)
+				const task = { taskId: "task-1", clineMessages: messages }
+				setCurrentTask(task)
+				setSequence(task.taskId, 4)
+				const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const expectedSnapshot = structuredClone(messages)
+				const held = holdTransport()
+
+				const snapshot = provider.postClineMessagesSnapshot(task.taskId, { bumpSeq })
+				const appended: ClineMessage = { ts: 201, type: "say", say: "text", text: "appended after snapshot" }
+				task.clineMessages.push(appended)
+				const append = provider.postClineMessageAppended(task.taskId, appended)
+				messages[0].text = "updated after snapshot"
+				messages[0].images?.push("updated-image")
+				const update = provider.postClineMessageUpdated(task.taskId, messages[0])
+				held.release()
+				await Promise.all([held.active, snapshot, append, update])
+
+				const snapshotSeq = bumpSeq ? 5 : 4
+				const snapshotId = "task-1:2"
+				expect(
+					postSpy.mock.calls
+						.map(([message]) => message)
+						.filter((message) => message.snapshotId !== "task-1:1"),
+				).toEqual([
+					{
+						type: "clineMessagesSnapshotStart",
+						taskId: task.taskId,
+						clineMessagesSeq: snapshotSeq,
+						snapshotId,
+						snapshotTotal: 200,
+					},
+					{
+						type: "clineMessagesSnapshotChunk",
+						taskId: task.taskId,
+						clineMessagesSeq: snapshotSeq,
+						snapshotId,
+						snapshotStartIndex: 0,
+						clineMessages: expectedSnapshot,
+					},
+					{
+						type: "clineMessagesSnapshotEnd",
+						taskId: task.taskId,
+						clineMessagesSeq: snapshotSeq,
+						snapshotId,
+						snapshotTotal: 200,
+					},
+					{
+						type: "clineMessageAppended",
+						taskId: task.taskId,
+						clineMessagesSeq: snapshotSeq + 1,
+						clineMessage: appended,
+					},
+					{
+						type: "clineMessageUpdated",
+						taskId: task.taskId,
+						clineMessagesSeq: snapshotSeq + 2,
+						clineMessage: messages[0],
+					},
+				])
+			},
+		)
+
+		test.each([
+			["append", "clineMessageAppended"],
+			["update", "clineMessageUpdated"],
+		] as const)(
+			"invalidates a queued old-focus %s delta before it reaches the webview",
+			async (operation, messageType) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+				setCurrentTask(task)
+				mockPostMessage.mockClear()
+
+				const held = holdTransport()
+				const message = {
+					ts: 1,
+					type: "say",
+					say: "text",
+					text: "queued",
+				} as ClineMessage
+				const pendingDelta =
+					operation === "append"
+						? provider.postClineMessageAppended("task-1", message)
+						: provider.postClineMessageUpdated("task-1", message)
+
+				task.taskId = "task-2"
+				const focusSync = provider.syncFocusedTaskToWebview()
+				held.release()
+				await Promise.all([pendingDelta, focusSync])
+
+				expect(mockPostMessage).not.toHaveBeenCalledWith(
+					expect.objectContaining({ type: messageType, taskId: "task-1" }),
+				)
+				expect(mockPostMessage).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "clineMessagesSnapshotStart", taskId: "task-2" }),
+				)
+			},
+		)
+
+		test.each([
+			["append", "clineMessageAppended"],
+			["update", "clineMessageUpdated"],
+		] as const)(
+			"invalidates a queued %s delta when only the focused task changes",
+			async (operation, messageType) => {
+				const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+				setCurrentTask(task)
+				const postSpy = vi.spyOn(provider, "postMessageToWebview")
+				const held = holdTransport()
+				const message = { ts: 1, type: "say", say: "text", text: "queued" } as ClineMessage
+				const pendingDelta =
+					operation === "append"
+						? provider.postClineMessageAppended("task-1", message)
+						: provider.postClineMessageUpdated("task-1", message)
+
+				task.taskId = "task-2"
+				held.release()
+				await pendingDelta
+
+				expect(postSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: messageType }))
+			},
+		)
+
+		test.each(["append", "update"] as const)(
+			"drops a queued %s delta safely when the current task disappears",
+			async (operation) => {
+				const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+				setCurrentTask(task)
+				const held = holdTransport()
+				const message = { ts: 1, type: "say", say: "text", text: "queued" } as ClineMessage
+				const pendingDelta =
+					operation === "append"
+						? provider.postClineMessageAppended("task-1", message)
+						: provider.postClineMessageUpdated("task-1", message)
+
+				setCurrentTask(undefined)
+				held.release()
+
+				await expect(pendingDelta).resolves.toBeUndefined()
+			},
+		)
+
+		test("invalidates a queued delta when only the transport generation changes", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+			setCurrentTask(task)
+			mockPostMessage.mockClear()
+
+			const held = holdTransport()
+			const pendingDelta = provider.postClineMessageAppended("task-1", {
+				ts: 1,
+				type: "say",
+				say: "text",
+				text: "stale generation",
+			})
+			const previousGeneration = provider["clineMessagesTransport"].generation
+			const resync = provider.resyncClineMessagesToWebview("task-1")
+
+			expect(provider["clineMessagesTransport"].generation).toBe(previousGeneration + 1)
+
+			held.release()
+			await Promise.all([pendingDelta, resync])
+
+			expect(mockPostMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "clineMessageAppended", taskId: "task-1" }),
+			)
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "clineMessagesSnapshotStart", taskId: "task-1" }),
+			)
+		})
+
+		test("invalidates a queued update when only the transport generation changes", async () => {
+			const task = { taskId: "task-1", clineMessages: [] as ClineMessage[] }
+			setCurrentTask(task)
+			const postSpy = vi.spyOn(provider, "postMessageToWebview")
+			const held = holdTransport()
+			const pendingUpdate = provider.postClineMessageUpdated("task-1", {
+				ts: 1,
+				type: "say",
+				say: "text",
+				text: "stale generation",
+			})
+
+			provider["invalidateClineMessagesTransport"]()
+			held.release()
+			await pendingUpdate
+
+			expect(postSpy).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "clineMessageUpdated", taskId: "task-1" }),
+			)
+		})
+
+		test.each(["focus", "generation"] as const)(
+			"drops a snapshot when %s changes before its first post",
+			async (change) => {
+				const task = {
+					taskId: "task-1",
+					clineMessages: [{ ts: 1, type: "say", say: "text", text: "message" }] as ClineMessage[],
+				}
+				setCurrentTask(task)
+				const postSpy = vi.spyOn(provider, "postMessageToWebview")
+				const held = holdTransport()
+
+				const snapshot = provider.postClineMessagesSnapshot("task-1")
+				if (change === "focus") {
+					task.taskId = "task-2"
+				} else {
+					provider["invalidateClineMessagesTransport"]()
+				}
+				held.release()
+				await Promise.all([held.active, snapshot])
+
+				expect(postSpy).toHaveBeenCalledOnce()
+				expect(postSpy).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "clineMessagesSnapshotStart", snapshotId: "task-1:1" }),
+				)
+			},
+		)
+
+		test("rejects a stale snapshot generation before cloning or allocating sequence and ID", async () => {
+			const readText = vi.fn(() => "must not be cloned")
+			setCurrentTask({
+				taskId: "task-1",
+				clineMessages: [
+					{
+						ts: 1,
+						type: "say",
+						get text() {
+							return readText()
+						},
+					},
+				],
+			})
+			const staleGeneration = provider["clineMessagesTransport"].generation
+			provider["invalidateClineMessagesTransport"]()
+			const postSpy = vi.spyOn(provider, "postMessageToWebview")
+
+			await provider.postClineMessagesSnapshot("task-1", { generation: staleGeneration, bumpSeq: true })
+
+			expect(readText).not.toHaveBeenCalled()
+			expect(postSpy).not.toHaveBeenCalled()
+			expect(provider["clineMessagesTransport"].getSequence("task-1")).toBe(0)
+			expect(provider["clineMessagesTransport"]["state"].nextSnapshotId).toBe(0)
+		})
+
+		test.each(["clineMessagesSnapshotStart", "clineMessagesSnapshotChunk"] as const)(
+			"releases queued payloads and callers across repeated resync while a physical %s is held",
+			async (heldType) => {
+				const task = {
+					taskId: "task-1",
+					clineMessages: [{ ts: 1, type: "say", text: "snapshot" }] as ClineMessage[],
+				}
+				setCurrentTask(task)
+				let release!: () => void
+				let started!: () => void
+				const held = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const postStarted = new Promise<void>((resolve) => {
+					started = resolve
+				})
+				let inFlight = 0
+				let maximumInFlight = 0
+				let heldOnce = false
+				const postSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async (message) => {
+					inFlight++
+					maximumInFlight = Math.max(maximumInFlight, inFlight)
+					if (message.type === heldType && !heldOnce) {
+						heldOnce = true
+						started()
+						await held
+					}
+					inFlight--
+				})
+				const active = provider.postClineMessagesSnapshot(task.taskId)
+				await postStarted
+				const queued = Array.from({ length: 25 }, () => provider.postClineMessagesSnapshot(task.taskId))
+				queued.push(provider.postClineMessageUpdated(task.taskId, task.clineMessages[0]))
+				const transport = provider["clineMessagesTransport"]
+				expect(transport["payloads"].size).toBe(27)
+				const firstResync = provider.resyncClineMessagesToWebview(task.taskId)
+				// These must settle BEFORE the active physical send is released.
+				await Promise.all(queued)
+				expect(transport["payloads"].size).toBe(1)
+				expect(transport["callers"].size).toBe(2)
+				const finalResync = provider.resyncClineMessagesToWebview(task.taskId)
+				await firstResync
+				expect(transport["payloads"].size).toBe(1)
+				expect(transport["state"].queue).toHaveLength(1)
+				expect(inFlight).toBe(1)
+				const postsBeforeRelease = postSpy.mock.calls.length
+				expect(postsBeforeRelease).toBe(heldType === "clineMessagesSnapshotStart" ? 1 : 2)
+				release()
+				await Promise.all([active, finalResync])
+				expect(maximumInFlight).toBe(1)
+				expect(postSpy.mock.calls.slice(postsBeforeRelease).map(([message]) => message.type)).toEqual([
+					"clineMessagesSnapshotStart",
+					"clineMessagesSnapshotChunk",
+					"clineMessagesSnapshotEnd",
+				])
+				expect(
+					postSpy.mock.calls
+						.slice(postsBeforeRelease)
+						.every(([message]) => message.snapshotId === "task-1:28"),
+				).toBe(true)
+				expect(transport["payloads"].size).toBe(0)
+				expect(transport["callers"].size).toBe(0)
+			},
+		)
+
+		test("uses monotonic task-scoped snapshot IDs and an empty no-task snapshot", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			setCurrentTask({ taskId: "task-1", clineMessages: [] })
+			mockPostMessage.mockClear()
+
+			await provider.postClineMessagesSnapshot("task-1")
+			await provider.postClineMessagesSnapshot("task-1")
+			setCurrentTask(undefined)
+			await provider.postClineMessagesSnapshot(undefined)
+
+			const snapshotMessages: ExtensionMessage[] = mockPostMessage.mock.calls.map(
+				([message]: [ExtensionMessage]) => message,
+			)
+			expect(snapshotMessages.map(({ snapshotId }) => snapshotId)).toEqual([
+				"task-1:1",
+				"task-1:1",
+				"task-1:2",
+				"task-1:2",
+				"none:3",
+				"none:3",
+			])
+			expect(snapshotMessages.slice(-2)).toEqual([
+				expect.objectContaining({ type: "clineMessagesSnapshotStart", snapshotTotal: 0 }),
+				expect.objectContaining({ type: "clineMessagesSnapshotEnd", snapshotTotal: 0 }),
+			])
+		})
+
+		test("does not emit an empty trailing chunk for an exact snapshot chunk boundary", async () => {
+			const messages = Array.from({ length: 200 }, (_, index) => ({
+				ts: index,
+				type: "say",
+				say: "text",
+				text: `message ${index}`,
+			})) as ClineMessage[]
+			setCurrentTask({ taskId: "task-1", clineMessages: messages })
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider.postClineMessagesSnapshot("task-1")
+
+			expect(postSpy.mock.calls.map(([message]) => message.type)).toEqual([
+				"clineMessagesSnapshotStart",
+				"clineMessagesSnapshotChunk",
+				"clineMessagesSnapshotEnd",
+			])
+			expect(postSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "clineMessagesSnapshotChunk",
+					snapshotStartIndex: 0,
+					clineMessages: messages,
+				}),
+			)
+		})
+
+		test("stops a snapshot when its transport generation changes after the start marker", async () => {
+			setCurrentTask({
+				taskId: "task-1",
+				clineMessages: [{ ts: 1, type: "say", say: "text", text: "message" }],
+			})
+			const postedTypes: string[] = []
+			vi.spyOn(provider, "postMessageToWebview").mockImplementation(async (message) => {
+				postedTypes.push(message.type)
+				if (message.type === "clineMessagesSnapshotStart") {
+					provider["invalidateClineMessagesTransport"]()
+				}
+			})
+
+			await provider.postClineMessagesSnapshot("task-1")
+
+			expect(postedTypes).toEqual(["clineMessagesSnapshotStart"])
+		})
+
+		test.each([
+			["after the start marker", "clineMessagesSnapshotStart", ["clineMessagesSnapshotStart"]],
+			[
+				"after a chunk",
+				"clineMessagesSnapshotChunk",
+				["clineMessagesSnapshotStart", "clineMessagesSnapshotChunk"],
+			],
+		])("stops a snapshot %s when focus changes", async (_description, invalidateAfterType, expectedTypes) => {
+			const task = {
+				taskId: "task-1",
+				clineMessages: [{ ts: 1, type: "say", say: "text", text: "message" }] as ClineMessage[],
+			}
+			setCurrentTask(task)
+			const postedTypes: string[] = []
+			vi.spyOn(provider, "postMessageToWebview").mockImplementation(async (message) => {
+				postedTypes.push(message.type)
+				if (message.type === invalidateAfterType) {
+					task.taskId = "task-2"
+				}
+			})
+
+			await provider.postClineMessagesSnapshot("task-1")
+
+			expect(postedTypes).toEqual(expectedTypes)
+		})
+
+		test.each([
+			{ name: "both diagnostics", expectedSeq: 2, receivedSeq: 7 },
+			{ name: "missing diagnostics", expectedSeq: undefined, receivedSeq: undefined },
+			{ name: "only the expected sequence", expectedSeq: 2, receivedSeq: undefined },
+			{ name: "only the observed sequence", expectedSeq: undefined, receivedSeq: 7 },
+			{ name: "wildly different diagnostics", expectedSeq: Number.MAX_SAFE_INTEGER, receivedSeq: 0 },
+		])(
+			"resyncs the focused task with $name without changing its sequence",
+			async ({ expectedSeq, receivedSeq }) => {
+				const message: ClineMessage = {
+					ts: 1,
+					type: "say",
+					say: "text",
+					text: "secret transcript must not appear in resync logs",
+					images: ["data:image/png;base64,private-image"],
+				}
+				const task = { taskId: "task-1", clineMessages: [message] }
+				setCurrentTask(task)
+				const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+				const transport = provider["clineMessagesTransport"]
+
+				await provider.postClineMessageAppended(task.taskId, message)
+				postSpy.mockClear()
+				logSpy.mockClear()
+				const previousGeneration = transport.generation
+
+				await provider.resyncClineMessagesToWebview(task.taskId, expectedSeq, receivedSeq)
+
+				expect(logSpy.mock.calls).toEqual([
+					[
+						`[clineMessages] resync accepted: ${JSON.stringify({
+							taskId: task.taskId,
+							previousGeneration,
+							newGeneration: previousGeneration + 1,
+							currentSeq: 1,
+							expectedSeq,
+							receivedSeq,
+						})}`,
+					],
+				])
+				const common = { taskId: task.taskId, clineMessagesSeq: 1, snapshotId: expect.any(String) }
+				expect(postSpy.mock.calls.map(([frame]) => frame)).toEqual([
+					{ ...common, type: "clineMessagesSnapshotStart", snapshotTotal: 1 },
+					{ ...common, type: "clineMessagesSnapshotChunk", snapshotStartIndex: 0, clineMessages: [message] },
+					{ ...common, type: "clineMessagesSnapshotEnd", snapshotTotal: 1 },
+				])
+				expect(transport.generation).toBe(previousGeneration + 1)
+				expect(transport.getSequence(task.taskId)).toBe(1)
+
+				await provider.postClineMessageUpdated(task.taskId, message)
+				expect(transport.getSequence(task.taskId)).toBe(2)
+				expect(postSpy).toHaveBeenLastCalledWith({
+					type: "clineMessageUpdated",
+					taskId: task.taskId,
+					clineMessagesSeq: 2,
+					clineMessage: message,
+				})
+			},
+		)
+
+		test.each([
+			{ name: "without diagnostics", expectedSeq: undefined, receivedSeq: undefined },
+			{ name: "with diagnostics", expectedSeq: 1, receivedSeq: 0 },
+		])("logs and resyncs the empty no-task scope $name", async ({ expectedSeq, receivedSeq }) => {
+			setCurrentTask(undefined)
+			setSequence("unfocused-task", 99)
+			const transport = provider["clineMessagesTransport"]
+			const previousGeneration = transport.generation
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider.resyncClineMessagesToWebview(undefined, expectedSeq, receivedSeq)
+
+			expect(logSpy.mock.calls).toEqual([
+				[
+					`[clineMessages] resync accepted: ${JSON.stringify({
+						taskId: null,
+						previousGeneration,
+						newGeneration: previousGeneration + 1,
+						currentSeq: 0,
+						expectedSeq,
+						receivedSeq,
+					})}`,
+				],
+			])
+			const common = { taskId: undefined, clineMessagesSeq: 0, snapshotId: expect.any(String), snapshotTotal: 0 }
+			expect(postSpy.mock.calls.map(([frame]) => frame)).toEqual([
+				{ ...common, type: "clineMessagesSnapshotStart" },
+				{ ...common, type: "clineMessagesSnapshotEnd" },
+			])
+			expect(transport.generation).toBe(previousGeneration + 1)
+			expect([...transport["state"].sequences]).toEqual([["unfocused-task", 99]])
+		})
+
+		test.each([
+			{ name: "wrong task", focusedTaskId: "task-1", requestedTaskId: "other-task" },
+			{ name: "missing task", focusedTaskId: "task-1", requestedTaskId: undefined },
+			{ name: "stale task in the no-task scope", focusedTaskId: undefined, requestedTaskId: "task-1" },
+		])(
+			"ignores a $name resync without logging or mutating transport",
+			async ({ focusedTaskId, requestedTaskId }) => {
+				setCurrentTask(focusedTaskId === undefined ? undefined : { taskId: focusedTaskId, clineMessages: [] })
+				setSequence("task-1", 3)
+				const transport = provider["clineMessagesTransport"]
+				const previousState = transport["state"]
+				const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const snapshotSpy = vi.spyOn(provider, "postClineMessagesSnapshot")
+				const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+
+				await provider.resyncClineMessagesToWebview(requestedTaskId, Number.MAX_SAFE_INTEGER, 0)
+
+				expect(transport["state"]).toBe(previousState)
+				expect(postSpy).not.toHaveBeenCalled()
+				expect(snapshotSpy).not.toHaveBeenCalled()
+				expect(logSpy).not.toHaveBeenCalled()
+			},
+		)
+
+		test.each([
+			{ name: "object", value: { secret: "do not log" } },
+			{ name: "array", value: ["do not log"] },
+			{ name: "string", value: "123" },
+			{ name: "boolean", value: true },
+			{ name: "null", value: null },
+			{ name: "NaN", value: Number.NaN },
+			{ name: "positive infinity", value: Number.POSITIVE_INFINITY },
+			{ name: "negative infinity", value: Number.NEGATIVE_INFINITY },
+			{ name: "negative integer", value: -1 },
+			{ name: "fraction", value: 1.5 },
+			{ name: "unsafe integer", value: Number.MAX_SAFE_INTEGER + 1 },
+			{ name: "bigint", value: 1n },
+			{ name: "symbol", value: Symbol("do not log") },
+		])("omits a $name diagnostic without affecting recovery or the other diagnostic", async ({ value }) => {
+			setCurrentTask({ taskId: "task-1", clineMessages: [] })
+			setSequence("task-1", 3)
+			const transport = provider["clineMessagesTransport"]
+			const previousGeneration = transport.generation
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider.resyncClineMessagesToWebview("task-1", value, 8)
+			await provider.resyncClineMessagesToWebview("task-1", 9, value)
+
+			expect(logSpy.mock.calls).toEqual([
+				[
+					`[clineMessages] resync accepted: ${JSON.stringify({
+						taskId: "task-1",
+						previousGeneration,
+						newGeneration: previousGeneration + 1,
+						currentSeq: 3,
+						receivedSeq: 8,
+					})}`,
+				],
+				[
+					`[clineMessages] resync accepted: ${JSON.stringify({
+						taskId: "task-1",
+						previousGeneration: previousGeneration + 1,
+						newGeneration: previousGeneration + 2,
+						currentSeq: 3,
+						expectedSeq: 9,
+					})}`,
+				],
+			])
+			expect(postSpy.mock.calls.map(([frame]) => frame.clineMessagesSeq)).toEqual([3, 3, 3, 3])
+			expect(transport.generation).toBe(previousGeneration + 2)
+			expect(transport.getSequence("task-1")).toBe(3)
+		})
+
+		test("prunes sequence state when a task leaves the stack", async () => {
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskId", { value: "task-to-remove", writable: true })
+			await provider.addClineToStack(task)
+			setSequence(task.taskId, 4)
+
+			await provider.removeClineFromStack()
+
+			expect(provider["clineMessagesTransport"]["state"].sequences.has(task.taskId)).toBe(false)
+		})
+
+		test("prunes sequence state when a task is deleted from history", async () => {
+			setSequence("deleted-task", 4)
+			vi.spyOn(provider.taskHistoryStore, "delete").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.deleteTaskFromState("deleted-task")
+
+			expect(provider["clineMessagesTransport"]["state"].sequences.has("deleted-task")).toBe(false)
+		})
+
+		test("prunes sequence state for every task deleted by a cascade", async () => {
+			const histories = {
+				parent: {
+					id: "parent",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					childIds: ["child"],
+				},
+				child: {
+					id: "child",
+					number: 2,
+					ts: 2,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+			}
+			vi.spyOn(provider, "getTaskWithId").mockImplementation(async (id) => ({
+				historyItem: histories[id as keyof typeof histories],
+				taskDirPath: `/test/task/${id}`,
+				apiConversationHistoryFilePath: `/test/task/${id}/api.json`,
+				uiMessagesFilePath: `/test/task/${id}/ui.json`,
+				apiConversationHistory: [],
+			}))
+			vi.spyOn(provider.taskHistoryStore, "deleteMany").mockResolvedValue(undefined)
+			vi.spyOn(ShadowCheckpointService, "deleteTask").mockResolvedValue(undefined)
+			vi.spyOn(fs, "rm").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			setSequence("parent", 4)
+			setSequence("child", 7)
+
+			await provider.deleteTaskWithId("parent")
+
+			expect(provider.taskHistoryStore.deleteMany).toHaveBeenCalledWith(["parent", "child"])
+			expect(provider["clineMessagesTransport"]["state"].sequences.has("parent")).toBe(false)
+			expect(provider["clineMessagesTransport"]["state"].sequences.has("child")).toBe(false)
+		})
+
+		test("abandons an older focus sync when a resync invalidates its state post", async () => {
+			const task = { taskId: "task-1", instanceId: "instance-1", clineMessages: [] as ClineMessage[] }
+			setCurrentTask(task)
+			let releaseStatePost!: () => void
+			const statePostStarted = new Promise<void>((resolve) => {
+				vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockImplementation(
+					() =>
+						new Promise<void>((release) => {
+							releaseStatePost = release
+							resolve()
+						}),
+				)
+			})
+			const snapshotSpy = vi.spyOn(provider, "postClineMessagesSnapshot")
+			const previousGeneration = provider["clineMessagesTransport"].generation
+
+			const focusSync = provider.syncFocusedTaskToWebview()
+			await statePostStarted
+			expect(snapshotSpy).not.toHaveBeenCalled()
+			expect(provider["clineMessagesTransport"].generation).toBe(previousGeneration + 1)
+			const resync = provider.resyncClineMessagesToWebview("task-1")
+			const winningOptions = { generation: previousGeneration + 2, taskInstanceId: task.instanceId }
+			expect(snapshotSpy).toHaveBeenCalledExactlyOnceWith("task-1", winningOptions)
+			releaseStatePost()
+			await Promise.all([focusSync, resync])
+
+			expect(snapshotSpy).toHaveBeenCalledOnce()
+			expect(snapshotSpy).toHaveBeenCalledWith("task-1", winningOptions)
+		})
+
+		test("passes the new transport generation into a focused-task snapshot", async () => {
+			setCurrentTask({ taskId: "task-1", clineMessages: [] })
+			vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+			const snapshotSpy = vi.spyOn(provider, "postClineMessagesSnapshot").mockResolvedValue(undefined)
+			const previousGeneration = provider["clineMessagesTransport"].generation
+
+			await provider.syncFocusedTaskToWebview()
+
+			expect(snapshotSpy).toHaveBeenCalledWith("task-1", { generation: previousGeneration + 1 })
+		})
+
+		test("includes task history when requested during focused-task synchronization", async () => {
+			setCurrentTask({ taskId: "task-1", clineMessages: [] })
+			const fullStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const lightweightStateSpy = vi
+				.spyOn(provider, "postStateToWebviewWithoutTaskHistory")
+				.mockResolvedValue(undefined)
+			const snapshotSpy = vi.spyOn(provider, "postClineMessagesSnapshot").mockResolvedValue(undefined)
+			const previousGeneration = provider["clineMessagesTransport"].generation
+
+			await provider.syncFocusedTaskToWebview({ includeTaskHistory: true })
+
+			expect(fullStateSpy).toHaveBeenCalledOnce()
+			expect(lightweightStateSpy).not.toHaveBeenCalled()
+			expect(snapshotSpy).toHaveBeenCalledWith("task-1", { generation: previousGeneration + 1 })
+		})
+	})
+
 	test("postStateToWebviewWithoutTaskHistory waits for the webview post boundary", async () => {
 		let releasePost!: () => void
 		const pendingPost = new Promise<void>((resolve) => {
@@ -894,7 +1989,9 @@ describe("ClineProvider", () => {
 			"postStateToWebviewWithoutTaskHistory",
 			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
 		],
-	])("%s assigns message sequence numbers before asynchronous state construction", async (_methodName, postState) => {
+	])("%s keeps out-of-order generic state publications transcript-free", async (_methodName, postState) => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockClear()
 		let releaseOlderSnapshot!: (state: ExtensionState) => void
 		const olderSnapshot = new Promise<ExtensionState>((resolve) => {
 			releaseOlderSnapshot = resolve
@@ -910,7 +2007,6 @@ describe("ClineProvider", () => {
 		vi.spyOn(provider, "getStateToPostToWebview")
 			.mockReturnValueOnce(olderSnapshot)
 			.mockResolvedValueOnce(readyState)
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 		const olderPost = postState(provider)
 		await Promise.resolve()
@@ -919,27 +2015,19 @@ describe("ClineProvider", () => {
 		releaseOlderSnapshot(emptyState)
 		await olderPost
 
-		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessages)).toEqual([
-			readyState.clineMessages,
-			emptyState.clineMessages,
-		])
-		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessagesSeq)).toEqual([2, 1])
+		const statePosts = (mockPostMessage.mock.calls as Array<[ExtensionMessage]>)
+			.map(([message]) => message)
+			.filter((message) => message.type === "state")
+		expect(statePosts).toHaveLength(2)
+		expect(statePosts.map((message) => message.state?.clineMessages)).toEqual([undefined, undefined])
+		expect(statePosts.map((message) => message.state?.clineMessagesSeq)).toEqual([undefined, undefined])
 	})
 
-	test.each([
-		[
-			"postStateToWebviewWithoutTaskHistory",
-			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
-		],
-		[
-			"postStateToWebviewWithoutClineMessages",
-			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutClineMessages(),
-		],
-	])("%s skips task history computation", async (_methodName, postState) => {
+	test("postStateToWebviewWithoutTaskHistory skips task history computation", async () => {
 		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll")
 		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
-		await postState(provider)
+		await provider.postStateToWebviewWithoutTaskHistory()
 
 		expect(getAllSpy).not.toHaveBeenCalled()
 		expect(postMessageSpy).toHaveBeenCalledOnce()
@@ -976,6 +2064,19 @@ describe("ClineProvider", () => {
 		expect(getAllSpy).toHaveBeenCalledOnce()
 		expect(historyReadPhases).toEqual([true])
 		expect(state.taskHistory).toEqual([historyItem])
+	})
+
+	test("eviction synchronizes an authoritative no-task identity that survives serialization", async () => {
+		const task = new Task(defaultTaskOptions)
+		await provider.addClineToStack(task)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		await provider.evictCurrentTask()
+
+		const stateMessage = postMessageSpy.mock.calls.map(([message]) => message).find(({ type }) => type === "state")
+		const roundTrippedState = JSON.parse(JSON.stringify(stateMessage?.state)) as Partial<ExtensionState>
+		expect(stateMessage?.state?.currentTaskId).toBeNull()
+		expect(roundTrippedState).toHaveProperty("currentTaskId", null)
 	})
 
 	describe("postStateToWebviewThrottled", () => {
@@ -1269,6 +2370,7 @@ describe("ClineProvider", () => {
 
 	test("handles webviewDidLaunch message", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
+		const syncFocusedTaskSpy = vi.spyOn(provider, "syncFocusedTaskToWebview").mockResolvedValue(undefined)
 
 		// Get the message handler from onDidReceiveMessage
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock
@@ -1279,6 +2381,7 @@ describe("ClineProvider", () => {
 
 		// Should post state and theme to webview
 		expect(mockPostMessage).toHaveBeenCalled()
+		expect(syncFocusedTaskSpy).toHaveBeenCalledWith({ includeTaskHistory: true })
 	})
 
 	test("logs detached workspace initialization failures", async () => {

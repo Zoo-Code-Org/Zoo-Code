@@ -647,7 +647,7 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			const state = await provider.getStateToPostToWebview()
 
-			expect(state.currentTaskId).toBeUndefined()
+			expect(state.currentTaskId).toBeNull()
 			expect(state.currentApiConfigName).toBe("default")
 		})
 
