@@ -20,6 +20,29 @@
 			"inputs": ["$TURBO_DEFAULT$", "!__tests__/dist_assets.spec.ts"],
 			"outputs": ["coverage/unit/**"]
 		},
+		"test:coverage:general": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": ["$TURBO_DEFAULT$", "!__tests__/dist_assets.spec.ts", "!services/tree-sitter/__tests__/**"],
+			"outputs": ["coverage/general/**"]
+		},
+		"test:coverage:tree-sitter": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"services/tree-sitter/**",
+				"services/shared/fallback-extensions.ts",
+				"core/ignore/RooIgnoreController.ts",
+				"utils/fs.ts",
+				"utils/path.ts",
+				"utils/vitest-verbosity.ts",
+				"__mocks__/**",
+				"vitest.setup.ts",
+				"vitest.config.ts",
+				"vitest.tree-sitter.config.ts",
+				"package.json",
+				"tsconfig.json"
+			],
+			"outputs": ["coverage/tree-sitter/**"]
+		},
 		"bundle": {
 			"dependsOn": ["^build", "@roo-code/vscode-webview#build"],
 			"outputs": ["dist/**"]

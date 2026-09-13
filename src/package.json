@@ -447,6 +447,8 @@
 		"test:dist": "vitest run --config vitest.dist.config.ts",
 		"test:coverage": "vitest run --coverage",
 		"test:coverage:unit": "vitest run --config vitest.unit.config.ts --coverage",
+		"test:coverage:general": "vitest run --config vitest.general.config.ts --coverage",
+		"test:coverage:tree-sitter": "vitest run --config vitest.tree-sitter.config.ts --coverage",
 		"format": "prettier --write .",
 		"bundle": "node esbuild.mjs",
 		"vscode:prepublish": "pnpm bundle --production",

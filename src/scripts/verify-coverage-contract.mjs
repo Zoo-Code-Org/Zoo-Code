@@ -7,7 +7,16 @@ const command = process.platform === "win32" ? process.execPath : pnpm
 const args = process.platform === "win32" ? [pnpm] : []
 const result = spawnSync(
 	command,
-	[...args, "turbo", "run", "test:coverage:unit", "test:dist", "--filter=zoo-code", "--dry=json"],
+	[
+		...args,
+		"turbo",
+		"run",
+		"test:coverage:general",
+		"test:coverage:tree-sitter",
+		"test:dist",
+		"--filter=zoo-code",
+		"--dry=json",
+	],
 	{ encoding: "utf8" },
 )
 if (result.status !== 0) {
@@ -16,14 +25,25 @@ if (result.status !== 0) {
 }
 
 const graph = JSON.parse(result.stdout)
-const coverageTask = graph.tasks.find(({ taskId }) => taskId === "zoo-code#test:coverage:unit")
+const generalTask = graph.tasks.find(({ taskId }) => taskId === "zoo-code#test:coverage:general")
+const treeSitterTask = graph.tasks.find(({ taskId }) => taskId === "zoo-code#test:coverage:tree-sitter")
 const distTask = graph.tasks.find(({ taskId }) => taskId === "zoo-code#test:dist")
-if (!coverageTask) throw new Error("Unit coverage task missing")
+if (!generalTask || !treeSitterTask) throw new Error("Extension coverage lane missing")
 if (graph.tasks.some(({ taskId }) => taskId === "zoo-code#prepare:tree-sitter-wasms"))
 	throw new Error("Removed WASM preparation task remains in the graph")
-if (coverageTask.dependencies.includes("zoo-code#bundle")) throw new Error("Unit coverage must not depend on bundle")
-if (!coverageTask.dependencies.includes("@roo-code/types#build"))
-	throw new Error("Unit coverage must depend on the types build")
-if (!Object.hasOwn(coverageTask.inputs, "package.json")) throw new Error("Unit coverage must hash package.json")
-if (!coverageTask.hashOfExternalDependencies) throw new Error("Unit coverage must hash external dependencies")
+for (const task of [generalTask, treeSitterTask]) {
+	if (task.dependencies.includes("zoo-code#bundle")) throw new Error("Coverage lanes must not depend on bundle")
+	if (!task.dependencies.includes("@roo-code/types#build"))
+		throw new Error("Coverage lanes must depend on the types build")
+	if (!Object.hasOwn(task.inputs, "package.json")) throw new Error("Coverage lanes must hash package.json")
+	if (!task.hashOfExternalDependencies) throw new Error("Coverage lanes must hash external dependencies")
+}
+if (!Object.hasOwn(generalTask.inputs, "services/tree-sitter/index.ts"))
+	throw new Error("General coverage must hash tree-sitter sources used by external consumers")
+if (Object.hasOwn(generalTask.inputs, "services/tree-sitter/__tests__/wasm.spec.ts"))
+	throw new Error("General coverage must not hash tree-sitter-owned tests")
+if (!Object.hasOwn(treeSitterTask.inputs, "services/tree-sitter/index.ts"))
+	throw new Error("Tree-sitter coverage must hash tree-sitter sources")
+if (Object.hasOwn(treeSitterTask.inputs, "core/task/Task.ts"))
+	throw new Error("Tree-sitter coverage must not hash unrelated core sources")
 if (!distTask?.dependencies.includes("zoo-code#bundle")) throw new Error("Dist smoke test must depend on bundle")
