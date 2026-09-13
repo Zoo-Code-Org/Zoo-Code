@@ -505,4 +505,20 @@ describe("RequestConfigBuilder", () => {
 			expect(config.maxTokens).toBe(2000)
 		})
 	})
+
+	describe("static merge helpers (canonical abort-signal entry points)", () => {
+		it("returns undefined from mergeAbortSignalAndTimeout when no external signal and no valid timeout", () => {
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(undefined, undefined)).toBeUndefined()
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(undefined, 0)).toBeUndefined()
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(undefined, -5)).toBeUndefined()
+		})
+
+		it("returns the external signal directly when no timeout is merged", () => {
+			const controller = new AbortController()
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(controller.signal, undefined)).toBe(
+				controller.signal,
+			)
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(controller.signal, 0)).toBe(controller.signal)
+		})
+	})
 })
