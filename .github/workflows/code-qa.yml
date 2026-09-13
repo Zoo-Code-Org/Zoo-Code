@@ -125,6 +125,10 @@ jobs:
     unit-test:
         name: platform-unit-test (${{ matrix.name }})
         runs-on: ${{ matrix.os }}
+        concurrency:
+            # Duplicate runs for one commit must not race the OS-specific Turbo cache save.
+            group: unit-test-${{ github.repository }}-${{ github.sha }}-${{ matrix.name }}
+            cancel-in-progress: false
         strategy:
             matrix:
                 include:
