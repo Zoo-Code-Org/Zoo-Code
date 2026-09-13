@@ -505,4 +505,44 @@ describe("RequestConfigBuilder", () => {
 			expect(config.maxTokens).toBe(2000)
 		})
 	})
+
+	describe("static merge helpers (canonical abort-signal entry points)", () => {
+		it("returns undefined from mergeAbortSignalAndTimeout when no external signal and no valid timeout", () => {
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(undefined, undefined)).toBeUndefined()
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(undefined, 0)).toBeUndefined()
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(undefined, -5)).toBeUndefined()
+		})
+
+		it("returns the external signal directly when no timeout is merged", () => {
+			const controller = new AbortController()
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(controller.signal, undefined)).toBe(
+				controller.signal,
+			)
+			expect(RequestConfigBuilder.mergeAbortSignalAndTimeout(controller.signal, 0)).toBe(controller.signal)
+		})
+
+		it("returns the primary signal directly from mergeAbortSignals when there is no secondary", () => {
+			const controller = new AbortController()
+			expect(RequestConfigBuilder.mergeAbortSignals(controller.signal)).toBe(controller.signal)
+			expect(RequestConfigBuilder.mergeAbortSignals(controller.signal, undefined)).toBe(controller.signal)
+		})
+
+		it("delegates to AbortSignal.any when two distinct signals are merged", () => {
+			const a = new AbortController()
+			const b = new AbortController()
+			const merged = RequestConfigBuilder.mergeAbortSignals(a.signal, b.signal)
+			expect(merged.aborted).toBe(false)
+			b.abort()
+			expect(merged.aborted).toBe(true)
+		})
+
+		it("aborts the merged signal when the primary signal aborts", () => {
+			const a = new AbortController()
+			const b = new AbortController()
+			const merged = RequestConfigBuilder.mergeAbortSignals(a.signal, b.signal)
+			expect(merged.aborted).toBe(false)
+			a.abort()
+			expect(merged.aborted).toBe(true)
+		})
+	})
 })

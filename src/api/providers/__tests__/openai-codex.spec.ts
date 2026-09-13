@@ -9,6 +9,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 import { Anthropic } from "@anthropic-ai/sdk"
+import { TelemetryService } from "@roo-code/telemetry"
 import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
 import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
@@ -591,6 +592,72 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		expect(mockFetch).not.toHaveBeenCalled()
 	})
 
+	// The cancellation wins over the auth retry: force-refreshing a token for a request that is
+	// already gone would spend a network round trip on a dead request and surface the
+	// cancellation as an authentication failure.
+	it("fails fast with the abort contract instead of force-refreshing the token after cancellation", async () => {
+		const handler = createHandler()
+		const refresh = vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+		const controller = new AbortController()
+		// The SDK keeps the request open until the signal it was handed aborts, then rejects the way
+		// it rejects aborted requests.
+		const create = vitest.fn().mockImplementation(
+			(_body: unknown, options: { signal: AbortSignal }) =>
+				new Promise((_resolve, reject) => {
+					options.signal.addEventListener("abort", () => reject(new Error("Request was aborted")), {
+						once: true,
+					})
+				}),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const completion = handler.completePrompt("Hello", { abortSignal: controller.signal })
+		await vitest.waitFor(() => expect(create).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(refresh).not.toHaveBeenCalled()
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// The abort lands while the fallback fetch is in flight, so the cancellation must come out as
+	// the shared abort contract - not a telemetry event and not a wrapped connection error.
+	it("keeps the abort contract and skips telemetry when the fallback fetch is cancelled", async () => {
+		const handler = createHandler()
+		// The module mock keeps the spy across tests, so clear it before asserting on this request
+		const captureException = vitest.mocked(TelemetryService.instance.captureException)
+		captureException.mockClear()
+		// The SDK path is unusable, so the request falls back to the SSE transport.
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const controller = new AbortController()
+		// Reject the way fetch rejects once the signal it was handed aborts.
+		const mockFetch = vitest.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+			const signal = init?.signal
+			if (!signal || signal.aborted) {
+				return Promise.reject(new DOMException("The operation was aborted", "AbortError"))
+			}
+			return new Promise((_resolve, reject) => {
+				signal.addEventListener(
+					"abort",
+					() => reject(new DOMException("The operation was aborted", "AbortError")),
+					{ once: true },
+				)
+			})
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const completion = handler.completePrompt("Hello", { abortSignal: controller.signal })
+		await vitest.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(captureException).not.toHaveBeenCalled()
+	})
+
 	it("wraps failures from both transports as a completion error", async () => {
 		const handler = createHandler()
 		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
@@ -1010,5 +1077,356 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 			version: "0.144.0",
 			"x-openai-internal-codex-responses-lite": "true",
 		})
+	})
+})
+
+describe("OpenAiCodexHandler.completePrompt timeout", () => {
+	function createHandler() {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		return handler
+	}
+
+	function injectStream(handler: OpenAiCodexHandler, events: unknown[]) {
+		const create = vitest.fn().mockResolvedValue(asyncStreamFrom(events))
+		Reflect.set(handler, "client", { responses: { create } })
+		return create
+	}
+
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	// timeoutMs <= 0 must not install a timer: the completion runs to the end and the
+	// request signal never aborts on its own.
+	it("treats timeoutMs=0 as no timeout", async () => {
+		const handler = createHandler()
+		const create = injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "response" },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("test prompt", { timeoutMs: 0 })).resolves.toBe("response")
+
+		expect(create.mock.calls[0][1].signal.aborted).toBe(false)
+	})
+
+	// A timeout and an external abort must cancel the same request: the signal the transport
+	// receives aborts when either of them fires.
+	it("merges abortSignal and timeoutMs into the request signal", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		let signalDuringRequest: AbortSignal | undefined
+
+		const create = vitest.fn().mockImplementation((_body: unknown, options: { signal: AbortSignal }) => {
+			signalDuringRequest = options.signal
+			// Abort mid-flight, while the listener linking the caller signal is attached.
+			controller.abort()
+			return Promise.resolve(
+				asyncStreamFrom([
+					{ type: "response.output_text.delta", delta: "feat: half a" },
+					{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+				]),
+			)
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+
+		await expect(
+			handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 }),
+		).rejects.toMatchObject({ name: "AbortError" })
+
+		expect(signalDuringRequest).toBeInstanceOf(AbortSignal)
+		expect(signalDuringRequest!.aborted).toBe(true)
+	})
+
+	// Native AbortSignal.timeout self-manages its timer, so a transport that rejects on abort
+	// is all the timeout needs to be observed end to end.
+	it("rejects with an AbortError when the timeout elapses", async () => {
+		const handler = createHandler()
+		let signalDuringRequest: AbortSignal | undefined
+
+		const create = vitest.fn().mockImplementation(
+			(_body: unknown, options: { signal: AbortSignal }) =>
+				new Promise((_resolve, reject) => {
+					signalDuringRequest = options.signal
+					// Reject the way the SDK does once the signal it was handed aborts.
+					options.signal.addEventListener("abort", () => reject(new Error("The operation was aborted")), {
+						once: true,
+					})
+				}),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+
+		// The timeout must have fired on the request signal, and a timed-out completion is not a
+		// transport failure, so it must not be replayed over SSE.
+		expect(signalDuringRequest!.aborted).toBe(true)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+})
+
+describe("OpenAiCodexHandler.createMessage abort bridging", () => {
+	// These tests drive createMessage directly (not completePrompt): completePrompt re-normalizes
+	// any error to the shared abort contract once the caller's signal has fired, which would mask
+	// regressions in the abort checks inside the transports.
+
+	function createHandler() {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		return handler
+	}
+
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	it("hands back the abort contract instead of force-refreshing after the caller cancels", async () => {
+		const handler = createHandler()
+		const refresh = vitest
+			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+			.mockResolvedValue("refreshed-token")
+		// The SDK fails with exactly the auth-failure wording the retry path would act on, so the
+		// abort check must win over the refresh-and-retry logic.
+		const create = vitest.fn().mockRejectedValue(new Error("401 invalid token"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(
+			collectStream(
+				handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+					taskId: "task-test",
+					abortSignal: AbortSignal.abort(),
+				}),
+			),
+		).rejects.toMatchObject({ name: "AbortError" })
+
+		// No refresh, no second SDK attempt, no SSE fallback.
+		expect(refresh).not.toHaveBeenCalled()
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("emits nothing once the caller cancels before the first SDK event", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		const create = vitest.fn().mockImplementation(() => {
+			// The caller cancels while the SDK is still delivering, so the loop's abort check must
+			// stop every event from reaching the caller.
+			controller.abort()
+			return Promise.resolve(
+				asyncStreamFrom([
+					{ type: "response.output_text.delta", delta: "feat: half a" },
+					{ type: "response.output_text.delta", delta: "and the rest" },
+					{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+				]),
+			)
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const chunks = await collectStream(
+			handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+				taskId: "task-test",
+				abortSignal: controller.signal,
+			}),
+		)
+
+		// The generators end quietly on abort - they break rather than throw - so an empty stream
+		// is the observable proof that nothing was processed after the cancellation.
+		expect(chunks).toEqual([])
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("clears the request controller once the request ends", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "done" },
+				{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+			]),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await collectStream(handler.createMessage("System", [{ role: "user", content: "Hello" }]))
+
+		// A later request must be able to tell that no request is in flight.
+		expect(Reflect.get(handler, "abortController")).toBeUndefined()
+	})
+
+	it("keeps the later request's controller when the earlier request finishes", async () => {
+		const handler = createHandler()
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		// The earlier request holds its stream open until the later request has installed its own
+		// controller, so the earlier cleanup runs while a request is still in flight.
+		let releaseEarlier: (() => void) | undefined
+		const releaseGate = new Promise<void>((resolve) => {
+			releaseEarlier = resolve
+		})
+		const earlierStream = (async function* () {
+			yield { type: "response.output_text.delta", delta: "a" }
+			await releaseGate
+			yield { type: "response.completed", response: { id: "ra", status: "completed", output: [] } }
+		})()
+		const create = vitest
+			.fn()
+			.mockImplementationOnce(() => Promise.resolve(earlierStream))
+			.mockImplementationOnce(() =>
+				Promise.resolve(
+					asyncStreamFrom([
+						{ type: "response.output_text.delta", delta: "b" },
+						{ type: "response.completed", response: { id: "rb", status: "completed", output: [] } },
+					]),
+				),
+			)
+		Reflect.set(handler, "client", { responses: { create } })
+
+		const earlier = handler.createMessage("System", [{ role: "user", content: "Hello" }])
+		expect(await earlier.next()).toMatchObject({ value: { type: "text", text: "a" } })
+
+		const later = handler.createMessage("System", [{ role: "user", content: "Hello" }])
+		expect(await later.next()).toMatchObject({ value: { type: "text", text: "b" } })
+
+		// The earlier request finishes while the later one is still in flight.
+		releaseEarlier!()
+		await earlier.next()
+
+		// The earlier request's cleanup must not clear the controller the later request installed.
+		const controller = Reflect.get(handler, "abortController") as AbortController | undefined
+		expect(controller).toBeDefined()
+		expect(controller?.signal).toBe(create.mock.calls[1][1].signal)
+
+		// Let the later request finish and clear its own controller.
+		await later.next()
+	})
+
+	it("stops reading the fallback stream once the request aborts", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const controller = new AbortController()
+		const encoder = new TextEncoder()
+		const body = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(
+					encoder.encode('data: {"type":"response.output_text.delta","delta":"one"}\n\n'),
+				)
+				streamController.enqueue(
+					encoder.encode('data: {"type":"response.output_text.delta","delta":"two"}\n\n'),
+				)
+				streamController.close()
+			},
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "one" } })
+
+		// The cancellation lands between two stream reads, exactly where the loop's check runs.
+		controller.abort()
+
+		const chunks = await collectStream(iter)
+		// Everything enqueued after the cancellation must stay unread.
+		expect(chunks).toEqual([])
+	})
+
+	it("hands back the abort contract when the fallback stream tears down while the caller cancels", async () => {
+		const handler = createHandler()
+		const captureException = vitest.mocked(TelemetryService.instance.captureException)
+		captureException.mockClear()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const controller = new AbortController()
+		const encoder = new TextEncoder()
+		let pullStartedResolve: (() => void) | undefined
+		let failRead: (() => void) | undefined
+		const pullStarted = new Promise<void>((resolve) => {
+			pullStartedResolve = resolve
+		})
+		const failGate = new Promise<void>((resolve) => {
+			failRead = resolve
+		})
+		const body = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(
+					encoder.encode('data: {"type":"response.output_text.delta","delta":"one"}\n\n'),
+				)
+			},
+			pull(streamController) {
+				// The second read is pending; tear the stream down on the test's signal.
+				pullStartedResolve!()
+				return failGate.then(() => {
+					streamController.error(new Error("stream torn down"))
+				})
+			},
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "one" } })
+
+		const pending = collectStream(iter)
+		await pullStarted
+		// The cancellation lands while the second read is in flight, i.e. after the loop's check.
+		controller.abort()
+		failRead!()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		// Cancellation is the caller's own doing, so neither catch may report it to telemetry.
+		expect(captureException).not.toHaveBeenCalled()
+	})
+
+	it("wraps a torn-down fallback stream as a stream error when nothing was aborted", async () => {
+		const handler = createHandler()
+		const captureException = vitest.mocked(TelemetryService.instance.captureException)
+		captureException.mockClear()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const encoder = new TextEncoder()
+		const body = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(
+					encoder.encode('data: {"type":"response.output_text.delta","delta":"one"}\n\n'),
+				)
+			},
+			pull(streamController) {
+				streamController.error(new Error("stream torn down"))
+			},
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }])
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "one" } })
+
+		// The wrap chain surfaces the connection-failure key in every case, so the message alone
+		// cannot prove the innermost check classified this as a stream failure: an always-true
+		// check would swap in the shared abort contract, and the request-level catch would wrap
+		// that in the same key. The telemetry count is the witness: the stream-processing catch
+		// and the request catch both report the failure (twice); the abort path skips the first.
+		await expect(collectStream(iter)).rejects.toThrow(/connectionFailed|stream torn down/)
+		expect(captureException).toHaveBeenCalledTimes(2)
 	})
 })
