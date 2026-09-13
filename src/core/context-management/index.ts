@@ -4,7 +4,13 @@ import crypto from "crypto"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ApiHandler, ApiHandlerCreateMessageMetadata } from "../../api"
-import { MAX_CONDENSE_THRESHOLD, MIN_CONDENSE_THRESHOLD, summarizeConversation, SummarizeResponse } from "../condense"
+import {
+	getEffectiveApiHistory,
+	MAX_CONDENSE_THRESHOLD,
+	MIN_CONDENSE_THRESHOLD,
+	summarizeConversation,
+	SummarizeResponse,
+} from "../condense"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -158,6 +164,195 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 		truncationId,
 		messagesRemoved: messagesToRemove,
 	}
+}
+
+/**
+ * Minimum characters retained when degrading a tool_result: below this the model can no
+ * longer tell what the tool was operating on, so the block stops being eligible.
+ */
+const TOOL_RESULT_SHRINK_FLOOR_CHARS = 200
+
+/**
+ * Notice appended to a degraded tool_result. Built through one helper so the characters it
+ * costs can be reserved before deciding how much of the payload to keep.
+ */
+const buildTruncationNotice = (removedChars: number): string =>
+	`\n[Tool result truncated: ${removedChars} characters removed to fit the context budget]`
+
+/**
+ * A textual tool_result block eligible for degradation, located by index so the edit can
+ * be applied without mutating the input history. `textIndex` is the position of the text
+ * inside the tool_result's content array, or -1 when the content is a plain string.
+ */
+type ShrinkingToolResult = {
+	messageIndex: number
+	blockIndex: number
+	textIndex: number
+	text: string
+	tokens: number
+}
+
+/**
+ * Collects the textual tool_result blocks that can still be shrunk, with their token
+ * estimates. Only blocks above the floor are returned; images and other non-textual
+ * content are never touched.
+ *
+ * Candidates are restricted to the content the API actually receives: `Task` passes the
+ * full persisted history to `manageContext`, but condense/truncation hide messages from
+ * `getEffectiveApiHistory`. Shrinking hidden content would lower the token estimate
+ * without changing the request, which is the same false progress this recovery exists to
+ * prevent. Returned indexes stay indexes into the persisted history so the edits below
+ * target the right messages. Visibility is decided per block by `apiVisibleBlocks` alone —
+ * message-level metadata (e.g. a `truncationParent` whose marker was rewound away) must
+ * not veto blocks that are API-visible again.
+ */
+async function findShrinkableToolResults(
+	messages: ApiMessage[],
+	apiHandler: ApiHandler,
+): Promise<ShrinkingToolResult[]> {
+	const results: ShrinkingToolResult[] = []
+	// Block-level identity, not message-level: `getEffectiveApiHistory` returns a clone of a
+	// user message when it filters an orphan tool_result out of it, so that message can never
+	// match a persisted message by reference. The clone's content array still holds the SAME
+	// block objects as the persisted history, so matching blocks by reference maps API-visible
+	// content back to its persisted location — the filtered orphan block stays invisible, and
+	// the surviving blocks in the same message remain shrinkable.
+	const apiVisibleBlocks = new Set(
+		getEffectiveApiHistory(messages).flatMap((message) => (Array.isArray(message.content) ? message.content : [])),
+	)
+	for (const [messageIndex, message] of messages.entries()) {
+		if (!Array.isArray(message.content)) continue
+		for (const [blockIndex, block] of message.content.entries()) {
+			if (!apiVisibleBlocks.has(block)) continue
+			if (block.type !== "tool_result") continue
+			const toolResult = block as Anthropic.ToolResultBlockParam
+			const items =
+				typeof toolResult.content === "string"
+					? [{ textIndex: -1, text: toolResult.content }]
+					: (toolResult.content ?? [])
+							.map((item, textIndex) => ({ textIndex, item }))
+							.filter(({ item }) => item.type === "text")
+							.map(({ textIndex, item }) => ({
+								textIndex,
+								text: (item as Anthropic.TextBlockParam).text,
+							}))
+			for (const { textIndex, text } of items) {
+				if (text.length <= TOOL_RESULT_SHRINK_FLOOR_CHARS) continue
+				results.push({
+					messageIndex,
+					blockIndex,
+					textIndex,
+					text,
+					tokens: await estimateTokenCount([{ type: "text", text }], apiHandler),
+				})
+			}
+		}
+	}
+	return results
+}
+
+/**
+ * Applies tool_result shrink edits functionally: the input history is never mutated, so
+ * the caller's reference comparison (`messages !== apiConversationHistory`) keeps working.
+ */
+function applyToolResultEdits(
+	messages: ApiMessage[],
+	edits: Array<{ messageIndex: number; blockIndex: number; textIndex: number; newText: string }>,
+): ApiMessage[] {
+	const result = [...messages]
+	const byMessage = new Map<number, typeof edits>()
+	for (const edit of edits) {
+		const group = byMessage.get(edit.messageIndex) ?? []
+		group.push(edit)
+		byMessage.set(edit.messageIndex, group)
+	}
+	for (const [messageIndex, messageEdits] of byMessage) {
+		const message = result[messageIndex]
+		if (!Array.isArray(message.content)) continue
+		const content = [...message.content]
+		const byBlock = new Map<number, typeof messageEdits>()
+		for (const edit of messageEdits) {
+			const group = byBlock.get(edit.blockIndex) ?? []
+			group.push(edit)
+			byBlock.set(edit.blockIndex, group)
+		}
+		for (const [blockIndex, blockEdits] of byBlock) {
+			const block = content[blockIndex] as Anthropic.ToolResultBlockParam
+			if (typeof block.content === "string") {
+				content[blockIndex] = { ...block, content: blockEdits[0]!.newText }
+			} else {
+				const blockContent = [...(block.content ?? [])]
+				for (const edit of blockEdits) {
+					blockContent[edit.textIndex] = {
+						...(blockContent[edit.textIndex] as Anthropic.TextBlockParam),
+						text: edit.newText,
+					}
+				}
+				content[blockIndex] = { ...block, content: blockContent }
+			}
+		}
+		result[messageIndex] = { ...message, content }
+	}
+	return result
+}
+
+/**
+ * Frees context budget by shrinking the largest textual tool_result blocks in place: the
+ * tool_use_id and block shape are preserved, so the tool_use/tool_result pair is never
+ * orphaned. Returns the updated messages, or null when nothing eligible can shrink.
+ *
+ * Used when message-level truncation removes zero messages (short histories such as an
+ * assistant tool_use followed by one oversized user tool_result): without this, the only
+ * remaining recovery is reporting a successful truncation that removed nothing.
+ */
+async function shrinkOversizedToolResults({
+	messages,
+	tokensToFree,
+	apiHandler,
+}: {
+	messages: ApiMessage[]
+	tokensToFree: number
+	apiHandler: ApiHandler
+}): Promise<ApiMessage[] | null> {
+	if (tokensToFree <= 0) return null
+	const candidates = await findShrinkableToolResults(messages, apiHandler)
+	if (candidates.length === 0) return null
+
+	// Largest first: the biggest result frees the most tokens while losing the least
+	// information, and smaller results stay available to a later recovery round.
+	candidates.sort((a, b) => b.tokens - a.tokens)
+
+	const edits: Array<{ messageIndex: number; blockIndex: number; textIndex: number; newText: string }> = []
+	let remaining = tokensToFree
+	for (const candidate of candidates) {
+		if (remaining <= 0) break
+		// Chars-per-token measured on the block itself, so the shrink target lands close
+		// to the intended token reduction whatever the content's tokenizer density is.
+		const charsPerToken = candidate.text.length / Math.max(candidate.tokens, 1)
+		const keepTokens = Math.max(candidate.tokens - remaining, 1)
+		const targetChars = Math.max(TOOL_RESULT_SHRINK_FLOOR_CHARS, Math.floor(keepTokens * charsPerToken))
+		if (targetChars >= candidate.text.length) continue
+		// The notice costs characters of its own, so reserve room for it: for a small
+		// tokensToFree the slice target sits within a notice's length of the original, and the
+		// appended notice would then grow the block while still reporting a removal.
+		const noticeReserve = buildTruncationNotice(candidate.text.length).length
+		const keepChars = Math.max(TOOL_RESULT_SHRINK_FLOOR_CHARS, targetChars - noticeReserve)
+		const newText = `${candidate.text.slice(0, keepChars)}${buildTruncationNotice(
+			candidate.text.length - keepChars,
+		)}`
+		// A block that is already at the floor cannot absorb the notice. Leave it untouched
+		// instead of rewriting it into a longer body and reporting success on a no-op edit.
+		if (newText.length >= candidate.text.length) continue
+		edits.push({
+			messageIndex: candidate.messageIndex,
+			blockIndex: candidate.blockIndex,
+			textIndex: candidate.textIndex,
+			newText,
+		})
+		remaining -= Math.floor((candidate.text.length - newText.length) / charsPerToken)
+	}
+	if (edits.length === 0) return null
+	return applyToolResultEdits(messages, edits)
 }
 
 /**
@@ -383,43 +578,85 @@ export async function manageContext({
 
 	// Fall back to sliding window truncation if needed
 	if (prevContextTokens > allowedTokens) {
+		// Model-facing token count: the system prompt plus everything `getEffectiveApiHistory`
+		// keeps — the summary's fresh-start slice (pre-summary content and condenseParent-tagged
+		// messages are hidden), truncation-tagged messages (only while their marker exists),
+		// orphan tool_result blocks, and truncation markers themselves. Counting the persisted
+		// history instead would compare the recovery result against tokens the API never sees.
+		// Shared by the truncation and degradation paths below so both report against the same
+		// accounting.
+		const countModelFacingTokens = async (msgs: ApiMessage[]): Promise<number> => {
+			let total = await estimateTokenCount([{ type: "text", text: systemPrompt }], apiHandler)
+			for (const msg of getEffectiveApiHistory(msgs)) {
+				const content = msg.content
+				if (Array.isArray(content)) {
+					total += await estimateTokenCount(content, apiHandler)
+				} else if (typeof content === "string") {
+					total += await estimateTokenCount([{ type: "text", text: content }], apiHandler)
+				}
+			}
+			return total
+		}
+
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
+		const newContextTokensAfterTruncation = await countModelFacingTokens(truncationResult.messages)
 
-		// Calculate new context tokens after truncation by counting non-truncated messages
-		// Messages with truncationParent are hidden, so we count only those without it
-		const effectiveMessages = truncationResult.messages.filter(
-			(msg) => !msg.truncationParent && !msg.isTruncationMarker,
-		)
-
-		// Include system prompt tokens so this value matches what we send to the API.
-		// Note: `prevContextTokens` is computed locally here (totalTokens + lastMessageTokens).
-		let newContextTokensAfterTruncation = await estimateTokenCount(
-			[{ type: "text", text: systemPrompt }],
-			apiHandler,
-		)
-
-		for (const msg of effectiveMessages) {
-			const content = msg.content
-			if (Array.isArray(content)) {
-				newContextTokensAfterTruncation += await estimateTokenCount(content, apiHandler)
-			} else if (typeof content === "string") {
-				newContextTokensAfterTruncation += await estimateTokenCount(
-					[{ type: "text", text: content }],
-					apiHandler,
-				)
+		// Recovery only counts as successful when the recalculated context actually decreased:
+		// for short histories the fraction-based message calculation can round down to zero
+		// removable messages, and reporting that as a successful truncation retriggers the same
+		// over-budget request forever.
+		if (truncationResult.messagesRemoved > 0 && newContextTokensAfterTruncation < prevContextTokens) {
+			// Include system prompt tokens so this value matches what we send to the API.
+			// Note: `prevContextTokens` is computed locally here (totalTokens + lastMessageTokens).
+			return {
+				messages: truncationResult.messages,
+				prevContextTokens,
+				summary: "",
+				cost,
+				error,
+				errorDetails,
+				truncationId: truncationResult.truncationId,
+				messagesRemoved: truncationResult.messagesRemoved,
+				newContextTokensAfterTruncation,
 			}
 		}
 
+		// Zero message-level progress: the history is too short to remove a valid
+		// turn/tool pair (e.g. an assistant tool_use followed by one oversized user
+		// tool_result). Degrade in place instead — shrink the largest textual tool_result
+		// blocks, keeping their tool_use_id and result shape so the pair stays intact.
+		const degradedMessages = await shrinkOversizedToolResults({
+			messages,
+			tokensToFree: prevContextTokens - allowedTokens,
+			apiHandler,
+		})
+
+		if (degradedMessages) {
+			const newContextTokensAfterDegradation = await countModelFacingTokens(degradedMessages)
+			if (newContextTokensAfterDegradation < prevContextTokens) {
+				return {
+					messages: degradedMessages,
+					prevContextTokens,
+					summary: "",
+					cost,
+					error,
+					errorDetails,
+					truncationId: truncationResult.truncationId,
+					messagesRemoved: 0,
+					newContextTokensAfterTruncation: newContextTokensAfterDegradation,
+				}
+			}
+		}
+
+		// Protected content leaves nothing to remove or shrink: report a controlled failure
+		// instead of emitting a successful truncation event that removed zero messages.
 		return {
-			messages: truncationResult.messages,
-			prevContextTokens,
+			messages,
 			summary: "",
 			cost,
-			error,
-			errorDetails,
-			truncationId: truncationResult.truncationId,
-			messagesRemoved: truncationResult.messagesRemoved,
-			newContextTokensAfterTruncation,
+			prevContextTokens,
+			error: `Context window recovery failed: the conversation (${Math.round(prevContextTokens)} tokens) exceeds the available budget (${Math.round(allowedTokens)} tokens) and no messages can be removed or tool results shrunk further. Reduce the size of individual tool outputs or start a new task.`,
+			errorDetails: `Fallback truncation removed 0 messages and no eligible textual tool_result could be shrunk below its floor.`,
 		}
 	}
 	// No truncation or condensation needed

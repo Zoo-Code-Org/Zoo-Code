@@ -2044,4 +2044,440 @@ describe("Context Management", () => {
 			summarizeSpy.mockRestore()
 		})
 	})
+
+	/**
+	 * Tests for the zero-progress fallback recovery in manageContext (issue #1254):
+	 * short histories where the fraction-based message calculation removes zero
+	 * messages must never report a successful truncation that leaves the oversized
+	 * context unchanged.
+	 */
+	describe("manageContext fallback recovery for zero-progress truncation", () => {
+		const buildToolPairHistory = (
+			toolResultContent: Anthropic.Messages.ToolResultBlockParam["content"],
+		): ApiMessage[] => [
+			{ role: "user", content: "Initial task", ts: 1000 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "toolu_01", name: "fetch_report", input: {} }],
+				ts: 1100,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_01", content: toolResultContent }],
+				ts: 1200,
+			},
+		]
+
+		it("recovers by shrinking an oversized tool_result when message-level truncation removes zero messages", async () => {
+			// ~4 MB tool result (realistic mixed content, like a large MCP/CLI output),
+			// far above the window budget once counted.
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(
+					4_000_000 / 74,
+				)
+			const messages = buildToolPairHistory(oversizedText)
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 0,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).not.toBe(messages) // the degraded copy must be persisted by the caller
+			expect(result.newContextTokensAfterTruncation).toBeDefined()
+			expect(result.newContextTokensAfterTruncation!).toBeLessThan(result.prevContextTokens)
+
+			// The oversized tool_use/tool_result pair stays intact: same message count,
+			// same tool_use_id, block shape preserved, only the payload is smaller.
+			expect(result.messages).toHaveLength(3)
+			const toolResult = (
+				result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(toolResult.tool_use_id).toBe("toolu_01")
+			const shrunkText =
+				typeof toolResult.content === "string"
+					? toolResult.content
+					: (toolResult.content as Anthropic.TextBlockParam[]).map((item) => item.text).join("")
+			expect(shrunkText.length).toBeLessThan(oversizedText.length)
+			expect(shrunkText).toContain("[Tool result truncated")
+		}, 60000)
+
+		it("shrinks only the oversized text item of an array-form tool_result", async () => {
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const headerItem: Anthropic.Messages.TextBlockParam = { type: "text", text: "Report header: 128 rows" }
+			const imageItem: Anthropic.Messages.ImageBlockParam = {
+				type: "image",
+				source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
+			}
+			const payloadItem: Anthropic.Messages.TextBlockParam = { type: "text", text: oversizedText }
+			const footerItem: Anthropic.Messages.TextBlockParam = { type: "text", text: "END OF REPORT" }
+			const toolResultContent: Anthropic.Messages.ToolResultBlockParam["content"] = [
+				headerItem,
+				imageItem,
+				payloadItem,
+				footerItem,
+			]
+			const messages = buildToolPairHistory(toolResultContent)
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			const toolResult = (
+				result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(toolResult.tool_use_id).toBe("toolu_01")
+
+			const items = toolResult.content as Anthropic.Messages.ContentBlockParam[]
+			// Order, block types and the ineligible items survive the edit untouched: only the
+			// oversized text item is degraded.
+			expect(items).toHaveLength(4)
+			expect(items[0]).toEqual(headerItem)
+			expect(items[1]).toEqual(imageItem)
+			expect(items[3]).toEqual(footerItem)
+			const degradedItem = items[2] as Anthropic.Messages.TextBlockParam
+			expect(degradedItem.type).toBe("text")
+			expect(degradedItem.text).toContain("[Tool result truncated")
+			expect(degradedItem.text.length).toBeLessThan(oversizedText.length)
+
+			// The caller's history is never mutated.
+			const originalBlock = (
+				messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(originalBlock.content).toEqual(toolResultContent)
+		}, 60000)
+
+		it("does not treat a tool_result hidden by a condensation summary as a shrink candidate", async () => {
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const condenseId = "condense-1"
+			// Fresh-start condense: every earlier message is tagged with condenseParent and the
+			// summary is the only message `getEffectiveApiHistory` keeps.
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000, condenseParent: condenseId },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_01", name: "fetch_report", input: {} }],
+					ts: 1100,
+					condenseParent: condenseId,
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_01", content: oversizedText }],
+					ts: 1200,
+					condenseParent: condenseId,
+				},
+				{
+					role: "user",
+					content: "## Conversation Summary\nEarlier work was condensed.",
+					ts: 1300,
+					isSummary: true,
+					condenseId,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// Degrading the condensed-away result would lower the token estimate without changing
+			// the request the API receives, so it must not be reported as recovery.
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages)
+		}, 60000)
+
+		it("still shrinks the API-visible tool_result of a message that also carries an orphan tool_result", async () => {
+			// After a condense, `getEffectiveApiHistory` filters the orphan tool_result out of the
+			// kept user message and returns a CLONE of it. The recovery must map the surviving
+			// (API-visible) blocks back to the persisted history so the oversized result stays
+			// shrinkable — while the orphan block itself must remain untouched.
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const orphanContent = "stale output whose tool_use was condensed away"
+			const messages: ApiMessage[] = [
+				{
+					role: "user",
+					content: "## Conversation Summary\nEarlier work was condensed.",
+					ts: 1200,
+					isSummary: true,
+					condenseId: "condense-1",
+				},
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_big", name: "fetch_report", input: {} }],
+					ts: 1300,
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_old", content: orphanContent },
+						{ type: "tool_result", tool_use_id: "toolu_big", content: oversizedText },
+					],
+					ts: 1400,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined() // the oversized result is API-visible and shrinkable
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).not.toBe(messages) // the degraded copy must be persisted by the caller
+
+			const blocks = result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			const degraded = blocks[1] as Anthropic.ToolResultBlockParam
+			expect(degraded.tool_use_id).toBe("toolu_big")
+			expect(degraded.content as string).toContain("[Tool result truncated")
+			expect((degraded.content as string).length).toBeLessThan(oversizedText.length)
+
+			// The orphan block is not API-visible: degrading it would lower the token estimate
+			// without changing the request, so it must survive the recovery byte-identical.
+			const orphan = blocks[0] as Anthropic.ToolResultBlockParam
+			expect(orphan.tool_use_id).toBe("toolu_old")
+			expect(orphan.content).toBe(orphanContent)
+		}, 60000)
+
+		it("still shrinks an oversized tool_result whose message carries an orphaned truncationParent", async () => {
+			// Rewinding past a truncation deletes the marker, and `getEffectiveApiHistory`
+			// includes the tagged messages again (orphaned parents are API-visible). Candidate
+			// selection must follow that visibility instead of the stale metadata, or an
+			// oversized API-visible tool_result has no shrink candidate at all.
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const orphanedParent = "rewound-truncation-id"
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000, truncationParent: orphanedParent },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_01", name: "fetch_report", input: {} }],
+					ts: 1100,
+					truncationParent: orphanedParent,
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_01", content: oversizedText }],
+					ts: 1200,
+					truncationParent: orphanedParent,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined() // the oversized result is API-visible again and shrinkable
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).not.toBe(messages) // the degraded copy must be persisted by the caller
+
+			const toolResult = (
+				result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			)[0] as Anthropic.ToolResultBlockParam
+			expect(toolResult.tool_use_id).toBe("toolu_01")
+			expect(toolResult.content as string).toContain("[Tool result truncated")
+			expect((toolResult.content as string).length).toBeLessThan(oversizedText.length)
+		}, 60000)
+
+		it("does not let a persisted orphan tool_result block mask a successful degradation", async () => {
+			// `getEffectiveApiHistory` filters the orphan block out of the kept user message, but
+			// the persisted history still carries it. Recovery accounting over persisted messages
+			// keeps charging the orphan against the result, so a degradation that only moves
+			// API-visible content gets rejected as zero progress and reports a controlled error.
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const orphanText = 'STALE_LOG_LINE {"level":"warn","msg":"orphaned output","path":"/data/old"}\n'.repeat(
+				3000,
+			)
+			const messages: ApiMessage[] = [
+				{
+					role: "user",
+					content: "## Conversation Summary\nEarlier work was condensed.",
+					ts: 1200,
+					isSummary: true,
+					condenseId: "condense-1",
+				},
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_big", name: "fetch_report", input: {} }],
+					ts: 1300,
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_old", content: orphanText },
+						{ type: "tool_result", tool_use_id: "toolu_big", content: oversizedText },
+					],
+					ts: 1400,
+				},
+				{ role: "user", content: "Continue the task.", ts: 1500 },
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 65000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined() // degrading API-visible content is real progress
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).not.toBe(messages)
+
+			const blocks = result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			const degraded = blocks[1] as Anthropic.ToolResultBlockParam
+			expect(degraded.tool_use_id).toBe("toolu_big")
+			expect(degraded.content as string).toContain("[Tool result truncated")
+			expect((degraded.content as string).length).toBeLessThan(oversizedText.length)
+
+			// The orphan block is not API-visible: it must survive the recovery byte-identical.
+			const orphan = blocks[0] as Anthropic.ToolResultBlockParam
+			expect(orphan.tool_use_id).toBe("toolu_old")
+			expect(orphan.content).toBe(orphanText)
+		}, 60000)
+
+		it("leaves a tool_result that is already at the shrink floor untouched", async () => {
+			// One result large enough to absorb the whole budget deficit, one sitting just above
+			// the 200-character floor (long enough to be a candidate, too short to absorb the
+			// notice the degradation appends).
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(300)
+			const floorText = "small tool output\n".repeat(15)
+			expect(floorText.length).toBeGreaterThan(200)
+
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000 },
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "toolu_big", name: "fetch_report", input: {} },
+						{ type: "tool_use", id: "toolu_small", name: "fetch_summary", input: {} },
+					],
+					ts: 1100,
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_big", content: oversizedText },
+						{ type: "tool_result", tool_use_id: "toolu_small", content: floorText },
+					],
+					ts: 1200,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined() // the oversized result alone covers the deficit
+			const blocks = result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			const degraded = blocks[0] as Anthropic.ToolResultBlockParam
+			expect(degraded.tool_use_id).toBe("toolu_big")
+			expect(degraded.content as string).toContain("[Tool result truncated")
+
+			// Rewriting the short block would append a notice longer than the characters it frees,
+			// growing the block while reporting a removal that never happened.
+			const untouched = blocks[1] as Anthropic.ToolResultBlockParam
+			expect(untouched.tool_use_id).toBe("toolu_small")
+			expect(untouched.content).toBe(floorText)
+		}, 60000)
+
+		it("returns a controlled error when nothing can be removed and no tool result can shrink", async () => {
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "First message", ts: 1000 },
+				{ role: "assistant", content: "Second message", ts: 1100 },
+				{ role: "user", content: "Third message", ts: 1200 },
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// The controlled error must name the actual failure, not just be defined: a stale or
+			// unrelated error would satisfy a `toBeDefined()` assertion.
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.errorDetails).toContain("removed 0 messages and no eligible textual tool_result")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages) // unchanged history, no fake truncation event
+		})
+	})
 })
