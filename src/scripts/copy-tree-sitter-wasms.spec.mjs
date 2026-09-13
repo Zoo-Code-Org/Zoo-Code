@@ -30,6 +30,18 @@ describe("publishTreeSitterWasms", () => {
 		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("a")
 	})
 
+	it("rejects an empty source set before touching published outputs", async () => {
+		const source = path.join(root, "source")
+		const destination = path.join(root, "dist")
+		fs.mkdirSync(source)
+		fs.mkdirSync(destination)
+		fs.writeFileSync(path.join(destination, "tree-sitter-a.wasm"), "existing")
+
+		await expect(publishTreeSitterWasms(source, destination)).rejects.toThrow("WASM source set is empty")
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("existing")
+		expect(fs.existsSync(`${destination}.tree-sitter-wasms-transaction`)).toBe(false)
+	})
+
 	it("restores published outputs when publication fails", async () => {
 		const source = path.join(root, "source")
 		const destination = path.join(root, "dist")
@@ -169,5 +181,26 @@ describe("publishTreeSitterWasms", () => {
 			}),
 		).rejects.toThrow("WASM publication cancelled")
 		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
+	})
+
+	it("keeps committed outputs when transaction cleanup fails", async () => {
+		const source = path.join(root, "source")
+		const destination = path.join(root, "dist")
+		const transaction = `${destination}.tree-sitter-wasms-transaction`
+		fs.mkdirSync(source)
+		fs.mkdirSync(destination)
+		fs.writeFileSync(path.join(source, "tree-sitter-a.wasm"), "new-a")
+		fs.writeFileSync(path.join(destination, "tree-sitter-a.wasm"), "previous-a")
+		const filesystem = {
+			...fs.promises,
+			rm(directory, options) {
+				if (directory === transaction) throw new Error("cleanup failed")
+				return fs.promises.rm(directory, options)
+			},
+		}
+
+		await expect(publishTreeSitterWasms(source, destination, { filesystem })).rejects.toThrow("cleanup failed")
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("new-a")
+		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
 	})
 })

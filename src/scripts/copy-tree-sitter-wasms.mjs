@@ -28,12 +28,14 @@ export async function publishTreeSitterWasms(
 	const backupDir = path.join(transactionDir, "backup")
 	const quarantineDir = path.join(transactionDir, "quarantine")
 	const sourceFiles = (await filesystem.readdir(sourceDir)).filter((filename) => wasmPattern.test(filename)).sort()
+	if (sourceFiles.length === 0) throw new Error("WASM source set is empty")
 	const step = async (name, filename) => {
 		await onStep(name, filename)
 		if (signalState.requested) throw Object.assign(new Error("WASM publication cancelled"), { code: "CANCELLED" })
 	}
 
 	let commitStarted = false
+	let committed = false
 	let ownsTransaction = false
 	const publishedFiles = []
 	try {
@@ -74,9 +76,11 @@ export async function publishTreeSitterWasms(
 			}
 		}
 
+		committed = true
 		await filesystem.rm(transactionDir, { recursive: true, force: true })
 		return { sourceFiles, cleanup: () => cleanPublishedTreeSitterWasms(destinationDir) }
 	} catch (error) {
+		if (committed) throw error
 		if (!commitStarted && ownsTransaction) {
 			await filesystem.rm(transactionDir, { recursive: true, force: true })
 		}
