@@ -33,15 +33,20 @@ export async function publishTreeSitterWasms(
 		if (signalState.requested) throw Object.assign(new Error("WASM publication cancelled"), { code: "CANCELLED" })
 	}
 
-	await filesystem.mkdir(destinationDir, { recursive: true })
-	await filesystem.mkdir(transactionDir)
-	await filesystem.mkdir(stagedDir)
-	await filesystem.mkdir(backupDir)
-	await filesystem.mkdir(quarantineDir)
-
 	let commitStarted = false
 	const publishedFiles = []
 	try {
+		await filesystem.mkdir(destinationDir, { recursive: true })
+		await step("initialized", destinationDir)
+		await filesystem.mkdir(transactionDir)
+		await step("initialized", transactionDir)
+		await filesystem.mkdir(stagedDir)
+		await step("initialized", stagedDir)
+		await filesystem.mkdir(backupDir)
+		await step("initialized", backupDir)
+		await filesystem.mkdir(quarantineDir)
+		await step("initialized", quarantineDir)
+
 		for (const filename of sourceFiles) {
 			await filesystem.copyFile(path.join(sourceDir, filename), path.join(stagedDir, filename))
 			await step("staged", filename)
@@ -61,8 +66,10 @@ export async function publishTreeSitterWasms(
 			await step("published", filename)
 		}
 		for (const filename of await filesystem.readdir(destinationDir)) {
-			if (temporaryPattern.test(filename))
+			if (temporaryPattern.test(filename)) {
 				await filesystem.rm(path.join(destinationDir, filename), { force: true })
+				await step("removed-temporary", filename)
+			}
 		}
 
 		await filesystem.rm(transactionDir, { recursive: true, force: true })
@@ -109,6 +116,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	}
 	try {
 		await publishTreeSitterWasms(wasmDir, distDir, { signalState })
+		if (signalState.requested) process.exitCode = signalState.requested === "SIGINT" ? 130 : 143
 	} catch (error) {
 		if (!signalState.requested) throw error
 		process.exitCode = signalState.requested === "SIGINT" ? 130 : 143
