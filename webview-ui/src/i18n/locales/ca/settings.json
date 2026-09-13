@@ -975,6 +975,10 @@
 			"refreshSuccess": "Eines actualitzades correctament",
 			"refreshError": "Error en actualitzar les eines",
 			"toolParameters": "Paràmetres"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Esforç de pensament dinàmic",
+			"description": "Activa l'eina set_thinking_effort perquè el model decideixi el seu esforç de pensament per pas. El control manual al xat sempre està disponible. (experimental)"
 		}
 	},
 	"promptCaching": {

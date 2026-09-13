@@ -975,6 +975,10 @@
 			"refreshSuccess": "Outils actualisés avec succès",
 			"refreshError": "Échec de l'actualisation des outils",
 			"toolParameters": "Paramètres"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Effort de réflexion dynamique",
+			"description": "Active l'outil set_thinking_effort afin que le modèle décide de son effort de réflexion à chaque étape. Le contrôle manuel dans le chat est toujours disponible. (expérimental)"
 		}
 	},
 	"promptCaching": {
