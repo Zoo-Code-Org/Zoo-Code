@@ -765,8 +765,8 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				{ uri: folderBUri, name: "folderB", index: 1 },
 			]
 
-			const managerA = CodeIndexManagerRegistry.getInstance(sharedContext as any, folderAPath)!
-			const managerB = CodeIndexManagerRegistry.getInstance(sharedContext as any, folderBPath)!
+			const managerA = CodeIndexManagerRegistry.getInstance(sharedContext, folderAPath)!
+			const managerB = CodeIndexManagerRegistry.getInstance(sharedContext, folderBPath)!
 
 			// Both start disabled (autoEnableDefault is false via globalState mock)
 			expect(managerA.isWorkspaceEnabled).toBe(false)
