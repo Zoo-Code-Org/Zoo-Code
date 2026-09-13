@@ -44,6 +44,7 @@
 		"update_support_prompt": "Ha fallat l'actualització del missatge de suport",
 		"reset_support_prompt": "Ha fallat el restabliment del missatge de suport",
 		"enhance_prompt": "Ha fallat la millora del missatge",
+		"commit_message_empty_response": "El model ha retornat un missatge de commit buit.",
 		"get_system_prompt": "Ha fallat l'obtenció del missatge del sistema",
 		"search_commits": "Ha fallat la cerca de commits",
 		"save_api_config": "Ha fallat el desament de la configuració de l'API",

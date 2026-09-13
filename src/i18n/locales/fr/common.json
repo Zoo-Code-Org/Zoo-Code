@@ -40,6 +40,7 @@
 		"update_support_prompt": "Erreur lors de la mise à jour du prompt de support",
 		"reset_support_prompt": "Erreur lors de la réinitialisation du prompt de support",
 		"enhance_prompt": "Erreur lors de l'amélioration du prompt",
+		"commit_message_empty_response": "Le modèle a renvoyé un message de commit vide.",
 		"get_system_prompt": "Erreur lors de l'obtention du prompt système",
 		"search_commits": "Erreur lors de la recherche des commits",
 		"save_api_config": "Erreur lors de l'enregistrement de la configuration API",

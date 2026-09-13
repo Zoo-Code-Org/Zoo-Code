@@ -104,6 +104,10 @@
 				"label": "Nâng cao lời nhắc",
 				"description": "Sử dụng nâng cao lời nhắc để nhận đề xuất hoặc cải tiến phù hợp cho đầu vào của bạn. Điều này đảm bảo Zoo hiểu ý định của bạn và cung cấp phản hồi tốt nhất có thể. Có sẵn thông qua biểu tượng ✨ trong chat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Thông điệp commit",
+				"description": "Tóm tắt các thay đổi của bạn thành một thông điệp commit. Có sẵn qua biểu tượng Zoo Code trong bảng Source Control, ghi kết quả trực tiếp vào ô nhập commit."
+			},
 			"CONDENSE": {
 				"label": "Cô đọng ngữ cảnh",
 				"description": "Định cấu hình cách cô đọng ngữ cảnh cuộc trò chuyện để quản lý giới hạn token. Lời nhắc này được sử dụng cho cả hoạt động cô đọng ngữ cảnh thủ công và tự động."
