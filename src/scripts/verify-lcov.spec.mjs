@@ -11,6 +11,7 @@ describe("verifyLcov", () => {
 		["an empty source path", "SF:\nLF:1\nLH:1\nend_of_record\n"],
 		["an unterminated record", "SF:file.ts\nLH:1\n"],
 		["a zero-hit report", "SF:file.ts\nLF:1\nLH:0\nend_of_record\n"],
+		["a line count outside a record", "LF:1\n"],
 		["a hit count outside a record", "LH:1\n"],
 		["a terminator outside a record", "end_of_record\n"],
 		["consecutive source records", "SF:first.ts\nSF:second.ts\nLF:1\nLH:1\nend_of_record\n"],
