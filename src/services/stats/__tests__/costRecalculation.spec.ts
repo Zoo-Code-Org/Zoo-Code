@@ -61,7 +61,7 @@ describe("costRecalculation", () => {
 		it("should find model info for a known OpenAI model", () => {
 			const info = lookupModelInfo("openai", "gpt-5.6-sol")
 			expect(info).toBeDefined()
-			expect(info?.inputPrice).toBe(5.0)
+			expect(info?.inputPrice).toBe(4.0)
 		})
 
 		it("should resolve openai-codex models to openAiNativeModels pricing (non-zero)", () => {
@@ -70,8 +70,8 @@ describe("costRecalculation", () => {
 			// see the equivalent API cost.
 			const info = lookupModelInfo("openai-codex", "gpt-5.6-sol")
 			expect(info).toBeDefined()
-			expect(info?.inputPrice).toBe(5.0)
-			expect(info?.outputPrice).toBe(30.0)
+			expect(info?.inputPrice).toBe(4.0)
+			expect(info?.outputPrice).toBe(20.0)
 		})
 
 		it("should resolve qwen-code models to qwenCodeModels pricing", () => {
@@ -145,9 +145,9 @@ describe("costRecalculation", () => {
 					// costUsd missing
 				},
 			})
-			// OpenAI gpt-5.6-sol: $5/1M input tokens (below long-context threshold of 272K)
-			// 100K input tokens at $5/1M = $0.5
-			expect(computeEventCost(event)).toBeCloseTo(0.5, 5)
+			// OpenAI gpt-5.6-sol: $4/1M input tokens (below long-context threshold of 272K)
+			// 100K input tokens at $4/1M = $0.4
+			expect(computeEventCost(event)).toBeCloseTo(0.4, 5)
 		})
 
 		it("should return 0 when model info is not available", () => {
@@ -205,12 +205,12 @@ describe("costRecalculation", () => {
 					// costUsd missing — simulates the old totalCost: 0 → falsy → undefined path
 				},
 			})
-			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$5.0/1M
-			// 100K input tokens × $5/1M = $0.5
+			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$4.0/1M
+			// 100K input tokens × $4/1M = $0.4
 			// This must NOT be 0 — that was the bug.
 			const cost = computeEventCost(event)
 			expect(cost).toBeGreaterThan(0)
-			expect(cost).toBeCloseTo(0.5, 5)
+			expect(cost).toBeCloseTo(0.4, 5)
 		})
 
 		it("should compute non-zero cost for openai-codex with output tokens", () => {
@@ -224,11 +224,11 @@ describe("costRecalculation", () => {
 					// costUsd missing
 				},
 			})
-			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$5.0/1M, outputPrice=$30.0/1M
-			// 100K input × $5/1M + 100K output × $30/1M = $0.5 + $3.0 = $3.5
+			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$4.0/1M, outputPrice=$20.0/1M
+			// 100K input × $4/1M + 100K output × $20/1M = $0.4 + $2.0 = $2.4
 			const cost = computeEventCost(event)
 			expect(cost).toBeGreaterThan(0)
-			expect(cost).toBeCloseTo(3.5, 5)
+			expect(cost).toBeCloseTo(2.4, 5)
 		})
 
 		it("should compute non-zero cost for anthropic event with missing costUsd", () => {
@@ -367,12 +367,12 @@ describe("costRecalculation", () => {
 					// costUsd is undefined — simulates the old totalCost: 0 → falsy → undefined path
 				},
 			})
-			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$5.0/1M
-			// 100K input tokens × $5/1M = $0.5
+			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$4.0/1M
+			// 100K input tokens × $4/1M = $0.4
 			// Must NOT be 0 — that was the bug.
 			const cost = getEffectiveCost(event)
 			expect(cost).toBeGreaterThan(0)
-			expect(cost).toBeCloseTo(0.5, 5)
+			expect(cost).toBeCloseTo(0.4, 5)
 		})
 	})
 
