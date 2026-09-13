@@ -3,7 +3,9 @@ import { poeDefaultModelId, providerIdentifiers } from "@roo-code/types"
 import { PoeHandler } from "../poe"
 import { getModelsFromCache } from "../fetchers/modelCache"
 
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { collectStream } from "../../../test-utils/stream"
 
 const { mockStreamText, mockGenerateText, mockCreatePoe, mockGetModelsFromCache, mockCaptureException } =
 	vitest.hoisted(() => ({
@@ -237,6 +239,334 @@ describe("PoeHandler", () => {
 				}),
 			)
 		})
+
+		it("rejects with AbortError when the external signal is pre-aborted", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockReturnValue({
+				fullStream: (async function* () {})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			const controller = new AbortController()
+			controller.abort()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			await expect(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata).next(),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			// Fail fast before any model lookup: no API work happens once the signal is aborted.
+			expect(mockGetModelsFromCache).not.toHaveBeenCalled()
+		})
+
+		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+
+			let requestSignal: AbortSignal | undefined
+			mockStreamText.mockImplementationOnce((args: { abortSignal?: AbortSignal }) => {
+				requestSignal = args.abortSignal
+				// Emulate the AI SDK: the first chunk arrives, then the stream errors once
+				// the abort signal fires.
+				const fullStream = (async function* () {
+					yield { type: "text-delta", text: "Hello " }
+					await new Promise<void>((resolve) => {
+						if (requestSignal?.aborted) {
+							resolve()
+						} else {
+							requestSignal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The operation was aborted")
+					abortError.name = "AbortError"
+					throw abortError
+				})()
+				return { fullStream, usage: Promise.resolve(undefined) }
+			})
+
+			const controller = new AbortController()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of handler.createMessage(
+					"system",
+					[{ role: "user" as const, content: "hi" }],
+					metadata,
+				)) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			expect(chunks).toContainEqual({ type: "text", text: "Hello " })
+		})
+
+		it("stops yielding chunks once the external signal aborts mid-stream", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			// The upstream stream ignores the abort and keeps producing late chunks; the
+			// provider must stop yielding them once the signal is aborted.
+			const fullStream = (async function* () {
+				yield { type: "text-delta", text: "Hello " }
+				yield { type: "text-delta", text: "late" }
+			})()
+			mockStreamText.mockReturnValueOnce({
+				fullStream,
+				usage: Promise.resolve(undefined),
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of handler.createMessage(
+					"system",
+					[{ role: "user" as const, content: "hi" }],
+					metadata,
+				)) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			// No late chunk may reach the caller after the abort.
+			expect(chunks).toEqual([{ type: "text", text: "Hello " }])
+		})
+
+		it("rejects with AbortError when the external signal aborts after the stream ends", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+
+			// The stream completes normally; the signal aborts while the provider is about
+			// to await result.usage. The abort must reject the stream before the usage
+			// promise is even read.
+			let usageAccessed = false
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "done" }
+				})(),
+				get usage() {
+					usageAccessed = true
+					return Promise.resolve({ inputTokens: 1, outputTokens: 1 })
+				},
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const iteration = (async () => {
+				for await (const chunk of handler.createMessage(
+					"system",
+					[{ role: "user" as const, content: "hi" }],
+					metadata,
+				)) {
+					if (chunk.type === "text") {
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			expect(usageAccessed).toBe(false)
+		})
+
+		it("rejects with AbortError when the external signal aborts while the usage promise is pending", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+
+			// The stream completes without aborting, so the provider reaches
+			// await result.usage. The signal aborts in the microtask between reading
+			// the usage promise and the usage settling: only the post-usage checkpoint
+			// can turn that late usage into an AbortError.
+			let reachedUsageAwait: (() => void) | undefined
+			let resolveUsage: (usage: { inputTokens: number; outputTokens: number }) => void = () => {}
+			const usagePromise = new Promise<{ inputTokens: number; outputTokens: number }>((resolve) => {
+				resolveUsage = resolve
+			})
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "x" }
+				})(),
+				get usage() {
+					queueMicrotask(() => reachedUsageAwait?.())
+					return usagePromise
+				},
+			})
+			const reachedUsage = new Promise<void>((resolve) => {
+				reachedUsageAwait = resolve
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const promise = collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata),
+			)
+			await reachedUsage
+			controller.abort()
+			resolveUsage({ inputTokens: 2, outputTokens: 2 })
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+		})
+
+		it("bridges the external abort signal into the request controller synchronously", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+
+			let requestSignal: AbortSignal | undefined
+			mockStreamText.mockImplementationOnce((args: { abortSignal?: AbortSignal }) => {
+				requestSignal = args.abortSignal
+				const fullStream = (async function* () {
+					yield { type: "text-delta", text: "x" }
+					// Hold the stream open until the request controller is aborted.
+					await new Promise<void>((resolve) => {
+						if (requestSignal?.aborted) {
+							resolve()
+						} else {
+							requestSignal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new Error("aborted")
+				})()
+				return { fullStream, usage: Promise.resolve(undefined) }
+			})
+
+			const controller = new AbortController()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value).toEqual({ type: "text", text: "x" })
+			expect(requestSignal?.aborted).toBe(false)
+
+			controller.abort()
+
+			// The bridge listener aborts the request controller synchronously, so the
+			// in-flight request is cancelled even before the stream observes it.
+			expect(requestSignal?.aborted).toBe(true)
+			await expect(generator.next()).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+		})
+
+		it("removes the external abort listener when the request completes without aborting", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "done" }
+				})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata),
+			)
+
+			expect(chunks).toContainEqual({ type: "text", text: "done" })
+			// The finally block must remove the exact listener that was registered, not
+			// just any function: removing a different reference would leave the original
+			// abort listener attached to the signal.
+			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		})
+		it("rejects with AbortError when the external signal aborts during request creation", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+
+			mockStreamText.mockImplementationOnce(() => {
+				// Emulate the AI SDK failing synchronously: abort the external signal first so
+				// the catch normalizes the failure to a DOM-standard AbortError.
+				controller.abort()
+				const abortError = new Error("The operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const nextPromise = handler
+				.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+				.next()
+
+			await expect(nextPromise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+		})
+
+		it("rejects with a completion error when request creation fails without abort", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockImplementationOnce(() => {
+				throw new Error("boom")
+			})
+
+			await expect(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]).next(),
+			).rejects.toThrow("Poe completion error: boom")
+		})
+
+		it("rejects with a streaming error when the stream fails without abort", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "Hello " }
+					throw new Error("stream broke")
+				})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			await expect(
+				collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }])),
+			).rejects.toThrow("Poe streaming error: stream broke")
+		})
+
+		it("passes an explicitly configured temperature to streamText", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o", modelTemperature: 0.7 })
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+
+			const callArgs = mockStreamText.mock.calls[0][0]
+			expect(callArgs.temperature).toBe(0.7)
+		})
+
+		it("yields no usage chunk when the stream reports no usage", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toEqual([])
+		})
 	})
 
 	describe("reasoning", () => {
@@ -397,6 +727,204 @@ describe("PoeHandler", () => {
 					operation: "completePrompt",
 				}),
 			)
+		})
+
+		it("completePrompt should pass abort signal through to generateText", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: mockLanguageModel,
+					prompt: "test prompt",
+					abortSignal: controller.signal,
+				}),
+			)
+		})
+
+		it("completePrompt should work without options (backward compatible)", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: mockLanguageModel,
+					prompt: "test prompt",
+				}),
+			)
+			// Without options there is no merged signal: the call must not carry an abortSignal key.
+			expect(mockGenerateText.mock.calls[0][0]).not.toHaveProperty("abortSignal")
+		})
+
+		it("completePrompt should merge the abort signal and timeoutMs into a combined abortSignal", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: mockLanguageModel,
+					prompt: "test prompt",
+					abortSignal: expect.any(AbortSignal),
+				}),
+			)
+			// The abortSignal should be a merged signal (not the original controller.signal).
+			const callArgs = mockGenerateText.mock.calls[0][0]
+			expect(callArgs.abortSignal).toBeDefined()
+			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+			expect(callArgs.abortSignal).not.toBe(controller.signal)
+		})
+
+		it("completePrompt rejects with AbortError when the per-request timeout expires before the response", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			// Emulate a slow response: the generation settles only once the merged abort
+			// signal (which embeds the per-request timeout) fires.
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				await new Promise<void>((resolve) => {
+					if (args.abortSignal?.aborted) {
+						resolve()
+					} else {
+						args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				return { text: "late response" }
+			})
+
+			const promise = handler.completePrompt("test prompt", { timeoutMs: 30 })
+			const callArgs = mockGenerateText.mock.calls[0][0] as { abortSignal?: AbortSignal }
+			// The per-request timeout is embedded in the abort signal passed to the SDK...
+			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+
+			// ...and when it fires before the response settles, the provider rejects with
+			// the canonical AbortError instead of returning the late result.
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+		})
+
+		it("completePrompt rejects with AbortError when the external signal aborts mid-flight", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			// Emulate the AI SDK: the in-flight generation rejects when the abort signal fires.
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				await new Promise<void>((resolve) => {
+					if (args.abortSignal?.aborted) {
+						resolve()
+					} else {
+						args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			const callArgs = mockGenerateText.mock.calls[0][0]
+			expect(callArgs.abortSignal).toBeDefined()
+
+			// Abort the external signal before the generation settles.
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+			// The merged signal should be aborted once the user signal aborts.
+			expect(callArgs.abortSignal.aborted).toBe(true)
+		})
+
+		it("completePrompt should handle timeoutMs=0 as no timeout", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: mockLanguageModel,
+					prompt: "test prompt",
+				}),
+			)
+			const callArgs = mockGenerateText.mock.calls[0][0]
+			expect(callArgs).not.toHaveProperty("abortSignal")
+		})
+
+		it("completePrompt should handle non-Error values in catch block", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockRejectedValueOnce("not an error")
+
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Poe completion error: not an error")
+		})
+		it("completePrompt rejects with AbortError when the response resolves after abort", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				// The generation only settles once the abort signal has fired (late result).
+				await new Promise<void>((resolve) => {
+					if (args.abortSignal?.aborted) {
+						resolve()
+					} else {
+						args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				return { text: "late result" }
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Poe request was aborted",
+			})
+		})
+
+		it("passes reasoning effort to streamText via createMessage", async () => {
+			const handler = new PoeHandler({
+				poeApiKey: "key",
+				apiModelId: "openai/o3",
+				enableReasoningEffort: true,
+				reasoningEffort: "low",
+				modelMaxTokens: 8192,
+			})
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			await handler.createMessage("system", [{ role: "user" as const, content: "hi" }]).next()
+
+			expect(mockStreamText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					maxOutputTokens: 8192,
+					providerOptions: { poe: { reasoningEffort: "low", reasoningSummary: "auto" } },
+				}),
+			)
+		})
+
+		it("does not set maxOutputTokens when modelMaxTokens is falsy on the effort path", async () => {
+			const handler = new PoeHandler({
+				poeApiKey: "key",
+				apiModelId: "openai/o3",
+				enableReasoningEffort: true,
+				reasoningEffort: "low",
+				modelMaxTokens: 0,
+			})
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			await handler.createMessage("system", [{ role: "user" as const, content: "hi" }]).next()
+
+			// 0 is falsy: the guard must skip the override, so the SDK receives the default (undefined).
+			expect(mockStreamText.mock.calls[0][0].maxOutputTokens).toBeUndefined()
 		})
 	})
 })
