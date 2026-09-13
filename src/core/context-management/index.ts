@@ -202,7 +202,9 @@ type ShrinkingToolResult = {
  * `getEffectiveApiHistory`. Shrinking hidden content would lower the token estimate
  * without changing the request, which is the same false progress this recovery exists to
  * prevent. Returned indexes stay indexes into the persisted history so the edits below
- * target the right messages.
+ * target the right messages. Visibility is decided per block by `apiVisibleBlocks` alone —
+ * message-level metadata (e.g. a `truncationParent` whose marker was rewound away) must
+ * not veto blocks that are API-visible again.
  */
 async function findShrinkableToolResults(
 	messages: ApiMessage[],
@@ -219,7 +221,6 @@ async function findShrinkableToolResults(
 		getEffectiveApiHistory(messages).flatMap((message) => (Array.isArray(message.content) ? message.content : [])),
 	)
 	for (const [messageIndex, message] of messages.entries()) {
-		if (message.truncationParent || message.isTruncationMarker) continue
 		if (!Array.isArray(message.content)) continue
 		for (const [blockIndex, block] of message.content.entries()) {
 			if (!apiVisibleBlocks.has(block)) continue
@@ -577,13 +578,16 @@ export async function manageContext({
 
 	// Fall back to sliding window truncation if needed
 	if (prevContextTokens > allowedTokens) {
-		// Model-facing token count: the system prompt plus every message that is not hidden
-		// by a truncation marker. Shared by the truncation and degradation paths below so
-		// both report against the same accounting.
+		// Model-facing token count: the system prompt plus everything `getEffectiveApiHistory`
+		// keeps — the summary's fresh-start slice (pre-summary content and condenseParent-tagged
+		// messages are hidden), truncation-tagged messages (only while their marker exists),
+		// orphan tool_result blocks, and truncation markers themselves. Counting the persisted
+		// history instead would compare the recovery result against tokens the API never sees.
+		// Shared by the truncation and degradation paths below so both report against the same
+		// accounting.
 		const countModelFacingTokens = async (msgs: ApiMessage[]): Promise<number> => {
 			let total = await estimateTokenCount([{ type: "text", text: systemPrompt }], apiHandler)
-			for (const msg of msgs) {
-				if (msg.truncationParent || msg.isTruncationMarker) continue
+			for (const msg of getEffectiveApiHistory(msgs)) {
 				const content = msg.content
 				if (Array.isArray(content)) {
 					total += await estimateTokenCount(content, apiHandler)
