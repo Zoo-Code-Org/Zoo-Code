@@ -242,13 +242,13 @@ The 38 IDs are not 38 independent projects. They group into eight programs with 
 
 ### Sequencing and critical path
 
-1. **Foundation:** establish the current serial scheduler baseline (P7), define lifecycle ownership/generation (P1), and define canonical request/tool identity (P4).
+1. **Foundation:** define lifecycle ownership/generation (P1) and canonical request/tool identity (P4), then ratchet the current serial scheduler baseline (P7) against the P1 ownership vocabulary.
 2. **Integrity:** build durable operation recovery (P2) on P1. Run P3 in parallel once legacy-data policy is settled.
 3. **Task isolation:** implement P5 using P4 identity and P1/P2 persistence rules.
 4. **Surface convergence:** implement P6 after barrier/notification and generation semantics are known.
 5. **Mechanical assurance:** start P8 metadata early; add cross-model refinement as production owners land.
 
-Critical path: **P7 serial baseline → P1 ownership/generation → P2 recovery → P5 durable task state → P6 public contracts**. P3 and P8 metadata can run in parallel from the first tranche. P4 can run beside P1 after agreeing how task and request generations relate.
+Critical path: **P1 ownership/generation → P7 serial baseline → P2 recovery → P5 durable task state → P6 public contracts**. P3 and P8 metadata can run in parallel from the first tranche. P4 can run beside P1 after agreeing how task and request generations relate.
 
 ### Quick wins versus architectural programs
 
@@ -271,8 +271,8 @@ Four workstreams can proceed concurrently after foundation decisions:
 
 ### Recommended first tranche
 
-1. Ratchet current serial behavior for 014 and leave fan-out to its separately scoped ticket.
-2. Add deterministic failing tests for 001/002/012, then implement their shared ownership/generation primitive.
+1. Add deterministic failing tests for 001/002/012, then define their shared ownership/generation primitive.
+2. Ratchet current serial behavior for 014 against that ownership contract and leave fan-out to its separately scoped ticket.
 3. Define canonical call identity and adversarial tests for 038/008; reuse it for 037 and 036.
 4. Land independent hardening for 013, 025, 029, and 034.
 5. Add P8 machine-readable mapping incrementally so closure PRs name symbols, witnesses, tests, bounds, and evidence class.

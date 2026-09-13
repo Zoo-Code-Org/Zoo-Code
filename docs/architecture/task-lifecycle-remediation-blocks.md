@@ -111,12 +111,18 @@ Optional future fan-out blocks do not own `LIFE-GAP-014` and do not participate 
 The primary tables above map the closed integer range `001..038` exactly once. Reviewers should verify this mechanically before changing the register:
 
 ```sh
-rg -o 'LIFE-BLK-P[0-9]-[0-9]{3}' docs/architecture/task-lifecycle-remediation-blocks.md \
+rg -o '^\| LIFE-BLK-P[0-9]-[0-9]{3} \|' docs/architecture/task-lifecycle-remediation-blocks.md \
   | sort \
   | uniq -d
 ```
 
-The command must print nothing. Also compare the final three digits of every primary block with the GAP register; optional `FANOUT-BLK-*` rows are excluded.
+The command must print nothing. It matches only primary table rows, so dependency references and optional `FANOUT-BLK-*` rows are excluded.
+
+Separately compare block suffixes with the GAP column to detect omissions or mismatches:
+
+```sh
+node -e 'const fs=require("fs");const s=fs.readFileSync("docs/architecture/task-lifecycle-remediation-blocks.md","utf8");const rows=[...s.matchAll(/^\| LIFE-BLK-P\d-(\d{3}) \| (\d{3}) \|/gm)];const gaps=rows.map(r=>r[2]);const want=Array.from({length:38},(_,i)=>String(i+1).padStart(3,"0"));if(rows.length!==38||rows.some(r=>r[1]!==r[2])||want.some(id=>!gaps.includes(id)))process.exit(1)'
+```
 
 ## Block completion template
 
