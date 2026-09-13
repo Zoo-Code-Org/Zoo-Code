@@ -4,6 +4,8 @@ import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
 
+import { assertMatchingFiles } from "./verify-wasm-files.mjs"
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
 if (!pnpm) throw new Error("pnpm executable path is unavailable")
@@ -60,6 +62,12 @@ try {
 	if (source.length === 0) throw new Error("Dependency contains no tree-sitter WASMs")
 	if (JSON.stringify(source) !== JSON.stringify(published))
 		throw new Error("Published WASM set does not match dependency")
+	assertMatchingFiles(
+		path.join(root, "src", "node_modules", "tree-sitter-wasms", "out"),
+		dist,
+		source,
+		"Published WASM content does not match dependency",
+	)
 	if (fs.readdirSync(dist).some((filename) => filename.endsWith(".tmp")))
 		throw new Error("Temporary WASM files remain")
 
@@ -85,6 +93,12 @@ try {
 		.filter((filename) => /^tree-sitter-.*\.wasm$/.test(filename))
 		.sort()
 	if (JSON.stringify(source) !== JSON.stringify(restored)) throw new Error("WASM cache did not restore exact outputs")
+	assertMatchingFiles(
+		path.join(root, "src", "node_modules", "tree-sitter-wasms", "out"),
+		dist,
+		source,
+		"WASM cache restored corrupted output",
+	)
 } finally {
 	fs.rmSync(cacheDir, { recursive: true, force: true })
 }

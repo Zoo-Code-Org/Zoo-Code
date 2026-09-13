@@ -26,21 +26,26 @@ export function publishTreeSitterWasms(sourceDir, destinationDir, filesystem = f
 	const cleanup = () => cleanPublishedTreeSitterWasms(destinationDir, filesystem)
 
 	filesystem.mkdirSync(destinationDir, { recursive: true })
+	const previousFiles = new Map(
+		filesystem
+			.readdirSync(destinationDir)
+			.filter((filename) => wasmPattern.test(filename))
+			.map((filename) => [filename, filesystem.readFileSync(path.join(destinationDir, filename))]),
+	)
 	for (const filename of filesystem.readdirSync(destinationDir)) {
 		if (temporaryPattern.test(filename)) filesystem.rmSync(path.join(destinationDir, filename), { force: true })
 	}
 
+	const temporaryFiles = []
 	try {
 		for (const filename of sourceFiles) {
 			const destination = path.join(destinationDir, filename)
 			const temporary = `${destination}.${process.pid}.tmp`
-
-			try {
-				filesystem.copyFileSync(path.join(sourceDir, filename), temporary)
-				filesystem.renameSync(temporary, destination)
-			} finally {
-				filesystem.rmSync(temporary, { force: true })
-			}
+			temporaryFiles.push(temporary)
+			filesystem.copyFileSync(path.join(sourceDir, filename), temporary)
+		}
+		for (const [index, filename] of sourceFiles.entries()) {
+			filesystem.renameSync(temporaryFiles[index], path.join(destinationDir, filename))
 		}
 
 		for (const filename of filesystem.readdirSync(destinationDir)) {
@@ -50,7 +55,12 @@ export function publishTreeSitterWasms(sourceDir, destinationDir, filesystem = f
 		}
 	} catch (error) {
 		cleanup()
+		for (const [filename, content] of previousFiles) {
+			filesystem.writeFileSync(path.join(destinationDir, filename), content)
+		}
 		throw error
+	} finally {
+		for (const temporary of temporaryFiles) filesystem.rmSync(temporary, { force: true })
 	}
 
 	return { sourceFiles, cleanup }
