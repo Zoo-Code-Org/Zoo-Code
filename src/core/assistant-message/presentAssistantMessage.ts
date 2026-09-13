@@ -344,10 +344,7 @@ export async function presentAssistantMessage(cline: Task) {
 
 			// Fetch state early so it's available for toolDescription and validation
 			const state = await cline.providerRef.deref()?.getState()
-			const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
-			// Read the task-local mode, not the shared provider mode.
-			// A delegated child task may run in a different mode than its parent.
-			const taskMode = await cline.getTaskMode()
+			const { mode, customModes, experiments: stateExperiments, disabledTools } = state ?? {}
 
 			const toolDescription = (): string => {
 				switch (block.name) {
@@ -620,7 +617,7 @@ export async function presentAssistantMessage(cline: Task) {
 
 					validateToolUse(
 						block.name as ToolName,
-						taskMode,
+						mode ?? defaultModeSlug,
 						customModes ?? [],
 						toolRequirements,
 						block.params,
@@ -927,7 +924,7 @@ export async function presentAssistantMessage(cline: Task) {
 							}
 
 							const result = await customTool.execute(customToolArgs, {
-								mode: taskMode,
+								mode: mode ?? defaultModeSlug,
 								task: cline,
 							})
 
