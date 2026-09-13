@@ -41,6 +41,8 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 
+const MAX_PARALLEL_COMMAND_BATCH_SIZE = 4
+
 /**
  * Maps a raw, potentially model-controlled tool name to a safe analytics key.
  * Never returns the raw name unless it is a known static tool, so an
@@ -465,6 +467,11 @@ export async function presentAssistantMessage(cline: Task) {
 				}
 			}
 
+			if (!block.partial && isParallelSafeCommandBlock(block) && !cline.didCompleteReadingStream) {
+				cline.presentAssistantMessageLocked = false
+				return
+			}
+
 			// Store approval feedback to merge into tool result (GitHub #10465)
 			let approvalFeedback: { text: string; images?: string[] } | undefined
 
@@ -716,6 +723,13 @@ export async function presentAssistantMessage(cline: Task) {
 					)
 					break
 				}
+			}
+
+			const parallelCommandBatch = getParallelCommandBatch(cline, cline.currentStreamingContentIndex)
+			if (parallelCommandBatch.length > 1) {
+				await executeParallelCommandBatch(cline, parallelCommandBatch)
+				cline.currentStreamingContentIndex += parallelCommandBatch.length - 1
+				break
 			}
 
 			switch (block.name) {
@@ -1034,4 +1048,388 @@ async function checkpointSaveAndMark(task: Task) {
 	} catch (error) {
 		console.error(`[Task#presentAssistantMessage] Error saving checkpoint: ${error.message}`, error)
 	}
+}
+
+function getParallelCommandBatch(cline: Task, startIndex: number): ToolUse<"execute_command">[] {
+	const batch: ToolUse<"execute_command">[] = []
+
+	for (let index = startIndex; index < cline.assistantMessageContent.length; index++) {
+		const candidate = cline.assistantMessageContent[index]
+
+		if (!isParallelSafeCommandBlock(candidate)) {
+			break
+		}
+
+		batch.push(candidate)
+
+		if (batch.length >= MAX_PARALLEL_COMMAND_BATCH_SIZE) {
+			break
+		}
+	}
+
+	return batch
+}
+
+function isParallelSafeCommandBlock(block: unknown): block is ToolUse<"execute_command"> {
+	if (!block || typeof block !== "object") {
+		return false
+	}
+
+	const toolUse = block as ToolUse
+	if (toolUse.type !== "tool_use" || toolUse.name !== "execute_command" || toolUse.partial || !toolUse.id) {
+		return false
+	}
+
+	const command = (toolUse.nativeArgs as { command?: unknown } | undefined)?.command
+	return typeof command === "string" && isReadOnlyShellCommand(command)
+}
+
+async function executeParallelCommandBatch(cline: Task, batch: ToolUse<"execute_command">[]): Promise<void> {
+	let approvalQueue: Promise<void> = Promise.resolve()
+
+	for (const toolUse of batch.slice(1)) {
+		cline.recordToolUsage(toolUse.name)
+	}
+
+	const outputs = await Promise.all(
+		batch.map((toolUse) => {
+			let hasToolResult = false
+			let approvalFeedback: { text: string; images?: string[] } | undefined
+			let output:
+				| {
+						toolResult: Anthropic.ToolResultBlockParam
+						imageBlocks: Anthropic.ImageBlockParam[]
+				  }
+				| undefined
+
+			const storeToolResult = (content: ToolResponse, isError = false) => {
+				if (hasToolResult) {
+					console.warn(
+						`[presentAssistantMessage] Skipping duplicate parallel tool_result for tool_use_id: ${toolUse.id}`,
+					)
+					return
+				}
+
+				let resultContent: string
+				let imageBlocks: Anthropic.ImageBlockParam[] = []
+
+				if (typeof content === "string") {
+					resultContent = content || "(tool did not return anything)"
+				} else {
+					const textBlocks = content.filter((item) => item.type === "text")
+					imageBlocks = content.filter((item) => item.type === "image") as Anthropic.ImageBlockParam[]
+					resultContent =
+						textBlocks.map((item) => (item as Anthropic.TextBlockParam).text).join("\n") ||
+						"(tool did not return anything)"
+				}
+
+				if (approvalFeedback) {
+					const feedbackText = formatResponse.toolApprovedWithFeedback(approvalFeedback.text)
+					resultContent = `${feedbackText}\n\n${resultContent}`
+					if (approvalFeedback.images) {
+						const feedbackImageBlocks = formatResponse.imageBlocks(approvalFeedback.images)
+						imageBlocks = [...feedbackImageBlocks, ...imageBlocks]
+					}
+				}
+
+				output = {
+					toolResult: {
+						type: "tool_result",
+						tool_use_id: sanitizeToolUseId(toolUse.id!),
+						content: resultContent,
+						...(isError ? { is_error: true } : {}),
+					},
+					imageBlocks,
+				}
+				hasToolResult = true
+			}
+
+			const askApproval = async (
+				type: ClineAsk,
+				partialMessage?: string,
+				progressStatus?: ToolProgressStatus,
+				isProtected?: boolean,
+			) => {
+				const runApproval = async () => {
+					if (cline.didRejectTool) {
+						storeToolResult(
+							`Skipping tool [${toolUse.name} for '${toolUse.nativeArgs?.command ?? ""}'] due to user rejecting a previous tool.`,
+							true,
+						)
+						return false
+					}
+
+					const { response, text, images } = await cline.ask(
+						type,
+						partialMessage,
+						false,
+						progressStatus,
+						isProtected || false,
+					)
+
+					if (response !== "yesButtonClicked") {
+						if (text) {
+							await cline.say("user_feedback", text, images)
+							storeToolResult(
+								formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images),
+							)
+						} else {
+							storeToolResult(formatResponse.toolDenied())
+						}
+						cline.didRejectTool = true
+						return false
+					}
+
+					if (text) {
+						await cline.say("user_feedback", text, images)
+						approvalFeedback = { text, images }
+					}
+
+					return true
+				}
+
+				const approval = approvalQueue.then(runApproval, runApproval)
+				approvalQueue = approval.then(
+					() => undefined,
+					() => undefined,
+				)
+				return approval
+			}
+
+			const handleError = async (action: string, error: Error) => {
+				if (error instanceof AskIgnoredError) {
+					return
+				}
+
+				const errorString = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+
+				await cline.say(
+					"error",
+					`Error ${action}:\n${error.message ?? JSON.stringify(serializeError(error), null, 2)}`,
+				)
+
+				storeToolResult(formatResponse.toolError(errorString), true)
+			}
+
+			return (async () => {
+				try {
+					await executeCommandTool.handle(cline, toolUse, {
+						askApproval,
+						handleError,
+						pushToolResult: storeToolResult,
+					})
+				} catch (error) {
+					await handleError("executing command", error instanceof Error ? error : new Error(String(error)))
+				}
+
+				if (!output) {
+					storeToolResult("(tool did not return anything)")
+				}
+
+				return output!
+			})()
+		}),
+	)
+
+	for (const output of outputs) {
+		cline.pushToolResultToUserContent(output.toolResult)
+
+		if (output.imageBlocks.length > 0) {
+			cline.userMessageContent.push(...output.imageBlocks)
+		}
+	}
+}
+
+function isReadOnlyShellCommand(command: string): boolean {
+	const trimmed = command.trim()
+	if (!trimmed) {
+		return false
+	}
+
+	if (hasShellControlSyntax(trimmed) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed)) {
+		return false
+	}
+
+	const tokens = splitShellWords(trimmed)
+	if (!tokens || tokens.length === 0) {
+		return false
+	}
+
+	const executable = tokens[0].split(/[\\/]/).pop() ?? tokens[0]
+	const args = tokens.slice(1)
+
+	switch (executable) {
+		case "cat":
+		case "du":
+		case "egrep":
+		case "fd":
+		case "fgrep":
+		case "file":
+		case "grep":
+		case "head":
+		case "ls":
+		case "nl":
+		case "pwd":
+		case "rg":
+		case "ripgrep":
+		case "stat":
+		case "wc":
+			return true
+		case "tail":
+			return !args.some((arg) => arg === "-f" || arg === "--follow" || arg.startsWith("--follow="))
+		case "tree":
+			return !args.some((arg) => arg === "-o")
+		case "find":
+			return !args.some((arg) =>
+				["-delete", "-exec", "-execdir", "-fls", "-fprint", "-fprint0", "-fprintf", "-ok", "-okdir"].includes(
+					arg,
+				),
+			)
+		case "sort":
+			return !args.some((arg) => arg === "-o" || arg === "--output" || arg.startsWith("--output="))
+		case "uniq":
+			return !args.some((arg) => arg === "-o" || arg === "--output" || arg.startsWith("--output="))
+		case "git":
+			return isReadOnlyGitCommand(args)
+		default:
+			return false
+	}
+}
+
+function hasShellControlSyntax(command: string): boolean {
+	let quote: "'" | '"' | undefined
+
+	for (let index = 0; index < command.length; index++) {
+		const char = command[index]
+
+		if (quote) {
+			if (char === quote) {
+				quote = undefined
+			}
+			continue
+		}
+
+		if (char === "'" || char === '"') {
+			quote = char
+			continue
+		}
+
+		if (";&|<>`$\\!\n\r".includes(char)) {
+			return true
+		}
+	}
+
+	return quote !== undefined
+}
+
+function splitShellWords(command: string): string[] | undefined {
+	const words: string[] = []
+	let current = ""
+	let quote: "'" | '"' | undefined
+
+	for (let index = 0; index < command.length; index++) {
+		const char = command[index]
+
+		if (quote) {
+			if (char === quote) {
+				quote = undefined
+			} else {
+				current += char
+			}
+			continue
+		}
+
+		if (char === "'" || char === '"') {
+			quote = char
+			continue
+		}
+
+		if (/\s/.test(char)) {
+			if (current) {
+				words.push(current)
+				current = ""
+			}
+			continue
+		}
+
+		current += char
+	}
+
+	if (quote) {
+		return undefined
+	}
+
+	if (current) {
+		words.push(current)
+	}
+
+	return words
+}
+
+function isReadOnlyGitCommand(args: string[]): boolean {
+	if (args.some((arg) => arg === "-c" || arg === "--config-env" || arg.startsWith("--config-env="))) {
+		return false
+	}
+
+	const { subcommand, rest } = parseGitSubcommand(args)
+
+	if (!subcommand) {
+		return true
+	}
+
+	const readOnlySubcommands = new Set(["blame", "diff", "grep", "log", "ls-files", "rev-parse", "show", "status"])
+
+	if (subcommand === "diff" && rest.some((arg) => arg === "--output" || arg.startsWith("--output="))) {
+		return false
+	}
+
+	if (readOnlySubcommands.has(subcommand)) {
+		return true
+	}
+
+	if (subcommand === "branch") {
+		return (
+			rest.length === 0 ||
+			rest.every((arg) =>
+				[
+					"--all",
+					"--contains",
+					"--list",
+					"--merged",
+					"--no-merged",
+					"--remotes",
+					"--show-current",
+					"-a",
+					"-r",
+					"-v",
+					"-vv",
+				].includes(arg),
+			)
+		)
+	}
+
+	if (subcommand === "config") {
+		return rest.length > 0 && ["--get", "--get-regexp", "--list", "-l"].includes(rest[0])
+	}
+
+	return false
+}
+
+function parseGitSubcommand(args: string[]): { subcommand?: string; rest: string[] } {
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index]
+
+		if (arg === "-C" || arg === "-c") {
+			index++
+			continue
+		}
+
+		if (arg.startsWith("-")) {
+			continue
+		}
+
+		return { subcommand: arg, rest: args.slice(index + 1) }
+	}
+
+	return { rest: [] }
 }
