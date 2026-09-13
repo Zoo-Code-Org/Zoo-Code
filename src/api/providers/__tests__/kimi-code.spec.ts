@@ -10,6 +10,16 @@ const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.ho
 	mockGetModels: vi.fn(),
 }))
 
+vi.mock("undici", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("undici")>()
+	return {
+		...actual,
+		fetch: vi.fn().mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+			return globalThis.fetch(url, init)
+		}),
+	}
+})
+
 vi.mock("../../../integrations/kimi-code/oauth", () => ({
 	kimiCodeOAuthManager: {
 		getAccessToken: mockGetAccessToken,

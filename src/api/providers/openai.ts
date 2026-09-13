@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI, { AzureOpenAI } from "openai"
 import axios from "axios"
+import { Agent, fetch as undiciFetch, Dispatcher } from "undici"
 
 import {
 	type ModelInfo,
@@ -52,34 +53,80 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			...(this.options.openAiHeaders || {}),
 		}
 
+		function resolveTimeoutMs(configuredMs: number | undefined): number {
+			if (configuredMs === undefined || configuredMs === 0) {
+				return 0;
+				// return 60 * 60 * 1000;
+			}
+			return configuredMs
+		}
+
+		const timeoutMs = resolveTimeoutMs(this.timeoutMs)
+
+		// VS Code bundles its own undici with a 5-minute `bodyTimeout` default.
+		// For streaming LLM requests, that default terminates the connection.
+		// We bypass the VS Code-bundled undici by injecting our own Agent-backed
+		// fetch into the OpenAI SDK.
+		const agent = new Agent({
+			headersTimeout: timeoutMs,
+			bodyTimeout: timeoutMs,
+			keepAliveTimeout: timeoutMs,
+			keepAliveMaxTimeout: timeoutMs,
+			connect: {
+				timeout: Math.min(timeoutMs, 60_000),
+			},
+		})
+
+		interface UndiciRequestInit extends RequestInit {
+			dispatcher?: Dispatcher
+		}
+
+		type MockedFunction = { mock?: { calls: unknown[] } }
+
+		const customFetch: typeof fetch = (url, init) => {
+			const undiciInit = { ...init, dispatcher: agent } as UndiciRequestInit
+			const fetchImpl = undiciFetch as unknown as (
+				url: RequestInfo | URL,
+				init: UndiciRequestInit,
+			) => Promise<Response>
+
+			return fetchImpl(url, undiciInit)
+		}
+
+		const timeoutConfig = {
+			timeout: timeoutMs,
+		}
+
 		if (isAzureAiInference) {
-			// Azure AI Inference Service (e.g., for DeepSeek) uses a different path structure
 			this.client = new OpenAI({
 				baseURL,
 				apiKey,
 				defaultHeaders: headers,
 				defaultQuery: { "api-version": this.options.azureApiVersion || "2024-05-01-preview" },
-				timeout: this.timeoutMs,
+				...timeoutConfig,
 			})
 		} else if (isAzureOpenAi) {
 			// Azure API shape slightly differs from the core API shape:
 			// https://github.com/openai/openai-node?tab=readme-ov-file#microsoft-azure-openai
+
 			const azureBaseURL = `${baseURL.replace(/\/openai\/?$/i, "").replace(/\/$/, "")}/openai`
 			this.client = new AzureOpenAI({
 				baseURL: azureBaseURL,
 				apiKey,
 				apiVersion: this.options.azureApiVersion || azureOpenAiDefaultApiVersion,
 				defaultHeaders: headers,
-				timeout: this.timeoutMs,
+				...timeoutConfig,
 			})
 		} else {
 			this.client = new OpenAI({
 				baseURL,
 				apiKey,
 				defaultHeaders: headers,
-				timeout: this.timeoutMs,
+				...timeoutConfig,
 			})
 		}
+
+		; (this.client as unknown as { fetch: typeof fetch }).fetch = customFetch
 	}
 
 	override async *createMessage(
@@ -164,8 +211,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				// otherwise omit it so the server's own default applies instead of forcing 0.
 				...(modelInfo.supportsTemperature !== false &&
 					(this.options.modelTemperature != null || deepseekReasoner) && {
-						temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
-					}),
+					temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
+				}),
 				messages: convertedMessages,
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
