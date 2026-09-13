@@ -129,6 +129,7 @@ describe("publishTreeSitterWasms", () => {
 		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
 		await expect(publishTreeSitterWasms(source, destination)).rejects.toMatchObject({ code: "EEXIST" })
 		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
+		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
 		await expect(publishTreeSitterWasms(source, destination)).rejects.toMatchObject({ code: "EEXIST" })
 	})
 
