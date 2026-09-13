@@ -207,6 +207,83 @@ Severity reflects plausible data loss, ownership corruption, permission/context 
 | LIFE-GAP-037 | Medium-high | High        | Singleton tool handlers share partial presentation state across calls/tasks, so interleaved paths can cause false or missed stabilization.                         | Interleave A:`x`, B:`y`, A:`x` or A:`x`, B:`x` through one handler's `lastSeenPartialPath`.                                                                          | Per-call handler state keyed by task and tool-call identity.                          | Isolate partial state by `(taskId, toolCallId)` or handler instance; prove independent stabilization and cleanup after success, malformed finalization, rejection, cancellation, abandonment, and incomplete streams.                                                                                                                                            |
 | LIFE-GAP-038 | High        | High        | Lossy tool-ID canonicalization can deduplicate persisted history without deduplicating execution, results, approvals, or pending-action replay.                    | Distinct raw IDs such as `call:a` and `call/a` both sanitize to `call_a`; history may retain one call while execution retains both.                                  | One collision-resistant canonical call identity before indexing and persistence.      | Reject or disambiguate collisions; prove a bijection among parsed call, durable tool use, approval, execution, result, pending action, and replay; test adversarial native/MCP IDs and restart between approval and settlement.                                                                                                                                  |
 
+## Portfolio remediation plan
+
+The 38 IDs are not 38 independent projects. They group into eight programs with shared root causes and implementation surfaces. Estimates are engineering effort, not calendar commitments; they include implementation, deterministic tests, proportional model/refinement work, documentation, and stabilization.
+
+| Cluster                                    | Gap IDs                                | Root fix and likely ownership                                                                                                                                                                                                | Size / effort                                | Engineering risk                                          | Objective portfolio evidence                                                                                                         |
+| ------------------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| P1. Persisted ownership and generation     | 001, 002, 012, 017, 020                | Disk-authoritative lifecycle ownership/generation and immutable store reads across history types, lifecycle reducers, `TaskHistoryStore`, provider delegation, and reconciliation.                                           | XL, 15–25 engineer-days                      | High: persisted compatibility and cross-host races        | Two-host stale-write tests, promoted invariants, restart/reconciliation evidence, backward-compatible optional data.                 |
+| P2. Durable operation and crash recovery   | 004, 005, 006, 021, 023                | Operation intent/replay or explicit idempotent recovery for pair writes, delegation, completion messages, shutdown, and deletion.                                                                                            | XL, 20–35 days                               | Very high: failure ordering can create new corruption     | Fault injection at every durable boundary, crash/restart convergence, no false success, recovery reachability.                       |
+| P3. Schema, path, and lifecycle vocabulary | 013, 018, 019                          | Schema-derived status ownership, validated ordinary history reads, and one safe task-ID boundary across types, persistence, metadata, CLI, and import paths.                                                                 | M, 5–9 days                                  | Medium: malformed legacy data and downgrade behavior      | Migration/quarantine fixtures, traversal tests, type/static ratchets.                                                                |
+| P4. Request, stream, and tool identity     | 008, 010, 024, 025, 026, 030, 037, 038 | Request generation plus canonical call identity, then task/generation/call-scoped parser and partial-handler state. Owners include provider transforms, parser, `Task`, `BaseTool`, editing handlers, and tool-ID utilities. | XL, 18–30 days                               | High: provider compatibility and duplicate execution      | Adversarial IDs/index-less streams, delayed/cancelled generation tests, cleanup/deadline checks, production-backed call-state model. |
+| P5. Tool-owned task state and queueing     | 003, 007, 031, 035, 036                | Task-local context, durable child initialization, correlated approval identity, and claim/persist/ack queueing across tools, `Task`, provider/webview, message queue, and history schema.                                    | XL, 16–27 days                               | High: cross-task contamination and persistence precedence | Omitted/explicit child controls, switch/restart E2E, two-approval schedules, queue failure retention, mode-permission tests.         |
+| P6. Event and ingress contracts            | 009, 011, 022, 027, 028, 029, 032, 033 | Classify barriers versus notifications; normalize lifecycle payloads and clear/resume semantics across Task, provider, public API, IPC, and webview.                                                                         | L, 12–20 days                                | Medium-high: public compatibility and ordering            | Exactly-once event tests, consumer inventory, cross-surface contract matrix, compatibility adapters where required.                  |
+| P7. Scheduler and fan-out decision         | 014                                    | Enforce serial capacity, or implement live-parent fan-out across scheduler, registry, routing, rollback, orphan cleanup, webview scoping, and E2E.                                                                           | Serial: M, 3–6 days. Fan-out: XL, 20–35 days | Serial low-medium; fan-out very high                      | Serial API/capacity ratchet, or production imports plus concurrent/failure E2E before fan-out reclassification.                      |
+| P8. Verification and traceability platform | 015, 016, 034                          | Machine-readable model metadata/traceability and selected cross-model trace validation across checker scripts, package commands, CI, and architecture docs.                                                                  | L, 7–12 days                                 | Medium: vacuity and CI cost                               | CI validates IDs, symbols, tests, bounds, actions, landmarks, workflows, and executable mappings for cross-model claims.             |
+
+### Root fixes that close multiple gaps
+
+- One persisted generation and disk-authoritative ownership design should close 001, 002, and 012; immutable reads and explicit reconciliation semantics address 017/020 around that owner.
+- One durable operation-intent/replay framework can support 004, 005, 006, 021, and 023, but each operation still needs its own legal recovery states and fault-injection matrix.
+- One request-generation/canonical-call identity established before parser indexing can support 008, 010, 024–026, 030, 037, and 038.
+- One correlated `(taskId, actionId, toolCallId)` approval protocol can close 036 and support 007/035; it does not itself make child state durable.
+- One typed lifecycle operation layer can normalize P6, but public compatibility requires separate adapters rather than a flag-day payload rewrite.
+
+### Independent work that should not be collapsed
+
+- Schema/path hardening (P3) is reviewable independently from transaction recovery (P2), despite shared persistence files.
+- Serial-versus-fan-out is a product decision and must not be hidden inside scheduler cleanup.
+- Completion consumer contracts (011) are not solved by safe EventEmitter listeners (009).
+- Durable child initialization (035) and approval correlation (036) need separate persistence and cancellation owners.
+- Verification platform work can proceed in parallel, but cannot promote another cluster before its production transition exists.
+
+### Sequencing and critical path
+
+1. **Foundation:** choose serial versus fan-out (serial recommended for current behavior), define lifecycle ownership/generation (P1), and define canonical request/tool identity (P4).
+2. **Integrity:** build durable operation recovery (P2) on P1. Run P3 in parallel once legacy-data policy is settled.
+3. **Task isolation:** implement P5 using P4 identity and P1/P2 persistence rules.
+4. **Surface convergence:** implement P6 after barrier/notification and generation semantics are known.
+5. **Mechanical assurance:** start P8 metadata early; add cross-model refinement as production owners land.
+
+Critical path: **P7 decision → P1 ownership/generation → P2 recovery → P5 durable task state → P6 public contracts**. P3 and P8 metadata can run in parallel from the first tranche. P4 can run beside P1 after agreeing how task and request generations relate.
+
+### Quick wins versus architectural programs
+
+| Category               | Scope                                                                                                                                         | Effort                 | Notes                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------- |
+| Quick wins             | 013 shared status type; 025 listener cleanup; 029 projection naming/contracts; 034 checker metadata.                                          | 1–4 days each          | Separate PRs; reduce drift but do not close cross-host integrity.                 |
+| Medium projects        | 019 path safety, 021 disposal drain, 022/033 ingress convergence, 024 parser cleanup, 026 hard deadline, 027/028 event ownership, serial 014. | 3–8 days each          | Focused subsystem work with deterministic tests.                                  |
+| Architectural programs | P1, P2, P4 identity/generation, P5 durable task state, P6 public contracts, or full fan-out.                                                  | 12–35 days per program | Require staged PRs, failure injection, compatibility plans, and model refinement. |
+
+### Overall scale and parallel workstreams
+
+With the recommended serial contract, shared infrastructure reduces the portfolio to approximately **85–145 engineer-days**. Full fan-out raises it to roughly **105–175 engineer-days** and increases critical-path risk. These are effort confidence bands, not delivery dates.
+
+Four workstreams can proceed concurrently after foundation decisions:
+
+1. persistence ownership/recovery (P1/P2);
+2. request/tool identity and streaming (P4);
+3. schema/path hardening and verification metadata (P3 plus P8 metadata);
+4. event/ingress compatibility design (P6 discovery, implementation after generation semantics).
+
+### Recommended first tranche
+
+1. Decide and enforce serial behavior for 014 unless fan-out is explicitly funded.
+2. Add deterministic failing tests for 001/002/012, then implement their shared ownership/generation primitive.
+3. Define canonical call identity and adversarial tests for 038/008; reuse it for 037 and 036.
+4. Land independent hardening for 013, 025, 029, and 034.
+5. Add P8 machine-readable mapping incrementally so closure PRs name symbols, witnesses, tests, bounds, and evidence class.
+
+### Sizing assumptions and reconciliations
+
+- Effort includes focused/full tests and relevant E2E, not only code edits.
+- Crash-consistency closure requires deterministic interruption and rollback fault injection; happy paths do not close P2.
+- Prefer lazy optional-field migrations. Existing lost data is unrecoverable; downgrade readers must ignore new fields safely.
+- High severity is reserved for demonstrated corruption, cross-task permission/state contamination, or execution/history divergence. Gap 035 remains Medium because its confirmed witness loses planning state; 036 and 038 remain High because they cross task/call ownership.
+- Gap 014 remains Medium while fan-out is disabled; risk rises if production concurrency is enabled prematurely.
+- Re-estimate after P1, P4, and P7 decisions because they define shared interfaces.
+
 ## Burn-down dependencies
 
 | Dependency                                     | Enables                                                       |
