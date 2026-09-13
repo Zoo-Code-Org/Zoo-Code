@@ -13,17 +13,20 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_PER_WRITE_CHECKPOINTS,
 } from "@roo-code/types"
 
 type CheckpointSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	enableCheckpoints?: boolean
 	checkpointTimeout?: number
-	setCachedStateField: SetCachedStateField<"enableCheckpoints" | "checkpointTimeout">
+	perWriteCheckpoints?: boolean
+	setCachedStateField: SetCachedStateField<"enableCheckpoints" | "checkpointTimeout" | "perWriteCheckpoints">
 }
 
 export const CheckpointSettings = ({
 	enableCheckpoints,
 	checkpointTimeout,
+	perWriteCheckpoints,
 	setCachedStateField,
 	...props
 }: CheckpointSettingsProps) => {
@@ -33,6 +36,22 @@ export const CheckpointSettings = ({
 			<SectionHeader>{t("settings:sections.checkpoints")}</SectionHeader>
 
 			<Section>
+				<SearchableSetting
+					settingId="checkpoints-perWriteCheckpoints"
+					section="checkpoints"
+					label={t("settings:checkpoints.perWrite.label")}>
+					<VSCodeCheckbox
+						checked={perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS}
+						onChange={(e: any) => {
+							setCachedStateField("perWriteCheckpoints", e.target.checked)
+						}}>
+						<span className="font-medium">{t("settings:checkpoints.perWrite.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:checkpoints.perWrite.description")}
+					</div>
+				</SearchableSetting>
+
 				<SearchableSetting
 					settingId="checkpoints-enable"
 					section="checkpoints"
