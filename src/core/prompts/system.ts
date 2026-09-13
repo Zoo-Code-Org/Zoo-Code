@@ -98,7 +98,7 @@ ${markdownFormattingSection()}
 
 ${getSharedToolUseSection()}${toolsCatalog}
 
-	${getToolUseGuidelinesSection()}
+${getToolUseGuidelinesSection()}
 
 ${
 	// Forward the hub only when the mode actually exposes the MCP group, and pass the per-mode

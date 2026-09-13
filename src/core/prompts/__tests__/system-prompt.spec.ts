@@ -560,6 +560,11 @@ describe("SYSTEM_PROMPT", () => {
 		// Should contain Tool Use Guidelines section
 		expect(prompt).toContain("Tool Use Guidelines")
 
+		// The guidelines heading must start at column 0. A stray leading tab
+		// (#1415) would otherwise be sent to the model with every request.
+		expect(prompt).toContain("\n# Tool Use Guidelines\n")
+		expect(prompt).not.toContain("\t# Tool Use Guidelines")
+
 		// Should NOT contain a tool catalog / XML examples
 		expect(prompt).not.toContain("# Tools")
 		expect(prompt).not.toContain("## read_file")
