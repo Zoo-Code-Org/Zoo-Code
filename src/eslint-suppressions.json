@@ -976,7 +976,7 @@
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 98
+			"count": 97
 		}
 	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"utils/tts.ts": {
