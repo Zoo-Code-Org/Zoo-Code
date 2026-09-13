@@ -1,0 +1,14 @@
+name: PR Review Event
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record review event
+        run: "true"

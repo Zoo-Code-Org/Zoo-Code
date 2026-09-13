@@ -10,6 +10,9 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const workflow = parse(
 	fs.readFileSync(path.join(repositoryRoot, ".github/workflows/label-pr-review-state.yml"), "utf8"),
 )
+const reviewEventWorkflow = parse(
+	fs.readFileSync(path.join(repositoryRoot, ".github/workflows/pr-review-event.yml"), "utf8"),
+)
 const codeRabbitConfig = parse(fs.readFileSync(path.join(repositoryRoot, ".coderabbit.yaml"), "utf8"))
 const workflowScript = workflow.jobs.reconcile.steps[0].with.script as string
 
@@ -30,9 +33,10 @@ interface HarnessOptions {
 	eventName?: string
 	issueCommentActor?: string
 	workflowRunAssociated?: boolean
-	workflowRunFallback?: "match" | "sha-mismatch" | "base-mismatch" | "none"
+	workflowRunFallback?: "match" | "ambiguous" | "sha-mismatch" | "branch-mismatch" | "base-mismatch" | "none"
 	workflowRunHeadBranch?: string
-	workflowRunMissing?: "repository" | "branch" | "sha"
+	workflowRunMissing?: "branch" | "sha"
+	workflowRunHeadOwner?: string
 	workflowDispatchPrNumber?: number
 	existingGuide?: boolean
 	existingGuideHead?: string
@@ -94,7 +98,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		draft: options.draft ?? false,
 		html_url: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
 		user: options.prAuthor ?? { login: "contributor", type: "User" },
-		head: { sha: SHA, repo: { full_name: headRepository } },
+		head: { ref: "feature/test", sha: SHA, repo: { full_name: headRepository } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 		labels: (options.labels ?? []).map((name) => ({ name })),
 		mergeable: options.mergeable !== undefined ? options.mergeable : options.conflict ? false : true,
@@ -238,8 +242,12 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		if (state === "open" && options.prState === "closed") return []
 		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
 			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
+			if (options.workflowRunFallback === "ambiguous") return [pr, { ...pr, number: pr.number + 1 }]
 			if (options.workflowRunFallback === "sha-mismatch") {
 				return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
+			}
+			if (options.workflowRunFallback === "branch-mismatch") {
+				return [{ ...pr, head: { ...pr.head, ref: "another-branch" } }]
 			}
 			if (options.workflowRunFallback === "base-mismatch") {
 				return [{ ...pr, base: { ...pr.base, repo: { full_name: "another/repository" } } }]
@@ -356,10 +364,13 @@ async function runWorkflow(options: HarnessOptions = {}) {
 						? {
 								workflow_run: {
 									pull_requests: options.workflowRunAssociated === false ? [] : [{ number: 1437 }],
-									head_repository:
-										options.workflowRunMissing === "repository"
-											? null
-											: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
+									head_repository: {
+										owner: {
+											login:
+												options.workflowRunHeadOwner ??
+												(options.fork ? "contributor" : "Zoo-Code-Org"),
+										},
+									},
 									head_branch:
 										options.workflowRunMissing === "branch"
 											? null
@@ -446,22 +457,36 @@ describe("PR review-state workflow", () => {
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
-	it("keeps fork review events read-only", async () => {
-		const result = await runWorkflow({ eventName: "pull_request_review", fork: true })
-
-		expect(result.addLabels).not.toHaveBeenCalled()
-		expect(result.removeLabel).not.toHaveBeenCalled()
-		expect(result.createComment).not.toHaveBeenCalled()
-		expect(result.updateComment).not.toHaveBeenCalled()
-		expect(result.createCommitStatus).not.toHaveBeenCalled()
-		expect(result.setFailed).not.toHaveBeenCalled()
+	it("bridges review events without permissions or untrusted code execution", () => {
+		expect(workflow.on.pull_request_review).toBeUndefined()
+		expect(workflow.on.workflow_run.workflows).toContain("PR Review Event")
+		expect(reviewEventWorkflow.on.pull_request_review.types).toEqual(["submitted", "dismissed"])
+		expect(reviewEventWorkflow.permissions).toEqual({})
+		expect(JSON.stringify(reviewEventWorkflow.jobs)).not.toMatch(/actions\/checkout|github\.event|\$\{\{/)
 	})
 
-	it("reconciles same-repository review events", async () => {
-		const result = await runWorkflow({ eventName: "pull_request_review" })
+	it("reconciles maintainer change requests on fork PRs through workflow_run", async () => {
+		const result = await runWorkflow({
+			eventName: "workflow_run",
+			fork: true,
+			labels: ["awaiting-maintainer"],
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "CHANGES_REQUESTED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
 
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 		expect(result.createCommitStatus).toHaveBeenCalled()
+		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.description).toContain("Address maintainer")
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
@@ -1712,10 +1737,28 @@ describe("PR review-state workflow", () => {
 			workflowRunFallback: "match",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(
-			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
-		)
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.listPullRequests).not.toHaveBeenCalledWith(expect.objectContaining({ head: expect.anything() }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("ignores an ambiguous unassociated workflow run", async () => {
+		const result = await runWorkflow({
+			eventName: "workflow_run",
+			workflowRunAssociated: false,
+			workflowRunFallback: "ambiguous",
+		})
+
+		expect(result.listPullRequests).toHaveBeenCalledWith({
+			owner: "Zoo-Code-Org",
+			repo: "Zoo-Code",
+			state: "open",
+			per_page: 100,
+		})
+		expect(result.getPullRequest).not.toHaveBeenCalled()
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Ignoring ambiguous workflow_run"))
 	})
 
 	it("ignores closed PRs when resolving an unassociated workflow run", async () => {
@@ -1727,9 +1770,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
-		expect(result.listPullRequests).toHaveBeenCalledWith(
-			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
-		)
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
 		expect(result.getPullRequest).not.toHaveBeenCalled()
 		expect(result.createCommitStatus).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalled()
@@ -1737,17 +1778,17 @@ describe("PR review-state workflow", () => {
 		expect(result.createLabel).not.toHaveBeenCalled()
 	})
 
-	it("resolves an unassociated fork workflow run by exact head", async () => {
+	it("resolves an unassociated fork review run when GitHub reports the base repository as head", async () => {
 		const result = await runWorkflow({
 			eventName: "workflow_run",
 			workflowRunAssociated: false,
 			workflowRunFallback: "match",
 			fork: true,
+			workflowRunHeadOwner: "Zoo-Code-Org",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(
-			expect.objectContaining({ head: "contributor:feature/test", state: "open" }),
-		)
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.listPullRequests).not.toHaveBeenCalledWith(expect.objectContaining({ head: expect.anything() }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
@@ -1756,6 +1797,19 @@ describe("PR review-state workflow", () => {
 			eventName: "workflow_run",
 			workflowRunAssociated: false,
 			workflowRunFallback: "sha-mismatch",
+		})
+
+		expect(result.listPullRequests).toHaveBeenCalled()
+		expect(result.getPullRequest).not.toHaveBeenCalled()
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
+	})
+
+	it("ignores an unassociated workflow run when the candidate head branch differs", async () => {
+		const result = await runWorkflow({
+			eventName: "workflow_run",
+			workflowRunAssociated: false,
+			workflowRunFallback: "branch-mismatch",
 		})
 
 		expect(result.listPullRequests).toHaveBeenCalled()
@@ -1777,7 +1831,7 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalled()
 	})
 
-	it.each(["repository", "branch", "sha"] as const)(
+	it.each(["branch", "sha"] as const)(
 		"ignores an unassociated workflow run with missing %s metadata",
 		async (workflowRunMissing) => {
 			const result = await runWorkflow({
@@ -1797,9 +1851,7 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ eventName: "workflow_run", workflowRunAssociated: false })
 
 		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
-		expect(result.listPullRequests).toHaveBeenCalledWith(
-			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
-		)
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
 		expect(result.createCommitStatus).not.toHaveBeenCalled()
 	})
 
