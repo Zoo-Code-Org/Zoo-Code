@@ -975,6 +975,10 @@
 			"refreshSuccess": "Strumenti aggiornati con successo",
 			"refreshError": "Impossibile aggiornare gli strumenti",
 			"toolParameters": "Parametri"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Sforzo di pensiero dinamico",
+			"description": "Abilita lo strumento set_thinking_effort in modo che il modello decida lo sforzo di pensiero per ogni passaggio. Il controllo manuale nella chat è sempre disponibile. (sperimentale)"
 		}
 	},
 	"promptCaching": {

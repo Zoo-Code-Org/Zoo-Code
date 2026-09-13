@@ -975,6 +975,10 @@
 			"refreshSuccess": "Tools erfolgreich aktualisiert",
 			"refreshError": "Fehler beim Aktualisieren der Tools",
 			"toolParameters": "Parameter"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamische Denkintensität",
+			"description": "Aktiviert das set_thinking_effort-Tool, damit das Modell die Denkintensität pro Schritt selbst bestimmt. Die manuelle Anpassung im Chat ist immer verfügbar. (experimentell)"
 		}
 	},
 	"promptCaching": {
