@@ -150,12 +150,20 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
                       ${{ runner.os }}-turbo-
-            - name: Run non-core coverage
-              run: pnpm turbo run test:coverage --filter="!@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run non-extension package coverage
+              run: pnpm turbo run test:coverage --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
+            - name: Run extension unit coverage
+              run: pnpm turbo run test:coverage:unit --filter="zoo-code" --log-order grouped --output-logs new-only
+            - name: Verify extension coverage contract
+              run: pnpm --dir src run verify:coverage-contract
+            - name: Run extension dist smoke test
+              run: pnpm turbo run test:dist --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Run core unit coverage
               run: pnpm turbo run test:coverage:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Run core integration coverage
               run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Verify extension unit coverage report
+              run: node src/scripts/verify-lcov.mjs src/coverage/unit/lcov.info
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -177,7 +185,7 @@ jobs:
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: >-
-                      src/coverage/lcov.info,
+                      src/coverage/unit/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
                       apps/cli/coverage/lcov.info
@@ -214,7 +222,7 @@ jobs:
               with:
                   name: coverage-reports-${{ matrix.name }}
                   path: |
-                      src/coverage/lcov.info
+                      src/coverage/unit/lcov.info
                       webview-ui/coverage/lcov.info
                       packages/cloud/coverage/lcov.info
                       packages/telemetry/coverage/lcov.info
