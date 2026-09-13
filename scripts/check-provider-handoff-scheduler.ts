@@ -111,6 +111,11 @@ const LEGACY_POLICIES: Array<Policy & { expectedViolation: string }> = [
 const parentConfiguration: ProviderSettings = { apiProvider: "anthropic", consecutiveMistakeLimit: 3 }
 const savedConfiguration: ProviderSettings = { apiProvider: "openrouter", consecutiveMistakeLimit: 7 }
 const parentContext = { mode: "code", apiConfigName: undefined, apiConfiguration: parentConfiguration }
+const otherViewContext = {
+	mode: "debug",
+	apiConfigName: "other-view",
+	apiConfiguration: { apiProvider: "openai", consecutiveMistakeLimit: 99 } satisfies ProviderSettings,
+}
 const PROFILE_SCENARIOS = [
 	{ name: "unsaved", locked: false, saved: undefined, expectedName: undefined, expectedLimit: 3 },
 	{
@@ -129,22 +134,43 @@ const PROFILE_SCENARIOS = [
 	},
 ] as const
 
+const FOCUSED_VIEWS = ["parent", "other"] as const
 for (const scenario of PROFILE_SCENARIOS) {
-	const selected = selectHandoffExecutionContext(
-		parentContext,
-		"ask",
-		parentContext.mode,
-		scenario.locked,
-		scenario.saved,
-	)
-	assert.equal(selected.mode, "ask", `${scenario.name}: requested mode must remain task-local`)
-	assert.equal(selected.apiConfigName, scenario.expectedName, `${scenario.name}: profile identity`)
-	assert.equal(
-		selected.apiConfiguration.consecutiveMistakeLimit,
-		scenario.expectedLimit,
-		`${scenario.name}: profile config`,
-	)
-	assert.equal(parentContext.apiConfiguration.consecutiveMistakeLimit, 3, `${scenario.name}: parent context mutated`)
+	for (const focusedBefore of FOCUSED_VIEWS) {
+		const viewContexts = { parent: structuredClone(parentContext), other: structuredClone(otherViewContext) }
+		const taskContext = viewContexts.parent
+		assert.equal(
+			viewContexts[focusedBefore].apiConfigName,
+			focusedBefore === "parent" ? undefined : "other-view",
+			`${scenario.name}/${focusedBefore}: focused view setup`,
+		)
+		const selected = selectHandoffExecutionContext(
+			taskContext,
+			"ask",
+			taskContext.mode,
+			scenario.locked,
+			scenario.saved,
+		)
+		for (const focusedAfter of FOCUSED_VIEWS) {
+			viewContexts[focusedAfter].apiConfiguration.consecutiveMistakeLimit = 101
+			assert.equal(selected.mode, "ask", `${scenario.name}/${focusedBefore}->${focusedAfter}: task-local mode`)
+			assert.equal(
+				selected.apiConfigName,
+				scenario.expectedName,
+				`${scenario.name}/${focusedBefore}->${focusedAfter}: profile identity`,
+			)
+			assert.equal(
+				selected.apiConfiguration.consecutiveMistakeLimit,
+				scenario.expectedLimit,
+				`${scenario.name}/${focusedBefore}->${focusedAfter}: profile config`,
+			)
+		}
+		assert.equal(
+			parentContext.apiConfiguration.consecutiveMistakeLimit,
+			3,
+			`${scenario.name}: parent context mutated`,
+		)
+	}
 }
 
 const fixed = explore(FIXED_POLICY, false)
@@ -156,7 +182,7 @@ const counterexamples = LEGACY_POLICIES.map((policy) => {
 })
 
 console.log(
-	`Provider handoff/scheduler model check passed: ${fixed.states} distinct reachable states, ${PROFILE_SCENARIOS.length}/${PROFILE_SCENARIOS.length} profile scenarios, ${fixed.actions.size}/${EXPECTED_ACTIONS.length} actions, ${fixed.landmarks.size}/${Object.keys(LANDMARKS).length} landmarks, depth <= ${MAX_DEPTH}, states <= ${MAX_STATES}, ${counterexamples.length}/${LEGACY_POLICIES.length} legacy counterexamples`,
+	`Provider handoff/scheduler model check passed: ${fixed.states} distinct reachable states, ${PROFILE_SCENARIOS.length * FOCUSED_VIEWS.length * FOCUSED_VIEWS.length}/${PROFILE_SCENARIOS.length * FOCUSED_VIEWS.length * FOCUSED_VIEWS.length} profile/focus schedules, ${fixed.actions.size}/${EXPECTED_ACTIONS.length} actions, ${fixed.landmarks.size}/${Object.keys(LANDMARKS).length} landmarks, depth <= ${MAX_DEPTH}, states <= ${MAX_STATES}, ${counterexamples.length}/${LEGACY_POLICIES.length} legacy counterexamples`,
 )
 for (const counterexample of counterexamples) {
 	console.log(
