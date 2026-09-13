@@ -123,21 +123,30 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 				case "message_start": {
 					const usage = chunk.message!.usage
 
+					// `output_tokens_details.thinking_tokens` decomposes the billed
+					// output into internal reasoning tokens; surfaced for per-turn
+					// thinking telemetry (billing already includes it in output_tokens).
 					yield {
 						type: "usage",
 						inputTokens: usage.input_tokens || 0,
 						outputTokens: usage.output_tokens || 0,
 						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
 						cacheReadTokens: usage.cache_read_input_tokens || undefined,
+						...(typeof usage.output_tokens_details?.thinking_tokens === "number"
+							? { reasoningTokens: usage.output_tokens_details!.thinking_tokens }
+							: {}),
 					}
 
 					break
 				}
 				case "message_delta": {
+					const deltaThinkingTokens = chunk.usage!.output_tokens_details?.thinking_tokens
+
 					yield {
 						type: "usage",
 						inputTokens: 0,
 						outputTokens: chunk.usage!.output_tokens || 0,
+						...(typeof deltaThinkingTokens === "number" ? { reasoningTokens: deltaThinkingTokens } : {}),
 					}
 
 					break
