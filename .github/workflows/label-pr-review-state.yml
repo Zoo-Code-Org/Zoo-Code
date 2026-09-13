@@ -389,13 +389,13 @@ jobs:
               }
             }
 
-            function reviewGuideBody(pr, phase, activationPending = false) {
+            function reviewGuideBody(pr, phase, activationPending = false, earlyActivation = false) {
               const automatedAuthor = pr.user?.type === 'Bot';
               const authorNote = automatedAuthor
                 ? 'This PR was opened by an automated account. A human maintainer must verify the change intent, provenance, and validation before merging.'
                 : 'Thanks for contributing. This comment tracks the review sequence and the next action.';
 
-              const labelMarker = phase === 'coderabbit'
+              const labelMarker = phase === 'coderabbit' || earlyActivation
                 ? `\n${codeRabbitLabelMarkerPrefix}${pr.head.sha}${activationPending ? ':pending' : ''} -->`
                 : '';
 
@@ -413,13 +413,13 @@ jobs:
                 labelMarker;
             }
 
-            async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false) {
+            async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false, earlyActivation = false) {
               if (isReadOnlyRun && isForkPR(pr)) {
                 core.info(`PR #${pr.number}: fork PR on a read-only run — skipping guide update`);
                 return;
               }
 
-              const body = reviewGuideBody(pr, phase, activationPending);
+              const body = reviewGuideBody(pr, phase, activationPending, earlyActivation);
               const existing = existingGuide ?? await findReviewGuide(pr);
 
               if (!existing) {
@@ -606,17 +606,42 @@ jobs:
                   )
                 );
 
+                // CodeRabbit review does not need the full test matrix: the Windows
+                // jobs run much longer than the Ubuntu jobs, so activation only waits
+                // for the non-Windows required checks (Ubuntu tests, lint, types, etc.)
+                // to conclude successfully. A failed Windows run still blocks
+                // activation until the author pushes a fix.
+                const windowsTestCheck = context => /\(windows-[^)]*\)/.test(context);
+                const activationResults = requiredResults.filter(
+                  result => !windowsTestCheck(result.check.context)
+                );
+                const activationRuns = activationResults.map(result => result.run).filter(Boolean);
+                const activationStatuses = activationResults.map(result => result.status).filter(Boolean);
+                const activationMissing = activationResults.filter(result => !result.run && !result.status);
+                const codeRabbitActivationPending = requiredChecks === null ||
+                  activationMissing.length > 0 ||
+                  activationRuns.some(run => run.status !== 'completed') ||
+                  activationStatuses.some(status => status.state === 'pending');
+                const codeRabbitActivationReady = !ciFailed && !codeRabbitActivationPending;
+
                 // While CI is running or has failed, remove state labels and move on.
                 // CI failure is its own signal; the label would add noise, not clarity.
+                // Once the non-Windows required checks pass, CodeRabbit may still be
+                // activated early while the Windows test jobs finish.
                 if (ciPending || ciFailed) {
                   core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                  const activateCodeRabbitEarly = ciPending && codeRabbitActivationReady;
+                  const recycleCodeRabbitLabelEarly = activateCodeRabbitEarly &&
+                    codeRabbitLabelHead(existingGuide) !== pr.head.sha;
                   await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
-                  await setCodeRabbitReviewActive(pr, false);
+                  await setCodeRabbitReviewActive(pr, activateCodeRabbitEarly, recycleCodeRabbitLabelEarly);
                   await reconcileLabels(pr, null);
                   await updateReviewGuide(
                     pr,
                     ciPending ? 'ci-pending' : 'ci-failed',
-                    existingGuide
+                    existingGuide,
+                    false,
+                    activateCodeRabbitEarly
                   );
                   continue;
                 }
