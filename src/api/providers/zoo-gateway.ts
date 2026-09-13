@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	zooGatewayDefaultModelId,
@@ -22,6 +22,7 @@ import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
+import { createAbortError } from "./utils/abort-signal"
 
 function getApiErrorStatus(error: unknown): number | undefined {
 	if (typeof error === "object" && error !== null && "status" in error) {
@@ -219,9 +220,29 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
+		// Per-request controller so an external abort signal (e.g. task
+		// cancellation) can interrupt the in-flight streaming request.
+		// Bridge it to our controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		// The listener is stored so it can be detached when the request ends:
+		// { once: true } only removes it on abort, so a task-scoped signal
+		// would otherwise accumulate one listener per request.
+		const controller = new AbortController()
+		const externalAbortSignal = metadata?.abortSignal
+		const abortListener = () => controller.abort()
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
+			}
+		}
+
 		try {
 			const completion = await this.client.chat.completions.create(body, {
 				headers: requestHeaders,
+				signal: controller.signal,
 			})
 
 			for await (const chunk of completion) {
@@ -266,6 +287,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 			}
 		} catch (error) {
+			// Preserve abort identity (series standard): surface a cancelled
+			// request as a DOM-standard AbortError before the gateway error
+			// surfacing/telemetry path.
+			if (controller.signal.aborted) {
+				throw createAbortError("Zoo Gateway")
+			}
 			try {
 				await surfaceGatewayApiError(error)
 			} catch (surfaceError) {
@@ -275,6 +302,8 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				)
 			}
 			throw error
+		} finally {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
 	}
 
@@ -295,10 +324,35 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens
+			// Build request options with abortSignal and/or timeout.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
+				createOptions.timeout = options.timeoutMs
+			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			const response = await this.client.chat.completions.create(requestOptions, createOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			if (
+				options?.abortSignal?.aborted ||
+				error instanceof APIUserAbortError ||
+				error instanceof APIConnectionTimeoutError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Zoo Gateway")
+			}
 			try {
 				await surfaceGatewayApiError(error)
 			} catch (surfaceError) {
