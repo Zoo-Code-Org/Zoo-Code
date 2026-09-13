@@ -93,3 +93,35 @@ export function createAbortError(providerName: string): Error {
 	abortError.name = "AbortError"
 	return abortError
 }
+
+/**
+ * Await `pending` but reject with the provider's abort error when `signal`
+ * aborts first. For async phases that have no native signal support (model
+ * discovery) yet must still settle promptly on cancellation. The underlying
+ * promise keeps running (its settlement is ignored) — cancellation is
+ * cooperative at this boundary.
+ *
+ * The abort listener is detached once `pending` settles (success or
+ * failure), so repeated calls on one signal do not accumulate listeners.
+ */
+export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+	if (signal.aborted) {
+		return Promise.reject(createAbortError(providerName))
+	}
+
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(createAbortError(providerName))
+		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
+		signal.addEventListener("abort", onAbort, { once: true })
+		void pending.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}
