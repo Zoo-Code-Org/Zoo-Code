@@ -703,6 +703,14 @@
 		"enable": {
 			"label": "Aktifkan checkpoint otomatis",
 			"description": "Ketika diaktifkan, Zoo akan secara otomatis membuat checkpoint selama eksekusi tugas, memudahkan untuk meninjau perubahan atau kembali ke state sebelumnya. <0>Pelajari lebih lanjut</0>"
+		},
+		"perWrite": {
+			"label": "Checkpoint setelah setiap penulisan file",
+			"description": "Merekam snapshot checkpoint setelah setiap penulisan file yang berhasil oleh agen"
+		},
+		"changeCardDetail": {
+			"label": "Tampilkan diff lengkap di kartu perubahan",
+			"description": "Termasuk diff terpadu lengkap secara inline untuk setiap file di kartu perubahan per langkah. Saat dimatikan, kartu hanya menampilkan daftar file dengan baris yang ditambahkan/dihapus."
 		}
 	},
 	"notifications": {

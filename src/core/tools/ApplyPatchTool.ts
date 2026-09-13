@@ -6,6 +6,8 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
+import { checkpointSave } from "../checkpoints"
+import { checkAutoApproval } from "../auto-approval"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -18,6 +20,18 @@ import type { ApplyPatchFileChange } from "./apply-patch"
 
 interface ApplyPatchParams {
 	patch: string
+}
+
+/**
+ * B2: result of a single file operation within a patch. `succeeded` controls
+ * the whole-patch success state (and therefore the per-patch checkpoint),
+ * while `wrote` records whether the operation actually wrote a file — a no-op
+ * update must not produce a change-journal entry for a file that was never
+ * written.
+ */
+interface ApplyPatchFileOpResult {
+	succeeded: boolean
+	wrote: boolean
 }
 
 export class ApplyPatchTool extends BaseTool<"apply_patch"> {
@@ -102,7 +116,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each file change
+			// Process each file change. The handlers report whether their file
+			// operation succeeded (which controls the whole-patch checkpoint) and
+			// whether it actually wrote a file (which controls the change journal
+			// — a no-op update must not be journaled). A rejected approval or a
+			// failed local write never gets checkpointed as a success.
+			let patchSucceeded = true
+			const successfulChanges: ApplyPatchFileChange[] = []
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -112,7 +132,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (!accessAllowed) {
 					await task.say("rooignore_error", relPath)
 					pushToolResult(formatResponse.rooIgnoreError(relPath))
-					return
+					// B2 partial flush: break, not return - an earlier hunk may have
+					// already written a file, and those writes must still receive the
+					// checkpoint, journal entry, and change card. Failing the patch
+					// also keeps the consecutive-mistake counter from resetting.
+					patchSucceeded = false
+					break
 				}
 
 				// Check if file is write-protected
@@ -120,17 +145,100 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					const addResult = await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					patchSucceeded = addResult.succeeded && patchSucceeded
+					if (addResult.wrote) {
+						successfulChanges.push(change)
+					}
 				} else if (change.type === "delete") {
 					// Delete file
-					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					const deleteResult = await this.handleDeleteFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					patchSucceeded = deleteResult.succeeded && patchSucceeded
+					if (deleteResult.wrote) {
+						successfulChanges.push(change)
+					}
 				} else if (change.type === "update") {
-					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					// Update file (a no-op update succeeds without writing)
+					const updateResult = await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					patchSucceeded = updateResult.succeeded && patchSucceeded
+					if (updateResult.wrote) {
+						successfulChanges.push(change)
+					}
 				}
 			}
 
-			task.consecutiveMistakeCount = 0
+			// Reset the consecutive-mistake counter only after a fully successful
+			// patch: a failed operation (missing file, rejected move, ...) increments
+			// the counter, and the count must survive a partially written patch so
+			// the auto-approval safety net still engages across consecutive failed
+			// patches.
+			if (patchSucceeded) {
+				task.consecutiveMistakeCount = 0
+			}
+
+			// B1: one checkpoint for the whole patch (not per file). Live
+			// setting with default-on semantics: skip only when explicitly false.
+			// B3a partial flush: the checkpoint and journal are also taken when at
+			// least one file operation wrote, even if a later hunk of the same
+			// patch failed - the journal then documents exactly the subset that
+			// was written, and the failed operation was already reported through
+			// pushToolResult. A fully failed patch (nothing written) leaves no
+			// checkpoint behind.
+			if (patchSucceeded || successfulChanges.length > 0) {
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					// B2: one journal entry per file that was actually written by
+					// the patch (the simplest correct design for multi-file patches),
+					// all referencing the single checkpoint above. A no-op update
+					// contributes no entry because nothing was written. `movePath`,
+					// when present, is the file's final location. B3a: the per-file
+					// approval diff/stats and auto-approval state, retained by the
+					// handlers, feed the per-step change card.
+					// Awaited: a later write must not interleave with this patch's
+					// staging/commit/journal/change-card work. checkpointSave never
+					// rejects (service call wrapped in try/catch upstream).
+					await checkpointSave(
+						task,
+						false,
+						true,
+						successfulChanges.map((change) => ({
+							path: change.movePath ?? change.path,
+							operation: change.type === "add" ? "create" : change.type,
+							...(change.diffStats
+								? {
+										diffStats: {
+											additions: change.diffStats.added,
+											deletions: change.diffStats.removed,
+										},
+									}
+								: {}),
+							...(change.diff ? { diff: change.diff } : {}),
+							...(change.autoApproved ? { autoApproved: true } : {}),
+						})),
+					)
+				}
+			}
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
@@ -144,7 +252,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file already exists
@@ -155,7 +263,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File already exists: ${relPath}. Use Update File instead.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		const newContent = change.newContent || ""
@@ -194,6 +302,21 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			diffStats,
 		} satisfies ClineSayTool)
 
+		// B3a: retain the approval diff/stats and auto-approval state so the
+		// post-loop checkpoint hook can build the per-step change card.
+		change.diff = sanitizedDiff
+		change.diffStats = diffStats
+		change.autoApproved =
+			(
+				await checkAutoApproval({
+					state,
+					cwd: task.cwd,
+					ask: "tool",
+					text: completeMessage,
+					isProtected: isWriteProtected,
+				})
+			).decision === "approve"
+
 		// Show diff view if focus disruption prevention is disabled
 		if (!isPreventFocusDisruptionEnabled) {
 			await task.diffViewProvider.open(relPath)
@@ -209,7 +332,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		// Save the changes
@@ -227,15 +350,17 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
 		task.processQueuedMessages()
+		return { succeeded: true, wrote: true }
 	}
 
 	private async handleDeleteFile(
+		change: ApplyPatchFileChange,
 		absolutePath: string,
 		relPath: string,
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file exists
@@ -246,7 +371,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot delete a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
@@ -264,11 +389,24 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			isProtected: isWriteProtected,
 		} satisfies ClineSayTool)
 
+		// B3a: auto-approval state feeds the per-step change card (deletes have
+		// no diff to thread).
+		change.autoApproved =
+			(
+				await checkAutoApproval({
+					state: await task.providerRef.deref()?.getState(),
+					cwd: task.cwd,
+					ask: "tool",
+					text: completeMessage,
+					isProtected: isWriteProtected,
+				})
+			).decision === "approve"
+
 		const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
 		if (!didApprove) {
 			pushToolResult("Delete operation was rejected by the user.")
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		// Delete the file
@@ -278,12 +416,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `Failed to delete file '${relPath}': ${error instanceof Error ? error.message : String(error)}`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
 		task.processQueuedMessages()
+		return { succeeded: true, wrote: true }
 	}
 
 	private async handleUpdateFile(
@@ -293,8 +432,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
+
+		// A move reports failure when the original file cannot be deleted
+		// after the copy (both paths would remain on disk).
+		let moveSucceeded = true
 
 		// Check if file exists
 		const fileExists = await fileExistsAtPath(absolutePath)
@@ -304,7 +447,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot update a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		const originalContent = change.originalContent || ""
@@ -318,9 +461,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// Generate and validate diff
 		const diff = formatResponse.createPrettyPatch(relPath, originalContent, newContent)
 		if (!diff) {
+			// A no-op change is not a failure: the patch processed cleanly and
+			// nothing was written, so the whole-patch success state is kept —
+			// but `wrote` stays false so the change journal does not document a
+			// write that never happened.
 			pushToolResult(`No changes needed for '${relPath}'`)
 			await task.diffViewProvider.reset()
-			return
+			return { succeeded: true, wrote: false }
 		}
 
 		// Check experiment settings
@@ -351,6 +498,21 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			diffStats,
 		} satisfies ClineSayTool)
 
+		// B3a: retain the approval diff/stats and auto-approval state so the
+		// post-loop checkpoint hook can build the per-step change card.
+		change.diff = sanitizedDiff
+		change.diffStats = diffStats
+		change.autoApproved =
+			(
+				await checkAutoApproval({
+					state,
+					cwd: task.cwd,
+					ask: "tool",
+					text: completeMessage,
+					isProtected: isWriteProtected,
+				})
+			).decision === "approve"
+
 		// Show diff view if focus disruption prevention is disabled
 		if (!isPreventFocusDisruptionEnabled) {
 			await task.diffViewProvider.open(relPath)
@@ -366,7 +528,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		// Handle file move if specified
@@ -379,7 +541,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("rooignore_error", change.movePath)
 				pushToolResult(formatResponse.rooIgnoreError(change.movePath))
 				await task.diffViewProvider.reset()
-				return
+				return { succeeded: false, wrote: false }
 			}
 
 			// Check if destination path is write-protected
@@ -391,7 +553,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return { succeeded: false, wrote: false }
 			}
 
 			// Check if destination path is outside workspace
@@ -403,7 +565,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return { succeeded: false, wrote: false }
 			}
 
 			// Save new content to the new path
@@ -422,11 +584,19 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
 			}
 
-			// Delete the original file
+			// Delete the original file. A failed deletion leaves both paths on
+			// disk, so the move must be reported as a failure rather than
+			// checkpointed and journaled as a completed move.
 			try {
 				await fs.unlink(absolutePath)
 			} catch (error) {
+				moveSucceeded = false
 				console.error(`Failed to delete original file after move: ${error}`)
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_patch")
+				const errorMessage = `Move of '${relPath}' to '${change.movePath}' failed: could not delete the original file.`
+				await task.say("error", errorMessage)
+				pushToolResult(formatResponse.toolError(errorMessage))
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
@@ -447,6 +617,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
 		task.processQueuedMessages()
+		if (!moveSucceeded) {
+			// The destination file was written on disk before the source
+			// deletion failed, so the write must still be checkpointed and
+			// journaled; the move itself is reported as failed.
+			return { succeeded: false, wrote: true }
+		}
+		return { succeeded: true, wrote: true }
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {
