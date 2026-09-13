@@ -460,26 +460,36 @@ export function formatAdvisoryCommand(advisory) {
 
 export function formatAnnotations(blockingMutants, packageRoot, state = { total: 0, perFile: new Map() }) {
 	const annotations = []
+	const mutantsByLocation = new Map()
 
-	for (const mutant of blockingMutants.sort((left, right) => {
+	for (const mutant of [...blockingMutants].sort((left, right) => {
 		const pathOrder = left.filePath.localeCompare(right.filePath)
 		return pathOrder || left.location.start.line - right.location.start.line
 	})) {
 		const repositoryPath = path.posix.join(packageRoot, mutant.filePath.replaceAll("\\", "/"))
 		const key = `${repositoryPath}:${mutant.location.start.line}`
-		const fileCount = state.perFile.get(repositoryPath) ?? 0
-		if (annotations.some((annotation) => annotation.key === key) || fileCount >= 7 || state.total >= 20) continue
+		const group = mutantsByLocation.get(key) ?? { repositoryPath, mutants: [] }
+		group.mutants.push(mutant)
+		mutantsByLocation.set(key, group)
+	}
 
+	for (const [key, { repositoryPath, mutants }] of mutantsByLocation) {
+		const fileCount = state.perFile.get(repositoryPath) ?? 0
+		if (fileCount >= 7 || state.total >= 20) continue
+
+		const mutant = mutants[0]
 		const replacement = String(mutant.replacement ?? "")
 			.replace(/\s+/g, " ")
 			.trim()
 			.slice(0, 160)
+		const location = `${repositoryPath}:${mutant.location.start.line}`
+		const detail = `${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}`
 		annotations.push({
 			key,
 			file: repositoryPath,
 			line: mutant.location.start.line,
 			message:
-				`${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}. ` +
+				`${location}: ${mutants.length === 1 ? detail : `${mutants.length} mutation test gaps; example: ${detail}`}. ` +
 				"See the job summary for the complete list and resolution guidance.",
 		})
 		state.perFile.set(repositoryPath, fileCount + 1)
@@ -652,16 +662,18 @@ export function evaluateReport(report, packageEntry) {
 				"The result is inconclusive; consider fixing flaky or slow tests, or reducing the changed scope.",
 		)
 	}
-	if (counts.blocking.length > 0) {
-		advisories.push(
-			`${packageEntry.id} has ${counts.survived} surviving and ${counts.noCoverage} uncovered changed-code mutants. ` +
-				"Consider adding or strengthening focused tests.",
-		)
-	}
 	return { ...counts, advisories }
 }
 
-export function runManifest(repoRoot, manifest, reportRoot) {
+export function runManifest(
+	repoRoot,
+	manifest,
+	reportRoot,
+	{
+		runMutation = runStryker,
+		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+	} = {},
+) {
 	const rows = []
 	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
@@ -677,7 +689,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			if (packageEntry.discoverRelatedTests) {
 				packageEntry.testFiles = discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory)
 			}
-			const preflightOutput = stripAnsi(runStryker(repoRoot, packageEntry, reportRoot, true))
+			const preflightOutput = stripAnsi(runMutation(repoRoot, packageEntry, reportRoot, true))
 			const mutantMatch = /Instrumented \d+ source file\(s\) with (\d+) mutant\(s\)/.exec(preflightOutput)
 			if (!mutantMatch) throw new Error(`${packageEntry.id} preflight did not report a mutant count`)
 			const generatedMutants = Number(mutantMatch[1])
@@ -707,9 +719,9 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				continue
 			}
 
-			runStryker(repoRoot, packageEntry, reportRoot, false)
+			runMutation(repoRoot, packageEntry, reportRoot, false)
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
-			const report = JSON.parse(fs.readFileSync(jsonReportPath, "utf8"))
+			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
 			counts = evaluateReport(report, packageEntry)
 			for (const annotation of formatAnnotations(
@@ -729,7 +741,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				reportPath,
 				changedLines: packageEntry.changedExecutableLines,
 				...counts,
-				result: counts.advisories.length > 0 ? "Advisory findings" : "Passed",
+				result: counts.blocking.length > 0 || counts.advisories.length > 0 ? "Advisory findings" : "Passed",
 			})
 		} catch (error) {
 			advisories.push(error.message)
