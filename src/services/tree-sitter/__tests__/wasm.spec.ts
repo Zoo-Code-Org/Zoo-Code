@@ -39,6 +39,20 @@ const requiredGrammars = [
 	"zig",
 ]
 
+async function captureLoadFailure(filename: string, directory: string) {
+	let error: unknown
+	try {
+		await loadTestGrammar(filename, directory)
+	} catch (caught) {
+		error = caught
+	}
+	if (!(error instanceof Error) || !(error.cause instanceof Error)) {
+		throw new Error("Expected a contextual grammar load error with an Error cause")
+	}
+	expect(error.message).toContain(error.cause.message)
+	return error
+}
+
 describe("dependency-owned Tree-sitter grammars", () => {
 	const temporaryDirectories: string[] = []
 
@@ -46,14 +60,16 @@ describe("dependency-owned Tree-sitter grammars", () => {
 	afterEach(() => temporaryDirectories.splice(0).forEach((directory) => fs.rmSync(directory, { recursive: true })))
 
 	it.each(requiredGrammars)("loads tree-sitter-%s.wasm", async (grammar) => {
-		await expect(loadTestGrammar(`tree-sitter-${grammar}.wasm`)).resolves.toBeDefined()
+		const language = await loadTestGrammar(`tree-sitter-${grammar}.wasm`)
+		expect(() => new Parser().setLanguage(language)).not.toThrow()
 	})
 
 	it("reports a missing dependency artifact with its filename and resolved path", async () => {
 		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "tree-sitter-wasm-missing-"))
 		temporaryDirectories.push(directory)
 
-		await expect(loadTestGrammar("tree-sitter-missing.wasm", directory)).rejects.toThrow(
+		const error = await captureLoadFailure("tree-sitter-missing.wasm", directory)
+		expect(error.message).toContain(
 			`Failed to load Tree-sitter grammar tree-sitter-missing.wasm from ${path.join(directory, "tree-sitter-missing.wasm")}`,
 		)
 	})
@@ -63,7 +79,8 @@ describe("dependency-owned Tree-sitter grammars", () => {
 		temporaryDirectories.push(directory)
 		fs.writeFileSync(path.join(directory, "tree-sitter-malformed.wasm"), "not wasm")
 
-		await expect(loadTestGrammar("tree-sitter-malformed.wasm", directory)).rejects.toThrow(
+		const error = await captureLoadFailure("tree-sitter-malformed.wasm", directory)
+		expect(error.message).toContain(
 			`Failed to load Tree-sitter grammar tree-sitter-malformed.wasm from ${path.join(directory, "tree-sitter-malformed.wasm")}`,
 		)
 	})
