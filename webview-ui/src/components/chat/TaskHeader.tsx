@@ -29,6 +29,8 @@ import { Mention } from "./Mention"
 import { TodoListDisplay } from "./TodoListDisplay"
 import { LucideIconButton } from "./LucideIconButton"
 
+import MarkdownBlock from "../common/MarkdownBlock"
+
 export interface TaskHeaderProps {
 	task: ClineMessage
 	tokensIn: number
@@ -163,7 +165,11 @@ const TaskHeader = ({
 							e.target.closest('[role="button"]') ||
 							e.target.closest("[data-radix-popper-content-wrapper]") ||
 							e.target.closest("img") ||
-							e.target.tagName === "IMG")
+							// Stryker disable next-line ConditionalExpression,StringLiteral: a click on the <img> itself is already caught by closest("img") above; the tagName backstop adds no distinct behavior
+							e.target.tagName === "IMG" ||
+							e.target.closest("a") ||
+							// Stryker disable next-line ConditionalExpression,StringLiteral: a click on the <a> itself is already caught by closest("a") above; the tagName backstop adds no distinct behavior
+							e.target.tagName === "A")
 					) {
 						return
 					}
@@ -324,13 +330,13 @@ const TaskHeader = ({
 							className="text-vscode-font-size overflow-y-auto break-words break-anywhere relative">
 							<div
 								ref={textRef}
-								className="overflow-auto max-h-80 whitespace-pre-wrap break-words break-anywhere cursor-text py-0.5"
+								className="scrollable overflow-auto max-h-80 break-words break-anywhere cursor-text py-0.5"
 								style={{
 									display: "-webkit-box",
 									WebkitLineClamp: "unset",
 									WebkitBoxOrient: "vertical",
 								}}>
-								<Mention text={task.text} />
+								<MarkdownBlock markdown={task.text ?? ""} mentions breaks />
 							</div>
 						</div>
 						{task.images && task.images.length > 0 && <Thumbnails images={task.images} />}

@@ -55,6 +55,7 @@
 		"failed_remove_directory": "Görev dizini kaldırılamadı: {{error}}",
 		"custom_storage_path_unusable": "Özel depolama yolu \"{{path}}\" kullanılamıyor, varsayılan yol kullanılacak",
 		"cannot_access_path": "{{path}} yoluna erişilemiyor: {{error}}",
+		"path_outside_workspace": "Yol çalışma alanının dışında",
 		"settings_import_failed": "Ayarlar içe aktarılamadı: {{error}}.",
 		"mistake_limit_guidance": "Bu, modelin düşünce sürecindeki bir başarısızlığı veya bir aracı düzgün kullanamama durumunu gösterebilir, bu da kullanıcı rehberliği ile hafifletilebilir (örn. \"Görevi daha küçük adımlara bölmeyi deneyin\").",
 		"violated_organization_allowlist": "Görev yürütülemedi: Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
