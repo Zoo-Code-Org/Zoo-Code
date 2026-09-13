@@ -143,6 +143,8 @@
 	},
 	"selectMode": "Pilih mode untuk interaksi",
 	"selectApiConfig": "Pilih konfigurasi API",
+	"selectModel": "Pilih model",
+	"selectModelUnsupported": "Pemilihan model tidak tersedia untuk penyedia ini di sini. Klik untuk membuka pengaturan.",
 	"lockApiConfigAcrossModes": "Kunci konfigurasi API di semua mode dalam workspace ini",
 	"unlockApiConfigAcrossModes": "Konfigurasi API terkunci di semua mode dalam workspace ini (klik untuk membuka kunci)",
 	"enhancePrompt": "Tingkatkan prompt dengan konteks tambahan",

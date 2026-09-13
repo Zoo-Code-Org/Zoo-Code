@@ -113,6 +113,8 @@
 	},
 	"selectMode": "选择交互模式",
 	"selectApiConfig": "选择 API 配置",
+	"selectModel": "选择模型",
+	"selectModelUnsupported": "此提供商在此处不支持模型选择。点击以打开设置。",
 	"lockApiConfigAcrossModes": "锁定此工作区所有模式的 API 配置",
 	"unlockApiConfigAcrossModes": "此工作区所有模式的 API 配置已锁定（点击解锁）",
 	"enhancePrompt": "增强提示词",

@@ -140,6 +140,8 @@
 	},
 	"selectMode": "Select mode for interaction",
 	"selectApiConfig": "Select API configuration",
+	"selectModel": "Select model",
+	"selectModelUnsupported": "Model selection isn't available for this provider here. Click to open settings.",
 	"lockApiConfigAcrossModes": "Lock API configuration across all modes in this workspace",
 	"unlockApiConfigAcrossModes": "API configuration is locked across all modes in this workspace (click to unlock)",
 	"enhancePrompt": "Enhance prompt with additional context",

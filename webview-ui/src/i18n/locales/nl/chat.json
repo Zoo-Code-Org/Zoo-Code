@@ -113,6 +113,8 @@
 	},
 	"selectMode": "Selecteer modus voor interactie",
 	"selectApiConfig": "Selecteer API-configuratie",
+	"selectModel": "Selecteer model",
+	"selectModelUnsupported": "Modelselectie is hier niet beschikbaar voor deze provider. Klik om instellingen te openen.",
 	"lockApiConfigAcrossModes": "API-configuratie vergrendelen voor alle modi in deze werkruimte",
 	"unlockApiConfigAcrossModes": "API-configuratie is vergrendeld voor alle modi in deze werkruimte (klik om te ontgrendelen)",
 	"enhancePrompt": "Prompt verbeteren met extra context",

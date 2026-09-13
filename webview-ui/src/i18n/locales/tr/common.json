@@ -20,6 +20,8 @@
 		"billion_suffix": "b"
 	},
 	"ui": {
+		"loading": "Yükleniyor...",
+		"clear_search": "Aramayı temizle",
 		"search_placeholder": "Ara...",
 		"no_results": "Sonuç bulunamadı"
 	},

@@ -113,6 +113,8 @@
 	},
 	"selectMode": "Selecionar modo de interação",
 	"selectApiConfig": "Selecionar configuração da API",
+	"selectModel": "Selecionar modelo",
+	"selectModelUnsupported": "A seleção de modelo não está disponível para este provedor aqui. Clique para abrir as configurações.",
 	"lockApiConfigAcrossModes": "Bloquear configuração da API em todos os modos neste workspace",
 	"unlockApiConfigAcrossModes": "A configuração da API está bloqueada em todos os modos neste workspace (clique para desbloquear)",
 	"enhancePrompt": "Aprimorar prompt com contexto adicional",
