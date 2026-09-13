@@ -859,6 +859,183 @@ describe("useMcpToolTool", () => {
 			])
 		})
 
+		it("should extract image data from embedded resource blobs", async () => {
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "godot-server",
+					tool_name: "game_screenshot",
+					arguments: "{}",
+				},
+				nativeArgs: {
+					server_name: "godot-server",
+					tool_name: "game_screenshot",
+					arguments: {},
+				},
+				partial: false,
+			}
+
+			mockAskApproval.mockResolvedValue(true)
+
+			const mockToolResult = {
+				content: [
+					{ type: "text", text: "Screenshot captured: 1152x648" },
+					{
+						type: "resource",
+						resource: {
+							uri: "godot://screenshot/latest",
+							mimeType: "image/png",
+							blob: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
+						},
+					},
+				],
+				isError: false,
+			}
+
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					callTool: vi.fn().mockResolvedValue(mockToolResult),
+					getAllServers: vi.fn().mockReturnValue([
+						{
+							name: "godot-server",
+							tools: [{ name: "game_screenshot", description: "Capture screenshot" }],
+						},
+					]),
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.say).toHaveBeenCalledWith(
+				"mcp_server_response",
+				expect.stringContaining("Screenshot captured: 1152x648"),
+				["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"],
+			)
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("with 1 image(s)"))
+		})
+
+		it("should not extract non-image resource blobs", async () => {
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "godot-server",
+					tool_name: "read_scene",
+					arguments: "{}",
+				},
+				nativeArgs: {
+					server_name: "godot-server",
+					tool_name: "read_scene",
+					arguments: {},
+				},
+				partial: false,
+			}
+
+			mockAskApproval.mockResolvedValue(true)
+
+			const mockToolResult = {
+				content: [
+					{
+						type: "resource",
+						resource: {
+							uri: "godot://scene/main",
+							mimeType: "text/plain",
+							blob: "c2NlbmUgZGF0YQ==",
+						},
+					},
+				],
+				isError: false,
+			}
+
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					callTool: vi.fn().mockResolvedValue(mockToolResult),
+					getAllServers: vi.fn().mockReturnValue([
+						{
+							name: "godot-server",
+							tools: [{ name: "read_scene", description: "Read scene" }],
+						},
+					]),
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.say).toHaveBeenCalledWith(
+				"mcp_server_response",
+				expect.stringContaining("godot://scene/main"),
+				[],
+			)
+		})
+
+		it("should not double-prefix image resource blobs already formatted as data URLs", async () => {
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "godot-server",
+					tool_name: "game_screenshot",
+					arguments: "{}",
+				},
+				nativeArgs: {
+					server_name: "godot-server",
+					tool_name: "game_screenshot",
+					arguments: {},
+				},
+				partial: false,
+			}
+
+			mockAskApproval.mockResolvedValue(true)
+
+			const mockToolResult = {
+				content: [
+					{
+						type: "resource",
+						resource: {
+							uri: "godot://screenshot/latest",
+							mimeType: "image/png",
+							blob: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
+						},
+					},
+				],
+				isError: false,
+			}
+
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					callTool: vi.fn().mockResolvedValue(mockToolResult),
+					getAllServers: vi.fn().mockReturnValue([
+						{
+							name: "godot-server",
+							tools: [{ name: "game_screenshot", description: "Capture screenshot" }],
+						},
+					]),
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_response", expect.any(String), [
+				"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
+			])
+		})
+
 		it("should handle multiple images in response", async () => {
 			const block: ToolUse = {
 				type: "tool_use",
