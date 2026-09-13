@@ -50,7 +50,7 @@ export function createWasmOutputSnapshot(destinationDir, filesystem = fs) {
 					filesystem.renameSync(path.join(destinationDir, filename), path.join(generatedDir, filename))
 				}
 			}
-			for (const filename of filesystem.readdirSync(backupDir)) {
+			for (const filename of filesystem.readdirSync(backupDir).sort()) {
 				filesystem.renameSync(path.join(backupDir, filename), path.join(destinationDir, filename))
 				restoredFiles.add(filename)
 			}

@@ -46,8 +46,11 @@ fs.rmSync(cacheDir, { recursive: true, force: true })
 const state = { outputSnapshot: undefined }
 for (const signal of ["SIGINT", "SIGTERM"]) {
 	process.once(signal, () => {
-		state.outputSnapshot?.restore()
-		fs.rmSync(cacheDir, { recursive: true, force: true })
+		try {
+			state.outputSnapshot?.restore()
+		} finally {
+			fs.rmSync(cacheDir, { recursive: true, force: true })
+		}
 		process.exit(1)
 	})
 }
@@ -106,6 +109,9 @@ try {
 		"WASM cache restored corrupted output",
 	)
 } finally {
-	state.outputSnapshot.restore()
-	fs.rmSync(cacheDir, { recursive: true, force: true })
+	try {
+		state.outputSnapshot.restore()
+	} finally {
+		fs.rmSync(cacheDir, { recursive: true, force: true })
+	}
 }
