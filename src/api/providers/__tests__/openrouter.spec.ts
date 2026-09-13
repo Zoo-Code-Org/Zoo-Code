@@ -165,9 +165,9 @@ describe("OpenRouterHandler", () => {
 			)
 
 			const result = await handler.fetchModel()
-			// With the new clamping logic, 128000 tokens (64% of 200000 context window)
-			// gets clamped to 20% of context window: 200000 * 0.2 = 40000
-			expect(result.maxTokens).toBe(40000)
+			// The user-configured max output tokens are honored for Anthropic contexts,
+			// capped at the model's advertised ceiling (128000).
+			expect(result.maxTokens).toBe(32_768)
 			expect(result.reasoningBudget).toBeUndefined()
 			expect(result.temperature).toBe(0)
 		})
