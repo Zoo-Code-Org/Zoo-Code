@@ -28,7 +28,9 @@ const LANDMARKS = {
 	"parent-loss-with-running-child": (state: ModelState) =>
 		!state.parentLive && CHILDREN.some((child) => state.children[child] === "running"),
 	"orphan-cleanup": (state: ModelState) =>
-		!state.parentLive && CHILDREN.every((child) => !["running", "ready"].includes(state.children[child])),
+		!state.parentLive &&
+		state.permitOwners.length === 0 &&
+		CHILDREN.every((child) => !["running", "ready"].includes(state.children[child])),
 } satisfies Record<string, (state: ModelState) => boolean>
 
 const start = initialState()
