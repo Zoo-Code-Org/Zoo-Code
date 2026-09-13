@@ -34,11 +34,13 @@ export async function publishTreeSitterWasms(
 	}
 
 	let commitStarted = false
+	let ownsTransaction = false
 	const publishedFiles = []
 	try {
 		await filesystem.mkdir(destinationDir, { recursive: true })
 		await step("initialized", destinationDir)
 		await filesystem.mkdir(transactionDir)
+		ownsTransaction = true
 		await step("initialized", transactionDir)
 		await filesystem.mkdir(stagedDir)
 		await step("initialized", stagedDir)
@@ -75,10 +77,10 @@ export async function publishTreeSitterWasms(
 		await filesystem.rm(transactionDir, { recursive: true, force: true })
 		return { sourceFiles, cleanup: () => cleanPublishedTreeSitterWasms(destinationDir) }
 	} catch (error) {
-		if (!commitStarted) {
+		if (!commitStarted && ownsTransaction) {
 			await filesystem.rm(transactionDir, { recursive: true, force: true })
-			throw error
 		}
+		if (!commitStarted) throw error
 
 		const failures = []
 		for (const filename of publishedFiles) {
