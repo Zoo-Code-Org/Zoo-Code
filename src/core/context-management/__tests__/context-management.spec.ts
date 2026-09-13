@@ -2219,6 +2219,68 @@ describe("Context Management", () => {
 			expect(result.messages).toBe(messages)
 		}, 60000)
 
+		it("still shrinks the API-visible tool_result of a message that also carries an orphan tool_result", async () => {
+			// After a condense, `getEffectiveApiHistory` filters the orphan tool_result out of the
+			// kept user message and returns a CLONE of it. The recovery must map the surviving
+			// (API-visible) blocks back to the persisted history so the oversized result stays
+			// shrinkable — while the orphan block itself must remain untouched.
+			const oversizedText =
+				'JSON_LOG_LINE {"level":"info","msg":"processed 128 records","path":"/data/exports"}\n'.repeat(2000)
+			const orphanContent = "stale output whose tool_use was condensed away"
+			const messages: ApiMessage[] = [
+				{
+					role: "user",
+					content: "## Conversation Summary\nEarlier work was condensed.",
+					ts: 1200,
+					isSummary: true,
+					condenseId: "condense-1",
+				},
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_big", name: "fetch_report", input: {} }],
+					ts: 1300,
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_old", content: orphanContent },
+						{ type: "tool_result", tool_use_id: "toolu_big", content: oversizedText },
+					],
+					ts: 1400,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined() // the oversized result is API-visible and shrinkable
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).not.toBe(messages) // the degraded copy must be persisted by the caller
+
+			const blocks = result.messages[2].content as Anthropic.Messages.ContentBlockParam[]
+			const degraded = blocks[1] as Anthropic.ToolResultBlockParam
+			expect(degraded.tool_use_id).toBe("toolu_big")
+			expect(degraded.content as string).toContain("[Tool result truncated")
+			expect((degraded.content as string).length).toBeLessThan(oversizedText.length)
+
+			// The orphan block is not API-visible: degrading it would lower the token estimate
+			// without changing the request, so it must survive the recovery byte-identical.
+			const orphan = blocks[0] as Anthropic.ToolResultBlockParam
+			expect(orphan.tool_use_id).toBe("toolu_old")
+			expect(orphan.content).toBe(orphanContent)
+		}, 60000)
+
 		it("leaves a tool_result that is already at the shrink floor untouched", async () => {
 			// One result large enough to absorb the whole budget deficit, one sitting just above
 			// the 200-character floor (long enough to be a candidate, too short to absorb the

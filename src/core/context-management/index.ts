@@ -197,9 +197,9 @@ type ShrinkingToolResult = {
  * estimates. Only blocks above the floor are returned; images and other non-textual
  * content are never touched.
  *
- * Candidates are restricted to the messages the API actually receives: `Task` passes the
+ * Candidates are restricted to the content the API actually receives: `Task` passes the
  * full persisted history to `manageContext`, but condense/truncation hide messages from
- * `getEffectiveApiHistory`. Shrinking a hidden message would lower the token estimate
+ * `getEffectiveApiHistory`. Shrinking hidden content would lower the token estimate
  * without changing the request, which is the same false progress this recovery exists to
  * prevent. Returned indexes stay indexes into the persisted history so the edits below
  * target the right messages.
@@ -209,12 +209,20 @@ async function findShrinkableToolResults(
 	apiHandler: ApiHandler,
 ): Promise<ShrinkingToolResult[]> {
 	const results: ShrinkingToolResult[] = []
-	const apiVisibleMessages = new Set(getEffectiveApiHistory(messages))
+	// Block-level identity, not message-level: `getEffectiveApiHistory` returns a clone of a
+	// user message when it filters an orphan tool_result out of it, so that message can never
+	// match a persisted message by reference. The clone's content array still holds the SAME
+	// block objects as the persisted history, so matching blocks by reference maps API-visible
+	// content back to its persisted location — the filtered orphan block stays invisible, and
+	// the surviving blocks in the same message remain shrinkable.
+	const apiVisibleBlocks = new Set(
+		getEffectiveApiHistory(messages).flatMap((message) => (Array.isArray(message.content) ? message.content : [])),
+	)
 	for (const [messageIndex, message] of messages.entries()) {
-		if (!apiVisibleMessages.has(message)) continue
 		if (message.truncationParent || message.isTruncationMarker) continue
 		if (!Array.isArray(message.content)) continue
 		for (const [blockIndex, block] of message.content.entries()) {
+			if (!apiVisibleBlocks.has(block)) continue
 			if (block.type !== "tool_result") continue
 			const toolResult = block as Anthropic.ToolResultBlockParam
 			const items =
