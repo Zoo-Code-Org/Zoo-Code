@@ -1166,7 +1166,7 @@
 	},
 	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 310
+			"count": 306
 		}
 	},
 	"integrations/editor/__tests__/EditorUtils.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"utils/tts.ts": {
