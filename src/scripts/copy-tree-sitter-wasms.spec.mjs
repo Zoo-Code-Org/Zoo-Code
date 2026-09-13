@@ -129,4 +129,43 @@ describe("publishTreeSitterWasms", () => {
 		expect(fs.readFileSync(path.join(transaction, "backup", "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
 		await expect(publishTreeSitterWasms(source, destination)).rejects.toMatchObject({ code: "EEXIST" })
 	})
+
+	it("cleans an incomplete transaction setup", async () => {
+		const source = path.join(root, "source")
+		const destination = path.join(root, "dist")
+		const transaction = `${destination}.tree-sitter-wasms-transaction`
+		fs.mkdirSync(source)
+		fs.writeFileSync(path.join(source, "tree-sitter-a.wasm"), "a")
+		const filesystem = {
+			...fs.promises,
+			mkdir(directory, options) {
+				if (directory.endsWith(`${path.sep}backup`)) throw new Error("setup failed")
+				return fs.promises.mkdir(directory, options)
+			},
+		}
+
+		await expect(publishTreeSitterWasms(source, destination, { filesystem })).rejects.toThrow("setup failed")
+		expect(fs.existsSync(transaction)).toBe(false)
+	})
+
+	it("observes a signal during temporary cleanup", async () => {
+		const source = path.join(root, "source")
+		const destination = path.join(root, "dist")
+		fs.mkdirSync(source)
+		fs.mkdirSync(destination)
+		fs.writeFileSync(path.join(source, "tree-sitter-a.wasm"), "new-a")
+		fs.writeFileSync(path.join(destination, "tree-sitter-a.wasm"), "previous-a")
+		fs.writeFileSync(path.join(destination, "tree-sitter-a.wasm.999.tmp"), "partial")
+		const signalState = { requested: undefined }
+
+		await expect(
+			publishTreeSitterWasms(source, destination, {
+				signalState,
+				onStep(name) {
+					if (name === "removed-temporary") signalState.requested = "SIGTERM"
+				},
+			}),
+		).rejects.toThrow("WASM publication cancelled")
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("previous-a")
+	})
 })
