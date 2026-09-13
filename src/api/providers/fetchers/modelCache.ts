@@ -44,6 +44,17 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // deduplicate each other's in-flight refreshes.
 const inFlightRefresh = new Map<string, Promise<ModelRecord>>()
 
+// Same single-flight guard for auth-scoped providers. Without this, two concurrent getModels()
+// calls (e.g. two panels opening on startup) both miss the session cache and each fire their own
+// provider fetch. Keyed on the same compound cache key as authSessionCache.
+const inFlightAuthScopedFetch = new Map<string, Promise<ModelRecord>>()
+
+// Generation counter per auth-scoped PROVIDER. Bumped on sign-out invalidation so that an
+// in-flight fetch that started before sign-out can detect that the session was invalidated
+// and avoid re-populating the cache with stale data. Keyed by provider (not cache key)
+// because the cache entry may not exist yet when sign-out occurs.
+const authScopedClearGeneration = new Map<AuthScopedProvider, number>()
+
 // Cache keys (see getCacheKey) for which we've already reported an empty model response this
 // session. A persistently-empty endpoint (e.g. misconfigured server) would otherwise re-fire this
 // event on every cache refresh; gate it to at most once per distinct provider+server+key identity
@@ -108,8 +119,243 @@ const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.kimiCode,
 ])
 
-function isAuthScopedProvider(provider: RouterName): boolean {
+type AuthScopedProvider = typeof providerIdentifiers.zooGateway | typeof providerIdentifiers.kimiCode
+
+type AuthScopedGetModelsOptions = Extract<GetModelsOptions, { provider: AuthScopedProvider }>
+
+const AUTH_SESSION_TTL_MS = 300_000
+const AUTH_SESSION_MAX_ENTRIES = 64
+
+function authSessionHasModels(models: ModelRecord): boolean {
+	// Stryker disable next-line EqualityOperator,ConditionalExpression: empty catalogs are never stored in authSessionCache
+	return Object.keys(models).length > 0
+}
+
+function authSessionKeyMatchesProvider(key: string, provider: RouterName): boolean {
+	// Bare equality covers missing apiKey/baseUrl (cache key === provider name).
+	// Compound keys always use `provider:...` via getCacheKey.
+	return key === provider || key.startsWith(`${provider}:`)
+}
+
+type AuthSessionCacheEntry = {
+	models: ModelRecord
+	etag?: string
+	fetchedAt: number
+}
+
+// In-memory, per-session catalog cache for auth-scoped providers. Never written to disk
+// and keyed by the same compound identity as getCacheKey (provider + baseUrl + token hash).
+const authSessionCache = new Map<string, AuthSessionCacheEntry>()
+
+function isAuthScopedProvider(provider: RouterName): provider is AuthScopedProvider {
 	return AUTH_SCOPED_PROVIDERS.has(provider)
+}
+
+function assertAuthScopedGetModelsOptions(options: GetModelsOptions): AuthScopedGetModelsOptions {
+	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
+	if (!isAuthScopedProvider(options.provider)) {
+		// Stryker disable next-line CallExpression,StringLiteral: defensive throw; unreachable for typed callers that already passed isAuthScopedProvider
+		throw new Error(`Expected auth-scoped provider, got ${options.provider}`)
+	}
+	// Runtime guard above; TS cannot narrow the GetModelsOptions discriminated union here.
+	return options as AuthScopedGetModelsOptions
+}
+
+function isAuthSessionFresh(entry: AuthSessionCacheEntry): boolean {
+	return Date.now() - entry.fetchedAt < AUTH_SESSION_TTL_MS
+}
+
+function pruneExpiredAuthSessionEntries(): void {
+	const staleCutoffMs = AUTH_SESSION_TTL_MS * 2
+	const now = Date.now()
+	for (const [key, entry] of authSessionCache) {
+		if (now - entry.fetchedAt >= staleCutoffMs) {
+			authSessionCache.delete(key)
+		}
+	}
+}
+
+function enforceAuthSessionCacheBound(): void {
+	pruneExpiredAuthSessionEntries()
+	while (authSessionCache.size > AUTH_SESSION_MAX_ENTRIES) {
+		let oldestKey: string | undefined
+		let oldestFetchedAt = Infinity
+		for (const [key, entry] of authSessionCache) {
+			if (entry.fetchedAt < oldestFetchedAt) {
+				oldestFetchedAt = entry.fetchedAt
+				oldestKey = key
+			}
+		}
+		// Stryker disable next-line ConditionalExpression: Map iteration always yields a key while size > 0; break is a defensive latch
+		if (!oldestKey) {
+			break
+		}
+		authSessionCache.delete(oldestKey)
+	}
+}
+
+function getAuthSessionEntry(cacheKey: string): AuthSessionCacheEntry | undefined {
+	return authSessionCache.get(cacheKey)
+}
+
+function setAuthSessionEntry(cacheKey: string, models: ModelRecord, etag?: string): void {
+	// Stryker disable next-line ConditionalExpression: callers only pass non-empty catalogs (guarded by modelCount > 0)
+	if (Object.keys(models).length === 0) {
+		return
+	}
+	authSessionCache.set(cacheKey, { models, etag, fetchedAt: Date.now() })
+	enforceAuthSessionCacheBound()
+}
+
+function touchAuthSessionEntry(cacheKey: string, entry: AuthSessionCacheEntry): void {
+	authSessionCache.set(cacheKey, { ...entry, fetchedAt: Date.now() })
+	// Stryker disable next-line CallExpression: touch cannot grow the cache; bound enforcement is redundant here
+	enforceAuthSessionCacheBound()
+}
+
+function deleteAuthSessionEntry(cacheKey: string): void {
+	authSessionCache.delete(cacheKey)
+}
+
+export function clearAuthSessionModelsForProvider(provider: RouterName): void {
+	for (const key of authSessionCache.keys()) {
+		if (authSessionKeyMatchesProvider(key, provider)) {
+			authSessionCache.delete(key)
+		}
+	}
+	// Also invalidate any in-flight fetches — the cache entry may not exist yet
+	// if the fetch hasn't resolved, so we must iterate inFlightAuthScopedFetch
+	// independently (not just keys already in authSessionCache).
+	for (const key of inFlightAuthScopedFetch.keys()) {
+		if (authSessionKeyMatchesProvider(key, provider)) {
+			inFlightAuthScopedFetch.delete(key)
+		}
+	}
+	// Bump generation so in-flight fetches that started before this clear
+	// know they should not write back stale data. Keyed by provider (not cache key)
+	// because the cache entry may not exist yet when sign-out occurs.
+	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line ArithmeticOperator: write-back only checks inequality vs generationAtStart; +1 and -1 are equivalent
+		authScopedClearGeneration.set(provider, (authScopedClearGeneration.get(provider) ?? 0) + 1)
+	}
+}
+
+type AuthScopedFetchResult = {
+	models: ModelRecord
+	etag?: string
+	notModified?: boolean
+}
+
+async function fetchAuthScopedModelsFromProvider(
+	options: AuthScopedGetModelsOptions,
+	ifNoneMatch?: string,
+): Promise<AuthScopedFetchResult> {
+	switch (options.provider) {
+		case providerIdentifiers.zooGateway: {
+			const result = await getZooGatewayModels({
+				zooSessionToken: options.apiKey,
+				zooGatewayBaseUrl: options.baseUrl,
+				ifNoneMatch,
+			})
+			if (result.kind === "not_modified") {
+				return { models: {}, notModified: true }
+			}
+			return { models: result.models, etag: result.etag }
+		}
+		case providerIdentifiers.kimiCode:
+			return { models: await getKimiCodeModels(options.apiKey) }
+	}
+}
+
+async function resolveAuthScopedModels(
+	options: GetModelsOptions,
+	{ forceRefresh = false }: { forceRefresh?: boolean } = {},
+): Promise<ModelRecord> {
+	const { provider } = options
+	const cacheKey = getCacheKey(options)
+	const existing = getAuthSessionEntry(cacheKey)
+
+	// Stryker disable next-line EqualityOperator: empty catalogs are never stored in authSessionCache
+	if (!forceRefresh && existing && isAuthSessionFresh(existing) && authSessionHasModels(existing.models)) {
+		return existing.models
+	}
+
+	// Coalesce concurrent fetches for the same session identity so two panels
+	// opening simultaneously don't each fire their own provider request.
+	const existingFlight = inFlightAuthScopedFetch.get(cacheKey)
+	if (existingFlight && !forceRefresh) {
+		return existingFlight
+	}
+
+	// Capture generation before starting the fetch so we can detect if a sign-out occurred
+	// between when we started and when we try to write back results.
+	const authProvider = provider as AuthScopedProvider
+	const generationAtStart = authScopedClearGeneration.get(authProvider) ?? 0
+
+	const fetchPromise = (async () => {
+		try {
+			const fetched = await fetchAuthScopedModelsFromProvider(
+				assertAuthScopedGetModelsOptions(options),
+				existing?.etag,
+			)
+
+			if (fetched.notModified) {
+				// Re-read from the Map: a concurrent sign-out could have cleared
+				// the entry between when we captured `existing` and now.
+				const current = getAuthSessionEntry(cacheKey)
+				if (current && authSessionHasModels(current.models)) {
+					touchAuthSessionEntry(cacheKey, current)
+					reportedEmptyModelResponse.delete(cacheKey)
+					return current.models
+				}
+				// Sign-out cleared the entry while the 304 was in-flight.
+				return {}
+			} else {
+				const modelCount = Object.keys(fetched.models).length
+				if (modelCount > 0) {
+					// Guard against re-populating the cache after a sign-out invalidated
+					// this key between when we started the fetch and when it resolved.
+					// Check both: (1) the in-flight promise is still ours, and (2) no sign-out
+					// bumped the generation while we were fetching.
+					const generationNow = authScopedClearGeneration.get(authProvider) ?? 0
+					if (inFlightAuthScopedFetch.has(cacheKey) && generationNow === generationAtStart) {
+						setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
+						reportedEmptyModelResponse.delete(cacheKey)
+					}
+					return fetched.models
+				}
+
+				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
+					context: forceRefresh ? "refreshModels" : "getModels",
+					hasExistingCache: Boolean(existing && authSessionHasModels(existing.models)),
+					...(existing ? { existingCacheSize: Object.keys(existing.models).length } : {}),
+				})
+			}
+
+			if (existing && authSessionHasModels(existing.models)) {
+				return existing.models
+			}
+
+			return fetched.models
+		} catch (error) {
+			if (existing && authSessionHasModels(existing.models)) {
+				return existing.models
+			}
+			throw error
+		}
+	})()
+
+	// Wrap cleanup in the promise itself so the stored value IS what callers await —
+	// a detached .finally() would produce an unhandled rejection when the fetch fails.
+	// Only remove our own entry: if sign-out cleared us and a new fetch registered a
+	// fresh promise under the same key, we must not delete that newer entry.
+	const fetchWithCleanup = fetchPromise.finally(() => {
+		if (inFlightAuthScopedFetch.get(cacheKey) === fetchWithCleanup) {
+			inFlightAuthScopedFetch.delete(cacheKey)
+		}
+	})
+	inFlightAuthScopedFetch.set(cacheKey, fetchWithCleanup)
+	return fetchWithCleanup
 }
 
 // Memoize derived digests so the deliberately-structureless KDF runs at most once per
@@ -224,6 +470,15 @@ async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
 async function fetchModelsFromProvider(options: GetModelsOptions): Promise<ModelRecord> {
 	const { provider } = options
 
+	// Stryker disable next-line ConditionalExpression,StringLiteral: defensive type-narrowing guard; callers already route via isAuthScopedProvider
+	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line CallExpression,StringLiteral: defensive throw; auth-scoped callers never reach this helper
+		throw new Error(
+			// Stryker disable next-line StringLiteral: defensive error message; auth-scoped callers never reach this helper
+			`fetchModelsFromProvider must not be called for auth-scoped provider "${provider}" — use resolveAuthScopedModels instead`,
+		)
+	}
+
 	let models: ModelRecord
 
 	switch (provider) {
@@ -267,12 +522,6 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey)
 			break
-		case providerIdentifiers.zooGateway:
-			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
-			break
-		case providerIdentifiers.kimiCode:
-			models = await getKimiCodeModels(options.apiKey)
-			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.
 			const exhaustiveCheck: never = provider
@@ -298,9 +547,11 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 	const { provider } = options
 	const cacheKey = getCacheKey(options)
 
-	const shouldSkipCache = isAuthScopedProvider(provider)
+	if (isAuthScopedProvider(provider)) {
+		return resolveAuthScopedModels(options)
+	}
 
-	const models = shouldSkipCache ? undefined : getModelsFromCache(options)
+	const models = getModelsFromCache(options)
 
 	if (models) {
 		return models
@@ -318,26 +569,25 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 	// refreshModels() degrades to cached data doesn't surface as a silent stale result to
 	// getModels(), and a fetch failure joined from refreshModels() still re-throws for
 	// getModels() callers.
-	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+	const sharedFetch = dedupedFetch(cacheKey, options)
 
 	try {
 		const fetched = await sharedFetch
 		const modelCount = Object.keys(fetched).length
 
 		// Only cache non-empty results so a failed API response doesn't get persisted
-		// as if the provider had no models. Auth-scoped providers skip caching entirely.
+		// as if the provider had no models.
 		if (modelCount > 0) {
 			// Clear the empty-response throttle for any non-empty response, including from
-			// auth-scoped providers that skip caching, so a later empty response is reported again.
+			// auth-scoped providers that skip disk/memory cache, so a later empty response
+			// is reported again.
 			reportedEmptyModelResponse.delete(cacheKey)
 
-			if (!shouldSkipCache) {
-				memoryCache.set(cacheKey, fetched)
+			memoryCache.set(cacheKey, fetched)
 
-				await writeModels(cacheKey, fetched).catch((err) =>
-					console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
-				)
-			}
+			await writeModels(cacheKey, fetched).catch((err) =>
+				console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
+			)
 		} else {
 			captureModelCacheEmptyResponseOnce(provider, cacheKey, {
 				context: "getModels",
@@ -392,17 +642,27 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 	const { provider } = options
 	const cacheKey = getCacheKey(options)
 
-	const shouldSkipCache = isAuthScopedProvider(provider)
+	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line BlockStatement: emptying this try falls through into the non-auth provider fetch path
+		try {
+			return await resolveAuthScopedModels(options, { forceRefresh: true })
+			// Stryker disable next-line BlockStatement: emptying catch falls through into non-auth refresh; covered by error-message assertion in tests
+		} catch (error) {
+			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
+			const existing = getAuthSessionEntry(cacheKey)
+			// Stryker disable next-line ConditionalExpression,BlockStatement,EqualityOperator: resolveAuthScopedModels only throws when no usable session entry remains
+			if (existing && authSessionHasModels(existing.models)) {
+				return existing.models
+			}
+			return {}
+		}
+	}
 
-	// De-duplication is skipped for auth-scoped providers because two concurrent calls may
-	// carry different tokens (e.g., after a sign-out/sign-in within the same session) and we
-	// must not return the first caller's results to the second caller.
-	//
 	// Shares the same underlying fetch getModels() uses (see dedupedFetch) so a refreshModels()
 	// call racing a getModels() cache-miss for the same key converges on one provider fetch --
 	// but each function still applies its own success/failure contract on the result below
 	// rather than sharing that promise's resolution/rejection wholesale.
-	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+	const sharedFetch = dedupedFetch(cacheKey, options)
 
 	try {
 		// Force fresh API fetch - skip getModelsFromCache() check
@@ -410,7 +670,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		const modelCount = Object.keys(models).length
 
 		// Get existing cached data for comparison
-		const existingCache = shouldSkipCache ? undefined : getModelsFromCache(options)
+		const existingCache = getModelsFromCache(options)
 		const existingCount = existingCache ? Object.keys(existingCache).length : 0
 
 		if (modelCount === 0) {
@@ -424,23 +684,15 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 
 		reportedEmptyModelResponse.delete(cacheKey)
 
-		if (!shouldSkipCache) {
-			memoryCache.set(cacheKey, models)
+		memoryCache.set(cacheKey, models)
 
-			await writeModels(cacheKey, models).catch((err) =>
-				console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
-			)
-		}
+		await writeModels(cacheKey, models).catch((err) =>
+			console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
+		)
 
 		return models
 	} catch (error) {
-		// Log the error for debugging, then return existing cache if available (graceful degradation).
-		// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
-		// session, since they could belong to a different user -- return empty instead.
 		console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
-		if (shouldSkipCache) {
-			return {}
-		}
 		return getModelsFromCache(options) || {}
 	}
 }
@@ -488,6 +740,19 @@ export async function initializeModelCacheRefresh(): Promise<void> {
  * @param refresh - If true, immediately fetch fresh data from API
  */
 export const flushModels = async (options: GetModelsOptions, refresh: boolean = false): Promise<void> => {
+	if (isAuthScopedProvider(options.provider)) {
+		if (refresh) {
+			try {
+				await resolveAuthScopedModels(options, { forceRefresh: true })
+			} catch (error) {
+				console.error(`[flushModels] Failed to refresh auth-scoped ${getCacheKey(options)} models:`, error)
+			}
+		} else {
+			deleteAuthSessionEntry(getCacheKey(options))
+		}
+		return
+	}
+
 	if (refresh) {
 		// Don't delete memory cache - let refreshModels atomically replace it
 		// This prevents a race condition where getModels() might be called
@@ -563,6 +828,28 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 	}
 
 	return undefined
+}
+
+/**
+ * Clears auth-session maps and the empty-response throttle for test isolation.
+ * Prefer this over `vi.resetModules()` so mutation testing instruments the same module instance.
+ */
+export function resetModelCacheTransientStateForTests(): void {
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
+	authSessionCache.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
+	inFlightAuthScopedFetch.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
+	authScopedClearGeneration.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
+	reportedEmptyModelResponse.clear()
+	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
+	inFlightRefresh.clear()
+}
+
+/** Test-only: observe clear-generation map size (non-auth clears must not insert entries). */
+export function authScopedClearGenerationSizeForTests(): number {
+	return authScopedClearGeneration.size
 }
 
 /**

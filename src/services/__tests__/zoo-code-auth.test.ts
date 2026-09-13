@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
+import { providerIdentifiers } from "@roo-code/types"
 
+import * as modelCache from "../../api/providers/fetchers/modelCache"
 import {
 	clearZooCodeToken,
 	clearZooCodeUserInfo,
@@ -167,6 +169,17 @@ describe("zoo-code-auth", () => {
 			await clearZooCodeToken()
 
 			expect(getCachedZooCodeToken()).toBe("")
+		})
+
+		it("clears the zoo-gateway session model cache", async () => {
+			const clearSessionSpy = vi.spyOn(modelCache, "clearAuthSessionModelsForProvider")
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_test_token")
+
+			await clearZooCodeToken()
+
+			expect(clearSessionSpy).toHaveBeenCalledWith(providerIdentifiers.zooGateway)
+			clearSessionSpy.mockRestore()
 		})
 	})
 

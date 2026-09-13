@@ -18,6 +18,7 @@ import { t } from "../../i18n"
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { NOT_PROVIDED } from "./constants"
@@ -233,6 +234,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 
 				const delta = chunk.choices[0]?.delta
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
 				if (delta?.content) {
 					yield {
 						type: "text",

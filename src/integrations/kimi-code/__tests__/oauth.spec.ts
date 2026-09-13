@@ -1,3 +1,6 @@
+import { providerIdentifiers } from "@roo-code/types"
+
+import * as modelCache from "../../../api/providers/fetchers/modelCache"
 import { KIMI_CODE_OAUTH_CONFIG, KimiCodeOAuthManager } from "../oauth"
 
 const createContext = () => {
@@ -95,6 +98,7 @@ describe("KimiCodeOAuthManager", () => {
 	})
 
 	it("clears credentials and cancels authorization", async () => {
+		const clearSessionSpy = vi.spyOn(modelCache, "clearAuthSessionModelsForProvider")
 		const { context, values } = createContext()
 		values.set(
 			"kimi-code-oauth-credentials",
@@ -105,6 +109,8 @@ describe("KimiCodeOAuthManager", () => {
 		await manager.clearCredentials()
 		expect(values.has("kimi-code-oauth-credentials")).toBe(false)
 		expect(await manager.isAuthenticated()).toBe(false)
+		expect(clearSessionSpy).toHaveBeenCalledWith(providerIdentifiers.kimiCode)
+		clearSessionSpy.mockRestore()
 	})
 
 	it("does not restore credentials when sign-out races an in-flight refresh", async () => {
