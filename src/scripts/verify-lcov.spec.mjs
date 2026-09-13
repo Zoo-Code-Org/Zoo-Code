@@ -8,6 +8,7 @@ describe("verifyLcov", () => {
 	})
 
 	it.each([
+		["an empty source path", "SF:\nLF:1\nLH:1\nend_of_record\n"],
 		["an unterminated record", "SF:file.ts\nLH:1\n"],
 		["a zero-hit report", "SF:file.ts\nLF:1\nLH:0\nend_of_record\n"],
 		["a hit count outside a record", "LH:1\n"],

@@ -11,6 +11,7 @@ export function verifyLcov(content) {
 	for (const line of content.split(/\r?\n/)) {
 		if (line.startsWith("SF:")) {
 			if (inRecord) throw new Error("LCOV source record is not terminated")
+			if (!line.slice(3)) throw new Error("LCOV source path is empty")
 			inRecord = true
 			linesFound = undefined
 			linesHit = undefined
