@@ -1,0 +1,96 @@
+{
+	"title": "Tableau de bord",
+	"done": "Retour",
+	"range": {
+		"today": "Aujourd'hui",
+		"7d": "7 jours",
+		"30d": "30 jours",
+		"custom": "Personnalisé",
+		"all": "Tout"
+	},
+	"summary": {
+		"totalTokens": "Tokens totaux",
+		"inputTokens": "Tokens d'entrée",
+		"outputTokens": "Tokens de sortie",
+		"cacheTokens": "Tokens de cache",
+		"cost": "Coût"
+	},
+	"states": {
+		"loading": "Chargement...",
+		"error": "Échec du chargement des statistiques",
+		"empty": "Pas encore de données d'utilisation",
+		"emptyHint": "Démarrez une conversation pour voir les statistiques"
+	},
+	"actions": {
+		"refresh": "Actualiser",
+		"exportJson": "Exporter JSON",
+		"exportCsv": "Exporter CSV",
+		"clear": "Effacer les statistiques"
+	},
+	"breakdown": {
+		"title": "Répartition",
+		"model": "Modèle",
+		"provider": "Fournisseur",
+		"mode": "Mode",
+		"events": "Événements",
+		"inputTokens": "Entrée",
+		"outputTokens": "Sortie",
+		"cacheReadTokens": "Lecture cache",
+		"cacheWriteTokens": "Écriture cache",
+		"reasoningTokens": "Raisonnement",
+		"totalTokens": "Total",
+		"costUsd": "Coût",
+		"unknown": "Inconnu"
+	},
+	"coverage": {
+		"title": "Couverture des données",
+		"liveFrom": "En direct depuis",
+		"lastUpdated": "Dernière mise à jour",
+		"backfilledEvents": "Événements rétroactivés",
+		"paused": "Enregistrement en pause (limite de stockage atteinte)"
+	},
+	"clearDialog": {
+		"title": "Effacer les statistiques",
+		"description": "Voulez-vous vraiment effacer toutes les statistiques d'utilisation ? Cette action est irréversible.",
+		"cancel": "Annuler",
+		"confirm": "Effacer"
+	},
+	"customRange": {
+		"from": "De",
+		"to": "À"
+	},
+	"cacheRatio": {
+		"label": "Ratio de cache pour estimation",
+		"hint": "Appliqué lorsque le fournisseur ne signale pas les données de cache"
+	},
+	"sessionDetail": {
+		"summary": "Résumé de la session",
+		"apiCalls": "Appels API",
+		"noApiCalls": "Aucun appel API enregistré",
+		"input": "Entrée",
+		"output": "Sortie",
+		"cost": "Coût",
+		"model": "Modèle",
+		"mode": "Mode",
+		"time": "Heure",
+		"status": "Statut"
+	},
+	"time": {
+		"justNow": "à l'instant",
+		"minutesAgo": "il y a {{count}} min",
+		"hoursAgo": "il y a {{count}} h",
+		"yesterday": "hier",
+		"daysAgo": "il y a {{count}} jours"
+	},
+	"tasks": {
+		"title": "Tâches",
+		"noTasks": "Aucune tâche enregistrée",
+		"filterModel": "Tous les modèles",
+		"filterProvider": "Tous les fournisseurs",
+		"callCount": "{{count}} appels"
+	},
+	"taskAggregate": {
+		"modes": "Modes",
+		"models": "Modèles"
+	}
+}

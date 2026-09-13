@@ -22,6 +22,21 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
+import type {
+	StatsQuery,
+	StatsSnapshot,
+	SessionSummary,
+	SessionDetail,
+	DashboardStatsSubscription,
+	DashboardStatsSnapshot,
+	DashboardStatsDelta,
+	DashboardSessionPage,
+	DashboardTaskPage,
+	DashboardTaskDetail,
+	DashboardTaskStatsSnapshot,
+	DashboardTaskStatsDelta,
+	DashboardStatsError,
+} from "./usage-stats.js"
 
 /**
  * ExtensionMessage
@@ -108,6 +123,23 @@ export interface ExtensionMessage {
 		| "fileContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
+		// Usage stats response types
+		| "getUsageStatsResponse"
+		| "clearUsageStatsResponse"
+		| "exportUsageStatsResponse"
+		| "requestClearNonceResponse"
+		| "usageStatsChanged"
+		// Dashboard response types
+		| "dashboardStatsResponse"
+		| "dashboardSessionsResponse"
+		| "dashboardSessionDetailResponse"
+		// Dashboard streaming response types
+		| "dashboardStatsStreamSnapshot"
+		| "dashboardStatsStreamDelta"
+		| "dashboardStatsStreamError"
+		| "dashboardSessionPageResponse"
+		| "dashboardTaskPageResponse"
+		| "dashboardTaskDetailResponse"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -121,6 +153,7 @@ export interface ExtensionMessage {
 		| "settingsButtonClicked"
 		| "historyButtonClicked"
 		| "marketplaceButtonClicked"
+		| "dashboardButtonClicked"
 		| "didBecomeVisible"
 		| "focusInput"
 		| "switchTab"
@@ -254,6 +287,40 @@ export interface ExtensionMessage {
 	copyProgressItemName?: string
 	// folderSelected
 	path?: string
+	// Usage stats response payloads
+	usageStatsSnapshot?: StatsSnapshot
+	clearUsageStatsResult?: { success: boolean; error?: string }
+	exportUsageStatsResult?: { format: "json" | "csv"; data: string; error?: string }
+	// B2 fix: host-issued clear nonce returned in `requestClearNonceResponse`.
+	// null when the service is unavailable or an error occurred (see `error`).
+	clearNonce?: string | null
+	// Dashboard sessions response payload (Commit 3).
+	// `dashboardSessions` is null when the service is unavailable or an error
+	// occurred (see `error`). On success it is an array (possibly empty).
+	dashboardSessions?: SessionSummary[] | null
+	// Dashboard session detail response payload (Commit 4).
+	// `dashboardSessionDetail` is null when the service is unavailable, the
+	// taskId is not found, or an error occurred (see `error`). On success it
+	// contains the full session summary plus the per-API-call records.
+	dashboardSessionDetail?: SessionDetail | null
+
+	// Dashboard streaming response payloads
+	/**
+	 * Full state snapshot for `dashboardStatsStreamSnapshot`. Legacy session
+	 * payloads remain valid until all producers and consumers migrate to the
+	 * History-first task page shape.
+	 */
+	dashboardStatsStreamSnapshot?: DashboardTaskStatsSnapshot | DashboardStatsSnapshot
+	/** Incremental delta for `dashboardStatsStreamDelta` during the same transition. */
+	dashboardStatsStreamDelta?: DashboardTaskStatsDelta | DashboardStatsDelta
+	/** Typed error for `dashboardStatsStreamError`. */
+	dashboardStatsStreamError?: DashboardStatsError
+	/** Cursor-paged session page for `dashboardSessionPageResponse`. */
+	dashboardSessionPage?: DashboardSessionPage
+	/** Cursor-paged History task page for `dashboardTaskPageResponse`. */
+	dashboardTaskPage?: DashboardTaskPage
+	/** History task detail for `dashboardTaskDetailResponse`. */
+	dashboardTaskDetail?: DashboardTaskDetail | null
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -646,10 +713,28 @@ export interface WebviewMessage {
 		| "openRuleFile"
 		| "openRulesDirectory"
 		| "themeFixtureProbeResponse"
+		// Usage stats request types
+		| "getUsageStats"
+		| "clearUsageStats"
+		| "exportUsageStats"
+		| "requestClearNonce"
+		// Dashboard request types
+		| "getDashboardSessionDetail"
+		| "getDashboardSessions"
+		| "getDashboardTaskDetail"
+		// Dashboard streaming request types
+		| "subscribeDashboardStats"
+		| "unsubscribeDashboardStats"
+		| "replaceDashboardStatsSubscription"
+		| "pauseDashboardStats"
+		| "resumeDashboardStats"
+		| "resyncDashboardStats"
+		| "getDashboardSessionPage"
+		| "getDashboardTaskPage"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
-	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
+	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud" | "stats" | "dashboard"
 	disabled?: boolean
 	context?: string
 	dataUri?: string
@@ -757,6 +842,35 @@ export interface WebviewMessage {
 	worktreeForce?: boolean
 	worktreeNewWindow?: boolean
 	worktreeIncludeContent?: string
+	// Usage stats request payloads
+	usageStatsQuery?: StatsQuery
+	clearUsageStatsNonce?: string
+	exportUsageStatsFormat?: "json" | "csv"
+	// B2 fix: host-issued clear nonce returned to webview in response to
+	// `requestClearNonce`. The webview must use this nonce (not a self-generated
+	// one) when sending the subsequent `clearUsageStats` message, so the host's
+	// nonce validation actually passes.
+	clearNonce?: string
+	// Dashboard sessions request payload (Commit 3).
+	// `usageStatsQuery` carries the time range; `dashboardSessionFilters`
+	// carries optional model/provider filters applied after grouping.
+	dashboardSessionFilters?: {
+		model?: string
+		provider?: string
+	}
+
+	// Dashboard streaming request payloads.
+	// `dashboardStatsSubscription` carries the validated subscription
+	// descriptor for subscribe/replace operations.
+	dashboardStatsSubscription?: DashboardStatsSubscription
+	// Opaque cursor for `getDashboardSessionPage` requests.
+	dashboardSessionCursor?: string
+	// Page size for `getDashboardSessionPage` requests (1–100).
+	dashboardSessionLimit?: number
+	// Opaque cursor for `getDashboardTaskPage` requests.
+	dashboardTaskCursor?: string
+	// Page size for `getDashboardTaskPage` requests (1–100).
+	dashboardTaskLimit?: number
 }
 
 export interface WebviewThemeFixture {

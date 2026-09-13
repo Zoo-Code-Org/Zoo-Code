@@ -1,0 +1,39 @@
+name: Update Visual Snapshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to update snapshots on'
+        required: true
+        type: string
+
+jobs:
+  update-snapshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+      options: --ipc=host
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          install-args: "--frozen-lockfile"
+
+      - name: Update Snapshots
+        run: pnpm --filter @roo-code/vscode-webview test:visual -- --update-snapshots
+
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "test(visual): update visual regression baselines [skip ci]"
+          file_pattern: 'webview-ui/**/__screenshots__/*.png'

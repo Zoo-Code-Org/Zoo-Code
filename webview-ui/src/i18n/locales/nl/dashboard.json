@@ -1,0 +1,96 @@
+{
+	"title": "Dashboard",
+	"done": "Terug",
+	"range": {
+		"today": "Vandaag",
+		"7d": "7 dagen",
+		"30d": "30 dagen",
+		"custom": "Aangepast",
+		"all": "Alles"
+	},
+	"summary": {
+		"totalTokens": "Totale tokens",
+		"inputTokens": "Invoer-tokens",
+		"outputTokens": "Uitvoer-tokens",
+		"cacheTokens": "Cache-tokens",
+		"cost": "Kosten"
+	},
+	"states": {
+		"loading": "Laden...",
+		"error": "Statistieken laden mislukt",
+		"empty": "Nog geen gebruiksgegevens",
+		"emptyHint": "Start een gesprek om statistieken te zien"
+	},
+	"actions": {
+		"refresh": "Vernieuwen",
+		"exportJson": "JSON exporteren",
+		"exportCsv": "CSV exporteren",
+		"clear": "Statistieken wissen"
+	},
+	"breakdown": {
+		"title": "Uitsplitsing",
+		"model": "Model",
+		"provider": "Provider",
+		"mode": "Modus",
+		"events": "Gebeurtenissen",
+		"inputTokens": "Invoer",
+		"outputTokens": "Uitvoer",
+		"cacheReadTokens": "Cache-lees",
+		"cacheWriteTokens": "Cache-schrijf",
+		"reasoningTokens": "Redenering",
+		"totalTokens": "Totaal",
+		"costUsd": "Kosten",
+		"unknown": "Onbekend"
+	},
+	"coverage": {
+		"title": "Dekking van gegevens",
+		"liveFrom": "Live sinds",
+		"lastUpdated": "Laatst bijgewerkt",
+		"backfilledEvents": "Aangevulde gebeurtenissen",
+		"paused": "Opname gepauzeerd (opslaglimiet bereikt)"
+	},
+	"clearDialog": {
+		"title": "Statistieken wissen",
+		"description": "Weet u zeker dat u alle gebruiksstatistieken wilt wissen? Deze actie kan niet ongedaan worden gemaakt.",
+		"cancel": "Annuleren",
+		"confirm": "Wissen"
+	},
+	"customRange": {
+		"from": "Van",
+		"to": "Tot"
+	},
+	"cacheRatio": {
+		"label": "Cache-verhouding voor schatting",
+		"hint": "Toegepast wanneer de provider geen cachegegevens rapporteert"
+	},
+	"sessionDetail": {
+		"summary": "Sessieoverzicht",
+		"apiCalls": "API-aanroepen",
+		"noApiCalls": "Geen API-aanroepen geregistreerd",
+		"input": "Invoer",
+		"output": "Uitvoer",
+		"cost": "Kosten",
+		"model": "Model",
+		"mode": "Modus",
+		"time": "Tijd",
+		"status": "Status"
+	},
+	"time": {
+		"justNow": "zojuist",
+		"minutesAgo": "{{count}} min geleden",
+		"hoursAgo": "{{count}} uur geleden",
+		"yesterday": "gisteren",
+		"daysAgo": "{{count}} dagen geleden"
+	},
+	"tasks": {
+		"title": "Taken",
+		"noTasks": "Geen taken geregistreerd",
+		"filterModel": "Alle modellen",
+		"filterProvider": "Alle providers",
+		"callCount": "{{count}} aanroepen"
+	},
+	"taskAggregate": {
+		"modes": "Modi",
+		"models": "Modellen"
+	}
+}

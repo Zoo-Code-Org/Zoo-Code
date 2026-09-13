@@ -117,12 +117,16 @@ import {
 	handleCreateWorktreeInclude,
 	handleCheckoutBranch,
 } from "./worktree"
+import { routeUsageStatsMessage } from "./usageStatsMessageHandler"
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
 	message: WebviewMessage,
 	marketplaceManager?: MarketplaceManager,
 ) => {
+	if (await routeUsageStatsMessage(provider, message)) {
+		return
+	}
 	// Utility functions provided for concise get/update of global state via contextProxy API.
 	const getGlobalState = <K extends keyof GlobalState>(key: K) => provider.contextProxy.getValue(key)
 	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) =>
