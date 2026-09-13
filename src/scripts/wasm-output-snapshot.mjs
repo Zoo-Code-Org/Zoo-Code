@@ -41,16 +41,18 @@ export function createWasmOutputSnapshot(destinationDir, filesystem = fs) {
 	}
 
 	let restored = false
+	const restoredFiles = new Set()
 	return {
 		restore() {
 			if (restored) return
 			for (const filename of filesystem.readdirSync(destinationDir)) {
-				if (wasmPattern.test(filename)) {
+				if (wasmPattern.test(filename) && !restoredFiles.has(filename)) {
 					filesystem.renameSync(path.join(destinationDir, filename), path.join(generatedDir, filename))
 				}
 			}
 			for (const filename of filesystem.readdirSync(backupDir)) {
 				filesystem.renameSync(path.join(backupDir, filename), path.join(destinationDir, filename))
+				restoredFiles.add(filename)
 			}
 			restored = true
 			filesystem.rmSync(transactionDir, { recursive: true, force: true })

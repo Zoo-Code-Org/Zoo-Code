@@ -66,4 +66,29 @@ describe("createWasmOutputSnapshot", () => {
 		expect(fs.readFileSync(path.join(destination, "tree-sitter-b.wasm"), "utf8")).toBe("previous-b")
 		expect(fs.existsSync(`${destination}.coverage-contract-backup`)).toBe(false)
 	})
+
+	it("retries a partial restoration without deleting an already restored original", () => {
+		fs.writeFileSync(path.join(destination, "tree-sitter-b.wasm"), "previous-b")
+		let restoreMoves = 0
+		let failRestore = true
+		const filesystem = {
+			...fs,
+			renameSync(source, target) {
+				if (source.includes(`${path.sep}backup${path.sep}`) && ++restoreMoves === 2 && failRestore) {
+					failRestore = false
+					throw new Error("restore interrupted")
+				}
+				return fs.renameSync(source, target)
+			},
+		}
+		const snapshot = createWasmOutputSnapshot(destination, filesystem)
+		fs.writeFileSync(path.join(destination, "tree-sitter-a.wasm"), "generated")
+
+		expect(() => snapshot.restore()).toThrow("restore interrupted")
+		expect(() => snapshot.restore()).not.toThrow()
+		expect(fs.readdirSync(destination)).toEqual(["tree-sitter-a.wasm", "tree-sitter-b.wasm"])
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-a.wasm"), "utf8")).toBe("previous")
+		expect(fs.readFileSync(path.join(destination, "tree-sitter-b.wasm"), "utf8")).toBe("previous-b")
+		expect(fs.existsSync(`${destination}.coverage-contract-backup`)).toBe(false)
+	})
 })
