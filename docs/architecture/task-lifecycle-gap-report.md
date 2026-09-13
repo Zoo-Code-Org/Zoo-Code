@@ -209,6 +209,8 @@ Severity reflects plausible data loss, ownership corruption, permission/context 
 
 ## Portfolio remediation plan
 
+The [1-SP remediation block register](./task-lifecycle-remediation-blocks.md) decomposes this portfolio into small modeling/documentation increments. It assigns every GAP exactly one primary block, preserves dependencies across workstreams, and keeps optional fan-out separate from baseline ownership.
+
 The 38 IDs are not 38 independent projects. They group into eight programs with shared root causes and implementation surfaces. Complexity classes reflect implementation breadth, coupling, and verification risk rather than schedule or duration.
 
 | Cluster                                    | Gap IDs                                | Root fix and likely ownership                                                                                                                                                                                                | Complexity | Engineering risk                                               | Objective portfolio evidence                                                                                                         |
