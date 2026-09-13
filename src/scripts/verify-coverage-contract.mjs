@@ -5,7 +5,7 @@ import process from "node:process"
 import { fileURLToPath } from "node:url"
 
 import { assertMatchingFiles } from "./verify-wasm-files.mjs"
-import { createWasmOutputSnapshot } from "./wasm-output-snapshot.mjs"
+import { createDistSandbox } from "./dist-sandbox.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
@@ -43,18 +43,18 @@ if (JSON.stringify(preparationTask?.outputs) !== JSON.stringify(["dist/tree-sitt
 const dist = path.join(root, "src", "dist")
 const cacheDir = path.join(root, ".turbo", "coverage-contract")
 fs.rmSync(cacheDir, { recursive: true, force: true })
-const state = { outputSnapshot: undefined }
+const state = { sandbox: undefined }
 for (const signal of ["SIGINT", "SIGTERM"]) {
 	process.once(signal, () => {
 		try {
-			state.outputSnapshot?.restore()
+			state.sandbox?.restore()
 		} finally {
 			fs.rmSync(cacheDir, { recursive: true, force: true })
 		}
 		process.exit(1)
 	})
 }
-state.outputSnapshot = createWasmOutputSnapshot(dist)
+state.sandbox = createDistSandbox(dist)
 
 try {
 	run(["turbo", "run", "prepare:tree-sitter-wasms", "--filter=zoo-code", "--cache-dir=.turbo/coverage-contract"])
@@ -110,7 +110,7 @@ try {
 	)
 } finally {
 	try {
-		state.outputSnapshot.restore()
+		state.sandbox.restore()
 	} finally {
 		fs.rmSync(cacheDir, { recursive: true, force: true })
 	}
