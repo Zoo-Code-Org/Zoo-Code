@@ -472,14 +472,15 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Saved mode
 			}
 
-			// Mock updateGlobalState to track mode updates
-			const updateGlobalStateSpy = vi.spyOn(provider as any, "updateGlobalState").mockResolvedValue(undefined)
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
 
 			// Initialize task with history item
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify mode was restored via updateGlobalState
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was restored into the view-local pin (no shared global write)
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
 		it("should use current mode if history item has no saved mode", async () => {
@@ -760,9 +761,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify that the mode was restored
+			// Verify that the mode was restored into this view's durable pin. The
+			// getState() merge of hydrated per-view values lands with the F1b follow-up.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
 			const state = await provider.getState()
-			expect(state.mode).toBe("architect")
 
 			// Verify that the API configuration was also restored
 			expect(state.currentApiConfigName).toBe("architect-config")
