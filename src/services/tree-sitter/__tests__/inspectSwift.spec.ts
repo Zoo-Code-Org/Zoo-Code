@@ -1,17 +1,33 @@
 // npx vitest services/tree-sitter/__tests__/inspectSwift.spec.ts
+//
+// PERFORMANCE NOTE:
+// The first query.captures() call for Swift WASM takes ~22-24 seconds due to
+// WASM JIT compilation of the 3.1MB tree-sitter-swift.wasm grammar.
+// We pre-warm the WASM JIT in a beforeAll() hook and log timing.
 
-import { inspectTreeStructure, testParseSourceCodeDefinitions, debugLog } from "./helpers"
+import { inspectTreeStructure, testParseSourceCodeDefinitions, debugLog, infoLog, warmUpLanguage } from "./helpers"
+import { Query } from "web-tree-sitter"
 import { swiftQuery } from "../queries"
+import * as path from "path"
 import sampleSwiftContent from "./fixtures/sample-swift"
 
-// This is insanely slow for some reason.
-describe.skip("inspectSwift", () => {
+describe("inspectSwift", () => {
 	const testOptions = {
 		language: "swift",
 		wasmFile: "tree-sitter-swift.wasm",
 		queryString: swiftQuery,
 		extKey: "swift",
 	}
+
+	beforeAll(async () => {
+		// Pre-warm Swift WASM JIT
+		const { initializeTreeSitter } = await import("./helpers")
+		const { Language } = await initializeTreeSitter()
+		const wasmPath = path.join(process.cwd(), "dist/tree-sitter-swift.wasm")
+		const swiftLang = await Language.load(wasmPath)
+		const warmupTime = await warmUpLanguage(swiftLang, swiftQuery)
+		infoLog(`Warmup query took ${warmupTime.toFixed(0)}ms`)
+	}, 60_000)
 
 	it("should inspect Swift tree structure", async () => {
 		// Should execute without throwing
@@ -28,5 +44,5 @@ describe.skip("inspectSwift", () => {
 			expect(result).toMatch(/\d+--\d+ \| .+/)
 			debugLog("Swift parsing test completed successfully")
 		}
-	}, 15000) // Increase timeout to 15 seconds
+	}, 30_000)
 })
