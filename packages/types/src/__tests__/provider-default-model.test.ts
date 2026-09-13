@@ -19,6 +19,7 @@ import {
 	internationalZAiDefaultModelId,
 	kimiCodeDefaultModelId,
 	mainlandZAiDefaultModelId,
+	openAiNativeDefaultModelId,
 	openRouterDefaultModelId,
 	vscodeLlmDefaultModelId,
 	zooGatewayDefaultModelId,
@@ -31,6 +32,10 @@ describe("getProviderDefaultModelId", () => {
 
 	it("triangulates static selection with another provider category", () => {
 		expect(getProviderDefaultModelId(providerIdentifiers.vscodeLm)).toBe(vscodeLlmDefaultModelId)
+	})
+
+	it("uses the canonical OpenAI Native default model", () => {
+		expect(getProviderDefaultModelId(providerIdentifiers.openaiNative)).toBe(openAiNativeDefaultModelId)
 	})
 
 	it.each([
