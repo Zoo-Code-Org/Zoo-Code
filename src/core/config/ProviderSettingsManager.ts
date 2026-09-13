@@ -52,6 +52,19 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+/**
+ * Signals that a profile's configuration no longer exists. Callers that treat an
+ * already-deleted profile as an idempotent no-op branch on this type instead of
+ * matching error message text, which a profile name containing the phrase could
+ * otherwise spoof.
+ */
+export class ProviderSettingsNotFoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProviderSettingsNotFoundError"
+	}
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -474,7 +487,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 
 				if (!providerProfiles.apiConfigs[name]) {
-					throw new Error(`Config '${name}' not found`)
+					throw new ProviderSettingsNotFoundError(`Config '${name}' not found`)
 				}
 
 				if (Object.keys(providerProfiles.apiConfigs).length === 1) {
@@ -485,6 +498,11 @@ export class ProviderSettingsManager {
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
+			// A missing config is a caller-meaningful signal, not a failure: rethrow it
+			// unwrapped so callers can branch on the type instead of message text.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to delete config: ${error}`)
 		}
 	}
