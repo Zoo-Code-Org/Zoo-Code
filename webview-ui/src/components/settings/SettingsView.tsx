@@ -39,6 +39,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_PER_WRITE_CHECKPOINTS,
 	ImageGenerationProvider,
 } from "@roo-code/types"
 
@@ -175,6 +176,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCondenseContextPercent,
 		enableCheckpoints,
 		checkpointTimeout,
+		perWriteCheckpoints,
 		experiments,
 		maxOpenTabsContext,
 		maxWorkspaceFiles,
@@ -410,6 +412,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					ttsSpeed,
 					enableCheckpoints: enableCheckpoints ?? false,
 					checkpointTimeout: checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+					perWriteCheckpoints: perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS,
 					writeDelayMs,
 					diffFuzzyThreshold,
 					terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? 30_000,
@@ -847,6 +850,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<CheckpointSettings
 								enableCheckpoints={enableCheckpoints}
 								checkpointTimeout={checkpointTimeout}
+								perWriteCheckpoints={perWriteCheckpoints}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

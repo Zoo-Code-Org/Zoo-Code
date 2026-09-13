@@ -6,6 +6,7 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
+import { checkpointSave } from "../checkpoints"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -102,7 +103,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each file change
+			// Process each file change. The handlers report whether their file
+			// operation succeeded, so a rejected approval or a failed local write
+			// does not get checkpointed as if the patch had succeeded.
+			let patchSucceeded = true
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -120,17 +124,39 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					patchSucceeded =
+						(await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)) &&
+						patchSucceeded
 				} else if (change.type === "delete") {
 					// Delete file
-					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					patchSucceeded =
+						(await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)) &&
+						patchSucceeded
 				} else if (change.type === "update") {
 					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					patchSucceeded =
+						(await this.handleUpdateFile(
+							change,
+							absolutePath,
+							relPath,
+							task,
+							callbacks,
+							isWriteProtected,
+						)) && patchSucceeded
 				}
 			}
 
 			task.consecutiveMistakeCount = 0
+
+			// B1: one checkpoint for the whole patch (not per file), and only when
+			// every file operation succeeded. Live setting with default-on
+			// semantics: skip only when explicitly false.
+			if (patchSucceeded) {
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					void checkpointSave(task, false, true).catch(() => {})
+				}
+			}
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
@@ -144,7 +170,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file already exists
@@ -155,7 +181,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File already exists: ${relPath}. Use Update File instead.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		const newContent = change.newContent || ""
@@ -209,7 +235,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return false
 		}
 
 		// Save the changes
@@ -227,6 +253,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
 		task.processQueuedMessages()
+		return true
 	}
 
 	private async handleDeleteFile(
@@ -235,7 +262,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file exists
@@ -246,7 +273,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot delete a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
@@ -268,7 +295,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		if (!didApprove) {
 			pushToolResult("Delete operation was rejected by the user.")
-			return
+			return false
 		}
 
 		// Delete the file
@@ -278,12 +305,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `Failed to delete file '${relPath}': ${error instanceof Error ? error.message : String(error)}`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
 		task.processQueuedMessages()
+		return true
 	}
 
 	private async handleUpdateFile(
@@ -293,7 +321,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file exists
@@ -304,7 +332,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot update a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		const originalContent = change.originalContent || ""
@@ -318,9 +346,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// Generate and validate diff
 		const diff = formatResponse.createPrettyPatch(relPath, originalContent, newContent)
 		if (!diff) {
+			// A no-op change is not a failure: the patch processed cleanly and
+			// nothing was written, so the whole-patch success state is kept.
 			pushToolResult(`No changes needed for '${relPath}'`)
 			await task.diffViewProvider.reset()
-			return
+			return true
 		}
 
 		// Check experiment settings
@@ -366,7 +396,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return false
 		}
 
 		// Handle file move if specified
@@ -379,7 +409,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("rooignore_error", change.movePath)
 				pushToolResult(formatResponse.rooIgnoreError(change.movePath))
 				await task.diffViewProvider.reset()
-				return
+				return false
 			}
 
 			// Check if destination path is write-protected
@@ -391,7 +421,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return false
 			}
 
 			// Check if destination path is outside workspace
@@ -403,7 +433,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return false
 			}
 
 			// Save new content to the new path
@@ -447,6 +477,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
 		task.processQueuedMessages()
+		return true
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {
