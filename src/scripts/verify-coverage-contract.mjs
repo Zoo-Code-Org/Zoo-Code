@@ -41,6 +41,12 @@ if (JSON.stringify(preparationTask?.outputs) !== JSON.stringify(["dist/tree-sitt
 
 const dist = path.join(root, "src", "dist")
 const cacheDir = path.join(root, ".turbo", "coverage-contract")
+for (const signal of ["SIGINT", "SIGTERM"]) {
+	process.once(signal, () => {
+		fs.rmSync(cacheDir, { recursive: true, force: true })
+		process.exit(1)
+	})
+}
 fs.mkdirSync(dist, { recursive: true })
 fs.rmSync(cacheDir, { recursive: true, force: true })
 for (const filename of fs.readdirSync(dist)) {
