@@ -105,6 +105,9 @@ Learn more: [Using Modes](https://docs.zoocode.dev/basic-usage/using-modes) •
 
 - **[Documentation](https://docs.zoocode.dev):** The official guide to
   installing, configuring, and mastering Zoo Code.
+- **[Task lifecycle architecture and issue traceability](docs/architecture/task-lifecycle-model.md#open-issue-traceability):**
+  Bounded model checks, production mappings, known-unsafe witnesses, and open
+  lifecycle obligations.
 - **[Discord Server](https://discord.gg/VxfP4Vx3gX):** Join the community for
   real-time help and discussion.
 - **[Reddit Community](https://www.reddit.com/r/ZooCode/):** Share your
