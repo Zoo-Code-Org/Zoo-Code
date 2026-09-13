@@ -14,6 +14,8 @@ pnpm cleanup-protocol:model-check
 
 This is a separate child model from the persisted task lifecycle and shared-store concurrency models. It follows the native tool-call parser model pattern: keep an independent bounded state space for an independent protocol, require every action and semantic landmark to remain reachable, and connect the abstract claims to focused production tests.
 
+The authoritative [lifecycle coverage audit and issue tracker](./task-lifecycle-model.md#coverage-audit) classifies how this abstract model relates to production and other submodels.
+
 ## Bounds and environment actions
 
 The model uses two tasks and explores every reachable interleaving through depth 20, with an explicit 100,000-state budget. Abort, disposal, final-save, provider abort/drain phases, and shutdown-cursor state are modeled directly. Independent abort and disposal calls may interleave freely, while provider-initiated calls are gated to the current shutdown task. Cleanup and editor-reversion settlement or rejection are environment actions, so the explorer does not assume they eventually occur.

@@ -147,6 +147,18 @@ for (const scenario of PROFILE_SCENARIOS) {
 	assert.equal(parentContext.apiConfiguration.consecutiveMistakeLimit, 3, `${scenario.name}: parent context mutated`)
 }
 
+const downstreamConsumerWitness = selectHandoffExecutionContext(
+	{ ...parentContext, mode: "orchestrator" },
+	"code",
+	"orchestrator",
+	false,
+)
+assert.notEqual(
+	downstreamConsumerWitness.mode,
+	"orchestrator",
+	"#921/#1623 witness requires task-local and shared provider modes to diverge",
+)
+
 const fixed = explore(FIXED_POLICY, false)
 const counterexamples = LEGACY_POLICIES.map((policy) => {
 	const result = explore(policy, true)
@@ -156,7 +168,7 @@ const counterexamples = LEGACY_POLICIES.map((policy) => {
 })
 
 console.log(
-	`Provider handoff/scheduler model check passed: ${fixed.states} distinct reachable states, ${PROFILE_SCENARIOS.length}/${PROFILE_SCENARIOS.length} profile scenarios, ${fixed.actions.size}/${EXPECTED_ACTIONS.length} actions, ${fixed.landmarks.size}/${Object.keys(LANDMARKS).length} landmarks, depth <= ${MAX_DEPTH}, states <= ${MAX_STATES}, ${counterexamples.length}/${LEGACY_POLICIES.length} legacy counterexamples`,
+	`Provider handoff/scheduler model check passed: ${fixed.states} distinct reachable states, ${PROFILE_SCENARIOS.length}/${PROFILE_SCENARIOS.length} profile scenarios, 1/1 downstream shared-mode witness, ${fixed.actions.size}/${EXPECTED_ACTIONS.length} actions, ${fixed.landmarks.size}/${Object.keys(LANDMARKS).length} landmarks, depth <= ${MAX_DEPTH}, states <= ${MAX_STATES}, ${counterexamples.length}/${LEGACY_POLICIES.length} legacy counterexamples`,
 )
 for (const counterexample of counterexamples) {
 	console.log(
