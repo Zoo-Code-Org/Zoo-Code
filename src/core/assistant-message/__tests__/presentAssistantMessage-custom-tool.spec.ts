@@ -77,6 +77,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 					}),
 				}),
 			},
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
@@ -119,6 +120,51 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 
 			// Should record as "custom_tool", not "my_custom_tool"
 			expect(mockTask.recordToolUsage).toHaveBeenCalledWith("custom_tool")
+		})
+	})
+
+	describe("Custom tool mode delegation regression", () => {
+		// Regression for issue #1623.
+		// Before the fix, customTool.execute received the shared provider mode
+		// instead of the task-local mode. A child delegated to "architect" would
+		// have its custom tool called with "orchestrator".
+		it("passes the task-local mode to customTool.execute, not the provider mode", async () => {
+			// Provider says "orchestrator"; task was delegated to "architect".
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "orchestrator",
+						customModes: [],
+						experiments: { customTools: true },
+					}),
+				}),
+			}
+			mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+
+			const executeMock = vi.fn().mockResolvedValue("result")
+			vi.mocked(customToolRegistry.has).mockReturnValue(true)
+			vi.mocked(customToolRegistry.get).mockReturnValue({
+				name: "my_custom_tool",
+				description: "A custom tool",
+				execute: executeMock,
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_delegation",
+					name: "my_custom_tool",
+					params: { value: "test" },
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask)
+
+			expect(executeMock).toHaveBeenCalledOnce()
+			const context = executeMock.mock.calls[0][1]
+			expect(context.mode).toBe("architect")
+			expect(context.task).toBe(mockTask)
 		})
 	})
 
