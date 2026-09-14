@@ -27,8 +27,9 @@ vi.mock("@/i18n/TranslationContext", () => ({
 	}),
 }))
 
-const { useRooPortalMock } = vi.hoisted(() => ({
+const { useRooPortalMock, popoverContentContainer } = vi.hoisted(() => ({
 	useRooPortalMock: vi.fn(() => document.body),
+	popoverContentContainer: { current: undefined as Element | DocumentFragment | null | undefined },
 }))
 
 vi.mock("@/components/ui/hooks/useRooPortal", () => ({
@@ -73,8 +74,9 @@ vi.mock("@/components/ui", async () => {
 				</button>
 			)
 		},
-		PopoverContent: ({ children }: ComponentProps<typeof PopoverContent>) => {
+		PopoverContent: ({ children, container }: ComponentProps<typeof PopoverContent>) => {
 			const { open } = useContext(PopoverContext)
+			popoverContentContainer.current = container
 			return open ? <div data-testid="popover-content">{children}</div> : null
 		},
 		StandardTooltip: ({ children, content }: ComponentProps<typeof StandardTooltip>) => (
@@ -306,6 +308,9 @@ describe("ModelSelector", () => {
 		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
 		expect(screen.getByText("openrouter/model-b")).toBeInTheDocument()
+		const list = within(screen.getByTestId("popover-content"))
+		expect(list.getByRole("button", { name: "openrouter/model-a" })).toHaveAttribute("aria-pressed", "true")
+		expect(list.getByRole("button", { name: "openrouter/model-b" })).toHaveAttribute("aria-pressed", "false")
 
 		fireEvent.click(screen.getByText("openrouter/model-b"))
 
@@ -347,6 +352,24 @@ describe("ModelSelector", () => {
 		})
 	})
 
+	it("falls back to the openrouter dynamic provider when apiProvider is unset", () => {
+		render(
+			<ModelSelector
+				apiConfiguration={{} satisfies ProviderSettings}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		expect(useRouterModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.openrouter,
+			enabled: true,
+		})
+		// No router models are loaded/mocked here, so the empty dynamic model list renders the
+		// unsupported/disabled fallback rather than an interactive trigger.
+		expect(screen.getByTestId("model-selector-disabled")).toBeInTheDocument()
+	})
+
 	it("mounts the popover content into the roo portal container", () => {
 		render(
 			<ModelSelector
@@ -357,9 +380,11 @@ describe("ModelSelector", () => {
 		)
 
 		expect(useRooPortalMock).toHaveBeenCalledWith("roo-portal")
+		expect(popoverContentContainer.current).toBe(useRooPortalMock.mock.results[0]?.value)
+		expect(popoverContentContainer.current).toBe(document.body)
 	})
 
-	it("shows the disabled view with an openrouter fallback label for a retired provider", () => {
+	it("shows the disabled view with a raw provider fallback label for a retired provider", () => {
 		useSelectedModelMock.mockReturnValue({ id: "", isLoading: false })
 
 		render(
@@ -371,9 +396,29 @@ describe("ModelSelector", () => {
 		)
 
 		// Retired providers have no model config of their own, so they never fetch router
-		// models and always render the unsupported/disabled view with an openrouter fallback.
+		// models and always render the unsupported/disabled view. With no selected model label,
+		// it falls back to the actual configured (retired) provider rather than openrouter.
 		expect(useRouterModelsMock).toHaveBeenCalledWith({ provider: undefined, enabled: false })
-		expect(screen.getByTestId("model-selector-disabled")).toHaveTextContent(providerIdentifiers.openrouter)
+		expect(screen.getByTestId("model-selector-disabled")).toHaveTextContent(retiredProviderIdentifiers.groq)
+	})
+
+	it("preserves the selected model label for a retired provider when one is available", () => {
+		useSelectedModelMock.mockReturnValue({
+			id: "llama-3-groq",
+			info: { displayName: "Llama 3 (Groq)" },
+			isLoading: false,
+		})
+
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: retiredProviderIdentifiers.groq } satisfies ProviderSettings}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		expect(screen.getByTestId("model-selector-disabled")).toHaveTextContent("Llama 3 (Groq)")
+		expect(screen.getByTestId("model-selector-disabled")).not.toHaveTextContent(retiredProviderIdentifiers.groq)
 	})
 
 	it("disables the selector for a provider outside the supported scope", () => {

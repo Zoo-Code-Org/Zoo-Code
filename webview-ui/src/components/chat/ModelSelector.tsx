@@ -173,6 +173,7 @@ export const ModelSelector = ({
 				<button
 					type="button"
 					disabled={isDisabled}
+					aria-pressed={isCurrentModel}
 					key={modelId}
 					onClick={() => handleSelect(modelId)}
 					className={cn(
@@ -207,7 +208,7 @@ export const ModelSelector = ({
 						triggerClassName,
 					)}
 					onClick={handleEditClick}>
-					<span className="truncate">{selectedModelLabel || provider}</span>
+					<span className="truncate">{selectedModelLabel || rawProvider}</span>
 				</button>
 			</StandardTooltip>
 		)
