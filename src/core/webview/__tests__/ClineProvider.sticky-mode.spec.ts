@@ -452,6 +452,59 @@ describe("ClineProvider - Sticky Mode", () => {
 				}),
 			)
 		})
+
+		it("bails out before any task write when the mutation signal is already aborted", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			const mockTask = {
+				taskId: "test-task-id",
+				taskMode: "code",
+				_taskMode: undefined as string | undefined,
+				emit: vi.fn(),
+				saveClineMessages: vi.fn(),
+				clineMessages: [],
+				apiConversationHistory: [],
+				updateApiConfiguration: vi.fn(),
+			} as unknown as Task
+
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+
+			const abortedController = new AbortController()
+			abortedController.abort()
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, abortedController.signal)
+
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			expect(mockTask["_taskMode"]).toBeUndefined()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("proceeds normally when no mutation signal is provided", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			const mockTask = {
+				taskId: "test-task-id",
+				taskMode: "code",
+				_taskMode: undefined as string | undefined,
+				emit: vi.fn(),
+				saveClineMessages: vi.fn(),
+				clineMessages: [],
+				apiConversationHistory: [],
+				updateApiConfiguration: vi.fn(),
+			} as unknown as Task
+
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, undefined)
+
+			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+		})
 	})
 
 	describe("createTaskWithHistoryItem", () => {
