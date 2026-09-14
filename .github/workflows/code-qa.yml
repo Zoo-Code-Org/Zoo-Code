@@ -157,7 +157,7 @@ jobs:
             - name: Run non-extension package coverage
               run: pnpm turbo run test:coverage --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
             - name: Run extension coverage lanes
-              run: pnpm turbo run test:coverage:general test:coverage:tree-sitter --filter="zoo-code" --log-order grouped --output-logs new-only
+              run: pnpm turbo run test:coverage:api test:coverage:core test:coverage:services test:coverage:misc test:coverage:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only
             - name: Verify extension coverage contract
               run: pnpm --dir src run verify:coverage-contract
             - name: Run extension dist smoke test
@@ -168,7 +168,10 @@ jobs:
               run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Verify extension coverage reports
               run: |
-                  node src/scripts/verify-lcov.mjs src/coverage/general/lcov.info
+                  node src/scripts/verify-lcov.mjs src/coverage/api/lcov.info
+                  node src/scripts/verify-lcov.mjs src/coverage/core/lcov.info
+                  node src/scripts/verify-lcov.mjs src/coverage/services/lcov.info
+                  node src/scripts/verify-lcov.mjs src/coverage/misc/lcov.info
                   node src/scripts/verify-lcov.mjs src/coverage/tree-sitter/lcov.info
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
@@ -191,7 +194,10 @@ jobs:
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: >-
-                      src/coverage/general/lcov.info,
+                      src/coverage/api/lcov.info,
+                      src/coverage/core/lcov.info,
+                      src/coverage/services/lcov.info,
+                      src/coverage/misc/lcov.info,
                       src/coverage/tree-sitter/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
@@ -229,7 +235,10 @@ jobs:
               with:
                   name: coverage-reports-${{ matrix.name }}
                   path: |
-                      src/coverage/general/lcov.info
+                      src/coverage/api/lcov.info
+                      src/coverage/core/lcov.info
+                      src/coverage/services/lcov.info
+                      src/coverage/misc/lcov.info
                       src/coverage/tree-sitter/lcov.info
                       webview-ui/coverage/lcov.info
                       packages/cloud/coverage/lcov.info
