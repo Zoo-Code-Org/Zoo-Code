@@ -1,8 +1,9 @@
-import { spawnSync } from "node:child_process"
+import { execFile, spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { relative, resolve } from "node:path"
 import process from "node:process"
+import { promisify } from "node:util"
 
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
 if (!pnpm) throw new Error("pnpm executable path is unavailable")
@@ -116,20 +117,30 @@ if (Object.values(laneCounts).flat().length !== testFiles.length)
 
 const collectionDirectory = mkdtempSync(resolve(tmpdir(), "zoo-code-coverage-contract-"))
 try {
-	const collect = (config) => {
+	const execFileAsync = promisify(execFile)
+	const collect = async (config) => {
 		const output = resolve(collectionDirectory, `${config}.json`)
-		const collection = spawnSync(
+		await execFileAsync(
 			command,
-			[...args, "exec", "vitest", "list", "--config", `vitest.${config}.config.ts`, `--json=${output}`],
-			{ encoding: "utf8" },
+			[
+				...args,
+				"exec",
+				"vitest",
+				"list",
+				"--staticParse",
+				"--config",
+				`vitest.${config}.config.ts`,
+				`--json=${output}`,
+			],
+			{ maxBuffer: 10 * 1024 * 1024 },
 		)
-		if (collection.status !== 0) throw new Error(collection.stderr || `Vitest collection failed for ${config}`)
 		return new Set(JSON.parse(readFileSync(output, "utf8")).map(({ file, name }) => `${file}\0${name}`))
 	}
-	const unitTests = collect("unit")
+	const collections = ["unit", ...ownershipLanes, "tree-sitter"]
+	const [unitTests, ...resolvedLanes] = await Promise.all(collections.map(collect))
 	const laneTests = new Set()
-	for (const lane of [...ownershipLanes, "tree-sitter"]) {
-		for (const test of collect(lane)) {
+	for (const tests of resolvedLanes) {
+		for (const test of tests) {
 			if (laneTests.has(test)) throw new Error(`Test belongs to multiple coverage lanes: ${test}`)
 			laneTests.add(test)
 		}
