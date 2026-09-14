@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { Package } from "@roo/package"
 
 export function getCallbackUrl(provider: string, uriScheme?: string) {
@@ -5,11 +6,11 @@ export function getCallbackUrl(provider: string, uriScheme?: string) {
 }
 
 export function getOpenRouterAuthUrl(uriScheme?: string) {
-	return `https://openrouter.ai/auth?callback_url=${getCallbackUrl("openrouter", uriScheme)}`
+	return `https://openrouter.ai/auth?callback_url=${getCallbackUrl(providerIdentifiers.openrouter, uriScheme)}`
 }
 
 export function getRequestyAuthUrl(uriScheme?: string) {
-	return `https://app.requesty.ai/oauth/authorize?callback_url=${getCallbackUrl("requesty", uriScheme)}`
+	return `https://app.requesty.ai/oauth/authorize?callback_url=${getCallbackUrl(providerIdentifiers.requesty, uriScheme)}`
 }
 
 const ZOO_CODE_DEFAULT_BASE_URL = "https://www.zoocode.dev"

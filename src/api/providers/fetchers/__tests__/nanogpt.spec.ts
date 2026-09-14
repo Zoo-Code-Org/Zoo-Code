@@ -140,6 +140,24 @@ describe("NanoGPT model fetcher", () => {
 		).toEqual(["low", "medium", "high"])
 	})
 
+	it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])(
+		"applies required Astra request constraints to %s",
+		(id) => {
+			expect(
+				parseNanoGptModel({
+					id,
+					capabilities: { reasoning: true, vision: true, tool_calling: true },
+					reasoning_efforts: ["low", "medium", "high", "xhigh", "max"],
+				}),
+			).toMatchObject({
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			})
+		},
+	)
+
 	it.each([{ data: null }, [], null])("returns no models for invalid top-level data %#", async (data) => {
 		vi.mocked(axios.get).mockResolvedValue({ data })
 		const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
