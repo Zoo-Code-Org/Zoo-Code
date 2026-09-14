@@ -322,6 +322,50 @@ describe("ModelSelector", () => {
 		)
 	})
 
+	it.each([
+		{ provider: providerIdentifiers.deepseek, staticModel: "deepseek-v4-flash" },
+		{ provider: providerIdentifiers.moonshot, staticModel: "kimi-k3" },
+	])("merges the static catalog with router models for $provider", ({ provider, staticModel }) => {
+		useRouterModelsMock.mockReturnValue({
+			data: { [provider]: { "router-only-model": makeModelInfo() } },
+			isLoading: false,
+		})
+
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: provider, apiModelId: staticModel } satisfies ProviderSettings}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const list = within(screen.getByTestId("popover-content"))
+		expect(list.getByText(staticModel)).toBeInTheDocument()
+		expect(list.getByText("router-only-model")).toBeInTheDocument()
+	})
+
+	it.each([
+		{ provider: providerIdentifiers.deepseek, staticModel: "deepseek-v4-flash" },
+		{ provider: providerIdentifiers.moonshot, staticModel: "kimi-k3" },
+	])(
+		"falls back to the static catalog when router models are unavailable for $provider",
+		({ provider, staticModel }) => {
+			useRouterModelsMock.mockReturnValue({ data: undefined, isLoading: false })
+
+			render(
+				<ModelSelector
+					apiConfiguration={{ apiProvider: provider, apiModelId: staticModel } satisfies ProviderSettings}
+					currentApiConfigName="default"
+					title="Select model"
+				/>,
+			)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+			expect(within(screen.getByTestId("popover-content")).getByText(staticModel)).toBeInTheDocument()
+		},
+	)
+
 	it("requests router models for a dynamic provider with fetching enabled", () => {
 		render(
 			<ModelSelector

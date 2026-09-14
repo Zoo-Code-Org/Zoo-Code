@@ -68,20 +68,22 @@ export const ModelSelector = ({
 			return {}
 		}
 
+		const staticModels = isStaticModelProvider(provider)
+			? getStaticModelsForProvider(provider, undefined, apiConfiguration)
+			: {}
+		const { "custom-arn": _customArn, ...modelsWithoutCustomArn } = staticModels
+
 		if (dynamicProvider) {
-			return filterModels(routerModels.data?.[dynamicProvider] ?? {}, provider, organizationAllowList) ?? {}
+			return (
+				filterModels(
+					{ ...modelsWithoutCustomArn, ...(routerModels.data?.[dynamicProvider] ?? {}) },
+					provider,
+					organizationAllowList,
+				) ?? {}
+			)
 		}
 
-		// Stryker disable next-line ConditionalExpression: getStaticModelsForProvider already
-		// falls back to `{}` for a provider missing from MODELS_BY_PROVIDER, so forcing this
-		// branch to run unconditionally yields the same result as the `false` case below.
-		if (isStaticModelProvider(provider)) {
-			const staticModels = getStaticModelsForProvider(provider, undefined, apiConfiguration)
-			const { "custom-arn": _customArn, ...rest } = staticModels
-			return filterModels(rest, provider, organizationAllowList) ?? {}
-		}
-
-		return {}
+		return filterModels(modelsWithoutCustomArn, provider, organizationAllowList) ?? {}
 	}, [modelConfig, dynamicProvider, routerModels.data, provider, apiConfiguration, organizationAllowList])
 
 	const modelIds = useMemo(() => Object.keys(models), [models])
