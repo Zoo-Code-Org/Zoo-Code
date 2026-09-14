@@ -22,7 +22,12 @@ type CreatedHistoryTask = Awaited<ReturnType<ClineProvider["createTaskWithHistor
 
 function seedRegistry(provider: ClineProvider, ...tasks: unknown[]) {
 	const registry = new TaskRegistry()
-	for (const t of tasks) registry.push(t as unknown as Task)
+	for (const value of tasks) {
+		const task = value as MockTask
+		task.dispose ??= vi.fn().mockResolvedValue(undefined)
+		// These lifecycle test doubles intentionally implement only the Task surface used here.
+		registry.push(task as unknown as Task)
+	}
 	provider["taskRegistry"] = registry
 }
 
@@ -390,6 +395,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			taskId: "task-1", // Same ID for rehydration scenario
 			instanceId: "instance-2", // Different instance
 			emit: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
 			on: vi.fn(),
 			off: vi.fn(),
 		}

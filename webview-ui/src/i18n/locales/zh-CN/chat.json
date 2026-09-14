@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "🤖 在全新的 Zoo Gateway 上，有余额的用户可在 2 周内以 5 折优惠试用 GLM-5.3-Flash 和 Gemini 3.7 Flash，并可完全免费使用 MiniMax M3：<modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "新模型 — GLM-5.3-Flash 现已通过 Z AI 提供。",
-			"highlight3": "可靠性修复 — 恢复了子任务批准，解决了 Vertex Gemini 3.7 工具输出为空、终端启动失败和后台服务错误问题，并提升了不同 IDE 主题下的可读性。"
+			"highlight1": "🔑 随处使用你的 Zoo Gateway API 密钥——可将其用于任何兼容 OpenAI 的客户端或工作流：<modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 限时通过 Zoo Gateway 免费使用 MiniMax-M3。",
+			"highlight3": "✨ 全新上线：GPT-6 Astra 和 Claude Fable 5.1 模型。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

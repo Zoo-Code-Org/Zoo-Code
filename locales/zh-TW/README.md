@@ -43,12 +43,11 @@ Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
 - **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
 - **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
 
-## v3.80.1 新功能
+## v3.82.0 新功能
 
-🤖 在全新的 Zoo Gateway 上，有餘額的使用者可在 2 週內以 5 折優惠試用 GLM-5.3-Flash 和 Gemini 3.7 Flash，並可完全免費使用 MiniMax M3。https://zoocode.dev/models
-
-- **新模型** — GLM-5.3-Flash 現已透過 Z AI 提供。
-- **可靠性修正** — 恢復了子任務核准，解決了 Vertex Gemini 3.7 工具輸出為空、終端機啟動失敗和背景服務錯誤問題，並提升了不同 IDE 主題下的可讀性。
+- 🔑 **隨處使用你的 Zoo Gateway API 金鑰** — 可將它用於任何與 OpenAI 相容的用戶端或工作流程：https://zoocode.dev/models
+- 🎁 **限時免費使用模型** — 透過 Zoo Gateway 免費使用 MiniMax-M3。
+- ✨ **全新模型** — GPT-6 Astra 和 Claude Fable 5.1 現已推出。
 
 ## Zoo Code 能為您做什麼？
 
