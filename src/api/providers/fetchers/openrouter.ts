@@ -221,6 +221,13 @@ export const parseOpenRouterModel = ({
 		supportedParameters: supportedParameters ? supportedParameters.filter(isModelParameter) : undefined,
 	}
 
+	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-pro") {
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
+		modelInfo.requiredReasoningEffort = true
+		modelInfo.reasoningEffort = "medium"
+		modelInfo.supportsTemperature = false
+	}
+
 	if (OPEN_ROUTER_REASONING_BUDGET_MODELS.has(id)) {
 		modelInfo.supportsReasoningBudget = true
 	}

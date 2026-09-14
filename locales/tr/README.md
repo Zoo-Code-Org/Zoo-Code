@@ -47,12 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.80.1'daki Yenilikler
+## v3.82.0'daki Yenilikler
 
-🤖 Yeni Zoo Gateway'de bakiyesi olan kullanıcılar GLM-5.3-Flash ve Gemini 3.7 Flash'ı 2 hafta boyunca %50 indirimle, MiniMax M3'ü ise tamamen ÜCRETSİZ deneyebilir. https://zoocode.dev/models
-
-- **Yeni model** — GLM-5.3-Flash artık Z AI üzerinden kullanılabilir.
-- **Güvenilirlik düzeltmeleri** — alt görev onayları geri getirildi, Vertex Gemini 3.7 boş araç çıktısı, terminal başlatma hataları ve arka plan servis hataları giderildi, IDE temalarındaki okunabilirlik iyileştirildi.
+- 🔑 **Zoo Gateway API anahtarını her yerde kullan** — anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: https://zoocode.dev/models
+- 🎁 **Sınırlı süreli ücretsiz model erişimi** — Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.
+- ✨ **Yepyeni modeller** — GPT-6 Astra ve Claude Fable 5.1 artık kullanılabilir.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 
