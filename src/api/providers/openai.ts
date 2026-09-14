@@ -236,6 +236,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				messages: deepseekReasoner
 					? convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
 					: [systemMessage, ...convertToOpenAiMessages(messages)],
+				...reasoning,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
 				tools: this.convertToolsForOpenAI(metadata?.tools),
 				tool_choice: metadata?.tool_choice,
@@ -297,7 +298,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			format: "openai",
 			modelId: id,
 			model: info,
-			settings: this.options,
+			// OpenAI Compatible edits effort in custom model info. The shared top-level
+			// setting may be left over from another provider and must not override it.
+			settings: { ...this.options, reasoningEffort: info.reasoningEffort },
 			defaultTemperature: 0,
 		})
 		return { id, info, ...params }
@@ -312,6 +315,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: model.id,
 				messages: [{ role: "user", content: prompt }],
+				...model.reasoning,
 			}
 
 			// Add max_tokens if needed
@@ -350,7 +354,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const modelInfo = this.getModel().info
+		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 
 		if (this.options.openAiStreamingEnabled ?? true) {
@@ -367,7 +371,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				],
 				stream: true,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
-				reasoning_effort: modelInfo.reasoningEffort as "low" | "medium" | "high" | undefined,
+				...reasoning,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
 				tools: this.convertToolsForOpenAI(metadata?.tools),
@@ -402,7 +406,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					},
 					...convertToOpenAiMessages(messages),
 				],
-				reasoning_effort: modelInfo.reasoningEffort as "low" | "medium" | "high" | undefined,
+				...reasoning,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
 				tools: this.convertToolsForOpenAI(metadata?.tools),

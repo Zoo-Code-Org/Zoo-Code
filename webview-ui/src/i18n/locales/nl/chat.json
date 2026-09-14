@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "🤖 Probeer GLM-5.3-Flash en Gemini 3.7 Flash 2 weken lang met 50% korting en MiniMax M3 helemaal gratis voor gebruikers met een saldo op de nieuwe Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Nieuw model — GLM-5.3-Flash is nu beschikbaar via Z AI.",
-			"highlight3": "Betrouwbaarheidsfixes — herstelde goedkeuringen voor subtaken en oplossingen voor lege tooloutput bij Vertex Gemini 3.7, opstartfouten van de terminal, fouten in achtergrondservices en de leesbaarheid in verschillende IDE-thema's."
+			"highlight1": "🔑 Gebruik je Zoo Gateway API-sleutel overal—voeg hem toe aan elke OpenAI-compatibele client of workflow: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "🎁 Krijg tijdelijk gratis toegang tot MiniMax-M3 via Zoo Gateway.",
+			"highlight3": "✨ Nu beschikbaar: de gloednieuwe modellen GPT-6 Astra en Claude Fable 5.1."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

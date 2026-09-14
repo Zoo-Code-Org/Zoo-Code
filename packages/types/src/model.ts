@@ -127,6 +127,8 @@ export const modelInfoSchema = z.object({
 		.optional(),
 	requiredReasoningEffort: z.boolean().optional(),
 	preserveReasoning: z.boolean().optional(),
+	// Some OpenAI-compatible gateways require a Responses-backed route for tool calls.
+	requiresResponsesApi: z.boolean().optional(),
 	supportedParameters: z.array(modelParametersSchema).optional(),
 	inputPrice: z.number().optional(),
 	outputPrice: z.number().optional(),
