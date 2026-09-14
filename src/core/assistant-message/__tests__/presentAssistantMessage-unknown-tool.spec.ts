@@ -2,12 +2,18 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
+import { isValidToolName } from "../../tools/validateToolUse"
+
+const mockNewTaskHandle = vi.hoisted(() => vi.fn())
 
 // Mock dependencies
 vi.mock("../../task/Task")
 vi.mock("../../tools/validateToolUse", () => ({
 	validateToolUse: vi.fn(),
 	isValidToolName: vi.fn(() => false),
+}))
+vi.mock("../../tools/NewTaskTool", () => ({
+	newTaskTool: { handle: mockNewTaskHandle },
 }))
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -22,6 +28,7 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 	let mockTask: any
 
 	beforeEach(() => {
+		mockNewTaskHandle.mockReset()
 		// Create a mock Task with minimal properties needed for testing
 		mockTask = {
 			taskId: "test-task-id",
@@ -240,5 +247,383 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 		expect(toolResult).toBeDefined()
 		expect(toolResult.is_error).toBe(true)
 		expect(toolResult.content).toContain("due to user rejecting a previous tool")
+	})
+
+	it("persists and acknowledges queued feedback through the native approval path", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_queued_feedback",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "messageResponse",
+			text: "Handle this first",
+			queuedMessageId: "queued-message-1",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(true)
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+			"queued-message-1",
+			"Handle this first",
+			undefined,
+		)
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+	})
+
+	it("acknowledges an empty queued denial instead of stranding its claim", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_empty_denial",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "noButtonClicked",
+			queuedMessageId: "queued-empty-denial",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(true)
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(false)
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+			"queued-empty-denial",
+			undefined,
+			undefined,
+		)
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+	})
+
+	it("merges ordinary approval feedback into a native tool result", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_approval_feedback",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "Approved context" })
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: {
+					askApproval: (type: "tool", text: string) => Promise<boolean>
+					pushToolResult: (content: string) => void
+				},
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(true)
+				callbacks.pushToolResult("Delegated")
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Approved context", undefined)
+		expect(mockTask.userMessageContent).toContainEqual(
+			expect.objectContaining({
+				type: "tool_result",
+				content: expect.stringContaining('"status":"approved"'),
+			}),
+		)
+	})
+
+	it("records ordinary image-only denial feedback and stops the tool", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_image_denial",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "noButtonClicked",
+			images: ["data:image/png;base64,denied"],
+		})
+		const continueTool = vi.fn()
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				if (await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))) {
+					continueTool()
+				}
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "", ["data:image/png;base64,denied"])
+		expect(continueTool).not.toHaveBeenCalled()
+		expect(mockTask.didRejectTool).toBe(true)
+		expect(mockTask.userMessageContent).toContainEqual(
+			expect.objectContaining({
+				type: "tool_result",
+				content: expect.stringContaining('"status":"denied"'),
+			}),
+		)
+	})
+
+	it("does not continue after queued denial persistence fails", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_failed_denial_persistence",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "messageResponse",
+			text: "Do not delegate",
+			queuedMessageId: "queued-failed-denial",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(false)
+		const continueTool = vi.fn()
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))
+				continueTool()
+			},
+		)
+
+		await expect(presentAssistantMessage(mockTask)).rejects.toThrow(
+			"Failed to persist queued approval feedback queued-failed-denial",
+		)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+			"queued-failed-denial",
+			"Do not delegate",
+			undefined,
+		)
+		expect(continueTool).not.toHaveBeenCalled()
+		expect(mockTask.userMessageContent).toEqual([])
+	})
+
+	it("merges queued image-only approval feedback without duplicating its chat row", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_queued_image_approval",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "yesButtonClicked",
+			images: ["data:image/png;base64,approved"],
+			queuedMessageId: "queued-image-approval",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(true)
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: {
+					askApproval: (type: "tool", text: string) => Promise<boolean>
+					pushToolResult: (content: string) => void
+				},
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(true)
+				callbacks.pushToolResult("Delegated once")
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith("queued-image-approval", undefined, [
+			"data:image/png;base64,approved",
+		])
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+		expect(
+			mockTask.userMessageContent.filter((item: { type: string }) => item.type === "tool_result"),
+		).toHaveLength(1)
+		expect(mockTask.userMessageContent).toContainEqual(
+			expect.objectContaining({ type: "image", source: expect.any(Object) }),
+		)
+	})
+
+	it("does not execute an approved tool when queued approval persistence fails", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_failed_approval_persistence",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "yesButtonClicked",
+			text: "Approved after save",
+			queuedMessageId: "queued-failed-approval",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(false)
+		const executeApprovedTool = vi.fn()
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				if (await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))) {
+					executeApprovedTool()
+				}
+			},
+		)
+
+		await expect(presentAssistantMessage(mockTask)).rejects.toThrow(
+			"Failed to persist queued approval feedback queued-failed-approval",
+		)
+
+		expect(executeApprovedTool).not.toHaveBeenCalled()
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+		expect(mockTask.userMessageContent).toEqual([])
+	})
+
+	it("handles an ordinary empty denial without recording a feedback row", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_empty_ordinary_denial",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked" })
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(false)
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+		expect(mockTask.didRejectTool).toBe(true)
+		expect(mockTask.userMessageContent).toContainEqual(
+			expect.objectContaining({
+				type: "tool_result",
+				content: expect.stringContaining("The user denied this operation"),
+			}),
+		)
+	})
+
+	it("merges ordinary image-only approval feedback into one tool result", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_image_approval",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "yesButtonClicked",
+			images: ["data:image/png;base64,ordinary-approved"],
+		})
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: {
+					askApproval: (type: "tool", text: string) => Promise<boolean>
+					pushToolResult: (content: string) => void
+				},
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(true)
+				callbacks.pushToolResult("Delegated once")
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "", ["data:image/png;base64,ordinary-approved"])
+		expect(
+			mockTask.userMessageContent.filter((item: { type: string }) => item.type === "tool_result"),
+		).toHaveLength(1)
+		expect(mockTask.userMessageContent).toContainEqual(
+			expect.objectContaining({ type: "image", source: expect.any(Object) }),
+		)
 	})
 })

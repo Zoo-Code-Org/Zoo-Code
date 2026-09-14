@@ -248,7 +248,7 @@ describe("McpToolRow", () => {
 		expect(screen.getByText("First parameter")).toBeInTheDocument()
 	})
 
-	it("grays out tool name and description when tool is disabled", () => {
+	it("uses readable secondary text when tool is disabled", () => {
 		const disabledTool = {
 			...mockTool,
 			enabledForPrompt: false,
@@ -259,11 +259,10 @@ describe("McpToolRow", () => {
 		const toolName = screen.getByText("test-tool")
 		const toolDescription = screen.getByText("A disabled tool")
 
-		// Check that the tool name has the grayed out classes
-		expect(toolName).toHaveClass("text-vscode-descriptionForeground", "opacity-60")
-
-		// Check that the description has reduced opacity
-		expect(toolDescription).toHaveClass("opacity-40")
+		expect(toolName).toHaveClass("text-vscode-descriptionForeground")
+		expect(toolDescription).toHaveClass("text-vscode-descriptionForeground")
+		expect(toolName.className).not.toMatch(/opacity-/)
+		expect(toolDescription.className).not.toMatch(/opacity-/)
 	})
 
 	it("shows normal styling for tool name and description when tool is enabled", () => {
@@ -277,12 +276,9 @@ describe("McpToolRow", () => {
 		const toolName = screen.getByText("test-tool")
 		const toolDescription = screen.getByText("An enabled tool")
 
-		// Check that the tool name has normal styling
 		expect(toolName).toHaveClass("text-vscode-foreground")
-		expect(toolName).not.toHaveClass("text-vscode-descriptionForeground", "opacity-60")
-
-		// Check that the description has normal opacity
-		expect(toolDescription).toHaveClass("opacity-80")
-		expect(toolDescription).not.toHaveClass("opacity-40")
+		expect(toolName).not.toHaveClass("text-vscode-descriptionForeground")
+		expect(toolDescription).toHaveClass("text-vscode-descriptionForeground")
+		expect(toolDescription.className).not.toMatch(/opacity-/)
 	})
 })

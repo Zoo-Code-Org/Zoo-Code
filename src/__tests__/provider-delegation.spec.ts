@@ -43,6 +43,148 @@ const makeParentTask = () =>
 	}) as any
 
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
+	it("rejects a stale restored action before delegation side effects", async () => {
+		const parentTask = makeParentTask()
+		const removeClineFromStack = vi.fn()
+		const createTask = vi.fn()
+		const handleModeSwitch = vi.fn()
+		const taskHistoryStore = makeStoreStub({
+			get: vi.fn().mockReturnValue({
+				...parentHistoryItem,
+				pendingAction: {
+					kind: "create_subtask",
+					actionId: "current-action",
+					approvalText: "{}",
+					mode: "code",
+					message: "Do something",
+					todos: [],
+				},
+			}),
+		})
+		const provider = {
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack,
+			createTask,
+			handleModeSwitch,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+				pendingActionId: "stale-action",
+			}),
+		).rejects.toThrow("Pending action mismatch")
+
+		expect(parentTask.flushPendingToolResultsToHistory).not.toHaveBeenCalled()
+		expect(removeClineFromStack).not.toHaveBeenCalled()
+		expect(handleModeSwitch).not.toHaveBeenCalled()
+		expect(createTask).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
+	})
+
+	it("clears a matching pending action when delegation commits", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		let current: HistoryItem = { ...parentHistoryItem, status: "active", pendingAction }
+		const taskHistoryStore = {
+			get: vi.fn(() => current),
+			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+				current = updater(current)
+				return [current]
+			}),
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			pendingActionId: "create-action",
+		})
+
+		expect(current.pendingAction).toBeUndefined()
+		expect(current).toMatchObject({ status: "delegated", awaitingChildId: "child-1" })
+	})
+
+	it("rolls back when pending-action ownership changes before the atomic parent update", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn(() => parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const replacementAction = { ...pendingAction, actionId: "replacement-action" }
+		const taskHistoryStore = makeStoreStub({
+			get: vi.fn().mockReturnValue({ ...parentHistoryItem, status: "active", pendingAction }),
+			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+				updater({ ...parentHistoryItem, status: "active", pendingAction: replacementAction })
+				return []
+			}),
+		})
+		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+				pendingActionId: "create-action",
+			}),
+		).rejects.toThrow("Pending action mismatch for parent parent-1")
+
+		expect(child.run).not.toHaveBeenCalled()
+		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistoryItem)
+	})
+
 	it("persists parent delegation metadata via atomicReadAndUpdate and emits TaskDelegated", async () => {
 		const providerEmit = vi.fn()
 		const parentTask = makeParentTask()

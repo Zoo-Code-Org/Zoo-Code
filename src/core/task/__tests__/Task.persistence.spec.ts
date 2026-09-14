@@ -4,7 +4,7 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
-import type { ClineMessage, GlobalState, ProviderSettings } from "@roo-code/types"
+import type { ClineMessage, GlobalState, PendingTaskAction, ProviderSettings } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
@@ -14,7 +14,9 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 type TaskPersistenceAccess = {
+	addToApiConversationHistory: (message: { role: "user"; content: unknown[] }) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
+	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 }
@@ -717,6 +719,352 @@ describe("Task persistence", () => {
 					is_error: true,
 				},
 			])
+		})
+	})
+
+	describe("pending action resume", () => {
+		const pendingAction: PendingTaskAction = {
+			kind: "finish_subtask",
+			actionId: "finish-action",
+			approvalText: JSON.stringify({ tool: "finishTask" }),
+			parentTaskId: "parent-1",
+			result: "Done",
+		}
+
+		it("replays an unresolved pending action instead of a generic resume ask", async () => {
+			const messages: ClineMessage[] = [
+				{ ts: 1, type: "say", say: "text", text: "Child" },
+				{ ts: 2, type: "ask", ask: "tool", text: pendingAction.approvalText },
+			]
+			mockReadTaskMessages.mockResolvedValue(messages)
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "finish-action", name: "attempt_completion", input: {} }],
+				},
+			])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+			const replay = vi
+				.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+				.mockResolvedValue(undefined)
+			const ask = vi.spyOn(task, "ask")
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(replay).toHaveBeenCalledWith(pendingAction)
+			expect(ask).not.toHaveBeenCalled()
+			expect(mockSaveTaskMessages).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.not.arrayContaining([
+						expect.objectContaining({ text: pendingAction.approvalText }),
+					]),
+				}),
+			)
+		})
+
+		it("reconciles an already-persisted tool result before generic resume", async () => {
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }] },
+			])
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+			vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
+			expect(replay).not.toHaveBeenCalled()
+			expect(task.ask).toHaveBeenCalledWith("resume_task")
+		})
+
+		it("clears pending metadata after the matching tool result is saved", async () => {
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+			})
+
+			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
+		})
+
+		it("retries a rejected tool-result save before clearing pending metadata", async () => {
+			vi.useFakeTimers()
+			try {
+				mockSaveApiMessages
+					.mockRejectedValueOnce(new Error("temporary failure"))
+					.mockResolvedValueOnce(undefined)
+				mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "child-1",
+						number: 1,
+						ts: 1,
+						task: "Child",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						pendingAction,
+					},
+					startTask: false,
+				})
+
+				const saving = getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(mockProvider.clearPendingTaskAction).not.toHaveBeenCalled()
+
+				await vi.advanceTimersByTimeAsync(100)
+				await saving
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("reconciles stale in-memory metadata after an idempotent clear without clearing a newer action", async () => {
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(false)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+			const storeGet = vi.mocked(mockProvider.taskHistoryStore.get)
+			storeGet.mockReturnValueOnce(undefined)
+
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+			})
+
+			const taskState = task as unknown as { pendingAction?: PendingTaskAction }
+			expect(taskState.pendingAction).toBeUndefined()
+
+			const newerAction: PendingTaskAction = { ...pendingAction, actionId: "newer-action" }
+			task.setPendingTaskAction(pendingAction)
+			storeGet.mockReturnValueOnce({
+				id: "child-1",
+				number: 1,
+				ts: 1,
+				task: "Child",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				pendingAction: newerAction,
+			})
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied again" }],
+			})
+
+			expect(taskState.pendingAction).toEqual(newerAction)
+		})
+
+		it("does not clear a newer in-memory action after the matching clear finishes", async () => {
+			let finishClear!: (cleared: boolean) => void
+			const clearing = new Promise<boolean>((resolve) => {
+				finishClear = resolve
+			})
+			mockProvider.clearPendingTaskAction = vi.fn(() => clearing)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+			const newerAction: PendingTaskAction = { ...pendingAction, actionId: "newer-action" }
+
+			const saving = getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+			})
+			await vi.waitFor(() => expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledTimes(1))
+			task.setPendingTaskAction(newerAction)
+			finishClear(true)
+			await saving
+
+			expect((task as unknown as { pendingAction?: PendingTaskAction }).pendingAction).toEqual(newerAction)
+		})
+
+		it("leaves a newer action untouched when an obsolete durable result arrives", async () => {
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+			const newerAction: PendingTaskAction = { ...pendingAction, actionId: "newer-action" }
+			task.setPendingTaskAction(newerAction)
+
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Late denial" }],
+			})
+
+			expect(mockProvider.clearPendingTaskAction).not.toHaveBeenCalled()
+			expect((task as unknown as { pendingAction?: PendingTaskAction }).pendingAction).toEqual(newerAction)
+		})
+
+		it("retains the pending action when clearing metadata throws after a durable save", async () => {
+			const clearError = new Error("metadata store unavailable")
+			mockProvider.clearPendingTaskAction = vi.fn().mockRejectedValue(clearError)
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+
+			await expect(
+				getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+				}),
+			).resolves.toBeUndefined()
+
+			expect((task as unknown as { pendingAction?: PendingTaskAction }).pendingAction).toEqual(pendingAction)
+			expect(consoleError).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to clear pending action for child-1"),
+				clearError,
+			)
+			consoleError.mockRestore()
+		})
+
+		it("completes the deny-with-feedback lifecycle using the sanitized action id", async () => {
+			const rawToolUseId = "finish.action/with spaces"
+			const sanitizedActionId = "finish_action_with_spaces"
+			const lifecycleAction: PendingTaskAction = {
+				...pendingAction,
+				actionId: sanitizedActionId,
+			}
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction: lifecycleAction,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({
+				response: "messageResponse",
+				text: "Please revise",
+				queuedMessageId: "queued-lifecycle",
+			})
+			const persist = vi.spyOn(task, "persistQueuedFeedbackAndAcknowledge").mockResolvedValue(true)
+			const initiate = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockImplementation(async (content) => {
+					await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "user", content })
+				})
+
+			await getTaskPersistenceAccess(task).resumePendingTaskAction(lifecycleAction)
+
+			expect(rawToolUseId).not.toBe(sanitizedActionId)
+			expect(persist).toHaveBeenCalledWith("queued-lifecycle", "Please revise", undefined)
+			expect(initiate).toHaveBeenCalledWith([
+				expect.objectContaining({ type: "tool_result", tool_use_id: sanitizedActionId }),
+			])
+			expect(mockSaveApiMessages).toHaveBeenCalled()
+			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", sanitizedActionId)
+			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiate.mock.invocationCallOrder[0])
 		})
 	})
 

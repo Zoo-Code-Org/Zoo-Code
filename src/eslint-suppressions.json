@@ -471,7 +471,7 @@
 	},
 	"api/transform/__tests__/gemini-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/transform/__tests__/mistral-format.spec.ts": {
@@ -831,7 +831,7 @@
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 32
+			"count": 18
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {

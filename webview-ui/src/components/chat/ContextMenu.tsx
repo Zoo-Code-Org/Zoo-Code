@@ -81,7 +81,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						style={{
 							fontWeight: "bold",
 							fontSize: "0.85em",
-							opacity: 0.8,
+							color: "var(--vscode-descriptionForeground)",
 						}}>
 						{option.label}
 					</span>
@@ -95,7 +95,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						{option.description && (
 							<span
 								style={{
-									opacity: 0.5,
+									color: "var(--vscode-descriptionForeground)",
 									fontSize: "0.9em",
 									lineHeight: "1.2",
 									whiteSpace: "nowrap",
@@ -115,7 +115,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 							{option.argumentHint && (
 								<span
 									style={{
-										opacity: 0.5,
+										color: "var(--vscode-descriptionForeground)",
 										fontSize: "0.9em",
 										lineHeight: "1.2",
 									}}>
@@ -126,7 +126,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						{option.description && (
 							<span
 								style={{
-									opacity: 0.5,
+									color: "var(--vscode-descriptionForeground)",
 									fontSize: "0.9em",
 									lineHeight: "1.2",
 									whiteSpace: "nowrap",
@@ -154,7 +154,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 							<span
 								style={{
 									fontSize: "0.85em",
-									opacity: 0.7,
+									color: "var(--vscode-descriptionForeground)",
 									whiteSpace: "nowrap",
 									overflow: "hidden",
 									textOverflow: "ellipsis",
@@ -197,7 +197,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 									direction: "rtl",
 									textAlign: "right",
 									flex: 1,
-									opacity: 0.75,
+									color: "var(--vscode-descriptionForeground)",
 									fontSize: "0.75em",
 								}}>
 								{folderPath}

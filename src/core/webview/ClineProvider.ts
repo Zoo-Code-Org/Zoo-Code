@@ -30,6 +30,7 @@ import {
 	type TerminalActionId,
 	type TerminalActionPromptType,
 	type HistoryItem,
+	type PendingTaskAction,
 	type CloudUserInfo,
 	type CloudOrganizationMembership,
 	type CreateTaskOptions,
@@ -725,6 +726,40 @@ export class ClineProvider
 
 	public getCurrentTaskStack(): string[] {
 		return this.taskRegistry.taskIds
+	}
+
+	public async setPendingTaskAction(taskId: string, pendingAction: PendingTaskAction): Promise<void> {
+		await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => ({
+			...historyItem,
+			pendingAction,
+		}))
+		this.recentTasksCache = undefined
+	}
+
+	public async clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean> {
+		let cleared = false
+		try {
+			await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => {
+				if (historyItem.pendingAction?.actionId !== actionId) {
+					return historyItem
+				}
+
+				cleared = true
+				return { ...historyItem, pendingAction: undefined }
+			})
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message === `[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`
+			) {
+				return false
+			}
+			throw error
+		}
+		if (cleared) {
+			this.recentTasksCache = undefined
+		}
+		return cleared
 	}
 
 	// Pending Edit Operations Management
@@ -3769,8 +3804,9 @@ export class ClineProvider
 		message: string
 		initialTodos: TodoItem[]
 		mode: string
+		pendingActionId?: string
 	}): Promise<Task> {
-		const { parentTaskId, message, initialTodos, mode } = params
+		const { parentTaskId, message, initialTodos, mode, pendingActionId } = params
 
 		// Metadata-driven delegation is always enabled
 
@@ -3783,6 +3819,14 @@ export class ClineProvider
 			throw new Error(
 				`[delegateParentAndOpenChild] Parent mismatch: expected ${parentTaskId}, current ${parent.taskId}`,
 			)
+		}
+		if (pendingActionId) {
+			const parentHistory = this.taskHistoryStore.get(parentTaskId)
+			if (parentHistory?.pendingAction?.actionId !== pendingActionId) {
+				throw new Error(
+					`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${parentHistory?.pendingAction?.actionId}`,
+				)
+			}
 		}
 		// 2) Flush pending tool results to API history BEFORE disposing the parent.
 		//    This is critical: when tools are called before new_task,
@@ -3879,6 +3923,11 @@ export class ClineProvider
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				let base = historyItem
+				if (pendingActionId && base.pendingAction?.actionId !== pendingActionId) {
+					throw new Error(
+						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${base.pendingAction?.actionId}`,
+					)
+				}
 				if (historyItem.status === "delegated") {
 					// Re-read the awaited child's current status under the store lock.
 					const awaitedChildStatus = historyItem.awaitingChildId
@@ -3909,6 +3958,7 @@ export class ClineProvider
 					delegatedToId: child.taskId,
 					awaitingChildId: child.taskId,
 					childIds,
+					pendingAction: base.pendingAction?.actionId === pendingActionId ? undefined : base.pendingAction,
 				}
 			})
 			this.recentTasksCache = undefined
@@ -3979,13 +4029,21 @@ export class ClineProvider
 		parentTaskId: string
 		childTaskId: string
 		completionResultSummary: string
+		pendingActionId?: string
 	}): Promise<boolean> {
-		const { parentTaskId, childTaskId, completionResultSummary } = params
+		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
 		return this.runDelegationTransition(parentTaskId, async () => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
 			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			const childHistory = this.taskHistoryStore.get(childTaskId)
+			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
+				this.log(
+					`[reopenParentFromDelegation] Aborting: child ${childTaskId} pending action does not match ${pendingActionId}`,
+				)
+				return false
+			}
 
 			// Guard: re-validate delegation state after the async approval gap.
 			// cancelTask() or removeClineFromStack() may have already detached the parent
@@ -4152,8 +4210,17 @@ export class ClineProvider
 				childTaskId,
 				parentTaskId,
 				(child) => {
+					if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
+						throw new Error(`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`)
+					}
 					assertValidTransition(child.status, "completed")
-					return { ...child, status: "completed" as const, completionResultSummary }
+					return {
+						...child,
+						status: "completed" as const,
+						completionResultSummary,
+						pendingAction:
+							child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
+					}
 				},
 				(parent) => {
 					if (parent.status !== "active") {
