@@ -117,6 +117,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				displayName: currentApiConfigName || "", // Use the name directly for display.
 			}
 		}, [listApiConfigMeta, currentApiConfigName])
+		const hasPersistedApiConfiguration = !!currentApiConfigName
 
 		const [gitCommits, setGitCommits] = useState<any[]>([])
 		const [showDropdown, setShowDropdown] = useState(false)
@@ -1325,8 +1326,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						<ModelSelector
 							apiConfiguration={apiConfiguration}
 							currentApiConfigName={currentApiConfigName}
-							disabled={selectApiConfigDisabled}
-							title={t("chat:selectModel")}
+							disabled={selectApiConfigDisabled || !hasPersistedApiConfiguration}
+							title={hasPersistedApiConfiguration ? t("chat:selectModel") : t("chat:selectApiConfig")}
 							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0"
 							organizationAllowList={organizationAllowList}
 						/>

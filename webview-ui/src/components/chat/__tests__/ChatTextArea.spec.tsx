@@ -83,6 +83,7 @@ describe("ChatTextArea", () => {
 			apiConfiguration: {
 				apiProvider: providerIdentifiers.anthropic,
 			},
+			currentApiConfigName: "default",
 			taskHistory: [],
 			cwd: "/test/workspace",
 		})
@@ -1245,6 +1246,33 @@ describe("ChatTextArea", () => {
 			render(<ChatTextArea {...defaultProps} selectApiConfigDisabled={false} />)
 
 			expect(screen.getByTestId("model-selector-trigger")).not.toBeDisabled()
+		})
+
+		it("disables model selection without a persisted API configuration", () => {
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				filePaths: [],
+				openedTabs: [],
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				currentTaskId: "task-local-context",
+				currentApiConfigName: undefined,
+				taskHistory: [],
+				cwd: "/test/workspace",
+			})
+
+			render(<ChatTextArea {...defaultProps} />)
+
+			const trigger = screen.getByTestId("model-selector-trigger")
+			expect(trigger).toBeDisabled()
+			expect(trigger.closest("[data-tooltip-content]")).toHaveAttribute(
+				"data-tooltip-content",
+				"chat:selectApiConfig",
+			)
+
+			mockPostMessage.mockClear()
+			fireEvent.click(trigger)
+			expect(mockPostMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "upsertApiConfiguration" }),
+			)
 		})
 	})
 
