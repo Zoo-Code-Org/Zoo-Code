@@ -55,7 +55,10 @@ reviews:
               or upstream repositories. Report only concrete, actionable conflicts or failure modes, citing
               the relevant repository location or external source. Prioritize correctness, security, data loss,
               lifecycle, and test gaps. Do not report generic best practices, unsupported concerns, speculative
-              style comments, or unrelated refactors. Search for existing helpers before suggesting abstractions.
+              style comments, or unrelated refactors. When changed code introduces a local implementation of a
+              cross-cutting concern, check whether it bypasses or duplicates an established repository abstraction
+              or nearby convention. Report only a concrete inconsistency with behavioral or maintenance impact,
+              and allow intentional deviations.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
@@ -153,7 +156,7 @@ reviews:
         description:
             mode: warning
         issue_assessment:
-            mode: warning
+            mode: error
         custom_checks:
             - name: Regression evidence
               mode: warning
@@ -178,7 +181,7 @@ reviews:
                   behavior is missing, or a persisted default is not propagated to a consumer. Cite the
                   changed path and a plausible triggering scenario; pass when no such changed path exists.
             - name: Lifecycle resource cleanup
-              mode: error
+              mode: warning
               instructions: >-
                   Fail only when a concrete changed lifecycle path can leak a listener, watcher, provider,
                   timer, task, or other resource, or can duplicate work after cancellation, disposal, or
