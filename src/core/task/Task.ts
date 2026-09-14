@@ -3746,12 +3746,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 							this.presentAssistantMessageSafe()
 						} else if (toolUseIndex !== undefined) {
-							// finalizeStreamingToolCall returned null (malformed JSON or missing args)
-							// We still need to mark the tool as non-partial so it gets executed
-							// The tool's validation will catch any missing required parameters
+							// finalizeStreamingToolCall returned null (malformed JSON or missing args).
+							// existingToolUse is the same object the streaming phase was mutating in
+							// place, so it still carries nativeArgs built from the incomplete partial
+							// parse (e.g. a truncated write_to_file `content` string) - that value was
+							// only ever meant for live progress display, never for execution. Mark the
+							// tool as non-partial so it's presented as complete, and clear nativeArgs so
+							// presentAssistantMessage's `!block.nativeArgs` guard actually short-circuits
+							// it with a structured tool_result instead of executing the truncated value.
 							const existingToolUse = this.assistantMessageContent[toolUseIndex]
 							if (existingToolUse && existingToolUse.type === "tool_use") {
 								existingToolUse.partial = false
+								existingToolUse.nativeArgs = undefined
 								// Ensure it has the ID for native protocol
 								;(existingToolUse as any).id = event.id
 							}
