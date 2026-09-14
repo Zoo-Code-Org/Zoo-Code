@@ -194,9 +194,14 @@ vi.mock("../ThinkingBudget", () => ({
 						value={apiConfiguration?.reasoningEffort || ""}
 						onChange={(e) => setApiConfigurationField("reasoningEffort", e.target.value)}>
 						<option value="">Select...</option>
-						<option value="low">Low</option>
-						<option value="medium">Medium</option>
-						<option value="high">High</option>
+						{(Array.isArray(modelInfo.supportsReasoningEffort)
+							? modelInfo.supportsReasoningEffort
+							: ["low", "medium", "high"]
+						).map((effort: string) => (
+							<option key={effort} value={effort}>
+								{effort}
+							</option>
+						))}
 					</select>
 				</div>
 			)
@@ -521,11 +526,12 @@ describe("ApiOptions", () => {
 			// However, we've tested the state update call.
 		})
 
-		it("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
+		it("selects max in custom model info even when a top-level low effort remains", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
 				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: true, // Initially enabled
+				reasoningEffort: "low" as const,
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
 					reasoningEffort: "low" as const,
@@ -537,25 +543,18 @@ describe("ApiOptions", () => {
 				setApiConfigurationField: mockSetApiConfigurationField,
 			})
 
-			// Find the reasoning effort select among all comboboxes by its current value
-			// const allSelects = screen.getAllByRole("combobox") as HTMLSelectElement[]
-			// const reasoningSelect = allSelects.find(
-			// 	(el) => el.value === initialConfig.openAiCustomModelInfo.reasoningEffort,
-			// )
-			// expect(reasoningSelect).toBeDefined()
 			const selectContainer = screen.getByTestId("reasoning-effort")
 			expect(selectContainer).toBeInTheDocument()
 
 			const reasoningSelect = within(selectContainer).getByRole("combobox")
 			expect(reasoningSelect).toHaveValue("low")
 
-			// Simulate changing the reasoning effort to 'high'
-			fireEvent.change(reasoningSelect, { target: { value: "high" } })
+			fireEvent.change(reasoningSelect, { target: { value: "max" } })
 
 			// Check if setApiConfigurationField was called correctly for openAiCustomModelInfo
 			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
 				"openAiCustomModelInfo",
-				expect.objectContaining({ reasoningEffort: "high" }),
+				expect.objectContaining({ reasoningEffort: "max" }),
 			)
 
 			// Check that other properties were preserved
