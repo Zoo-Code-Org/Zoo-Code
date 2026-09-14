@@ -1312,6 +1312,16 @@ describe("leaked tool-call recovery", () => {
 			expect(calls).toHaveLength(0)
 		})
 
+		it("does not treat an info-string fence line as a closing fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("```md\n```ts\n" + block + "\n```\n```")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
 		it("recovers an invoke that follows a CLOSED fence, proving the fence guard reopens", () => {
 			const text = quoted("```\nexample\n```\n" + invoke("update_todo_list", param("todos", "[x] one")))
 

@@ -95,15 +95,16 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
 function isInsideCodeFence(before: string): boolean {
 	let openFence: { marker: string; width: number } | null = null
 	for (const line of before.split("\n")) {
-		const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/)
+		const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})([^\n]*)$/)
 		if (!fenceMatch) {
 			continue
 		}
 		const marker = fenceMatch[1][0]
 		const width = fenceMatch[1].length
+		// CommonMark allows an info string only on an opening fence, never a closing one.
 		if (!openFence) {
 			openFence = { marker, width }
-		} else if (marker === openFence.marker && width >= openFence.width) {
+		} else if (marker === openFence.marker && width >= openFence.width && fenceMatch[2].trim() === "") {
 			openFence = null
 		}
 	}
