@@ -322,7 +322,7 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-fable-5.1",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
