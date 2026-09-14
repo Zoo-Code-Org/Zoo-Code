@@ -8,6 +8,7 @@ import {
 	type ModelRecord,
 	ollamaDefaultModelInfo,
 	OllamaModelsMessageType,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -38,7 +39,7 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
 	const [refreshError, setRefreshError] = useState<string | undefined>()
 	const refreshStatusRef = useRef(refreshStatus)
-	const routerModels = useRouterModels()
+	const routerModels = useRouterModels({ provider: providerIdentifiers.ollama })
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(

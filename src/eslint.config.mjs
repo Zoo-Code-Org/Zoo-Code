@@ -58,6 +58,6 @@ export default [
 		},
 	},
 	{
-		ignores: ["webview-ui", "out"],
+		ignores: [".stryker-tmp", "webview-ui", "out"],
 	},
 ]
