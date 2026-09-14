@@ -32,6 +32,7 @@ import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { writeToFileTool } from "../../tools/WriteToFileTool"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -693,6 +694,93 @@ describe("Cline", () => {
 					input: { param: "value" },
 				},
 			])
+		})
+
+		it("blocks a truncated write_to_file call instead of executing it (issue #1221)", async () => {
+			// Regression test for #1221: if the model's stream is cut off mid-way
+			// through a write_to_file tool call's `content` argument (e.g. it hits
+			// max_tokens), finalizeStreamingToolCall() can't parse the incomplete
+			// JSON and returns null. Task.ts must not let the truncated content
+			// reach writeToFileTool's execution path - it must clear nativeArgs so
+			// presentAssistantMessage's fail-closed guard emits a structured
+			// tool_result error instead.
+			//
+			// Unlike the simulation-based tests in truncated-native-tool-args.spec.ts,
+			// this drives the real streaming + presentAssistantMessage flow through
+			// Task, and spies on the actual tool handler to prove it is never invoked.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "truncated tool call test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			// presentAssistantMessageSafe is intentionally left un-mocked here (unlike
+			// the other tests in this block) - the whole point is to exercise the real
+			// dispatch/guard logic, not just tool_use finalization.
+
+			const writeToFileHandleSpy = vi.spyOn(writeToFileTool, "handle")
+			// Spy directly on the guard's own push, rather than inspecting
+			// userMessageContent/apiConversationHistory afterwards - the task
+			// recurses into a follow-up request once the tool_result is ready
+			// (see the second mocked stream below), which resets those arrays
+			// for the new turn before this function returns.
+			const pushToolResultSpy = vi.spyOn(task, "pushToolResultToUserContent")
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call_partial",
+							index: 0,
+							id: "call_truncated",
+							name: "write_to_file",
+						},
+						{
+							type: "tool_call_partial",
+							index: 0,
+							// Cut off mid-string: no closing quote/brace, and the stream
+							// ends here with no explicit tool_call_end - exactly what
+							// happens when the model hits max_tokens mid-argument.
+							// .md path deliberately used so the only thing that can block
+							// execution is the nativeArgs guard under test - an arbitrary
+							// extension could also get caught by unrelated mode-based file
+							// restrictions (e.g. Architect mode's markdown-only rule),
+							// which would produce a false pass/fail unrelated to this bug.
+							arguments: '{"path":"docs/config.md","content":"sk-live-abc123',
+						},
+					]),
+				)
+				// The task recurses once the error tool_result makes the turn
+				// "ready" - this bounds that follow-up to a single harmless text
+				// reply instead of an unmocked second call.
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "" }]))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "truncated tool call test" }])
+
+			// handle() legitimately gets called with partial: true while the call is
+			// still streaming (BaseTool.handle short-circuits to a no-op preview hook
+			// in that case) - that's expected and safe. What must never happen is a
+			// call with partial: false, which is what actually reaches execute() and
+			// writes to disk.
+			const nonPartialCalls = writeToFileHandleSpy.mock.calls.filter(
+				([, block]) => (block as { partial?: boolean }).partial === false,
+			)
+			expect(nonPartialCalls).toHaveLength(0)
+
+			// A structured, matching tool_result error must have been pushed for
+			// the truncated call's ID instead of letting it execute.
+			const truncatedCallResult = pushToolResultSpy.mock.calls.find(
+				([result]) => result.tool_use_id === "call_truncated",
+			)?.[0]
+			expect(truncatedCallResult).toMatchObject({
+				type: "tool_result",
+				tool_use_id: "call_truncated",
+				is_error: true,
+			})
+			expect(JSON.stringify(truncatedCallResult)).toContain("missing nativeArgs")
 		})
 	})
 
