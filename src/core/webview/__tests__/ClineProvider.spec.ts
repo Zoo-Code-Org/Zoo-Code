@@ -1949,9 +1949,7 @@ describe("ClineProvider", () => {
 					apiProvider: providerIdentifiers.anthropic,
 				}),
 			}
-			const setProviderSettingsSpy = vi
-				.spyOn(provider.contextProxy, "setProviderSettings")
-				.mockResolvedValue(undefined)
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
 			await provider.deleteProviderProfile(oldProfile)
 
