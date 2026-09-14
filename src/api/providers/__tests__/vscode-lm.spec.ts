@@ -1322,6 +1322,14 @@ describe("leaked tool-call recovery", () => {
 			expect(leftoverText).toBe(text)
 		})
 
+		it("treats a fence line with a whitespace-only suffix as a closing fence", () => {
+			const text = quoted("```\nexample\n```   \n" + invoke("update_todo_list", param("todos", "[x] one")))
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
+		})
+
 		it("recovers an invoke that follows a CLOSED fence, proving the fence guard reopens", () => {
 			const text = quoted("```\nexample\n```\n" + invoke("update_todo_list", param("todos", "[x] one")))
 
