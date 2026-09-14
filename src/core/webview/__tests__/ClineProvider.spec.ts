@@ -435,7 +435,17 @@ type StalledProfile = {
  */
 function stallProviderSettingsProfile(provider: ClineProvider) {
 	let resolveProfile: (value: StalledProfile) => void = () => {}
-	const getProfileSpy = vi.fn(() => new Promise<StalledProfile>((resolve) => (resolveProfile = resolve)))
+	const getProfileSpy = vi.fn(() => {
+		// Only one lookup is resolvable: resolveProfile is bound to the first
+		// promise's resolver, so a second getProfile would strand its promise.
+		// Fail loudly instead of hanging.
+		if (getProfileSpy.mock.calls.length > 1) {
+			throw new Error(
+				"stallProviderSettingsProfile: getProfile called more than once; only one lookup is resolvable",
+			)
+		}
+		return new Promise<StalledProfile>((resolve) => (resolveProfile = resolve))
+	})
 	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
 	provider.providerSettingsManager = { getProfile: getProfileSpy }
 	// Return a stable wrapper around the closure binding: resolveProfile is

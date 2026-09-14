@@ -349,6 +349,15 @@ export class ClineProvider
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
 
+	/**
+	 * This view's pinned profile name from the view-local buffer. Exposed for
+	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
+	 * is private and must not be reached through bracket access.
+	 */
+	get pinnedProfileName(): string | undefined {
+		return this.viewLocalState.currentApiConfigName
+	}
+
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
@@ -2071,6 +2080,14 @@ export class ClineProvider
 	): Promise<void> {
 		const task = targetTask
 
+		// A cancelled or timed-out switch must not be partially applied: bail out
+		// before the task history / _taskMode writes as well as the durable mode
+		// write below. The pre-write check further down still covers aborts that
+		// land while the task writes are in flight.
+		if (signal?.aborted) {
+			return
+		}
+
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
 			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
@@ -2377,12 +2394,21 @@ export class ClineProvider
 			)
 		}
 
+		// Capture this view's pin before setValue rewrites it: a view pinned to the
+		// deleted profile while the global selection points elsewhere must still be
+		// reconfigured, or getState() would keep the deleted profile's settings under
+		// the surviving profile's name.
+		const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+
 		await this.setValue("currentApiConfigName", profileToActivate)
 
-		if (profileToDelete.name === globalSettings.currentApiConfigName && survivingSettings) {
-			// The deleted profile was the active one, so the shared provider keys
-			// and this view's buffer still carry its settings; replace both so
-			// getState() reports the surviving profile's configuration.
+		if (
+			(profileToDelete.name === globalSettings.currentApiConfigName || viewWasPinnedToDeleted) &&
+			survivingSettings
+		) {
+			// The deleted profile was the active one (globally, or for this view), so
+			// the shared provider keys and this view's buffer still carry its settings;
+			// replace both so getState() reports the surviving profile's configuration.
 			await this.contextProxy.setProviderSettings(survivingSettings)
 			await this._saveViewLocalStateFromMutation(survivingSettings)
 		}
@@ -2516,7 +2542,7 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance["viewLocalState"].currentApiConfigName === name,
+			(instance) => instance !== this && instance.pinnedProfileName === name,
 		)
 
 		if (affected.length === 0) {
@@ -2525,7 +2551,8 @@ export class ClineProvider
 
 		await Promise.all(
 			affected.map(async (instance) => {
-				await instance["_saveViewLocalStateFromMutation"]({ apiConfiguration: providerSettings })
+				// Direct private access: compile-time safe across sibling instances.
+				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
 				await instance.postStateToWebview()
 			}),
 		)
@@ -2544,7 +2571,7 @@ export class ClineProvider
 		replacementSettings: ProviderSettings | undefined,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance["viewLocalState"].currentApiConfigName === deletedProfileName,
+			(instance) => instance !== this && instance.pinnedProfileName === deletedProfileName,
 		)
 
 		if (affected.length === 0) {
@@ -2561,7 +2588,8 @@ export class ClineProvider
 					values.apiConfiguration = replacementSettings
 				}
 
-				await instance["_saveViewLocalStateFromMutation"](values)
+				// Direct private access: compile-time safe across sibling instances.
+				await instance._saveViewLocalStateFromMutation(values)
 				await instance.postStateToWebview()
 			}),
 		)

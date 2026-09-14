@@ -408,7 +408,11 @@ describe("registerCommands handlers", () => {
 
 		await handlers["zoo-code.focusInput"]()
 
-		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
+		// The tab takes selection priority: assert it was selected by identity
+		// (reference, not structural equality).
+		expect((ClineProvider.getInstanceForView as Mock).mock.calls[0]![0]).toBe(tabPanel)
+		// No error was logged on the success path.
+		expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
 		expect(mockTabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
