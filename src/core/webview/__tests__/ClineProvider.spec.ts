@@ -435,7 +435,17 @@ type StalledProfile = {
  */
 function stallProviderSettingsProfile(provider: ClineProvider) {
 	let resolveProfile: (value: StalledProfile) => void = () => {}
-	const getProfileSpy = vi.fn(() => new Promise<StalledProfile>((resolve) => (resolveProfile = resolve)))
+	const getProfileSpy = vi.fn(() => {
+		// Only one lookup is resolvable: resolveProfile is bound to the first
+		// promise's resolver, so a second getProfile would strand its promise.
+		// Fail loudly instead of hanging.
+		if (getProfileSpy.mock.calls.length > 1) {
+			throw new Error(
+				"stallProviderSettingsProfile: getProfile called more than once; only one lookup is resolvable",
+			)
+		}
+		return new Promise<StalledProfile>((resolve) => (resolveProfile = resolve))
+	})
 	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
 	provider.providerSettingsManager = { getProfile: getProfileSpy }
 	// Return a stable wrapper around the closure binding: resolveProfile is
@@ -1956,6 +1966,96 @@ describe("ClineProvider", () => {
 			// The list entry must remain untouched when the deletion failed.
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([profile, keeperProfile])
 			expect(deleteConfigSpy).toHaveBeenCalledTimes(1)
+			await provider.dispose()
+		})
+
+		it("reconfigures a view pinned to the deleted profile even when the global selection points elsewhere", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			// The global selection points at the keeper profile, but this view's buffer
+			// is still pinned to the profile being deleted (it loaded it earlier).
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			provider["viewLocalState"].currentApiConfigName = "old-profile"
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+			await provider.deleteProviderProfile(oldProfile)
+
+			// The captured pin must still trigger the reconfiguration: the shared
+			// provider keys take the surviving profile's settings.
+			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic }),
+			)
+			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
+			// Flat provider-settings keys are shared: they are written through the
+			// ContextProxy and must not be mirrored into the view-local buffer, which
+			// would turn them into a per-view override masking later shared updates.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			await provider.dispose()
+		})
+
+		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const otherProfile: ProviderSettingsEntry = {
+				name: "other-profile",
+				id: "other-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile, otherProfile])
+			// The global selection and this view's pin both name surviving profiles:
+			// the deletion must not reconfigure this view's settings.
+			await provider.contextProxy.setValue("currentApiConfigName", "other-profile")
+			provider["viewLocalState"].currentApiConfigName = "keeper-profile"
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "other-profile",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const setProviderSettingsSpy = vi
+				.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockResolvedValue(undefined)
+
+			await provider.deleteProviderProfile(oldProfile)
+
+			// No reconfiguration: the guard must stay false when neither the global
+			// selection nor the view pin names the deleted profile.
+			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+			expect(provider.getValues().currentApiConfigName).toBe("other-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			await provider.dispose()
 		})
 	})
