@@ -690,7 +690,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * Performs a non-streaming chat completion and returns the full response text.
 	 *
 	 * Anthropic-format models are completed via the `/v1/messages` endpoint;
-	 * Responses-format models (gpt-5.6-luna) via `/v1/responses`; all other
+	 * Responses-format models via `/v1/responses`; all other
 	 * models use the OpenAI-compatible chat completions endpoint.
 	 *
 	 * @param prompt - The user prompt to send as a single user message.

@@ -1,0 +1,20 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "LMSTUDIO_E2E_THINK_BLOCK",
+				"model": "qwen3.8-27b"
+			},
+			"response": {
+				"reasoning": "LMSTUDIO_E2E_REASONING_PROBE I considered which country the question refers to and recalled its capital from geography knowledge before committing to an answer.",
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Paris\"}",
+						"id": "call_lmstudio_e2e_think_001"
+					}
+				]
+			}
+		}
+	]
+}
