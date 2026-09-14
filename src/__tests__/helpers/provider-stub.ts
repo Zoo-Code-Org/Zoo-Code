@@ -3,10 +3,10 @@ import { TaskRegistry } from "../../core/task/TaskRegistry"
 import { type Task } from "../../core/task/Task"
 
 type ProviderStubFields = {
-	delegationTransitionLocks?: Map<string, Promise<void>>
 	cancelledDelegationChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
-	taskHistoryStore?: { get: (id: string) => unknown }
+	taskHistoryStore?: { get: (id: string) => unknown; invalidate?: (id: string) => Promise<void> }
+	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
 	tasks?: Task[]
@@ -24,7 +24,7 @@ type PrivateProviderMethods = {
 /**
  * Augments a plain stub object with the instance fields and bound methods that
  * ClineProvider methods read from `this` (runDelegationTransition,
- * delegationTransitionLocks, cancelledDelegationChildIds, cancellingDelegationChildIds),
+ * cancelledDelegationChildIds and taskHistoryStore),
  * so tests can call private ClineProvider methods against a plain object
  * without instantiating a real ClineProvider.
  *
@@ -34,10 +34,11 @@ type PrivateProviderMethods = {
 export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	const s = stub as T & ProviderStubFields
 	const proto = ClineProvider.prototype as unknown as PrivateProviderMethods
-	s.delegationTransitionLocks ??= new Map()
 	s.cancelledDelegationChildIds ??= new Set()
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
+	s.taskHistoryStore.invalidate ??= async () => {}
+	s.taskScheduler ??= { schedule: async (_task, run) => run() }
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {
