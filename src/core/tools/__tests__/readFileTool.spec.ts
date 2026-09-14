@@ -1555,6 +1555,79 @@ describe("ReadFileTool", () => {
 				expect(reg!.size).toBe(0)
 			})
 
+			it("a failed version-token lookup after a successful read keeps the result and leaves the registry empty", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				// The directory-check stat succeeds; the stat inside computeVersionToken
+				// rejects, so the token lookup fails after the file was read successfully.
+				const okStats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat.mockResolvedValueOnce(okStats)
+				mockedFsStat.mockRejectedValueOnce(new Error("EACCES"))
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				// The read itself succeeded: no failure flag and the result carries the file.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("existing.ts"))
+
+				// The failed token lookup never observes: the registry stays empty.
+				expect(mockTask.observationRegistry!.size).toBe(0)
+			})
+
+			it("a failed version-token lookup on a legacy read keeps the result and leaves the registry empty", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				// Same shape as the native case, on the legacy multi-file path:
+				// directory-check stat succeeds, the token stat rejects after the read.
+				const okStats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat.mockResolvedValueOnce(okStats)
+				mockedFsStat.mockRejectedValueOnce(new Error("EACCES"))
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue("legacy content")
+
+				// Typed legacy (pre-refactor) params: the multi-file format with the
+				// _legacyFormat discriminant (see LegacyReadFileParams).
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				// The legacy read succeeded: no failure flag and the result carries the file.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy.ts"))
+
+				// The failed token lookup never observes: the registry stays empty.
+				expect(mockTask.observationRegistry!.size).toBe(0)
+			})
+
 			it("records an observation for legacy-format reads of existing files", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),

@@ -15,18 +15,22 @@ describe("ObservationRegistry", () => {
 
 	it("re-observe replaces the entry with a fresh observedAt", () => {
 		vi.useFakeTimers()
-		const reg = new ObservationRegistry()
-		reg.observe("/a/b/c.ts", "v1")
-		const first = reg.get("/a/b/c.ts")!
-		expect(first.version).toBe("v1")
+		try {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			const first = reg.get("/a/b/c.ts")!
+			expect(first.version).toBe("v1")
 
-		vi.advanceTimersByTime(50)
-		reg.observe("/a/b/c.ts", "v2")
-		const second = reg.get("/a/b/c.ts")!
-		expect(second.version).toBe("v2")
-		expect(second.observedAt).toBeGreaterThan(first.observedAt)
-
-		vi.useRealTimers()
+			vi.advanceTimersByTime(50)
+			reg.observe("/a/b/c.ts", "v2")
+			const second = reg.get("/a/b/c.ts")!
+			expect(second.version).toBe("v2")
+			expect(second.observedAt).toBeGreaterThan(first.observedAt)
+		} finally {
+			// Teardown in finally so a failing assertion cannot leak fake
+			// timers or the mocked Date into subsequent tests.
+			vi.useRealTimers()
+		}
 	})
 
 	it("has returns true for observed paths, false otherwise", () => {
