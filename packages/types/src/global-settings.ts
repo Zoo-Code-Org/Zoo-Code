@@ -15,6 +15,7 @@ import { toolNamesSchema } from "./tool.js"
 import { changeCardDetailSchema, type ChangeCardDetail } from "./message.js"
 import { type Keys } from "./type-fu.js"
 import { languagesSchema } from "./vscode.js"
+import { providerIdentifiers } from "./provider-identifiers.js"
 
 /**
  * Default delay in milliseconds after writes to allow diagnostics to detect potential problems.
@@ -132,7 +133,7 @@ export const globalSettingsSchema = z.object({
 	dismissedUpsells: z.array(z.string()).optional(),
 
 	// Image generation settings (experimental) - flattened for simplicity
-	imageGenerationProvider: z.enum(["openrouter"]).optional(),
+	imageGenerationProvider: z.enum([providerIdentifiers.openrouter]).optional(),
 	openRouterImageApiKey: z.string().optional(),
 	openRouterImageGenerationSelectedModel: z.string().optional(),
 
