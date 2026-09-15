@@ -307,7 +307,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 					return item.text
 				}
 				if (item.type === "resource") {
-					const { blob: _, ...rest } = item.resource
+					const { blob, ...rest } = item.resource
+					if (blob && item.resource.mimeType?.startsWith("image")) {
+						if (blob.startsWith("data:")) {
+							images.push(blob)
+						} else {
+							images.push(`data:${item.resource.mimeType};base64,${blob}`)
+						}
+					}
 					return JSON.stringify(rest, null, 2)
 				}
 				if (item.type === "image") {
