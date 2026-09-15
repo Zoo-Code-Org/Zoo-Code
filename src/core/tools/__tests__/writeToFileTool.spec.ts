@@ -8,7 +8,10 @@ import { getReadablePath } from "../../../utils/path"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
+import { checkpointSave } from "../../checkpoints"
+import { formatResponse } from "../../prompts/responses"
 import { writeToFileTool } from "../WriteToFileTool"
+import { convertNewFileToUnifiedDiff, sanitizeUnifiedDiff } from "../../diff/stats"
 
 vi.mock("path", async () => {
 	const originalPath = await vi.importActual("path")
@@ -24,6 +27,13 @@ vi.mock("path", async () => {
 
 vi.mock("delay", () => ({
 	default: vi.fn(),
+}))
+
+// The focus-disruption save path reads the original file content via fs.readFile.
+vi.mock("fs/promises", () => ({
+	default: {
+		readFile: vi.fn().mockResolvedValue("original content"),
+	},
 }))
 
 vi.mock("../../../utils/fs", () => ({
@@ -89,12 +99,20 @@ vi.mock("../../ignore/RooIgnoreController", () => ({
 	},
 }))
 
+vi.mock("../../checkpoints", () => ({
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe("writeToFileTool", () => {
 	// Test data
 	const testFilePath = "test/file.txt"
 	const absoluteFilePath = process.platform === "win32" ? "C:\\test\\file.txt" : "/test/file.txt"
 	const testContent = "Line 1\nLine 2\nLine 3"
 	const testContentWithMarkdown = "```javascript\nLine 1\nLine 2\n```"
+
+	// The exact approval diff the tool computes for a new file (B3a threads it
+	// into the checkpoint write for the per-step change card).
+	const newFileApprovalDiff = sanitizeUnifiedDiff(convertNewFileToUnifiedDiff(testContent, testFilePath))
 
 	// Mocked functions with correct types
 	const mockedFileExistsAtPath = fileExistsAtPath as MockedFunction<typeof fileExistsAtPath>
@@ -137,6 +155,9 @@ describe("writeToFileTool", () => {
 				getState: vi.fn().mockResolvedValue({
 					diagnosticsEnabled: true,
 					writeDelayMs: 1000,
+					// Pin the legacy diff-editor path explicitly: the PREVENT_FOCUS_DISRUPTION default
+					// flipped to true (L2, plan #33), so these tests must opt out.
+					experiments: { preventFocusDisruption: false },
 				}),
 			}),
 		}
@@ -155,6 +176,11 @@ describe("writeToFileTool", () => {
 				newProblemsMessage: "",
 				userEdits: null,
 				finalContent: "final content",
+			}),
+			saveDirectly: vi.fn().mockResolvedValue({
+				newProblemsMessage: "",
+				userEdits: undefined,
+				finalContent: "saved",
 			}),
 			scrollToFirstDiff: vi.fn(),
 			updateDiagnosticSettings: vi.fn(),
@@ -187,6 +213,7 @@ describe("writeToFileTool", () => {
 		mockCline.say = vi.fn().mockResolvedValue(undefined)
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
+		mockCline.processQueuedMessages = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -204,6 +231,11 @@ describe("writeToFileTool", () => {
 			fileExists?: boolean
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// (perWriteCheckpoints, auto-approval settings, ...) so the helper's
+			// providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		// Configure mocks based on test scenario
@@ -213,6 +245,18 @@ describe("writeToFileTool", () => {
 
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockCline.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockCline.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true (chat-diff is the
+				// default approval path). Tests exercising the chat-diff branch opt in via
+				// the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
+			}),
+		})
 
 		// Create a tool use object
 		const toolUse: ToolUse = {
@@ -364,6 +408,34 @@ describe("writeToFileTool", () => {
 		})
 	})
 
+	describe("focus disruption default (L2: chat-diff is the default approval path)", () => {
+		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// No stored experiment value: the default (flipped to true in L2) resolves
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeWriteFileTool({}, { experiments: {} })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(true)
+		})
+
+		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// Explicit stored true: same chat-diff routing as the default.
+			// Trial addendum: threaded through the helper's experiments option.
+			await executeWriteFileTool({}, { experiments: { preventFocusDisruption: true } })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(true)
+		})
+	})
+
 	describe("file operations", () => {
 		it("successfully creates new files with full workflow", async () => {
 			await executeWriteFileTool({}, { fileExists: false })
@@ -450,6 +522,58 @@ describe("writeToFileTool", () => {
 		})
 	})
 
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes through saveDirectly with create kind when the write is approved", async () => {
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				testContent,
+				false,
+				true,
+				1000,
+				"create",
+			)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+			expect(mockCline.didEditFile).toBe(true)
+			expect(mockCline.consecutiveMistakeCount).toBe(0)
+			expect(result).toBe("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				`File already exists at ${absoluteFilePath} and was not read before this write -- read the file first, then retry.`,
+			)
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
+		})
+
+		it("surfaces the stale-version remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
+		})
+	})
+
 	describe("error handling", () => {
 		it("handles general file operation errors", async () => {
 			mockCline.diffViewProvider.open.mockRejectedValue(new Error("General error"))
@@ -470,6 +594,137 @@ describe("writeToFileTool", () => {
 			// Second call with same path - path is now stabilized, error occurs
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", expect.any(Error))
+		})
+	})
+
+	describe("per-write checkpoints (B1)", () => {
+		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+
+		it("records one suppressed checkpoint after a successful write (default-on)", async () => {
+			await executeWriteFileTool({})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: the write info threads the path, operation, and the approval
+			// diff stats (3 added lines, 0 removed) into the checkpoint hook.
+			// B3a: the approval diff itself is threaded verbatim for the
+			// per-step change card.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+				diff: newFileApprovalDiff,
+			})
+		})
+
+		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
+			// Trial addendum: thread the state through the helper (its providerRef pin
+			// would otherwise clobber this test's extension state).
+			await executeWriteFileTool({}, { state: { perWriteCheckpoints: false } })
+
+			expect(mockCline.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("does not record a checkpoint when the write fails", async () => {
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("write failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("waits for the per-write checkpoint before the tool completes", async () => {
+			let checkpointStarted = false
+			let releaseCheckpoint: () => void = () => {}
+			mockedCheckpointSave.mockImplementationOnce(() => {
+				checkpointStarted = true
+				return new Promise<undefined>((resolve) => {
+					releaseCheckpoint = () => resolve(undefined)
+				})
+			})
+			const processQueuedSpy = vi.fn()
+			mockCline.processQueuedMessages = processQueuedSpy
+
+			const toolPromise = executeWriteFileTool({})
+
+			// Advance microtasks until the tool reaches the checkpoint call (all
+			// preceding awaits are mocked resolutions, no real timers involved).
+			for (let i = 0; i < 50 && !checkpointStarted; i++) {
+				await Promise.resolve()
+			}
+			expect(checkpointStarted).toBe(true)
+
+			let settled = false
+			void toolPromise.then(() => {
+				settled = true
+			})
+
+			// The tool must not complete while the checkpoint is still
+			// staging/committing: a later write started by the task loop would
+			// otherwise collapse into the same (or a missing) commit.
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(settled).toBe(false)
+			expect(processQueuedSpy).not.toHaveBeenCalled()
+
+			releaseCheckpoint()
+			await toolPromise
+			expect(settled).toBe(true)
+			expect(processQueuedSpy).toHaveBeenCalledOnce()
+		})
+
+		it("threads write info with approval diff stats when the prevent-focus-disruption experiment is enabled", async () => {
+			// Trial addendum: opt into the chat-diff branch via the helper's experiments
+			// option (the helper now pins the legacy path by default).
+			await executeWriteFileTool({}, { experiments: { preventFocusDisruption: true } })
+
+			// The experiment branch saves directly (no diff view) and still
+			// journals the write through the same single checkpoint hook, carrying
+			// the approval diff for the per-step change card (B3a).
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				testContent,
+				false,
+				true,
+				1000,
+				// Trial addendum: S4b appends the guarded-write kind to the save call.
+				"create",
+			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+				diff: newFileApprovalDiff,
+			})
+		})
+
+		it("omits diff stats from the checkpoint write when the approval diff is empty", async () => {
+			// Writing identical content to an existing file produces an empty
+			// approval diff, so the checkpoint write carries no diffStats.
+			vi.mocked(formatResponse.createPrettyPatch).mockReturnValueOnce("")
+
+			await executeWriteFileTool({}, { fileExists: true })
+
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "update",
+			})
+		})
+
+		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {
+			// B3a: when the step is auto-approved the checkpoint write carries
+			// autoApproved so checkpointSave can force the compact change card.
+			// Trial addendum: thread the auto-approval state through the helper.
+			await executeWriteFileTool({}, { state: { autoApprovalEnabled: true, alwaysAllowWrite: true } })
+
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+				diff: newFileApprovalDiff,
+				autoApproved: true,
+			})
 		})
 	})
 })

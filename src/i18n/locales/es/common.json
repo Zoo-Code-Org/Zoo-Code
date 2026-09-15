@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "No hay tarea activa de la cual eliminar mensajes",
+			"no_active_task_to_roll_back": "No hay ninguna tarea activa desde la que deshacer los cambios",
+			"no_active_task_to_restore": "No hay ninguna tarea activa desde la que restaurar los cambios",
 			"invalid_timestamp_for_deletion": "Marca de tiempo del mensaje no válida para eliminación",
 			"cannot_delete_missing_timestamp": "No se puede eliminar el mensaje: falta marca de tiempo",
 			"cannot_delete_invalid_timestamp": "No se puede eliminar el mensaje: marca de tiempo no válida",

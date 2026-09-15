@@ -189,6 +189,24 @@
 			"claudeCodeNotAuthenticated": "您需要登入才能使用 Claude Code。前往設定並點選「登入 Claude Code」以進行驗證。"
 		}
 	},
+	"changeCard": {
+		"header": "此步驟中變更了 {{count}} 個檔案",
+		"rollbackFile": "還原此檔案",
+		"rollbackFileWarning": "將此檔案還原到此步驟執行前的內容。",
+		"restoreLatest": "還原至最新版本",
+		"restoreLatestWarning": "將此檔案還原至最近一次記錄的版本。",
+		"restored": "已還原至最新版本",
+		"restoreFailed": "還原失敗",
+		"rollbackStep": "還原此步驟",
+		"rollbackWarning": "將還原此步驟檔案的上一版內容。",
+		"confirm": "確認",
+		"cancel": "取消",
+		"rollingBack": "正在還原...",
+		"rolledBack": "已還原",
+		"stepRolledBack": "步驟已還原",
+		"rollbackFailed": "還原失敗",
+		"openFile": "開啟檔案: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "檢查點",
 		"initializingWarning": "正在初始化檢查點... 如果耗時過長，您可以在 <settingsLink>設定</settingsLink> 中停用檢查點並重新啟動工作。",
