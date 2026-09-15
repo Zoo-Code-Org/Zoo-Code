@@ -104,6 +104,10 @@
 				"label": "Millorar prompt",
 				"description": "Utilitzeu la millora de prompts per obtenir suggeriments o millores personalitzades per a les vostres entrades. Això assegura que Zoo entengui la vostra intenció i proporcioni les millors respostes possibles. Disponible a través de la icona ✨ al xat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Missatge de commit",
+				"description": "Resumeix els teus canvis en un missatge de commit. Disponible mitjançant la icona de Zoo Code al plafó de control de codi font, que escriu el resultat directament al camp del missatge de commit."
+			},
 			"CONDENSE": {
 				"label": "Condensació de context",
 				"description": "Configureu com es condensa el context de la conversa per gestionar els límits de testimonis. Aquest indicador s'utilitza tant per a les operacions de condensació de context manuals com automàtiques."
