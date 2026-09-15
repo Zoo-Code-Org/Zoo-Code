@@ -104,7 +104,13 @@ export class DeepSeekHandler extends OpenAiHandler {
 			settings: this.options,
 			defaultTemperature: DEEP_SEEK_DEFAULT_TEMPERATURE,
 		})
-		return { id, info, ...params }
+		return {
+			id,
+			info,
+			...params,
+			// Unknown IDs use fallback metadata, but must not inherit its V4 request fields.
+			reasoning: supportsDeepSeekThinkingToggle(id) ? params.reasoning : undefined,
+		}
 	}
 
 	override async *createMessage(
