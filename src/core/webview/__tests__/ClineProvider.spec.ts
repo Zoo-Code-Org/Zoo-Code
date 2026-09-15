@@ -29,6 +29,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
+import { ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -1989,6 +1990,65 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should swallow only the typed not-found signal when pruning a stale profile entry", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const staleProfile: ProviderSettingsEntry = {
+				name: "stale-profile",
+				id: "stale-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [staleProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// The secret was already pruned: the typed not-found must be an idempotent
+			// success so the stale list entry is still removed.
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockRejectedValue(
+				new ProviderSettingsNotFoundError(`Config 'stale-profile' not found`),
+			)
+
+			await provider.deleteProviderProfile(staleProfile)
+
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
+			await provider.dispose()
+		})
+
+		it("should propagate a non-not-found deletion failure for a profile named like the not-found message", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const profile: ProviderSettingsEntry = {
+				name: "not found config",
+				id: "nf-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [profile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// An unrelated failure (wrapped the way deleteConfig wraps storage errors)
+			// must not be mistaken for the idempotent not-found path just because the
+			// profile name contains "not found".
+			const deleteConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "deleteConfig")
+				.mockRejectedValue(
+					new Error(`Failed to delete config: Error: storage write failed for 'not found config'`),
+				)
+
+			await expect(provider.deleteProviderProfile(profile)).rejects.toThrow("storage write failed")
+
+			// The list entry must remain untouched when the deletion failed.
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([profile, keeperProfile])
+			expect(deleteConfigSpy).toHaveBeenCalledTimes(1)
+			await provider.dispose()
+		})
+
 		it("reconfigures a view pinned to the deleted profile even when the global selection points elsewhere", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const oldProfile: ProviderSettingsEntry = {
@@ -2019,6 +2079,7 @@ describe("ClineProvider", () => {
 					id: "keeper-id",
 					apiProvider: providerIdentifiers.anthropic,
 				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			}
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
@@ -2074,6 +2135,7 @@ describe("ClineProvider", () => {
 					id: "other-id",
 					apiProvider: providerIdentifiers.openrouter,
 				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			}
 			const setProviderSettingsSpy = vi
 				.spyOn(provider.contextProxy, "setProviderSettings")
