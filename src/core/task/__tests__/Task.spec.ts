@@ -4230,45 +4230,47 @@ describe("Cline", () => {
 			// throws before anything is persisted, saveClineMessages() reports the
 			// failed message write, and the skip guard keeps the webview update off.
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
-			fsReal.rmSync(taskDir, { recursive: true, force: true })
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
 				.mockResolvedValue(undefined)
+			try {
+				fsReal.rmSync(taskDir, { recursive: true, force: true })
 
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-			const partialToolAsk = {
-				ts: Date.now() - 1,
-				type: "ask" as const,
-				ask: "tool" as const,
-				text: "partial tool message",
-				partial: true,
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const partialToolAsk = {
+					ts: Date.now() - 1,
+					type: "ask" as const,
+					ask: "tool" as const,
+					text: "partial tool message",
+					partial: true,
+				}
+
+				task.clineMessages.push(partialToolAsk)
+
+				await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+				await flushMicrotasks()
+
+				// The in-memory ask is still finalized... (the flags are set before saving)
+				expect(partialToolAsk.partial).toBe(false)
+				expect(task.clineMessages[0].isAnswered).toBe(true)
+				// ...but the failed message write skips the webview update and surfaces
+				// both failure logs instead of updating on an unpersisted save.
+				expect(updateSpy).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save Roo messages:", expect.any(Error))
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+				)
+			} finally {
+				// Restore the shared directory for sibling tests that persist through the
+				// real fs, even when the operation rejects or an assertion fails.
+				fsReal.mkdirSync(taskDir, { recursive: true })
+				updateSpy.mockRestore()
 			}
-
-			task.clineMessages.push(partialToolAsk)
-
-			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
-			await flushMicrotasks()
-
-			// The in-memory ask is still finalized... (the flags are set before saving)
-			expect(partialToolAsk.partial).toBe(false)
-			expect(task.clineMessages[0].isAnswered).toBe(true)
-			// ...but the failed message write skips the webview update and surfaces
-			// both failure logs instead of updating on an unpersisted save.
-			expect(updateSpy).not.toHaveBeenCalled()
-			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save Roo messages:", expect.any(Error))
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
-			)
-
-			// Restore the directory for sibling tests that persist through the real fs.
-			fsReal.mkdirSync(taskDir, { recursive: true })
-
-			updateSpy.mockRestore()
 		})
 
 		it("finalizePartialToolAsk ignores partial asks that match only some predicate clauses", async () => {

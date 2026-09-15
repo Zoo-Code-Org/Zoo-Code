@@ -352,17 +352,34 @@ describe("writeToFileTool", () => {
 			// (the spinner must not stick) and still perform the same diff-view revert / reset
 			// and per-task-state cleanup as the other early-return paths.
 			// Record the relative order of revertChanges() and reset(): vitest mocks expose
-			// no invocationCallOrder, so the ordering assertion uses this sequence.
+			// no invocationCallOrder, so the ordering assertion uses this sequence. The
+			// revert mock awaits a deferred so the test proves the branch AWAITs
+			// revertChanges() before reset(): with the revert still pending, reset() must
+			// not have run yet.
 			const diffViewCallOrder: string[] = []
+			let resolveRevert: () => void = () => {}
+			const revertDeferred = new Promise<void>((resolve) => {
+				resolveRevert = resolve
+			})
 			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
+				await revertDeferred
 			})
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
 				diffViewCallOrder.push("reset")
 			})
 			await streamPartialAsk()
 
-			await executeWriteFileTool({ content: undefined }, { fileExists: false })
+			// The missing-parameter branch awaits revertChanges() before reset(): with the
+			// deferred revert still pending, reset() must not have run yet.
+			const executePromise = executeWriteFileTool({ content: undefined }, { fileExists: false })
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+
+			resolveRevert()
+			await executePromise
 
 			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
 			// The missing-parameter path finalizes without a text match: any open partial ask is closed.
@@ -375,19 +392,34 @@ describe("writeToFileTool", () => {
 
 		it("finalizes the partial ask when path is missing after partial streaming", async () => {
 			// Same scenario with the `path` field missing: the missing-`path` branch must run
-			// the identical partial-ask + diff-view + per-task-state cleanup.
-			// Record the relative order of revertChanges() and reset(): vitest mocks expose
-			// no invocationCallOrder, so the ordering assertion uses this sequence.
+			// the identical partial-ask + diff-view + per-task-state cleanup. As in the
+			// content-missing test above, the revert mock awaits a deferred so the test
+			// proves the branch AWAITs revertChanges() before reset(): with the revert
+			// still pending, reset() must not have run yet.
 			const diffViewCallOrder: string[] = []
+			let resolveRevert: () => void = () => {}
+			const revertDeferred = new Promise<void>((resolve) => {
+				resolveRevert = resolve
+			})
 			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
+				await revertDeferred
 			})
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
 				diffViewCallOrder.push("reset")
 			})
 			await streamPartialAsk()
 
-			await executeWriteFileTool({ path: undefined }, { fileExists: false })
+			// The missing-parameter branch awaits revertChanges() before reset(): with the
+			// deferred revert still pending, reset() must not have run yet.
+			const executePromise = executeWriteFileTool({ path: undefined }, { fileExists: false })
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+
+			resolveRevert()
+			await executePromise
 
 			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "path")
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
