@@ -28,6 +28,46 @@ function asObjectSafe(value: unknown): object {
 	}
 }
 
+/**
+ * Replaces unpaired UTF-16 surrogate code units with the Unicode replacement character (U+FFFD).
+ *
+ * The VS Code LM backend forwards requests to model APIs that require valid UTF-8. A lone surrogate
+ * — e.g. left behind when some upstream step slices a string through an astral-plane character
+ * (emoji, CJK extension, etc.) — cannot be encoded as UTF-8, so the backend rejects the entire
+ * request with a 400 ("string contains an unpaired UTF-16 surrogate code point and cannot be
+ * encoded as valid UTF-8"). Valid surrogate pairs are matched by the lookahead/lookbehind and left
+ * untouched. The regex intentionally omits the `u` flag so it operates on UTF-16 code units.
+ */
+export function sanitizeSurrogates(text: string): string {
+	if (!text) {
+		return text
+	}
+	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD")
+}
+
+/**
+ * Applies {@link sanitizeSurrogates} to every string nested in a tool-call argument object. The
+ * backend rejects the whole request for a lone surrogate anywhere in the JSON payload, so a tool
+ * argument carrying a sliced astral character fails the request just as message text would.
+ */
+function sanitizeSurrogatesDeep(value: unknown): unknown {
+	if (typeof value === "string") {
+		return sanitizeSurrogates(value)
+	}
+	if (Array.isArray(value)) {
+		return value.map(sanitizeSurrogatesDeep)
+	}
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+				sanitizeSurrogates(key),
+				sanitizeSurrogatesDeep(nested),
+			]),
+		)
+	}
+	return value
+}
+
 export function convertToVsCodeLmMessages(
 	anthropicMessages: Anthropic.Messages.MessageParam[],
 ): vscode.LanguageModelChatMessage[] {
@@ -36,10 +76,11 @@ export function convertToVsCodeLmMessages(
 	for (const anthropicMessage of anthropicMessages) {
 		// Handle simple string messages
 		if (typeof anthropicMessage.content === "string") {
+			const safeContent = sanitizeSurrogates(anthropicMessage.content)
 			vsCodeLmMessages.push(
 				anthropicMessage.role === "assistant"
-					? vscode.LanguageModelChatMessage.Assistant(anthropicMessage.content)
-					: vscode.LanguageModelChatMessage.User(anthropicMessage.content),
+					? vscode.LanguageModelChatMessage.Assistant(safeContent)
+					: vscode.LanguageModelChatMessage.User(safeContent),
 			)
 			continue
 		}
@@ -69,7 +110,7 @@ export function convertToVsCodeLmMessages(
 						// Process tool result content into TextParts
 						const toolContentParts: vscode.LanguageModelTextPart[] =
 							typeof toolMessage.content === "string"
-								? [new vscode.LanguageModelTextPart(toolMessage.content)]
+								? [new vscode.LanguageModelTextPart(sanitizeSurrogates(toolMessage.content))]
 								: (toolMessage.content?.map((part) => {
 										if (part.type === "image") {
 											if (part.source.type === "base64") {
@@ -82,7 +123,7 @@ export function convertToVsCodeLmMessages(
 											)
 										}
 										if (part.type === "text") {
-											return new vscode.LanguageModelTextPart(part.text)
+											return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
 										}
 										return new vscode.LanguageModelTextPart("")
 									}) ?? [new vscode.LanguageModelTextPart("")])
@@ -102,7 +143,7 @@ export function convertToVsCodeLmMessages(
 								`[Image (${part.source.type}): not supported by VSCode LM API]`,
 							)
 						}
-						return new vscode.LanguageModelTextPart(part.text)
+						return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
 					}),
 				]
 
@@ -135,7 +176,7 @@ export function convertToVsCodeLmMessages(
 						if (part.type === "image") {
 							return new vscode.LanguageModelTextPart("[Image generation not supported by VSCode LM API]")
 						}
-						return new vscode.LanguageModelTextPart(part.text)
+						return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
 					}),
 
 					// Convert tool messages to ToolCallParts after text
@@ -144,7 +185,7 @@ export function convertToVsCodeLmMessages(
 							new vscode.LanguageModelToolCallPart(
 								toolMessage.id,
 								toolMessage.name,
-								asObjectSafe(toolMessage.input),
+								sanitizeSurrogatesDeep(asObjectSafe(toolMessage.input)) as object,
 							),
 					),
 				]
