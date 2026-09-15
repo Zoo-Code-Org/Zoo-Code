@@ -63,6 +63,12 @@ export interface ApiStreamUsageChunk {
 	cacheReadTokens?: number
 	reasoningTokens?: number
 	totalCost?: number
+	/**
+	 * The model's stop reason once known (e.g. Anthropic's message_delta).
+	 * Lets callers distinguish terminal ends like "max_tokens" (which must
+	 * not be silently retried) from genuinely empty responses.
+	 */
+	stopReason?: string | null
 }
 
 export interface ApiStreamGroundingChunk {

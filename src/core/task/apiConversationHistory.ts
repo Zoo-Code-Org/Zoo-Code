@@ -12,6 +12,7 @@ type ApiHistoryHandler = ApiHandler & {
 	getResponseId?: () => string | undefined
 	getEncryptedContent?: () => { encrypted_content: string; id?: string } | undefined
 	getThoughtSignature?: () => string | undefined
+	getThinkingBlocks?: () => { thinking: string; signature: string }[] | undefined
 	getReasoningDetails?: () => any[] | undefined
 }
 
@@ -46,6 +47,7 @@ function prepareAssistantMessage(
 	const responseId = handler.getResponseId?.()
 	const reasoningData = handler.getEncryptedContent?.()
 	const thoughtSignature = handler.getThoughtSignature?.()
+	const thinkingBlocks = handler.getThinkingBlocks?.()
 	const reasoningDetails = handler.getReasoningDetails?.()
 
 	const modelId = getModelId(apiConfiguration)
@@ -67,7 +69,18 @@ function prepareAssistantMessage(
 		messageWithTs.reasoning_details = reasoningDetails
 	}
 
-	if (isAnthropicProtocol && reasoning && thoughtSignature && !reasoningDetails) {
+	if (isAnthropicProtocol && thinkingBlocks && thinkingBlocks.length > 0 && !reasoningDetails) {
+		// Replay each completed thinking block with its own signature -
+		// signatures only validate against their exact block text, so blocks
+		// must not be combined under a single signature.
+		for (let i = thinkingBlocks.length - 1; i >= 0; i--) {
+			prependContentBlock(messageWithTs, {
+				type: "thinking",
+				thinking: thinkingBlocks[i].thinking,
+				signature: thinkingBlocks[i].signature,
+			})
+		}
+	} else if (isAnthropicProtocol && reasoning && thoughtSignature && !reasoningDetails) {
 		const thinkingBlock = {
 			type: "thinking",
 			thinking: reasoning,
