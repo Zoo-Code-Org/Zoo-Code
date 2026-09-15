@@ -20,6 +20,8 @@
 		"billion_suffix": "b"
 	},
 	"ui": {
+		"loading": "載入中...",
+		"clear_search": "清除搜尋",
 		"search_placeholder": "搜尋...",
 		"no_results": "找不到結果"
 	},

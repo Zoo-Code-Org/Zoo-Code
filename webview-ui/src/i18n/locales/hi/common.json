@@ -20,6 +20,8 @@
 		"billion_suffix": "b"
 	},
 	"ui": {
+		"loading": "लोड हो रहा है...",
+		"clear_search": "खोज साफ़ करें",
 		"search_placeholder": "खोजें...",
 		"no_results": "कोई परिणाम नहीं मिला"
 	},

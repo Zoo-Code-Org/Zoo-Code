@@ -27,6 +27,7 @@ import { StandardTooltip } from "@src/components/ui"
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
+import { ModelSelector } from "./ModelSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -92,6 +93,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const {
 			filePaths,
 			openedTabs,
+			apiConfiguration,
 			currentApiConfigName,
 			listApiConfigMeta,
 			customModes,
@@ -104,6 +106,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			commands,
 			enterBehavior,
 			lockApiConfigAcrossModes,
+			organizationAllowList,
 		} = useExtensionState()
 
 		// Find the ID and display text for the currently selected API configuration.
@@ -114,6 +117,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				displayName: currentApiConfigName || "", // Use the name directly for display.
 			}
 		}, [listApiConfigMeta, currentApiConfigName])
+		const hasPersistedApiConfiguration = !!currentApiConfigName
 
 		const [gitCommits, setGitCommits] = useState<any[]>([])
 		const [showDropdown, setShowDropdown] = useState(false)
@@ -1318,6 +1322,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							togglePinnedApiConfig={togglePinnedApiConfig}
 							lockApiConfigAcrossModes={!!lockApiConfigAcrossModes}
 							onToggleLockApiConfig={handleToggleLockApiConfig}
+						/>
+						<ModelSelector
+							apiConfiguration={apiConfiguration}
+							currentApiConfigName={currentApiConfigName}
+							disabled={selectApiConfigDisabled || !hasPersistedApiConfiguration}
+							title={hasPersistedApiConfiguration ? t("chat:selectModel") : t("chat:selectApiConfig")}
+							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0"
+							organizationAllowList={organizationAllowList}
 						/>
 						<AutoApproveDropdown triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0" />
 					</div>
