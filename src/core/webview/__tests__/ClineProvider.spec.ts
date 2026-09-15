@@ -1793,21 +1793,6 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should build the buffered apiConfiguration from provider settings keys", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			provider["viewLocalState"] = { apiConfiguration: { openRouterApiKey: "key-1" } }
-			await provider.setValues({ apiProvider: providerIdentifiers.openrouter })
-			expect(provider["viewLocalState"].apiConfiguration).toStrictEqual({
-				apiProvider: providerIdentifiers.openrouter,
-			})
-			await provider.setValues({ openRouterModelId: "model-x" })
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
-				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "model-x",
-			})
-			await provider.dispose()
-		})
-
 		it("should remove the buffered apiConfiguration when it is cleared", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const save = provider.saveViewState.bind(provider) as (key: string, value: unknown) => Promise<void>
@@ -2016,15 +2001,15 @@ describe("ClineProvider", () => {
 			await provider.deleteProviderProfile(oldProfile)
 
 			// The captured pin must still trigger the reconfiguration: the shared
-			// provider keys and the view-local buffer both take the surviving
-			// profile's settings.
+			// provider keys take the surviving profile's settings.
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
 				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic }),
 			)
 			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
-			expect(provider["viewLocalState"].apiConfiguration).toEqual(
-				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic }),
-			)
+			// Flat provider-settings keys are shared: they are written through the
+			// ContextProxy and must not be mirrored into the view-local buffer, which
+			// would turn them into a per-view override masking later shared updates.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			await provider.dispose()
 		})
 
@@ -2174,6 +2159,45 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("reports the fresh global apiConfiguration after a profile activation followed by a global settings write", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("activated-id"),
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "activated-profile", id: "activated-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.upsertProviderProfile(
+				"activated-profile",
+				{ apiProvider: providerIdentifiers.anthropic },
+				true,
+			)
+
+			// Simulate api.setConfiguration (src/extension/api.ts): a global-only
+			// write that does not refresh the view-local buffer.
+			const contextProxyAccess = provider.contextProxy as unknown as {
+				setValues: (values: { apiProvider?: string; openRouterApiKey?: string }) => Promise<void>
+			}
+			await contextProxyAccess.setValues({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+			})
+
+			const state = await provider.getState({ includeTaskHistory: false })
+
+			// The fresh global selection must win: the activation's buffer write must
+			// not mask the later shared update (regression guard for the e2e
+			// provider-probe suites, which start tasks after a profile activation).
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.openrouter)
+			await provider.dispose()
+		})
+
 		it("should merge getValues from ContextProxy with view-local values taking precedence", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const providerAccess = provider as unknown as {
@@ -2212,7 +2236,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should update viewLocalState apiConfiguration when setValues receives flat provider settings", async () => {
+		it("should keep flat provider settings out of the view-local buffer", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			await provider.saveViewState("apiConfiguration", {
@@ -2230,12 +2254,16 @@ describe("ClineProvider", () => {
 				awsBedrockEndpointEnabled: true,
 			})
 
-			const state = await provider.getState()
-
-			expect(state.apiConfiguration.apiProvider).toBe("bedrock")
-			expect(state.apiConfiguration.awsBedrockEndpoint).toBe("http://127.0.0.1:4567")
-			expect(provider["viewLocalState"].apiConfiguration?.apiProvider).toBe("bedrock")
-			expect(provider["viewLocalState"].apiConfiguration).not.toHaveProperty("openRouterModelId")
+			// Flat provider-settings keys are shared settings: they must flow through
+			// the ContextProxy only and must not be merged into the view-local buffer,
+			// which would turn them into a per-view override masking later shared
+			// updates from other views. The explicit view-local override survives.
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openrouter/old-model",
+			})
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.bedrock)
+			expect(provider.contextProxy.getValue("awsBedrockEndpoint")).toBe("http://127.0.0.1:4567")
 
 			await provider.dispose()
 		})
