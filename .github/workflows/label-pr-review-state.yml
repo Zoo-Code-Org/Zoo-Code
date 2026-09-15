@@ -15,14 +15,13 @@ on:
   # pull_request_target gives fork PRs a token that can update labels and comments.
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled, unlabeled]
-  pull_request_review:
-    types: [submitted, dismissed]
-  # Fork review events have a read-only token. CodeRabbit's status-comment update
-  # provides a trusted base-repository event that can reconcile those PRs promptly.
+  # Maintainer reviews first trigger the zero-permission PR Review Event workflow.
+  # workflow_run then reconciles from the trusted default branch with metadata-only access.
   issue_comment:
     types: [created, edited]
   workflow_run:
-    workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
+    workflows:
+      ["PR Review Event", "Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
     types: [completed]
 
 permissions:
@@ -113,25 +112,30 @@ jobs:
             }
             if (context.eventName === 'workflow_run' && eventPrNumbers.length === 0) {
               const run = context.payload.workflow_run;
-              const headOwner = run.head_repository?.owner?.login;
-              if (headOwner && run.head_branch && run.head_sha) {
+              if (run.head_branch && run.head_sha) {
                 const candidates = await github.paginate(github.rest.pulls.list, {
                   owner,
                   repo,
                   state: 'open',
-                  head: `${headOwner}:${run.head_branch}`,
                   per_page: 100,
                 });
                 const baseRepository = `${owner}/${repo}`.toLowerCase();
-                eventPrNumbers = candidates
-                  .filter(pr =>
+                const matches = candidates.filter(pr =>
                     pr.head?.sha === run.head_sha &&
+                    pr.head?.ref === run.head_branch &&
                     pr.base?.repo?.full_name?.toLowerCase() === baseRepository
-                  )
-                  .map(pr => pr.number);
+                  );
+                if (matches.length === 1) {
+                  eventPrNumbers = [matches[0].number];
+                } else if (matches.length > 1) {
+                  core.warning(
+                    `Ignoring ambiguous workflow_run ${run.id ?? '(unknown)'}: ` +
+                    `${matches.length} PRs match the exact branch, SHA, and base repository`
+                  );
+                }
                 core.info(
                   `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
-                  `${eventPrNumbers.length} PR(s) by exact head owner, branch, and SHA`
+                  `${eventPrNumbers.length} PR(s) by exact branch, SHA, and base repository`
                 );
               }
             }
