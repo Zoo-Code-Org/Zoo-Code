@@ -18,11 +18,17 @@ export const visualThemes: VisualTheme[] = [
 ]
 
 export async function applyVisualTheme(page: Page, theme: VisualTheme) {
-	await page.evaluate(({ bodyClass, themeId }) => {
+	await page.evaluate(async ({ bodyClass, themeId }) => {
 		document.documentElement.className = bodyClass
 		document.documentElement.removeAttribute("style")
 		document.body.className = bodyClass
 		document.body.removeAttribute("style")
 		document.body.dataset.vscodeThemeId = themeId
+
+		// Flush the theme style change and wait for final colors before contrast/layout checks.
+		// Only CSS transitions are relevant here; loading animations may loop forever.
+		const transitions = document.getAnimations().filter((animation) => animation instanceof CSSTransition)
+		// A transition canceled by a component update is also settled.
+		await Promise.allSettled(transitions.map((transition) => transition.finished))
 	}, theme)
 }

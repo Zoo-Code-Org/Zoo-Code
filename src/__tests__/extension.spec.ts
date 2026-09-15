@@ -2,11 +2,13 @@
 
 import type * as vscode from "vscode"
 
+const mockOutputChannel = vi.hoisted(() => ({
+	appendLine: vi.fn<vscode.OutputChannel["appendLine"]>(),
+}))
+
 vi.mock("vscode", () => ({
 	window: {
-		createOutputChannel: vi.fn().mockReturnValue({
-			appendLine: vi.fn(),
-		}),
+		createOutputChannel: vi.fn().mockReturnValue(mockOutputChannel),
 		registerWebviewViewProvider: vi.fn(),
 		registerUriHandler: vi.fn(),
 		tabGroups: {
@@ -188,7 +190,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 		resolveWebviewView: vi.fn(),
 		postMessageToWebview: vi.fn(),
 		postStateToWebview: vi.fn(),
-		postStateToWebviewWithoutClineMessages: vi.fn().mockResolvedValue(undefined),
+		postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 		getState: vi.fn().mockResolvedValue({}),
 		initializeCloudProfileSyncWhenReady: vi.fn().mockResolvedValue(undefined),
 		providerSettingsManager: {},
@@ -295,17 +297,17 @@ describe("extension.ts", () => {
 
 			const provider = (
 				ClineProvider as unknown as {
-					getVisibleInstance(): { postStateToWebviewWithoutClineMessages: ReturnType<typeof vi.fn> }
+					getVisibleInstance(): { postStateToWebviewWithoutTaskHistory: ReturnType<typeof vi.fn> }
 				}
 			).getVisibleInstance()
-			provider.postStateToWebviewWithoutClineMessages.mockClear()
+			provider.postStateToWebviewWithoutTaskHistory.mockClear()
 			const refreshError = new Error("state refresh failed")
-			provider.postStateToWebviewWithoutClineMessages.mockRejectedValueOnce(refreshError)
+			provider.postStateToWebviewWithoutTaskHistory.mockRejectedValueOnce(refreshError)
 
 			settingsUpdatedHandler!({})
 			await Promise.resolve()
 
-			expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(1)
+			expect(provider.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledTimes(1)
 			const vscode = await import("vscode")
 			const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
 			expect(channel?.appendLine).toHaveBeenCalledWith(
@@ -433,6 +435,29 @@ describe("extension.ts", () => {
 			expect(updateTelemetryStateMock).toHaveBeenCalledWith(false)
 		})
 
+		test("updates telemetry without throwing when no webview provider is visible", async () => {
+			const vscode = await import("vscode")
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			const updateTelemetryState = vi.mocked(TelemetryService.instance.updateTelemetryState)
+			updateTelemetryState.mockClear()
+			const visibleInstance = vi.mocked(ClineProvider.getVisibleInstance()!)
+			visibleInstance.postStateToWebviewWithoutTaskHistory.mockClear()
+			mockOutputChannel.appendLine.mockClear()
+			vi.mocked(ClineProvider.getVisibleInstance).mockReturnValueOnce(undefined)
+			const onDidChangeHandler = vi.mocked(vscode.env.onDidChangeTelemetryEnabled).mock.calls[0][0]
+
+			expect(() => onDidChangeHandler(vscode.env.isTelemetryEnabled)).not.toThrow()
+			await Promise.resolve()
+
+			expect(updateTelemetryState).toHaveBeenCalledOnce()
+			expect(visibleInstance.postStateToWebviewWithoutTaskHistory).not.toHaveBeenCalled()
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+		})
+
 		test("pushes a state update to the webview so its own PostHog client picks up the new vscode.env.isTelemetryEnabled value", async () => {
 			const vscode = await import("vscode")
 			const { ClineProvider } = await import("../core/webview/ClineProvider")
@@ -440,17 +465,53 @@ describe("extension.ts", () => {
 			const { activate } = await import("../extension")
 			await activate(mockContext)
 
-			const visibleInstance = (
-				ClineProvider as unknown as {
-					getVisibleInstance(): { postStateToWebviewWithoutClineMessages: ReturnType<typeof vi.fn> }
-				}
-			).getVisibleInstance()
-			vi.mocked(visibleInstance.postStateToWebviewWithoutClineMessages).mockClear()
+			const visibleInstance = vi.mocked(ClineProvider.getVisibleInstance()!)
+			visibleInstance.postStateToWebviewWithoutTaskHistory.mockClear()
+			mockOutputChannel.appendLine.mockClear()
 
 			const onDidChangeHandler = vi.mocked(vscode.env.onDidChangeTelemetryEnabled).mock.calls[0][0]
-			onDidChangeHandler(undefined as never)
+			onDidChangeHandler(vscode.env.isTelemetryEnabled)
+			await Promise.resolve()
 
-			expect(visibleInstance.postStateToWebviewWithoutClineMessages).toHaveBeenCalled()
+			expect(visibleInstance.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledOnce()
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+		})
+
+		test.each([
+			{
+				kind: "Error",
+				error: new Error("telemetry state refresh failed"),
+				message: "telemetry state refresh failed",
+			},
+			{
+				kind: "non-Error",
+				error: "telemetry state refresh rejected",
+				message: "telemetry state refresh rejected",
+			},
+		])("logs $kind state-refresh rejections locally after a telemetry toggle", async ({ error, message }) => {
+			const vscode = await import("vscode")
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			const visibleInstance = vi.mocked(ClineProvider.getVisibleInstance()!)
+			visibleInstance.postStateToWebviewWithoutTaskHistory.mockClear()
+			visibleInstance.postStateToWebviewWithoutTaskHistory.mockRejectedValueOnce(error)
+			const updateTelemetryState = vi.mocked(TelemetryService.instance.updateTelemetryState)
+			updateTelemetryState.mockClear()
+			mockOutputChannel.appendLine.mockClear()
+			vi.mocked(vscode.env).isTelemetryEnabled = false
+			const onDidChangeHandler = vi.mocked(vscode.env.onDidChangeTelemetryEnabled).mock.calls[0][0]
+
+			expect(() => onDidChangeHandler(vscode.env.isTelemetryEnabled)).not.toThrow()
+			await Promise.resolve()
+
+			expect(updateTelemetryState).toHaveBeenCalledWith(false)
+			expect(visibleInstance.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledOnce()
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledExactlyOnceWith(
+				`[TelemetryService] Failed to refresh state after telemetry toggle: ${message}`,
+			)
 		})
 	})
 

@@ -132,6 +132,7 @@ import { getUri } from "./getUri"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
+import { TranscriptTransport, type TranscriptRequest } from "./transcriptTransport"
 
 /**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -222,6 +223,13 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private readonly clineMessagesTransport = new TranscriptTransport(
+		() => this.getCurrentTask()?.taskId,
+		(message) => this.postMessageToWebview(message),
+		(error) =>
+			this.log(`[clineMessages] transport failure: ${error instanceof Error ? error.message : String(error)}`),
+		() => this.getCurrentTask()?.instanceId,
+	)
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -312,12 +320,6 @@ export class ClineProvider
 	private cloudOrganizationsCacheTimestamp: number | null = null
 	private static readonly CLOUD_ORGANIZATIONS_CACHE_DURATION_MS = 5 * 1000 // 5 seconds
 
-	/**
-	 * Monotonically increasing sequence number for clineMessages state pushes.
-	 * Used by the frontend to reject stale state that arrives out-of-order.
-	 */
-	private clineMessagesSeq = 0
-
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
@@ -367,7 +369,7 @@ export class ClineProvider
 		this.providerSettingsManager = new ProviderSettingsManager(this.context)
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {
-			await this.postStateToWebviewWithoutClineMessages()
+			await this.postStateToWebviewWithoutTaskHistory()
 		})
 
 		// Initialize MCP Hub through the singleton manager
@@ -577,6 +579,7 @@ export class ClineProvider
 		// Add this cline instance into the stack that represents the order of
 		// all the called tasks.
 		this.taskRegistry.push(task)
+		await this.publishFocusedTaskScope()
 		task.emit(RooCodeEventName.TaskFocused)
 
 		// Perform special setup provider specific tasks.
@@ -588,6 +591,8 @@ export class ClineProvider
 		if (!state || typeof state.mode !== "string") {
 			throw new Error(t("common:errors.retrieve_current_mode"))
 		}
+
+		await this.syncFocusedTaskToWebview()
 	}
 
 	async performPreparationTasks(cline: Task) {
@@ -618,8 +623,10 @@ export class ClineProvider
 		// Remove the focused Cline instance from the stack.
 		let task = this.taskRegistry.current
 		if (task) {
+			this.clineMessagesTransport.forgetTask(task.taskId)
 			task = this.taskRegistry.remove(task.taskId)
 		}
+		await this.publishFocusedTaskScope()
 
 		if (task) {
 			task.emit(RooCodeEventName.TaskUnfocused)
@@ -646,6 +653,8 @@ export class ClineProvider
 			// garbage collected.
 			task = undefined
 		}
+
+		await this.syncFocusedTaskToWebview()
 	}
 
 	/**
@@ -1383,6 +1392,11 @@ export class ClineProvider
 			const oldTask = this.taskRegistry.current
 
 			if (oldTask) {
+				// Publish replacement ownership before cleanup can yield. Old Task producers
+				// must already be stale during abort, not just after model preparation.
+				this.taskRegistry.replace(oldTask.taskId, task)
+				await this.publishFocusedTaskScope()
+
 				// Abort the old task to stop running processes and mark as abandoned
 				try {
 					await oldTask.abortTask(true)
@@ -1398,15 +1412,13 @@ export class ClineProvider
 					cleanupFunctions.forEach((cleanup) => cleanup())
 					this.taskEventListeners.delete(oldTask)
 				}
-
-				// Replace in-place: preserves stack index and current pointer
-				this.taskRegistry.replace(oldTask.taskId, task)
 			}
 
 			task.emit(RooCodeEventName.TaskFocused)
 
 			// Perform preparation tasks and set up event listeners
 			await this.performPreparationTasks(task)
+			await this.syncFocusedTaskToWebview()
 
 			this.log(
 				`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
@@ -1478,11 +1490,137 @@ export class ClineProvider
 			return
 		}
 
+		if (message.type === "state" && message.state) {
+			// State assembly awaits optional services after capturing its Task. Never let
+			// such a late post restore an old scope (or attach old metadata to a new one).
+			// Partial, unscoped metadata remains valid, including for CLI consumers.
+			const currentTask = this.getCurrentTask()
+			if (
+				(message.state.currentTaskId !== undefined &&
+					message.state.currentTaskId !== (currentTask?.taskId ?? null)) ||
+				(message.state.currentTaskInstanceId !== undefined &&
+					message.state.currentTaskInstanceId !== (currentTask?.instanceId ?? null))
+			) {
+				return
+			}
+
+			// Browser webviews use the dedicated transcript transport below. The CLI
+			// still consumes transcript state and legacy updates until its clients adopt
+			// the sequence-aware protocol.
+			if (process.env.ROO_CLI_RUNTIME !== "1") {
+				const {
+					clineMessages: _omitMessages,
+					clineMessagesSeq: _omitMessagesSeq,
+					...metadataState
+				} = message.state
+				message = { ...message, state: metadataState }
+			}
+		}
+
 		try {
 			await this.view?.webview.postMessage(message)
 		} catch {
 			// View disposed, drop message silently
 		}
+	}
+
+	private invalidateClineMessagesTransport(): number {
+		return this.clineMessagesTransport.invalidate()
+	}
+
+	private async publishFocusedTaskScope(): Promise<number> {
+		const generation = this.invalidateClineMessagesTransport()
+		const currentTask = this.getCurrentTask()
+		// No asynchronous state assembly before this post: held old frames must see
+		// the replacement scope even while abort/preparation or generic state is pending.
+		await this.postMessageToWebview({
+			type: "clineMessagesFocus",
+			taskId: currentTask?.taskId,
+			taskInstanceId: currentTask?.instanceId,
+		})
+		return generation
+	}
+
+	public postClineMessageAppended(taskId: string, message: ClineMessage, taskInstanceId?: string): Promise<void> {
+		return this.postTranscript({ kind: "append", taskId, taskInstanceId, message })
+	}
+
+	public postClineMessageUpdated(taskId: string, message: ClineMessage, taskInstanceId?: string): Promise<void> {
+		return this.postTranscript({ kind: "update", taskId, taskInstanceId, message })
+	}
+
+	public postClineMessagesSnapshot(
+		taskId: string | undefined = this.getCurrentTask()?.taskId,
+		options: { bumpSeq?: boolean; generation?: number; taskInstanceId?: string } = {},
+	): Promise<void> {
+		return this.postTranscript({ kind: "snapshot", taskId, ...options })
+	}
+
+	private postTranscript(
+		request: TranscriptRequest & ({ kind: "snapshot" } | { kind: "append" | "update"; message: ClineMessage }),
+	): Promise<void> {
+		const currentTask = this.getCurrentTask()
+		// Every producer, including the legacy CLI path, must pass the same identity
+		// check before reading or cloning payloads from the focused task.
+		if (currentTask?.taskId !== request.taskId || currentTask?.instanceId !== request.taskInstanceId) {
+			return Promise.resolve()
+		}
+		if (process.env.ROO_CLI_RUNTIME === "1") {
+			return request.kind === "update"
+				? this.postMessageToWebview({ type: "messageUpdated", clineMessage: structuredClone(request.message) })
+				: this.postStateToWebviewWithoutTaskHistory()
+		}
+
+		return this.clineMessagesTransport.enqueue(
+			request,
+			request.kind === "snapshot" ? (currentTask?.clineMessages ?? []) : [request.message],
+		)
+	}
+
+	public resyncClineMessagesToWebview(taskId?: string, expectedSeq?: unknown, receivedSeq?: unknown): Promise<void> {
+		const currentTask = this.getCurrentTask()
+		const currentTaskId = currentTask?.taskId
+		if (currentTaskId !== taskId) {
+			return Promise.resolve()
+		}
+		// Untrusted webview diagnostics are log-only; never derive transport state from them.
+		const diagnosticSequence = (value: unknown): number | undefined => {
+			if (!Number.isSafeInteger(value)) return undefined
+			// isSafeInteger rejects non-numbers without coercion, but is not a TS type predicate.
+			const sequence = value as number
+			return sequence >= 0 ? sequence : undefined
+		}
+		const previousGeneration = this.clineMessagesTransport.generation
+		const currentSeq = this.clineMessagesTransport.getSequence(currentTaskId)
+		const generation = this.invalidateClineMessagesTransport()
+		this.log(
+			`[clineMessages] resync accepted: ${JSON.stringify({
+				taskId: currentTaskId ?? null,
+				previousGeneration,
+				newGeneration: generation,
+				currentSeq,
+				expectedSeq: diagnosticSequence(expectedSeq),
+				receivedSeq: diagnosticSequence(receivedSeq),
+			})}`,
+		)
+		return this.postClineMessagesSnapshot(taskId, { generation, taskInstanceId: currentTask?.instanceId })
+	}
+
+	public async syncFocusedTaskToWebview(options: { includeTaskHistory?: boolean } = {}): Promise<void> {
+		const currentTask = this.getCurrentTask()
+		const generation = await this.publishFocusedTaskScope()
+		if (options.includeTaskHistory) {
+			await this.postStateToWebview()
+		} else {
+			await this.postStateToWebviewWithoutTaskHistory()
+		}
+		if (generation !== this.clineMessagesTransport.generation) {
+			return
+		}
+		await this.postClineMessagesSnapshot(currentTask?.taskId, {
+			generation,
+			taskInstanceId: currentTask?.instanceId,
+		})
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
@@ -2375,6 +2513,9 @@ export class ClineProvider
 
 			// Delete all tasks from state in one batch
 			await this.taskHistoryStore.deleteMany(allIdsToDelete)
+			for (const taskId of allIdsToDelete) {
+				this.clineMessagesTransport.forgetTask(taskId)
+			}
 			this.recentTasksCache = undefined
 
 			// Delete associated shadow repositories or branches and task directories
@@ -2417,6 +2558,7 @@ export class ClineProvider
 
 	async deleteTaskFromState(id: string) {
 		await this.taskHistoryStore.delete(id)
+		this.clineMessagesTransport.forgetTask(id)
 		this.recentTasksCache = undefined
 
 		await this.postStateToWebview()
@@ -2428,9 +2570,7 @@ export class ClineProvider
 	}
 
 	async postStateToWebview() {
-		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview()
-		state.clineMessagesSeq = clineMessagesSeq
 		await this.postMessageToWebview({ type: "state", state })
 	}
 
@@ -2443,11 +2583,9 @@ export class ClineProvider
 	 *   `taskHistoryUpdated` / `taskHistoryItemUpdated`.
 	 */
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
-		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
-		state.clineMessagesSeq = clineMessagesSeq
-		const { taskHistory: _omit, ...rest } = state
-		await this.postMessageToWebview({ type: "state", state: rest })
+		const { taskHistory: _omitHistory, ...metadataState } = state
+		await this.postMessageToWebview({ type: "state", state: metadataState })
 	}
 
 	/**
@@ -2470,23 +2608,6 @@ export class ClineProvider
 		}
 
 		await this._postStateToWebviewThrottled.flush()
-	}
-
-	/**
-	 * Like postStateToWebview but intentionally omits both clineMessages and taskHistory.
-	 *
-	 * Rationale:
-	 * - Cloud event handlers (auth, settings, user-info) and mode changes trigger state pushes
-	 *   that have nothing to do with chat messages. Including clineMessages in these pushes
-	 *   creates race conditions where a stale snapshot of clineMessages (captured during async
-	 *   getStateToPostToWebview) overwrites newer messages the task has streamed in the meantime.
-	 * - This method ensures cloud/mode events only push the state fields they actually affect
-	 *   (cloud auth, org settings, profiles, etc.) without interfering with task message streaming.
-	 */
-	async postStateToWebviewWithoutClineMessages(): Promise<void> {
-		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
-		const { clineMessages: _omitMessages, taskHistory: _omitHistory, ...rest } = state
-		await this.postMessageToWebview({ type: "state", state: rest })
 	}
 
 	/**
@@ -2775,7 +2896,8 @@ export class ClineProvider
 			autoCondenseContext: autoCondenseContext ?? true,
 			autoCondenseContextPercent: autoCondenseContextPercent ?? 100,
 			uriScheme: vscode.env.uriScheme,
-			currentTaskId: currentTask?.taskId,
+			currentTaskId: currentTask?.taskId ?? null,
+			currentTaskInstanceId: currentTask?.instanceId ?? null,
 			currentTaskItem: currentTask?.taskId ? this.taskHistoryStore.get(currentTask.taskId) : undefined,
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],

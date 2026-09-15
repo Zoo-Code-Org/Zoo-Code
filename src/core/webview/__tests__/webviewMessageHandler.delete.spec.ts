@@ -247,6 +247,34 @@ describe("webviewMessageHandler delete functionality", () => {
 			])
 		})
 
+		it("publishes restored checkpoint metadata after deleting messages", async () => {
+			const checkpoint = { hash: "checkpoint-hash", type: "user_message" }
+			const preservedMessage = { ts: 1000, say: "user", text: "First message", checkpoint }
+			getCurrentTaskMock.clineMessages = [preservedMessage, { ts: 2000, say: "user", text: "Delete this" }]
+			getCurrentTaskMock.apiConversationHistory = [
+				{ ts: 1000, role: "user", content: { type: "text", text: "First message" } },
+				{ ts: 2000, role: "user", content: { type: "text", text: "Delete this" } },
+			]
+			getCurrentTaskMock.overwriteClineMessages.mockImplementation(
+				async (messages: (typeof preservedMessage)[]) => {
+					getCurrentTaskMock.clineMessages = structuredClone(messages).map((message) => {
+						const { checkpoint: _checkpoint, ...withoutCheckpoint } = message
+						return withoutCheckpoint
+					})
+				},
+			)
+
+			await webviewMessageHandler(provider, {
+				type: "deleteMessageConfirm",
+				messageTs: 2000,
+			})
+
+			expect(getCurrentTaskMock.overwriteClineMessages).toHaveBeenCalledTimes(2)
+			expect(getCurrentTaskMock.overwriteClineMessages).toHaveBeenLastCalledWith([
+				expect.objectContaining({ ts: 1000, checkpoint }),
+			])
+		})
+
 		describe("condense preservation behavior", () => {
 			it("should preserve summary and condensed messages when deleting after the summary", async () => {
 				// Design: Rewind/delete preserves summaries that were created BEFORE the rewind point.
