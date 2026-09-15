@@ -22,6 +22,9 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 /**
  * LiteLLM provider handler
@@ -133,6 +136,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Fast-fail if the request was already aborted before building, so an
+		// already-aborted request fails with AbortError before provider model
+		// discovery (getModels/refreshModels) begins.
+		throwIfAborted(metadata?.abortSignal)
+
 		const { id: modelId, info } = await this.fetchModel()
 
 		// Models that require reasoning_content to be echoed back during tool-call
@@ -267,29 +275,49 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
 		}
 
+		// The request-local controller is the provider-owned abort handle; the
+		// request signal merges it with the external Task signal (AbortSignal.any
+		// inside RequestConfigBuilder), so external aborts cancel the in-flight
+		// request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
+
 		try {
 			const { data: completion } = await this.client.chat.completions
-				.create(requestOptions, { headers: requestHeaders })
+				.create(requestOptions, { headers: requestHeaders, signal: requestSignal })
 				.withResponse()
 
 			let lastUsage
 
 			for await (const chunk of completion) {
+				// Stop consuming buffered chunks once the request is aborted (the
+				// OpenAI SDK iterator may keep delivering buffered content after
+				// abort, and swallows the mid-stream AbortError).
+				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				const delta = chunk.choices[0]?.delta
 				const usage = chunk.usage as LiteLLMUsage
 
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
+					// No pre-yield guard: this is the first yield of the iteration —
+					// the top-of-loop check runs without a suspension point before it.
 					yield { type: "reasoning", text: reasoningText }
 				}
 
 				if (delta?.content) {
+					throwIfAborted(requestSignal)
 					yield { type: "text", text: delta.content }
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
+						throwIfAborted(requestSignal)
 						yield {
 							type: "tool_call_partial",
 							index: toolCall.index,
@@ -304,6 +332,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 					lastUsage = usage
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 
 			if (lastUsage) {
 				// Extract cache-related information if available
@@ -339,6 +372,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				yield usageData
 			}
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM streaming error: ${error.message}`)
 			}
@@ -347,6 +385,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building, so an
+		// already-aborted request fails with AbortError before provider model
+		// discovery (getModels/refreshModels) begins.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: modelId, info } = await this.fetchModel()
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
@@ -373,9 +416,30 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				requestOptions.max_tokens = info.maxTokens
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Build request options with abortSignal and/or timeout. Per the
+			// abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely, because the OpenAI SDK treats
+			// a timeout of 0 as an immediate timeout.
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				createOptions.timeout = timeoutMs
+			}
+
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				Object.keys(createOptions).length > 0 ? createOptions : undefined,
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM completion error: ${error.message}`)
 			}
