@@ -2,7 +2,7 @@ import * as vscode from "vscode"
 import path from "path"
 
 import { Task } from "../task/Task"
-import { CodeIndexManager } from "../../services/code-index/manager"
+import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
 import { getWorkspacePath } from "../../utils/path"
 import { formatResponse } from "../prompts/responses"
 import { VectorStoreSearchResult } from "../../services/code-index/interfaces"
@@ -57,7 +57,7 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 				throw new Error("Extension context is not available.")
 			}
 
-			const manager = CodeIndexManager.getInstance(context)
+			const manager = CodeIndexManagerRegistry.getInstance(context)
 
 			if (!manager) {
 				throw new Error("CodeIndexManager is not available.")

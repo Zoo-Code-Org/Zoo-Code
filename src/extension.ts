@@ -34,7 +34,8 @@ import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
-import { CodeIndexManager } from "./services/code-index/manager"
+import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
+import type { CodeIndexManager } from "./services/code-index/manager"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -200,7 +201,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	if (vscode.workspace.workspaceFolders) {
 		for (const folder of vscode.workspace.workspaceFolders) {
-			const manager = CodeIndexManager.getInstance(context, folder.uri.fsPath)
+			const manager = CodeIndexManagerRegistry.getInstance(context, folder.uri.fsPath)
 
 			if (manager) {
 				codeIndexManagers.push(manager)
@@ -212,8 +213,6 @@ export async function activate(context: vscode.ExtensionContext) {
 						`[CodeIndexManager] Error during background CodeIndexManager configuration/indexing for ${folder.uri.fsPath}: ${message}`,
 					)
 				})
-
-				context.subscriptions.push(manager)
 			}
 		}
 	}
@@ -383,6 +382,14 @@ export async function activate(context: vscode.ExtensionContext) {
 // This method is called when your extension is deactivated.
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
+
+	try {
+		CodeIndexManagerRegistry.disposeAll()
+	} catch (error) {
+		outputChannel.appendLine(
+			`Failed to dispose code index managers: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	}
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {
