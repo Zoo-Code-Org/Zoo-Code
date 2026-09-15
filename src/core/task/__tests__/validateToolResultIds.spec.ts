@@ -2,6 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { TelemetryService } from "@roo-code/telemetry"
 import {
 	validateAndFixToolResultIds,
+	hoistToolResultsToFront,
 	ToolResultIdMismatchError,
 	MissingToolResultError,
 } from "../validateToolResultIds"
@@ -993,5 +994,188 @@ describe("validateAndFixToolResultIds", () => {
 
 			expect(TelemetryService.instance.captureException).not.toHaveBeenCalled()
 		})
+	})
+
+	// Anthropic requires that tool_result blocks come FIRST in the user message content array;
+	// see the doc comment on `hoistToolResultsToFront()`.
+	describe("when tool_results are interleaved with other block types", () => {
+		it("should hoist a tool_result that follows an image block from a parallel tool call", () => {
+			const assistantMessage: Anthropic.MessageParam = {
+				role: "assistant",
+				content: [
+					{ type: "text", text: "The visual confirms it: ..." },
+					{
+						type: "tool_use",
+						id: "tooluse_UDLZ6mSXfpiIeVAHk5NnIR",
+						name: "execute_command",
+						input: { command: "WS=/..." },
+					},
+					{
+						type: "tool_use",
+						id: "tooluse_NudlJpcjeQemU5wudkIYMA",
+						name: "execute_command",
+						input: { command: "git diff --stat -- python/" },
+					},
+				],
+			}
+
+			const userMessage: Anthropic.MessageParam = {
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tooluse_UDLZ6mSXfpiIeVAHk5NnIR",
+						content: "Exit code: 0",
+					},
+					{
+						type: "image",
+						source: { type: "base64", media_type: "image/png", data: "iVBOR" },
+					},
+					{
+						type: "tool_result",
+						tool_use_id: "tooluse_NudlJpcjeQemU5wudkIYMA",
+						content: "Exit code: 0",
+					},
+					{ type: "text", text: "<user_message>Something wrong with the tool use?</user_message>" },
+					{ type: "text", text: "<environment_details>...</environment_details>" },
+				],
+			}
+
+			const result = validateAndFixToolResultIds(userMessage, [assistantMessage])
+			const content = result.content as Anthropic.Messages.ContentBlockParam[]
+
+			// Both tool_results must form one contiguous leading run.
+			expect(content.map((block) => block.type)).toEqual(["tool_result", "tool_result", "image", "text", "text"])
+			// IDs and content are preserved, and no synthetic "interrupted" result is invented.
+			expect((content[0] as Anthropic.ToolResultBlockParam).tool_use_id).toBe("tooluse_UDLZ6mSXfpiIeVAHk5NnIR")
+			expect((content[1] as Anthropic.ToolResultBlockParam).tool_use_id).toBe("tooluse_NudlJpcjeQemU5wudkIYMA")
+			expect((content[1] as Anthropic.ToolResultBlockParam).content).toBe("Exit code: 0")
+			// Telemetry should not fire: nothing is missing or mismatched, only misordered.
+			expect(TelemetryService.instance.captureException).not.toHaveBeenCalled()
+		})
+
+		it("should hoist tool_results that follow a text block", () => {
+			const assistantMessage: Anthropic.MessageParam = {
+				role: "assistant",
+				content: [
+					{ type: "tool_use", id: "tool-1", name: "read_file", input: {} },
+					{ type: "tool_use", id: "tool-2", name: "read_file", input: {} },
+				],
+			}
+
+			const userMessage: Anthropic.MessageParam = {
+				role: "user",
+				content: [
+					{ type: "text", text: "Here are the results:" },
+					{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+					{ type: "tool_result", tool_use_id: "tool-2", content: "B" },
+				],
+			}
+
+			const result = validateAndFixToolResultIds(userMessage, [assistantMessage])
+			const content = result.content as Anthropic.Messages.ContentBlockParam[]
+
+			expect(content.map((block) => block.type)).toEqual(["tool_result", "tool_result", "text"])
+			expect((content[0] as Anthropic.ToolResultBlockParam).tool_use_id).toBe("tool-1")
+			expect((content[1] as Anthropic.ToolResultBlockParam).tool_use_id).toBe("tool-2")
+		})
+
+		it("should deduplicate and hoist without mismatching IDs by position", () => {
+			// The duplicate must be dropped BEFORE positional ID correction, otherwise the
+			// interleaved ordering could cause a valid result to be reassigned the wrong ID.
+			const assistantMessage: Anthropic.MessageParam = {
+				role: "assistant",
+				content: [
+					{ type: "tool_use", id: "tool-1", name: "read_file", input: {} },
+					{ type: "tool_use", id: "tool-2", name: "read_file", input: {} },
+				],
+			}
+
+			const userMessage: Anthropic.MessageParam = {
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+					{ type: "image", source: { type: "base64", media_type: "image/png", data: "x" } },
+					{ type: "tool_result", tool_use_id: "tool-1", content: "duplicate" },
+					{ type: "tool_result", tool_use_id: "tool-2", content: "B" },
+				],
+			}
+
+			const result = validateAndFixToolResultIds(userMessage, [assistantMessage])
+			const content = result.content as Anthropic.Messages.ContentBlockParam[]
+
+			expect(content.map((block) => block.type)).toEqual(["tool_result", "tool_result", "image"])
+			expect((content[0] as Anthropic.ToolResultBlockParam).content).toBe("A")
+			expect((content[1] as Anthropic.ToolResultBlockParam).tool_use_id).toBe("tool-2")
+			expect((content[1] as Anthropic.ToolResultBlockParam).content).toBe("B")
+		})
+	})
+})
+
+describe("hoistToolResultsToFront", () => {
+	it("returns the same array reference when tool_results are already contiguous at the front", () => {
+		const content: Anthropic.Messages.ContentBlockParam[] = [
+			{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+			{ type: "tool_result", tool_use_id: "tool-2", content: "B" },
+			{ type: "image", source: { type: "base64", media_type: "image/png", data: "x" } },
+			{ type: "text", text: "env" },
+		]
+
+		expect(hoistToolResultsToFront(content)).toBe(content)
+	})
+
+	it("returns the same array reference when there are no tool_result blocks", () => {
+		const content: Anthropic.Messages.ContentBlockParam[] = [
+			{ type: "text", text: "hello" },
+			{ type: "image", source: { type: "base64", media_type: "image/png", data: "x" } },
+		]
+
+		expect(hoistToolResultsToFront(content)).toBe(content)
+	})
+
+	it("returns the same array reference for an empty array", () => {
+		const content: Anthropic.Messages.ContentBlockParam[] = []
+		expect(hoistToolResultsToFront(content)).toBe(content)
+	})
+
+	it("returns the same array reference when every block is a tool_result", () => {
+		const content: Anthropic.Messages.ContentBlockParam[] = [
+			{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+			{ type: "tool_result", tool_use_id: "tool-2", content: "B" },
+		]
+
+		expect(hoistToolResultsToFront(content)).toBe(content)
+	})
+
+	it("preserves the relative order of both tool_results and other blocks", () => {
+		const content: Anthropic.Messages.ContentBlockParam[] = [
+			{ type: "text", text: "first" },
+			{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+			{ type: "text", text: "second" },
+			{ type: "tool_result", tool_use_id: "tool-2", content: "B" },
+			{ type: "text", text: "third" },
+		]
+
+		const result = hoistToolResultsToFront(content)
+
+		expect(result).toEqual([
+			{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+			{ type: "tool_result", tool_use_id: "tool-2", content: "B" },
+			{ type: "text", text: "first" },
+			{ type: "text", text: "second" },
+			{ type: "text", text: "third" },
+		])
+	})
+
+	it("does not mutate the input array", () => {
+		const content: Anthropic.Messages.ContentBlockParam[] = [
+			{ type: "text", text: "first" },
+			{ type: "tool_result", tool_use_id: "tool-1", content: "A" },
+		]
+		const snapshot = [...content]
+
+		hoistToolResultsToFront(content)
+
+		expect(content).toEqual(snapshot)
 	})
 })
