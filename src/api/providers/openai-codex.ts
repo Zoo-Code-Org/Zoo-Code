@@ -29,7 +29,7 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
-import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
@@ -1369,6 +1369,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	 * from having to be duplicated here.
 	 */
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the caller's stop signal already fired before we started: a cancelled
+		// request must not spend the OAuth setup (token and account fetch) or an SDK request on
+		// a completion that is already gone.
+		throwIfAborted(options?.abortSignal)
+
 		// Merge an optional timeout into the caller's abort signal so a timeout cancels the
 		// completion the same way an external abort does (timeoutMs <= 0 disables it).
 		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
@@ -1380,7 +1385,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			// the prompt enhancer writes this straight into the input box.
 			let text = ""
 
-			for await (const chunk of this.handleResponsesApiMessage(
+			const stream = this.handleResponsesApiMessage(
 				model,
 				"",
 				[{ role: "user", content: prompt }],
@@ -1388,7 +1393,16 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				// directly, so `prompt_cache_key` is unchanged.
 				{ taskId: this.sessionId },
 				requestSignal,
-			)) {
+			)
+
+			for await (const chunk of stream) {
+				// A buffered chunk can still be pulled in the window between the abort and the
+				// inner generator's own stop, so break here: post-abort output must never be
+				// joined into the completion.
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				// Refusals are streamed as text for the chat, but they are not output: the
 				// non-streaming request this replaced read `output_text`, which never carries them.
 				// Keeping them would paste "[Refusal] ..." into the input box as if it were an answer.
@@ -1410,7 +1424,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			// reported to telemetry nor relabelled as a completion error: a timed-out or
 			// cancelled request is normalized to the shared abort contract whether the stream
 			// ended quietly or the request threw.
-			if (requestSignal?.aborted) {
+			if (isRequestAborted(error, requestSignal)) {
 				throw createAbortError(this.providerName)
 			}
 

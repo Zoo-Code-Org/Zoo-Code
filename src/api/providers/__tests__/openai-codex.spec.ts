@@ -492,17 +492,29 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		expect(signalDuringRequest!.aborted).toBe(true)
 	})
 
-	it("rejects when the caller's signal is already aborted", async () => {
-		const handler = createHandler()
-		const create = injectStream(handler, [
-			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
-		])
+	// A request cancelled before it starts must not spend the provider setup on it: the
+	// fast-fail rejects before the (here deferred, never resolving) token and account fetch
+	// and before the SDK request, so a pending OAuth flow cannot hold a cancelled completion
+	// hostage.
+	it("fast-fails before the OAuth setup when the caller's signal is already aborted", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol" })
+		const getAccessToken = vitest
+			.spyOn(openAiCodexOAuthManager, "getAccessToken")
+			.mockReturnValue(new Promise<string>(() => {}))
+		const getAccountId = vitest
+			.spyOn(openAiCodexOAuthManager, "getAccountId")
+			.mockReturnValue(new Promise<string>(() => {}))
+		const create = vitest.fn()
+		Reflect.set(handler, "client", { responses: { create } })
 
 		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
 			name: "AbortError",
+			message: "This operation was aborted",
 		})
 
-		expect(create.mock.calls[0][1].signal.aborted).toBe(true)
+		expect(create).not.toHaveBeenCalled()
+		expect(getAccessToken).not.toHaveBeenCalled()
+		expect(getAccountId).not.toHaveBeenCalled()
 	})
 
 	// The SSE fallback is for an SDK that could not be used at all. Replaying the request after the
