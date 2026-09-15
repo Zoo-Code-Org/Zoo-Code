@@ -1937,9 +1937,14 @@ describe("ClineProvider", () => {
 			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
 			// The global selection points at the keeper profile, but this view's buffer
-			// is still pinned to the profile being deleted (it loaded it earlier).
+			// is still pinned to the profile being deleted (it loaded it earlier):
+			// the nested overlay still carries the deleted profile's configuration.
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			provider["viewLocalState"].currentApiConfigName = "old-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "deleted-profile-secret",
+			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
@@ -1955,14 +1960,16 @@ describe("ClineProvider", () => {
 
 			// The captured pin must still trigger the reconfiguration: the shared
 			// provider keys and the view-local buffer both take the surviving
-			// profile's settings.
+			// profile's settings, and the nested overlay is replaced wholesale so
+			// no key of the deleted profile survives.
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
 				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic }),
 			)
 			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
-			expect(provider["viewLocalState"].apiConfiguration).toEqual(
-				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic }),
-			)
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
 			await provider.dispose()
 		})
 
@@ -1985,9 +1992,14 @@ describe("ClineProvider", () => {
 			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile, otherProfile])
 			// The global selection and this view's pin both name surviving profiles:
-			// the deletion must not reconfigure this view's settings.
+			// the deletion must not reconfigure this view's settings, and the
+			// pinned view's nested overlay must survive byte-for-byte.
 			await provider.contextProxy.setValue("currentApiConfigName", "other-profile")
 			provider["viewLocalState"].currentApiConfigName = "keeper-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "pinned-profile-secret",
+			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
@@ -2004,10 +2016,16 @@ describe("ClineProvider", () => {
 			await provider.deleteProviderProfile(oldProfile)
 
 			// No reconfiguration: the guard must stay false when neither the global
-			// selection nor the view pin names the deleted profile.
+			// selection nor the view pin names the deleted profile, so the view
+			// keeps its own pin and its nested overlay while the shared store
+			// reports the global selection.
 			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
-			expect(provider.getValues().currentApiConfigName).toBe("other-profile")
-			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("other-profile")
+			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "pinned-profile-secret",
+			})
 			await provider.dispose()
 		})
 	})
