@@ -86,6 +86,7 @@ describe("coverage source equivalence", () => {
 		["DA after LF", "SF:src/a.ts\nDA:1,1\nLF:1\nDA:2,1\nend_of_record", "DA after LF"],
 		["missing DA counts", "SF:src/a.ts\nDA:1\nLF:1\nend_of_record", "invalid DA"],
 		["nonnumeric DA counts", "SF:src/a.ts\nDA:1,nope\nLF:1\nend_of_record", "invalid DA"],
+		["zero DA line numbers", "SF:src/a.ts\nDA:0,1\nLF:1\nend_of_record", "invalid DA"],
 		[
 			"unsafe DA line numbers",
 			`SF:src/a.ts\nDA:${Number.MAX_SAFE_INTEGER + 1},0\nLF:1\nend_of_record`,
@@ -95,22 +96,27 @@ describe("coverage source equivalence", () => {
 		["duplicate DA lines", "SF:src/a.ts\nDA:1,0\nDA:1,1\nLF:2\nend_of_record", "duplicate DA"],
 		["empty LF values", "SF:src/a.ts\nLF:\nend_of_record", "invalid LF"],
 		["nonnumeric LF values", "SF:src/a.ts\nLF:nope\nend_of_record", "invalid LF"],
+		["mismatched LF values", "SF:src/a.ts\nDA:1,1\nLF:2\nend_of_record", "invalid LF"],
+		["records without LF", "SF:src/a.ts\nend_of_record", "invalid record terminator"],
 		["invalid terminators", "end_of_record", "invalid record terminator"],
 	])("rejects %s", (_name, lcov, error) => {
 		expect(() => parseCoverageSourceLines(lcov, "api")).toThrow(error)
 	})
 
 	it("accepts DA and LF numeric boundaries", () => {
-		expect(() =>
-			parseCoverageSourceLines(
-				`SF:src/a.ts\nDA:1,0\nDA:${Number.MAX_SAFE_INTEGER},0,checksum\nLF:2\nend_of_record`,
-				"api",
-			),
-		).not.toThrow()
+		const sources = parseCoverageSourceLines(
+			`SF:src/a.ts\nDA:1,0\nDA:${Number.MAX_SAFE_INTEGER},0,checksum\nLF:2\nend_of_record`,
+			"api",
+		)
+
+		expect(sources).toEqual(new Map([["src/a.ts", new Set([1, Number.MAX_SAFE_INTEGER])]]))
 	})
 
 	it("rejects empty and unexpected lane coverage", () => {
 		expect(() => mergeCoverageSources(["api"], [["api", new Map()]])).toThrow(
+			"Coverage lane has no instrumented lines: api",
+		)
+		expect(() => mergeCoverageSources(["api"], [["api", new Map([["src/a.ts", new Set()]])]])).toThrow(
 			"Coverage lane has no instrumented lines: api",
 		)
 		expect(() =>
