@@ -342,9 +342,10 @@ export async function presentAssistantMessage(cline: Task) {
 				break
 			}
 
-			// Fetch state early so it's available for toolDescription and validation
+			// Shared provider state supplies global settings; mode is owned by the task.
 			const state = await cline.providerRef.deref()?.getState()
-			const { mode, customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			const mode = await cline.getTaskMode()
 
 			const toolDescription = (): string => {
 				switch (block.name) {
@@ -617,7 +618,7 @@ export async function presentAssistantMessage(cline: Task) {
 
 					validateToolUse(
 						block.name as ToolName,
-						mode ?? defaultModeSlug,
+						mode,
 						customModes ?? [],
 						toolRequirements,
 						block.params,
@@ -924,7 +925,7 @@ export async function presentAssistantMessage(cline: Task) {
 							}
 
 							const result = await customTool.execute(customToolArgs, {
-								mode: mode ?? defaultModeSlug,
+								mode,
 								task: cline,
 							})
 

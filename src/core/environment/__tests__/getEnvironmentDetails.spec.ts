@@ -75,7 +75,7 @@ describe("getEnvironmentDetails", () => {
 			terminalOutputLineLimit: 100,
 			maxWorkspaceFiles: 50,
 			maxOpenTabsContext: 10,
-			mode: "code",
+			mode: "orchestrator",
 			customModes: [],
 			experiments: {},
 			customInstructions: "test instructions",
@@ -91,6 +91,7 @@ describe("getEnvironmentDetails", () => {
 			cwd: mockCwd,
 			taskId: mockTaskId,
 			didEditFile: false,
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			fileContextTracker: {
 				getAndClearRecentlyModifiedFiles: vi.fn().mockReturnValue([]),
 			} as unknown as FileContextTracker,
@@ -156,6 +157,8 @@ describe("getEnvironmentDetails", () => {
 
 		expect(mockProvider.getState).toHaveBeenCalled()
 
+		expect(mockCline.getTaskMode).toHaveBeenCalled()
+		expect(result).toContain("<slug>code</slug>")
 		expect(getFullModeDetails).toHaveBeenCalledWith("code", [], undefined, {
 			cwd: mockCwd,
 			globalCustomInstructions: "test instructions",

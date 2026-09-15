@@ -1,7 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-usage-attribution.spec.ts
 
 import type { Anthropic } from "@anthropic-ai/sdk"
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import { getModeBySlug } from "../../../shared/modes"
@@ -60,6 +60,7 @@ interface MockTask {
 	didAlreadyUseTool: boolean
 	consecutiveMistakeCount: number
 	clineMessages: unknown[]
+	getTaskMode: Mock<() => Promise<string>>
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
 	recordToolUsage: ReturnType<typeof vi.fn>
 	recordToolError: ReturnType<typeof vi.fn>
@@ -96,6 +97,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			didAlreadyUseTool: false,
 			consecutiveMistakeCount: 0,
 			clineMessages: [],
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			api: {
 				getModel: () => ({ id: "test-model", info: {} }),
 			},
@@ -185,6 +187,35 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 
 		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
 		expect(mockTask.recordToolUsage).not.toHaveBeenCalledWith("mcp_")
+	})
+
+	it("validates tools against the task-local mode when provider state differs", async () => {
+		mockTask.getTaskMode.mockResolvedValue("code")
+		mockTask.providerRef.deref = () => ({
+			getState: vi.fn().mockResolvedValue({ mode: "orchestrator", customModes: [] }),
+		})
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_task_mode",
+				name: "read_file",
+				params: { path: "test.txt" },
+				nativeArgs: { path: "test.txt" },
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		expect(validateToolUse).toHaveBeenCalledWith(
+			"read_file",
+			"code",
+			[],
+			{},
+			{ path: "test.txt" },
+			undefined,
+			undefined,
+		)
 	})
 
 	it("records a safe failure key without leaking the raw tool name when validation fails", async () => {
