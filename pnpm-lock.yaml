@@ -799,7 +799,7 @@ importers:
         version: 0.16.47
       lru-cache:
         specifier: ^11.1.0
-        version: 11.2.2
+        version: 11.5.2
       lucide-react:
         specifier: ^1.18.0
         version: 1.21.0(react@18.3.1)
@@ -6396,8 +6396,8 @@ packages:
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
-  lru-cache@11.2.2:
-    resolution: {integrity: sha512-F9ODfyqML2coTIsQpSkRHnLSZMtkU8Q+mSfcaIyKwy58u+8k5nvAYeiNhsyMARvzNcXJ9QfWVrcPsC9e9rAxtg==}
+  lru-cache@11.5.2:
+    resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
     engines: {node: 20 || >=22}
 
   lru-cache@5.1.1:
@@ -9412,7 +9412,7 @@ snapshots:
       '@babel/compat-data': 8.0.0
       '@babel/helper-validator-option': 8.0.0
       browserslist: 4.24.5
-      lru-cache: 11.2.2
+      lru-cache: 11.5.2
       semver: 7.8.5
 
   '@babel/helper-create-class-features-plugin@8.0.1(@babel/core@8.0.1)':
@@ -14985,7 +14985,7 @@ snapshots:
 
   lru-cache@10.4.3: {}
 
-  lru-cache@11.2.2: {}
+  lru-cache@11.5.2: {}
 
   lru-cache@5.1.1:
     dependencies:
@@ -16017,7 +16017,7 @@ snapshots:
 
   path-scurry@2.0.0:
     dependencies:
-      lru-cache: 11.2.2
+      lru-cache: 11.5.2
       minipass: 7.1.2
 
   path-to-regexp@8.2.0: {}
