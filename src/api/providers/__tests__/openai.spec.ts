@@ -8,6 +8,7 @@ import {
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	azureOpenAiDefaultApiVersion,
+	type ModelInfo,
 } from "@roo-code/types"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
@@ -950,7 +951,119 @@ describe("OpenAiHandler", () => {
 		})
 	})
 
+	describe.each([
+		{ name: "streaming chat", openAiModelId: "custom-model", streaming: true, singleCompletion: false },
+		{ name: "non-streaming chat", openAiModelId: "custom-model", streaming: false, singleCompletion: false },
+		{ name: "streaming O3", openAiModelId: "o3-mini", streaming: true, singleCompletion: false },
+		{ name: "non-streaming O3", openAiModelId: "o3-mini", streaming: false, singleCompletion: false },
+		{ name: "single completion", openAiModelId: "custom-model", streaming: false, singleCompletion: true },
+	])("reasoning effort consistency: $name", ({ openAiModelId, streaming, singleCompletion }) => {
+		async function requestWithSettings(settings: Partial<ApiHandlerOptions>) {
+			const reasoningHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiModelId,
+				openAiStreamingEnabled: streaming,
+				...settings,
+			})
+
+			if (singleCompletion) {
+				await reasoningHandler.completePrompt("Hello")
+			} else {
+				await collectStream(
+					reasoningHandler.createMessage("System prompt", [{ role: "user", content: "Hello" }]),
+				)
+			}
+		}
+
+		it.each([
+			{ selected: "max", stale: "low" },
+			{ selected: "high", stale: "medium" },
+			{ selected: "xhigh", stale: "medium" },
+			{ selected: "max", stale: "disable" },
+			{ selected: "max", stale: "none" },
+		] as const)(
+			"uses the custom model's $selected effort despite a stale top-level $stale",
+			async ({ selected, stale }) => {
+				await requestWithSettings({
+					enableReasoningEffort: true,
+					reasoningEffort: stale,
+					openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: selected },
+				})
+
+				expect(mockCreate).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({ reasoning_effort: selected }),
+					{},
+				)
+			},
+		)
+
+		it.each(["low", "medium", "high", "xhigh", "max"] as const)(
+			"preserves the selected %s effort when the enable flag is unset in a legacy profile",
+			async (reasoningEffort) => {
+				await requestWithSettings({
+					openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort },
+				})
+
+				expect(mockCreate).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({ reasoning_effort: reasoningEffort }),
+					{},
+				)
+			},
+		)
+
+		it("omits reasoning effort when disabled even if custom model metadata retains max", async () => {
+			await requestWithSettings({
+				enableReasoningEffort: false,
+				reasoningEffort: "low",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
+			})
+
+			expect(mockCreate).toHaveBeenCalledOnce()
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+		})
+
+		it("does not use a hidden top-level effort when no custom effort is configured", async () => {
+			await requestWithSettings({
+				enableReasoningEffort: true,
+				reasoningEffort: "low",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, supportsReasoningEffort: true },
+			})
+
+			expect(mockCreate).toHaveBeenCalledOnce()
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+		})
+	})
+
 	describe("getModel", () => {
+		it.each([
+			{ supportsReasoningEffort: undefined },
+			{ supportsReasoningEffort: true },
+			{ supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"] },
+		] satisfies Array<Pick<ModelInfo, "supportsReasoningEffort">>)(
+			"resolves custom effort consistently for capability $supportsReasoningEffort without mutating settings",
+			({ supportsReasoningEffort }) => {
+				const options: ApiHandlerOptions = {
+					...mockOptions,
+					enableReasoningEffort: true,
+					reasoningEffort: "low",
+					openAiCustomModelInfo: {
+						...openAiModelInfoSaneDefaults,
+						supportsReasoningEffort,
+						reasoningEffort: "max",
+					},
+				}
+				const reasoningHandler = new OpenAiHandler(options)
+
+				expect(reasoningHandler.getModel()).toMatchObject({
+					info: { reasoningEffort: "max" },
+					reasoningEffort: "max",
+					reasoning: { reasoning_effort: "max" },
+				})
+				expect(options.reasoningEffort).toBe("low")
+				expect(options.openAiCustomModelInfo?.reasoningEffort).toBe("max")
+			},
+		)
+
 		it("should return model info with sane defaults", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe(mockOptions.openAiModelId)
