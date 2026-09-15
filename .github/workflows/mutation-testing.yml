@@ -22,8 +22,10 @@ jobs:
             - name: Record merge-queue enforcement
               if: github.event_name == 'merge_group'
               run: |
-                  echo "## Changed-code mutation testing" >> "$GITHUB_STEP_SUMMARY"
-                  echo "Mutation testing was enforced on each pull request before it entered the merge queue." >> "$GITHUB_STEP_SUMMARY"
+                  {
+                      echo "## Changed-code mutation testing"
+                      echo "Mutation testing was enforced on each pull request before it entered the merge queue."
+                  } >> "$GITHUB_STEP_SUMMARY" || echo "::warning title=Mutation test advisory::Could not write the job summary"
 
             - name: Checkout pull request merge result
               if: github.event_name == 'pull_request'
@@ -50,7 +52,7 @@ jobs:
               if: github.event_name == 'pull_request'
               run: pnpm test:mutation-ci
 
-            - name: Mutate changed executable lines
+            - name: Enforce executable-line scope and run advisory mutation testing
               if: github.event_name == 'pull_request'
               env:
                   BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -60,6 +62,7 @@ jobs:
             - name: Upload mutation reports
               id: mutation_report
               if: always() && github.event_name == 'pull_request'
+              continue-on-error: true
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                   name: changed-code-mutation-report
@@ -76,4 +79,4 @@ jobs:
                       echo ""
                       echo "### Download mutation reports"
                       echo "[Open the changed-code-mutation-report artifact]($ARTIFACT_URL), then open the package's mutation.html file."
-                  } >> "$GITHUB_STEP_SUMMARY"
+                  } >> "$GITHUB_STEP_SUMMARY" || echo "::warning title=Mutation test advisory::Could not write the job summary"

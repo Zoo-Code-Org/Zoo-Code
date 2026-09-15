@@ -72,6 +72,14 @@ describe("LiteLLM", () => {
 		)
 
 		fireEvent.click(screen.getByTestId("refresh-button"))
+		expect(postMessageMock).toHaveBeenCalledWith({
+			type: "requestRouterModels",
+			values: {
+				provider: providerIdentifiers.litellm,
+				litellmApiKey: "test-key",
+				litellmBaseUrl: "http://localhost:4000",
+			},
+		})
 		act(() => {
 			window.dispatchEvent(new MessageEvent("message", { data: { type: "routerModels" } }))
 		})
