@@ -20,6 +20,90 @@
 			"inputs": ["$TURBO_DEFAULT$", "!__tests__/dist_assets.spec.ts"],
 			"outputs": ["coverage/unit/**"]
 		},
+		"test:coverage:api": {
+			"dependsOn": ["^build"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"!core/**/*.{test,spec}.{ts,tsx}",
+				"!services/**/*.{test,spec}.{ts,tsx}",
+				"!__tests__/**/*.{test,spec}.{ts,tsx}",
+				"!activate/**/*.{test,spec}.{ts,tsx}",
+				"!extension/**/*.{test,spec}.{ts,tsx}",
+				"!i18n/**/*.{test,spec}.{ts,tsx}",
+				"!integrations/**/*.{test,spec}.{ts,tsx}",
+				"!scripts/**/*.{test,spec}.{mjs,ts}",
+				"!shared/**/*.{test,spec}.{ts,tsx}",
+				"!test-utils/**/*.{test,spec}.{ts,tsx}",
+				"!utils/**/*.{test,spec}.{ts,tsx}"
+			],
+			"outputs": ["coverage/api/**"]
+		},
+		"test:coverage:core": {
+			"dependsOn": ["^build"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"!api/**/*.{test,spec}.{ts,tsx}",
+				"!services/**/*.{test,spec}.{ts,tsx}",
+				"!__tests__/**/*.{test,spec}.{ts,tsx}",
+				"!activate/**/*.{test,spec}.{ts,tsx}",
+				"!extension/**/*.{test,spec}.{ts,tsx}",
+				"!i18n/**/*.{test,spec}.{ts,tsx}",
+				"!integrations/**/*.{test,spec}.{ts,tsx}",
+				"!scripts/**/*.{test,spec}.{mjs,ts}",
+				"!shared/**/*.{test,spec}.{ts,tsx}",
+				"!test-utils/**/*.{test,spec}.{ts,tsx}",
+				"!utils/**/*.{test,spec}.{ts,tsx}"
+			],
+			"outputs": ["coverage/core/**"]
+		},
+		"test:coverage:services": {
+			"dependsOn": ["^build"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"!api/**/*.{test,spec}.{ts,tsx}",
+				"!core/**/*.{test,spec}.{ts,tsx}",
+				"!services/tree-sitter/**/*.{test,spec}.{ts,tsx}",
+				"!__tests__/**/*.{test,spec}.{ts,tsx}",
+				"!activate/**/*.{test,spec}.{ts,tsx}",
+				"!extension/**/*.{test,spec}.{ts,tsx}",
+				"!i18n/**/*.{test,spec}.{ts,tsx}",
+				"!integrations/**/*.{test,spec}.{ts,tsx}",
+				"!scripts/**/*.{test,spec}.{mjs,ts}",
+				"!shared/**/*.{test,spec}.{ts,tsx}",
+				"!test-utils/**/*.{test,spec}.{ts,tsx}",
+				"!utils/**/*.{test,spec}.{ts,tsx}"
+			],
+			"outputs": ["coverage/services/**"]
+		},
+		"test:coverage:misc": {
+			"dependsOn": ["^build"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"!api/**/*.{test,spec}.{ts,tsx}",
+				"!core/**/*.{test,spec}.{ts,tsx}",
+				"!services/**/*.{test,spec}.{ts,tsx}",
+				"!__tests__/dist_assets.spec.ts"
+			],
+			"outputs": ["coverage/misc/**"]
+		},
+		"test:coverage:tree-sitter": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"services/tree-sitter/**",
+				"services/shared/fallback-extensions.ts",
+				"core/ignore/RooIgnoreController.ts",
+				"utils/fs.ts",
+				"utils/path.ts",
+				"utils/vitest-verbosity.ts",
+				"__mocks__/**",
+				"vitest.setup.ts",
+				"vitest.config.ts",
+				"vitest.tree-sitter.config.ts",
+				"package.json",
+				"tsconfig.json"
+			],
+			"outputs": ["coverage/tree-sitter/**"]
+		},
 		"bundle": {
 			"dependsOn": ["^build", "@roo-code/vscode-webview#build"],
 			"outputs": ["dist/**"]
