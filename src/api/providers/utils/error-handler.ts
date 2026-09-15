@@ -9,6 +9,8 @@
  * - Enables telemetry and debugging with complete error context
  */
 
+import { APIUserAbortError } from "openai"
+
 import i18n from "../../../i18n/setup"
 
 /**
@@ -111,4 +113,25 @@ export function handleProviderError(
  */
 export function handleOpenAIError(error: unknown, providerName: string): Error {
 	return handleProviderError(error, providerName, { messagePrefix: "completion" })
+}
+
+/**
+ * Handles errors from OpenAI Node SDK request sites with abort awareness.
+ *
+ * An abort failure (the external signal already aborted, the SDK's
+ * APIUserAbortError, or a fetch-level AbortError) is normalized to a fresh
+ * Error with name "AbortError" and a message ending in "aborted" (the Task.ts
+ * contract) instead of being wrapped as a regular completion error, which a
+ * plain rethrow of the SDK abort error would produce.
+ */
+export function handleOpenAIRequestError(error: unknown, providerName: string, abortSignal?: AbortSignal): Error {
+	if (
+		abortSignal?.aborted ||
+		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
+	) {
+		const aborted = new Error(`${providerName} request aborted`, { cause: error })
+		aborted.name = "AbortError"
+		return aborted
+	}
+	return handleOpenAIError(error, providerName)
 }

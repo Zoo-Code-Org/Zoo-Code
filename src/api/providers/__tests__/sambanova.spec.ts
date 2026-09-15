@@ -15,6 +15,8 @@ vitest.mock("openai", () => {
 		default: vitest.fn(function () {
 			return { chat: { completions: { create: createMock } } }
 		}),
+		// Named export consumed by the provider for abort-error normalization
+		APIUserAbortError: class extends Error {},
 	}
 })
 
