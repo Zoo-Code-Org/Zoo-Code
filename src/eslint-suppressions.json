@@ -1206,7 +1206,7 @@
 	},
 	"integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 10
+			"count": 8
 		}
 	},
 	"integrations/terminal/__tests__/OutputInterceptor.test.ts": {
