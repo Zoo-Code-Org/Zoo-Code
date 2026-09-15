@@ -36,6 +36,9 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
 export class ContextProxy {

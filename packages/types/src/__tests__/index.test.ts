@@ -3,6 +3,10 @@
 import { GLOBAL_STATE_KEYS } from "../index.js"
 
 describe("GLOBAL_STATE_KEYS", () => {
+	it("should contain registered durable per-view state", () => {
+		expect(GLOBAL_STATE_KEYS).toContain("viewStates")
+	})
+
 	it("should contain provider settings keys", () => {
 		expect(GLOBAL_STATE_KEYS).toContain("autoApprovalEnabled")
 	})
@@ -13,6 +17,7 @@ describe("GLOBAL_STATE_KEYS", () => {
 
 	it("should not contain secret state keys", () => {
 		expect(GLOBAL_STATE_KEYS).not.toContain("openRouterApiKey")
+		expect(GLOBAL_STATE_KEYS).not.toContain("apiKey")
 	})
 
 	it("should contain OpenAI Compatible base URL setting", () => {
