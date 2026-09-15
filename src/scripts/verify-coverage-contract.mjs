@@ -160,7 +160,7 @@ for (const lane of [...ownershipLanes, "tree-sitter"]) {
 	}
 }
 const instrumentedLines = [...coverageSources.values()].reduce((sum, lines) => sum + lines, 0)
-if (coverageSources.size !== 469 || instrumentedLines !== 30_229)
+if (coverageSources.size !== 470 || instrumentedLines !== 30_324)
 	throw new Error(
 		`Coverage source population changed: ${coverageSources.size} records and ${instrumentedLines} lines; verify equivalence and update the baseline deliberately`,
 	)
