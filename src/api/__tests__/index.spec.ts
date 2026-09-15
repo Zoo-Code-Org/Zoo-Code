@@ -77,7 +77,7 @@ const expectedHandlers = {
 	[providerIdentifiers.ollama]: NativeOllamaHandler,
 	[providerIdentifiers.lmstudio]: LmStudioHandler,
 	[providerIdentifiers.gemini]: GeminiHandler,
-	// Gemini CLI currently relies on the factory's default Anthropic handler.
+	// Gemini CLI has no dedicated handler yet; the factory routes it explicitly to the Anthropic handler.
 	[providerIdentifiers.geminiCli]: AnthropicHandler,
 	[providerIdentifiers.openaiCodex]: OpenAiCodexHandler,
 	[providerIdentifiers.openaiNative]: OpenAiNativeHandler,
