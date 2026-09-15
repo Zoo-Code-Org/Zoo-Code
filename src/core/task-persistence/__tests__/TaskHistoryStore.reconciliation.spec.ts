@@ -81,6 +81,10 @@ describe("assertValidTransition", () => {
 			expect(() => assertValidTransition("delegated", "active")).not.toThrow()
 		})
 
+		it("delegated → interrupted", () => {
+			expect(() => assertValidTransition("delegated", "interrupted")).not.toThrow()
+		})
+
 		it("interrupted → completed", () => {
 			expect(() => assertValidTransition("interrupted", "completed")).not.toThrow()
 		})
@@ -644,27 +648,66 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(store.get("parent-b")?.status).toBe("active")
 	})
 
-	it("repairs an orphaned link in a chained delegation without repairing its grandparent", async () => {
-		// C doesn't exist (orphaned). B is delegated waiting for C → repaired to active.
-		// A sees B as delegated in the persisted startup snapshot and remains delegated.
-		const parentA = makeItem({ id: "parent-a-chain", status: "delegated", awaitingChildId: "parent-b-chain" })
+	it("recovers a delegated chain that terminates in a missing child", async () => {
+		const parentA = makeItem({
+			id: "parent-a-chain",
+			status: "delegated",
+			awaitingChildId: "parent-b-chain",
+			delegatedToId: "parent-b-chain",
+		})
 		const parentB = makeItem({
 			id: "parent-b-chain",
 			status: "delegated",
 			awaitingChildId: "missing-child-chain",
+			delegatedToId: "missing-child-chain",
+			parentTaskId: parentA.id,
 		})
 		await seedItems([parentA, parentB])
 
 		await store.initialize()
 
-		// B is repaired: its child (C) was missing
-		expect(store.get("parent-b-chain")?.status).toBe("active")
-		// A stays delegated: B was repaired from delegated to active and remains
-		// resumable rather than being mistaken for an active orphan from disk.
-		expect(store.get("parent-a-chain")?.status).toBe("delegated")
-		expect(store.get("parent-a-chain")?.awaitingChildId).toBe("parent-b-chain")
-		expect(store.get("parent-b-chain")?.status).toBe("active")
-		expect(store.get("parent-b-chain")?.awaitingChildId).toBeUndefined()
+		expect(store.get(parentA.id)).toMatchObject({
+			status: "delegated",
+			awaitingChildId: parentB.id,
+		})
+		expect(store.get(parentB.id)).toMatchObject({
+			status: "interrupted",
+			parentTaskId: parentA.id,
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		})
+	})
+
+	it("recovers a delegated chain that terminates in an interrupted grandchild", async () => {
+		const parent = makeItem({
+			id: "nested-parent",
+			status: "delegated",
+			awaitingChildId: "nested-child",
+			delegatedToId: "nested-child",
+		})
+		const child = makeItem({
+			id: "nested-child",
+			status: "delegated",
+			parentTaskId: parent.id,
+			awaitingChildId: "nested-grandchild",
+			delegatedToId: "nested-grandchild",
+		})
+		const grandchild = makeItem({
+			id: "nested-grandchild",
+			status: "interrupted",
+			parentTaskId: child.id,
+		})
+		await seedItems([parent, child, grandchild])
+
+		await store.initialize()
+
+		expect(store.get(parent.id)).toMatchObject({ status: "delegated", awaitingChildId: child.id })
+		expect(store.get(child.id)).toMatchObject({
+			status: "interrupted",
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		})
+		expect(store.get(grandchild.id)?.status).toBe("interrupted")
 	})
 
 	it("does not repair a grandparent when replay repairs the middle node", async () => {

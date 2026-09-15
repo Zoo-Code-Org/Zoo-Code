@@ -20,6 +20,8 @@ export {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
 	LifecycleTransitionError,
 	type HistoryItemStatus,
 	VALID_TASK_STATUS_TRANSITIONS,

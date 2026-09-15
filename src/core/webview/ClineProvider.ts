@@ -124,6 +124,8 @@ import {
 	abandonDelegatedChild,
 	completeDelegatedChild,
 	delegateTaskToChild,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
 	interruptDelegatedChild,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
@@ -3834,6 +3836,58 @@ export class ClineProvider
 		return this.currentWorkspacePath || getWorkspacePath()
 	}
 
+	private isTaskRunningInAnyProvider(taskId: string): boolean {
+		return (
+			this.taskRegistry.hasRunning(taskId) ||
+			Array.from(ClineProvider.activeInstances).some(
+				(provider) => provider !== this && provider.taskRegistry.hasRunning(taskId),
+			)
+		)
+	}
+
+	private async refreshDelegationChain(taskId: string): Promise<void> {
+		const visited = new Set<string>()
+		let currentTaskId: string | undefined = taskId
+		while (currentTaskId && !visited.has(currentTaskId)) {
+			visited.add(currentTaskId)
+			await this.taskHistoryStore.invalidate(currentTaskId)
+			const current = this.taskHistoryStore.get(currentTaskId)
+			currentTaskId = current?.status === "delegated" ? current.awaitingChildId : undefined
+		}
+	}
+
+	private async recoverDeadAwaitedChild(parent: HistoryItem, childId: string): Promise<HistoryItem | undefined> {
+		await this.refreshDelegationChain(childId)
+		const child = this.taskHistoryStore.get(childId)
+		if (
+			!child ||
+			!isDeadDelegationChain(
+				child,
+				(id) => this.taskHistoryStore.get(id),
+				(id) => this.isTaskRunningInAnyProvider(id),
+			)
+		) {
+			return child
+		}
+		await this.taskHistoryStore.atomicReadAndUpdate(childId, (currentChild) => {
+			if (
+				!isDeadDelegationChain(
+					currentChild,
+					(id) => this.taskHistoryStore.get(id),
+					(id) => this.isTaskRunningInAnyProvider(id),
+				)
+			) {
+				throw new Error(`Delegation chain for child ${childId} became live during recovery`)
+			}
+			return recoverDeadDelegatedChild(parent, currentChild)
+		})
+		const recovered = this.taskHistoryStore.get(childId)
+		this.log(
+			`[delegateParentAndOpenChild] Recovered dead delegated child ${childId} as interrupted before re-delegation`,
+		)
+		return recovered
+	}
+
 	/**
 	 * Delegate parent task and open child task.
 	 *
@@ -3884,9 +3938,24 @@ export class ClineProvider
 			const awaitedChildId = authoritativeParent.awaitingChildId
 			if (!awaitedChildId) throw new Error("Cannot re-delegate a parent with no awaited child")
 			await this.taskHistoryStore.invalidate(awaitedChildId)
-			if (this.taskHistoryStore.get(awaitedChildId)?.status !== "interrupted") {
-				throw new Error("Cannot re-delegate while the awaited child is not interrupted")
+			let awaitedChild = this.taskHistoryStore.get(awaitedChildId)
+			if (awaitedChild?.status === "delegated") {
+				awaitedChild = await this.recoverDeadAwaitedChild(authoritativeParent, awaitedChildId)
 			}
+			if (awaitedChild?.status !== "interrupted") {
+				throw new Error(
+					`Cannot re-delegate while the awaited child ${awaitedChildId} has status ${awaitedChild?.status ?? "missing"}; expected interrupted`,
+				)
+			}
+		}
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider was disposed during delegation")
+		}
+		if (parent.abort || parent.abandoned) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} was cancelled during delegation`)
+		}
+		if (this.getCurrentTask() !== parent) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} is no longer current`)
 		}
 		if (pendingActionId) {
 			const parentHistory = this.taskHistoryStore.get(parentTaskId)
@@ -3966,6 +4035,16 @@ export class ClineProvider
 			)
 		}
 
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider was disposed during delegation")
+		}
+		if (parent.abort || parent.abandoned) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} was cancelled during delegation`)
+		}
+		if (this.getCurrentTask() !== parent) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} is no longer current`)
+		}
+
 		// 3) Enforce single-open invariant by closing/disposing the parent first
 		//    This ensures we never have >1 tasks open at any time during delegation.
 		//    Await abort completion to ensure clean disposal and prevent unhandled rejections.
@@ -3978,6 +4057,10 @@ export class ClineProvider
 				}`,
 			)
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
+		}
+
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider was disposed during parent cleanup")
 		}
 
 		// 4) Bind the child directly to the delegating task's local provider
@@ -4014,6 +4097,9 @@ export class ClineProvider
 		//    slip between the status snapshot and the write. An active child must never be
 		//    silently detached.
 		try {
+			if (this._disposed) {
+				throw new Error("[delegateParentAndOpenChild] Provider was disposed before delegation commit")
+			}
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
 					throw new Error(
@@ -4030,6 +4116,9 @@ export class ClineProvider
 						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
 				}
 			})
+			if (this._disposed) {
+				throw new Error("[delegateParentAndOpenChild] Provider was disposed before child scheduling")
+			}
 			this.recentTasksCache = undefined
 			if (this.isViewLaunched) {
 				const updatedItem = this.taskHistoryStore.get(parentTaskId)

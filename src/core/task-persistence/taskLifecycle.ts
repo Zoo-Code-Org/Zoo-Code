@@ -5,7 +5,7 @@ export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
 
 export const VALID_TASK_STATUS_TRANSITIONS: Readonly<Record<HistoryItemStatus, readonly HistoryItemStatus[]>> = {
 	active: ["delegated", "completed", "interrupted"],
-	delegated: ["active"],
+	delegated: ["active", "interrupted"],
 	interrupted: ["completed"],
 	completed: [],
 }
@@ -60,6 +60,51 @@ export function interruptDelegatedChild(parent: HistoryItem, child: HistoryItem)
 	}
 	assertValidTransition(child.status, "interrupted")
 	return { ...child, status: "interrupted" }
+}
+
+/** True when a delegated task has no live owner and its awaited chain ends dead. */
+export function isDeadDelegationChain(
+	child: HistoryItem,
+	getTask: (taskId: string) => HistoryItem | undefined,
+	isTaskLive: (taskId: string) => boolean = () => false,
+): boolean {
+	if (child.status !== "delegated") return false
+
+	const visited = new Set<string>()
+	let current: HistoryItem | undefined = child
+	while (true) {
+		if (visited.has(current.id) || isTaskLive(current.id)) return false
+		visited.add(current.id)
+		if (current.status === "interrupted" || current.status === "completed") return true
+		if (current.status !== "delegated") return false
+		if (!current.awaitingChildId) return true
+		current = getTask(current.awaitingChildId)
+		if (!current) return true
+	}
+}
+
+/**
+ * Recover a delegated child whose own execution chain has died.
+ *
+ * The caller must establish that neither this child nor any descendant in its
+ * active delegation chain has a live runtime owner. The parent deliberately
+ * keeps awaiting the now-interrupted child so existing resume, abandon, and
+ * re-delegation paths retain ownership semantics.
+ */
+export function recoverDeadDelegatedChild(parent: HistoryItem, child: HistoryItem): HistoryItem {
+	if (parent.status !== "delegated" || parent.awaitingChildId !== child.id) {
+		throw new LifecycleTransitionError(`Task ${parent.id} is not delegated to child ${child.id}`)
+	}
+	if (child.status !== "delegated") {
+		throw new LifecycleTransitionError(`Cannot recover child ${child.id} with status ${child.status}`)
+	}
+	assertValidTransition(child.status, "interrupted")
+	return {
+		...child,
+		status: "interrupted",
+		awaitingChildId: undefined,
+		delegatedToId: undefined,
+	}
 }
 
 export function completeDelegatedChild(

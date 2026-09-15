@@ -9,7 +9,12 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import {
+	assertValidTransition,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
+	type HistoryItemStatus,
+} from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -431,8 +436,9 @@ export class TaskHistoryStore {
 			// are visible when evaluating chained delegations.
 			const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
 
-			for (const [, item] of byId) {
-				if (item.status !== "delegated") {
+			for (const [, snapshotItem] of byId) {
+				const item = this.cache.get(snapshotItem.id)
+				if (item?.status !== "delegated") {
 					continue
 				}
 
@@ -463,6 +469,13 @@ export class TaskHistoryStore {
 						)
 						console.warn(
 							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
+						)
+						repairsInThisPass++
+					} else if (child.status === "delegated" && isDeadDelegationChain(child, (id) => byId.get(id))) {
+						const recoveredChild = recoverDeadDelegatedChild(item, child)
+						await this.upsertCore(recoveredChild)
+						console.warn(
+							`[TaskHistoryStore] Reconciled dead nested delegation: child ${child.id} → interrupted, task ${item.id} remains delegated`,
 						)
 						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
