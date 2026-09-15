@@ -118,6 +118,18 @@ describe("Task dispose method", () => {
 		expect(disposalComplete).toBe(true)
 	})
 
+	test("should cancel a pending ask when disposed directly", async () => {
+		const pendingAsk = task.ask("api_req_failed", "provider failed")
+		await vi.waitFor(() =>
+			expect(task.clineMessages).toContainEqual(expect.objectContaining({ type: "ask", ask: "api_req_failed" })),
+		)
+
+		await task.dispose()
+
+		await expect(pendingAsk).rejects.toThrow(/aborted/)
+		expect(task.abort).toBe(true)
+	})
+
 	test("should reject the memoized completion promise when disposal cannot start", async () => {
 		const disposalError = new Error("disposal failed")
 		skipCleanup = true

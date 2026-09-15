@@ -138,6 +138,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
+import { decideMidStreamFailure, findRetryRequestMessageIndex, MAX_MID_STREAM_RETRIES } from "./midStreamRetry"
 import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
@@ -2696,6 +2697,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		this.abort = true
 		this.cancelAssistantMessagePersistence()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
@@ -2924,6 +2926,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
+			requestMessageId?: string
 		}
 
 		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
@@ -3065,9 +3068,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				isEmptyUserContent,
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
+			let requestMessageId = currentItem.requestMessageId
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++
+				requestMessageId = this.apiConversationHistory.at(-1)?.messageId
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -3655,34 +3660,124 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							this.abortReason = cancelReason
 							await this.abortTask()
 						} else {
+							// Stream failed - retry with the same content, but only up to
+							// MAX_MID_STREAM_RETRIES automatic attempts. Every attempt
+							// re-bills the full input context, so retries must be both
+							// bounded and visible to the user.
+							const midStreamRetryAttempt = currentItem.retryAttempt ?? 0
+
+							if (decideMidStreamFailure(midStreamRetryAttempt) === "ask") {
+								// Automatic retries exhausted - surface the failure instead of
+								// retrying (and re-billing the request) silently forever.
+								// Stryker disable next-line CallExpression: console output has no retry-protocol side effect.
+								console.error(
+									// Stryker disable next-line StringLiteral: diagnostic-only task identity and retry-limit text.
+									`[Task#${this.taskId}.${this.instanceId}] Stream failed, automatic retry limit (${MAX_MID_STREAM_RETRIES}) reached: ${streamingFailedMessage}`,
+								)
+
+								const { response } = await this.ask(
+									"api_req_failed",
+									// Stryker disable next-line LogicalOperator: both fallbacks describe the same provider failure.
+									streamingFailedMessage ?? rawErrorMessage,
+								)
+
+								if (response === "yesButtonClicked") {
+									await this.say("api_req_retried")
+
+									// The user approved another round of retries, so reset the
+									// automatic retry budget. Remove the user message this request
+									// added first so it is not duplicated in history on retry.
+									if (requestMessageId) {
+										const requestMessageIndex = findRetryRequestMessageIndex(
+											this.apiConversationHistory,
+											requestMessageId,
+										)
+										if (requestMessageIndex === -1) {
+											await this.say(
+												"error",
+												"Failed to locate the API request in conversation history.",
+											)
+											return false
+										}
+										const [requestMessage] = this.apiConversationHistory.splice(
+											requestMessageIndex,
+											1,
+										)
+										this.messageCounts.user--
+										if (!(await this.saveApiConversationHistory(false))) {
+											this.apiConversationHistory.splice(requestMessageIndex, 0, requestMessage!)
+											this.messageCounts.user++
+											await this.say(
+												"error",
+												"Failed to persist conversation history before retrying.",
+											)
+											return false
+										}
+									}
+
+									stack.push({
+										userContent: currentUserContent,
+										// Stryker disable next-line BooleanLiteral: file details are already materialized in the persisted request being retried.
+										includeFileDetails: false,
+										retryAttempt: 0,
+									})
+
+									// Continue to retry the request
+									continue
+								}
+
+								// User declined to retry - record the failure visibly and stop.
+								// Stryker disable next-line LogicalOperator: both fallbacks describe the same provider failure.
+								await this.say("error", streamingFailedMessage ?? rawErrorMessage)
+
+								// Synthetic assistant message recording the failure -- increment
+								// messageCounts.assistant to match, same as the normal
+								// assistant-message-saved path.
+								await this.addToApiConversationHistory({
+									role: "assistant",
+									content: [
+										{
+											type: "text",
+											text: "Failure: The API request failed mid-stream and the retry was declined.",
+										},
+									],
+								})
+								this.messageCounts.assistant++
+
+								return false
+							}
+
 							// Stream failed - log the error and retry with the same content
-							// The existing rate limiting will prevent rapid retries
 							console.error(
-								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry: ${streamingFailedMessage}`,
+								// Stryker disable next-line StringLiteral,ArithmeticOperator: diagnostic-only attempt metadata.
+								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry (attempt ${midStreamRetryAttempt + 1}/${MAX_MID_STREAM_RETRIES}): ${streamingFailedMessage}`,
 							)
 
-							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
-							const stateForBackoff = await this.providerRef.deref()?.getState()
-							if (stateForBackoff?.autoApprovalEnabled) {
-								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
+							// Announce every automatic retry with the shared exponential
+							// backoff countdown (api_req_retry_delayed) so no retry - and its
+							// associated token cost - happens silently.
+							await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
-								// Check if task was aborted during the backoff
-								if (this.abort) {
-									console.log(
-										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
-									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
-									await this.abortTask()
-									break
-								}
+							// Check if task was aborted during the backoff
+							if (this.abort) {
+								// Stryker disable next-line CallExpression: console output has no cancellation side effect.
+								console.log(
+									// Stryker disable next-line StringLiteral: diagnostic-only task identity.
+									`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
+								)
+								// Abort the entire task
+								// Stryker disable next-line StringLiteral: abort reason is existing diagnostic metadata.
+								this.abortReason = "user_cancelled"
+								await this.abortTask()
+								break
 							}
 
 							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								retryAttempt: midStreamRetryAttempt + 1,
+								requestMessageId,
 							})
 
 							// Continue to retry the request
