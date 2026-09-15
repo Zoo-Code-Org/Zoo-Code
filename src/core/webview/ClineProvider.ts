@@ -3823,6 +3823,7 @@ export class ClineProvider
 				this.viewLocalState.apiConfiguration = val
 			}
 		}
+
 		// Flat provider-settings keys (PROVIDER_SETTINGS_KEYS) are shared settings:
 		// they are written through the ContextProxy above and must NOT be merged
 		// into viewLocalState.apiConfiguration, which would turn them into a
