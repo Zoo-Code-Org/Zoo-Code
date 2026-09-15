@@ -181,6 +181,47 @@ export async function getOpenRouterModelEndpoints(
 }
 
 /**
+ * Apply the Moonshot K3 profile to an OpenRouter model record.
+ *
+ * OpenRouter reports `max_completion_tokens: null` for these models, so the
+ * generic 0.2 context-window fallback would fabricate an inflated max_tokens
+ * value (e.g. 209,716 for a 1M context window). K3 also always reasons with a
+ * low/high/max effort ladder (default "high") and is fixed at temperature 1.0
+ * (issue #1316 expects requests to carry an explicit `temperature: 1.0`), so
+ * its wire-safe capability flags and temperature default are profiled here
+ * instead of being derived from the catalogue.
+ *
+ * Exported so OpenRouterHandler can re-apply the profile at consumption time:
+ * parsed records are persisted in the model cache, and records cached before
+ * this profile existed still carry the fabricated max_tokens value and a
+ * boolean supportsReasoningEffort with no default effort.
+ *
+ * The model ids and profile values live in the function body on purpose:
+ * module-scope literals become "static" mutants, and the Stryker/Vitest
+ * runner combination used by the mutation-diff gate never activates them,
+ * so they would report as surviving mutants (see .github/workflows/mutation-testing.yml).
+ *
+ * `~moonshotai/kimi-latest` is OpenRouter's rolling Kimi alias: the catalogue
+ * identifier keeps its `~` prefix, and that exact string is what reaches this
+ * function as `modelId`. Issue #1316 covers the alias in addition to the exact
+ * `moonshotai/kimi-k3` id.
+ */
+export const applyOpenRouterMoonshotK3Profile = (modelId: string, modelInfo: ModelInfo): ModelInfo => {
+	const moonshotK3Models = new Set<string>(["moonshotai/kimi-k3", "~moonshotai/kimi-latest"])
+	if (!moonshotK3Models.has(modelId)) {
+		return modelInfo
+	}
+	const moonshotK3Profile: Partial<ModelInfo> = {
+		maxTokens: 32_768,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "high",
+		supportsTemperature: true,
+		defaultTemperature: 1.0, // K3 is fixed at 1.0 upstream; send it explicitly (issue #1316)
+	}
+	return { ...modelInfo, ...moonshotK3Profile }
+}
+
+/**
  * parseOpenRouterModel
  */
 
@@ -317,5 +358,7 @@ export const parseOpenRouterModel = ({
 		modelInfo.maxTokens = 32768
 	}
 
-	return modelInfo
+	// Profile Moonshot K3 ids so fetched (and later cached) records carry the
+	// correct max tokens, reasoning effort ladder, and temperature handling.
+	return applyOpenRouterMoonshotK3Profile(id, modelInfo)
 }
