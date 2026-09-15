@@ -376,17 +376,22 @@ export function isToolAllowedInMode(
 ): boolean {
 	const modeSlug = mode ?? defaultModeSlug
 
+	// codebase_search belongs to the read group, not ALWAYS_AVAILABLE_TOOLS.
+	// Readiness can deny access, but must not bypass mode or disabled-tool restrictions.
+	if (
+		toolName === "codebase_search" &&
+		(!codeIndexManager ||
+			!codeIndexManager.isFeatureEnabled ||
+			!codeIndexManager.isFeatureConfigured ||
+			!codeIndexManager.isInitialized ||
+			settings?.disabledTools?.includes(toolName))
+	) {
+		return false
+	}
+
 	// Check if it's an always-available tool
 	if (ALWAYS_AVAILABLE_TOOLS.includes(toolName)) {
 		// But still check for conditional exclusions
-		if (toolName === "codebase_search") {
-			return !!(
-				codeIndexManager &&
-				codeIndexManager.isFeatureEnabled &&
-				codeIndexManager.isFeatureConfigured &&
-				codeIndexManager.isInitialized
-			)
-		}
 		if (toolName === "update_todo_list") {
 			return settings?.todoListEnabled !== false
 		}

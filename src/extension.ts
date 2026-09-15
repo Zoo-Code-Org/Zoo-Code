@@ -35,6 +35,7 @@ import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
 import { CodeIndexManager } from "./services/code-index/manager"
+import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -200,7 +201,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	if (vscode.workspace.workspaceFolders) {
 		for (const folder of vscode.workspace.workspaceFolders) {
-			const manager = CodeIndexManager.getInstance(context, folder.uri.fsPath)
+			const manager = CodeIndexManagerRegistry.getInstance(context, folder.uri.fsPath)
 
 			if (manager) {
 				codeIndexManagers.push(manager)
