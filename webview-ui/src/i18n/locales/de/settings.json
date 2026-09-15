@@ -703,6 +703,10 @@
 		"enable": {
 			"label": "Automatische Kontrollpunkte aktivieren",
 			"description": "Wenn aktiviert, erstellt Zoo automatisch Kontrollpunkte während der Aufgabenausführung, was die Überprüfung von Änderungen oder die Rückkehr zu früheren Zuständen erleichtert. <0>Mehr erfahren</0>"
+		},
+		"perWrite": {
+			"label": "Kontrollpunkt nach jedem Dateischreibvorgang",
+			"description": "Ein Kontrollpunkt-Snapshot wird nach jedem erfolgreichen Dateischreibvorgang des Agents erfasst"
 		}
 	},
 	"notifications": {

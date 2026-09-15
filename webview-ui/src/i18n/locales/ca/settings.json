@@ -703,6 +703,10 @@
 		"enable": {
 			"label": "Habilitar punts de control automàtics",
 			"description": "Quan està habilitat, Zoo crearà automàticament punts de control durant l'execució de tasques, facilitant la revisió de canvis o la reversió a estats anteriors. <0>Més informació</0>"
+		},
+		"perWrite": {
+			"label": "Punt de control després de cada escriptura de fitxer",
+			"description": "Registra una instantània de punt de control després de cada escriptura de fitxer reeixida de l’agent"
 		}
 	},
 	"notifications": {
