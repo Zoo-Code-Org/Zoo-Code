@@ -29,8 +29,7 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
-import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { createAbortError } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
@@ -1372,7 +1371,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		// Merge an optional timeout into the caller's abort signal so a timeout cancels the
 		// completion the same way an external abort does (timeoutMs <= 0 disables it).
-		const requestSignal = RequestConfigBuilder.mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 
 		try {
 			const model = this.getModel()
