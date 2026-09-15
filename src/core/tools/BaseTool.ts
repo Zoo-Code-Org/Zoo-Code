@@ -156,6 +156,13 @@ export abstract class BaseTool<TName extends ToolName> {
 			}
 		} catch (error) {
 			console.error(`Error parsing parameters:`, error)
+			// Final args could not be parsed (e.g. the model's tool call was truncated
+			// mid-JSON by the output token limit), so execute() will never run. If a
+			// streaming delta already opened a partial "tool" ask (partial: true),
+			// finalize it here or the webview spinner stays stuck indefinitely.
+			await task.finalizePartialToolAsk().catch((finalizeError) => {
+				console.error(`Error finalizing ${this.name} partial tool ask:`, finalizeError)
+			})
 			const errorMessage = `Failed to parse ${this.name} parameters: ${error instanceof Error ? error.message : String(error)}`
 			await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
 			// Note: handleError already emits a tool_result via formatResponse.toolError in the caller.
