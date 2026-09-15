@@ -173,7 +173,8 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
+				// Save directly without showing diff view or opening the file. The diff is
+				// applied to an existing file, so edit-guard semantics require a prior read.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -182,6 +183,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"edit",
 				)
 			} else {
 				// Original behavior with diff view
