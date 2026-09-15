@@ -25,6 +25,7 @@ interface HarnessOptions {
 	conflict?: boolean
 	mergeable?: boolean | null
 	mergeableState?: string
+	mergeabilitySequence?: Array<{ mergeable: boolean | null; mergeableState: string }>
 	fork?: boolean
 	eventName?: string
 	issueCommentActor?: string
@@ -246,7 +247,15 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		}
 		return [pr]
 	})
-	const getPullRequest = vi.fn(async () => ({ data: pr }))
+	let mergeabilityIndex = 0
+	const getPullRequest = vi.fn(async () => {
+		const mergeability = options.mergeabilitySequence?.[mergeabilityIndex++]
+		return {
+			data: mergeability
+				? { ...pr, mergeable: mergeability.mergeable, mergeable_state: mergeability.mergeableState }
+				: pr,
+		}
+	})
 
 	const github = {
 		paginate: vi.fn(async (target: unknown, args: unknown) => {
@@ -325,11 +334,14 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			},
 		},
 	}
-	const pullRequestPayload = {
-		number: 1437,
-		head: { repo: { full_name: headRepository } },
-		base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
-	}
+	const pullRequestPayload =
+		eventName === "push"
+			? undefined
+			: {
+					number: 1437,
+					head: { repo: { full_name: headRepository } },
+					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				}
 	const payload =
 		eventName === "schedule"
 			? {}
@@ -384,6 +396,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		createCommitStatus,
 		createLabel,
 		setFailed,
+		info: core.info,
 		warning: core.warning,
 		getPullRequest,
 		listPullRequests: github.rest.pulls.list,
@@ -413,7 +426,7 @@ describe("PR review-state workflow", () => {
 
 	it("keeps privileged event handling metadata-only and least-privilege", () => {
 		expect(workflow.permissions).toEqual({
-			"pull-requests": "read",
+			"pull-requests": "write",
 			issues: "write",
 			checks: "read",
 			statuses: "write",
@@ -525,9 +538,45 @@ describe("PR review-state workflow", () => {
 		expect(latestGuide(result)).toContain("Review-state labels are managed by this workflow")
 	})
 
-	it("routes bot-authored PRs directly to maintainer review", async () => {
+	it("starts CodeRabbit for zoomote-authored PRs after required CI passes", async () => {
 		const result = await runWorkflow({
 			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.description).toContain("Waiting for automated review")
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("coderabbit=pending"))
+	})
+
+	it("does not start CodeRabbit for draft zoomote-authored PRs", async () => {
+		const result = await runWorkflow({
+			draft: true,
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGuide(result)).toContain("Mark the PR ready")
+	})
+
+	it("does not start CodeRabbit for zoomote-authored PRs while required CI fails", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			requiredConclusion: "failure",
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("Fix the failing required CI checks")
+	})
+
+	it("routes other bot-authored PRs directly to maintainer review", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "dependabot[bot]", type: "Bot" },
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
@@ -536,11 +585,12 @@ describe("PR review-state workflow", () => {
 		)
 		expect(latestGateStatus(result)?.state).toBe("success")
 		expect(latestGateStatus(result)?.description).toContain("Awaiting fresh human maintainer")
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("coderabbit=optional"))
 	})
 
-	it("completes bot-authored PR review after human maintainer approval", async () => {
+	it("completes other bot-authored PR review after human maintainer approval", async () => {
 		const result = await runWorkflow({
-			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			prAuthor: { login: "dependabot[bot]", type: "Bot" },
 			permissions: { maintainer: "write" },
 			reviews: [
 				{
@@ -557,7 +607,7 @@ describe("PR review-state workflow", () => {
 
 	it("honors manually requested CodeRabbit changes on bot-authored PRs", async () => {
 		const result = await runWorkflow({
-			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			prAuthor: { login: "dependabot[bot]", type: "Bot" },
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -898,6 +948,102 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	it("clears awaiting-maintainer when a main push introduces conflicts", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			conflict: true,
+			labels: ["awaiting-maintainer"],
+		})
+
+		expect(workflow.on.push.branches).toContain("main")
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	it("preserves awaiting-maintainer when adding has-conflicts fails", async () => {
+		const result = await runWorkflow({
+			conflict: true,
+			labels: ["awaiting-maintainer"],
+			addLabelsStatus: 500,
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Could not add desired label"))
+	})
+
+	it("rechecks mergeability before tagging a PR awaiting maintainer", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: false, mergeableState: "dirty" },
+			],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	it("preserves the current state while mergeability is unknown", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: null, mergeableState: "unknown" },
+			],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(latestGateStatus(result)?.description).toContain("calculating mergeability")
+		expect(latestGuide(result)).toContain("calculating mergeability")
+	})
+
+	it("preserves the current state when pending mergeability metadata cannot be updated", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: null, mergeableState: "unknown" },
+			],
+			removeLabelStatus: 500,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Remove label failed"))
+	})
+
 	it("routes CodeRabbit change requests back to the author", async () => {
 		const result = await runWorkflow({
 			labels: ["coderabbit-review-active"],
@@ -949,12 +1095,16 @@ describe("PR review-state workflow", () => {
 		},
 	)
 
-	it("recognizes CodeRabbit regardless of login casing", async () => {
+	it.each([
+		{ login: "CodeRabbitAI[bot]", type: "Bot" },
+		{ login: "coderabbitai", type: "User" },
+	] as const)("recognizes CodeRabbit review login $login", async ({ login, type }) => {
 		const result = await runWorkflow({
+			permissionErrorStatus: 500,
 			reviews: [
 				{
-					login: "CodeRabbitAI[bot]",
-					type: "Bot",
+					login,
+					type,
 					state: "APPROVED",
 					submittedAt: REVIEWED_AT,
 				},

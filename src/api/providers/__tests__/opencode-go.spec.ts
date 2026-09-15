@@ -22,6 +22,7 @@ import {
 import { OpencodeGoHandler } from "../opencode-go"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
+import { Package } from "../../../shared/package"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -94,6 +95,7 @@ describe("OpencodeGoHandler", () => {
 			expect.objectContaining({
 				baseURL: "https://opencode.ai/zen/go/v1",
 				apiKey: "test-key",
+				defaultHeaders: expect.objectContaining({ "User-Agent": `ZooCode/${Package.version}` }),
 			}),
 		)
 	})
@@ -106,6 +108,7 @@ describe("OpencodeGoHandler", () => {
 				// NOT include the trailing `/v1` used by the OpenAI client.
 				baseURL: "https://opencode.ai/zen/go",
 				apiKey: "test-key",
+				defaultHeaders: expect.objectContaining({ "User-Agent": `ZooCode/${Package.version}` }),
 			}),
 		)
 	})
@@ -206,6 +209,17 @@ describe("OpencodeGoHandler", () => {
 					temperature: expect.any(Number),
 				}),
 			)
+		})
+
+		it("sends the stable conversation ID to chat completions", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages, { taskId: "conversation-123" }))
+
+			expect(mockCreate.mock.calls[0][1]?.headers).toMatchObject({
+				"x-opencode-session": "conversation-123",
+			})
 		})
 
 		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
@@ -476,6 +490,17 @@ describe("OpencodeGoHandler", () => {
 			)
 			// The OpenAI chat completions endpoint must NOT be used for this model.
 			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("sends the stable conversation ID to the Anthropic messages endpoint", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages, { taskId: "conversation-123" }))
+
+			expect(mockAnthropicCreate.mock.calls[0][1]?.headers).toMatchObject({
+				"x-opencode-session": "conversation-123",
+			})
 		})
 
 		it("streams text, tool-call, usage and cost chunks from the Anthropic stream", async () => {
@@ -845,7 +870,10 @@ describe("OpencodeGoHandler", () => {
 				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
 			)
 
-			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
+				signal: controller.signal,
+				headers: { "x-opencode-session": "test-task" },
+			})
 		})
 
 		it("closes the Responses iterator when the consumer stops early", async () => {
@@ -1334,8 +1362,12 @@ describe("OpencodeGoHandler", () => {
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
 		})
 
-		it("classifies gpt-5.6-luna as Responses-format and other models as not", () => {
+		it("classifies documented Responses models as Responses-format and other models as not", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(false)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.2-contributor")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("glm-5.3")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("qwen3.7-max")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("some-unknown-model")).toBe(false)
@@ -1344,6 +1376,7 @@ describe("OpencodeGoHandler", () => {
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
 		it("classifies Qwen and MiniMax Go models as Anthropic-format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.8-flash")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-max")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-plus")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.6-plus")).toBe(true)
@@ -1357,6 +1390,7 @@ describe("OpencodeGoHandler", () => {
 			expect(isOpencodeGoAnthropicFormatModel("kimi-k2.6")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("deepseek-v4-pro")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("mimo-v2.5")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.5-plus")).toBe(false)
 		})
 
 		it("defaults unknown model IDs to the OpenAI-compatible format", () => {

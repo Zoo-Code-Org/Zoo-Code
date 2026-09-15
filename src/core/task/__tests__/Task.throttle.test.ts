@@ -101,10 +101,10 @@ describe("Task token usage throttling", () => {
 		})
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
 		vi.useRealTimers()
 		if (task && !task.abort) {
-			task.dispose()
+			await task.dispose()
 		}
 	})
 

@@ -33,6 +33,29 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"api-config-manager": async () => {
+		const [{ AppProviders }, { default: ApiConfigManager }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ApiConfigManager"),
+		])
+		return (
+			<AppProviders>
+				<div className="w-full p-4" data-testid="api-config-manager-story">
+					<ApiConfigManager
+						currentApiConfigName="Default Config"
+						listApiConfigMeta={[
+							{ id: "default", name: "Default Config" },
+							{ id: "another", name: "Another Config" },
+						]}
+						onSelectConfig={() => undefined}
+						onDeleteConfig={() => undefined}
+						onRenameConfig={() => undefined}
+						onUpsertConfig={() => undefined}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />
