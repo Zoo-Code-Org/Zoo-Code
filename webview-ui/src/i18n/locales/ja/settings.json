@@ -975,6 +975,10 @@
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
 			"toolParameters": "パラメーター"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "ダイナミック思考強度",
+			"description": "set_thinking_effort ツールを有効にし、ステップごとにモデルが思考強度を決定できるようにします。チャット内での手動調整は常に利用可能です。（実験的機能）"
 		}
 	},
 	"promptCaching": {
