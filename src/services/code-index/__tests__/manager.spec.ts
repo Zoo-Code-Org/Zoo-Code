@@ -1,4 +1,5 @@
 import { CodeIndexManager } from "../manager"
+import { codeIndexWorkspaceScopeRegistry } from "../code-index-workspace-scope-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
 import type { MockedClass } from "vitest"
 import * as path from "path"
@@ -126,7 +127,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 
 	beforeEach(() => {
 		// Clear all instances before each test
-		CodeIndexManager.disposeAll()
+		codeIndexWorkspaceScopeRegistry.disposeAll()
 
 		const workspaceStateStore: Record<string, any> = {}
 		const globalStateStore: Record<string, any> = {}
@@ -160,11 +161,11 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			languageModelAccessInformation: {} as any,
 		}
 
-		manager = CodeIndexManager.getInstance(mockContext)!
+		manager = codeIndexWorkspaceScopeRegistry.getScope(mockContext)!.codeIndexManager
 	})
 
 	afterEach(() => {
-		CodeIndexManager.disposeAll()
+		codeIndexWorkspaceScopeRegistry.disposeAll()
 	})
 
 	describe("handleSettingsChange", () => {
@@ -733,7 +734,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 		})
 
 		it("should store enablement per folder URI, not per window", async () => {
-			CodeIndexManager.disposeAll()
+			codeIndexWorkspaceScopeRegistry.disposeAll()
 
 			const vscode = await import("vscode")
 
@@ -764,8 +765,8 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				{ uri: folderBUri, name: "folderB", index: 1 },
 			]
 
-			const managerA = CodeIndexManager.getInstance(sharedContext as any, folderAPath)!
-			const managerB = CodeIndexManager.getInstance(sharedContext as any, folderBPath)!
+			const managerA = codeIndexWorkspaceScopeRegistry.getScope(sharedContext, folderAPath)!.codeIndexManager
+			const managerB = codeIndexWorkspaceScopeRegistry.getScope(sharedContext, folderBPath)!.codeIndexManager
 
 			// Both start disabled (autoEnableDefault is false via globalState mock)
 			expect(managerA.isWorkspaceEnabled).toBe(false)
@@ -784,7 +785,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			expect(managerA.isWorkspaceEnabled).toBe(false)
 			expect(managerB.isWorkspaceEnabled).toBe(true)
 
-			CodeIndexManager.disposeAll()
+			codeIndexWorkspaceScopeRegistry.disposeAll()
 		})
 	})
 

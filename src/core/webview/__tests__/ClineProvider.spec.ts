@@ -35,6 +35,8 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
+import { CodeIndexWorkspaceScope } from "../../../services/code-index/code-index-workspace-scope"
+import { codeIndexWorkspaceScopeRegistry } from "../../../services/code-index/code-index-workspace-scope-registry"
 
 // Mock setup must come before imports.
 vi.mock("../../prompts/sections/custom-instructions")
@@ -558,6 +560,145 @@ describe("ClineProvider", () => {
 			listResources: vi.fn().mockResolvedValue([]),
 			readResource: vi.fn().mockResolvedValue({ contents: [] }),
 			getAllServers: vi.fn().mockReturnValue([]),
+		})
+	})
+
+	describe("workspace-scope progress subscriptions", () => {
+		let activeScope: CodeIndexWorkspaceScope | undefined
+		let changeEditor: () => void
+		let disposeView: () => Promise<void>
+		const editorDisposable = { dispose: vi.fn() }
+
+		function workspace(workspacePath: string) {
+			const scope = new CodeIndexWorkspaceScope(workspacePath, mockContext.extensionUri, mockContext)
+			const manager = scope.codeIndexManager
+			const status = { ...manager.getCurrentStatus(), message: workspacePath }
+			const subscriptions: { callback: (update: typeof status) => void; dispose: ReturnType<typeof vi.fn> }[] = []
+			const subscribe = vi.fn<typeof manager.onProgressUpdate>((callback) => {
+				const subscription = { callback, dispose: vi.fn() }
+				subscriptions.push(subscription)
+				return subscription
+			})
+			Object.defineProperty(manager, "onProgressUpdate", { value: subscribe })
+			const getStatus = vi.spyOn(manager, "getCurrentStatus").mockReturnValue(status)
+			return { scope, status, subscriptions, subscribe, getStatus }
+		}
+
+		beforeEach(() => {
+			activeScope = undefined
+			vi.spyOn(codeIndexWorkspaceScopeRegistry, "getScope").mockImplementation(() => activeScope)
+			vi.mocked(vscode.window.onDidChangeActiveTextEditor).mockImplementation((callback) => {
+				changeEditor = () => callback(undefined)
+				return editorDisposable
+			})
+			mockWebviewView.onDidDispose = vi.fn((callback: () => Promise<void>) => {
+				disposeView = callback
+				return { dispose: vi.fn() }
+			})
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			vi.restoreAllMocks()
+		})
+
+		it("rejects a captured stale A callback after switching to B even when workspace lookup returns A again", async () => {
+			const a = workspace("/a")
+			const b = workspace("/b")
+			activeScope = a.scope
+			await provider.resolveWebviewView(mockWebviewView)
+			activeScope = b.scope
+			changeEditor()
+			mockPostMessage.mockClear()
+			a.getStatus.mockClear()
+
+			// The editor lookup can change before the provider receives the editor event.
+			activeScope = a.scope
+			a.subscriptions[0].callback(a.status)
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+			expect(a.getStatus).not.toHaveBeenCalled()
+		})
+
+		it("reuses scope identity and publishes full current status rather than the progress payload", async () => {
+			const a = workspace("/a")
+			activeScope = a.scope
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(provider.getCurrentWorkspaceCodeIndexScope()).toBe(a.scope)
+			expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenCalledWith(mockContext)
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "indexingStatusUpdate", values: a.status })
+			mockPostMessage.mockClear()
+			changeEditor()
+			changeEditor()
+			expect(a.subscribe).toHaveBeenCalledOnce()
+			expect(a.subscriptions[0].dispose).not.toHaveBeenCalled()
+			expect(mockPostMessage).not.toHaveBeenCalled()
+
+			const latest = { ...a.status, processedItems: 7, totalItems: 10 }
+			a.getStatus.mockReturnValue(latest)
+			a.subscriptions[0].callback(a.status)
+			expect(mockPostMessage).toHaveBeenCalledExactlyOnceWith({ type: "indexingStatusUpdate", values: latest })
+		})
+
+		it("handles no workspace initially and detaches progress when the workspace disappears", async () => {
+			const a = workspace("/a")
+			await provider.resolveWebviewView(mockWebviewView)
+			changeEditor()
+			expect(provider.getCurrentWorkspaceCodeIndexScope()).toBeUndefined()
+			expect(a.subscribe).not.toHaveBeenCalled()
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "indexingStatusUpdate" }))
+
+			activeScope = a.scope
+			changeEditor()
+			expect(a.subscribe).toHaveBeenCalledOnce()
+			mockPostMessage.mockClear()
+			// Reject progress as soon as lookup changes, before the editor notification.
+			activeScope = undefined
+			a.subscriptions[0].callback(a.status)
+			expect(mockPostMessage).not.toHaveBeenCalled()
+			changeEditor()
+			changeEditor()
+			expect(a.subscriptions[0].dispose).toHaveBeenCalledOnce()
+			activeScope = a.scope
+			a.subscriptions[0].callback(a.status)
+			expect(mockPostMessage).not.toHaveBeenCalled()
+			await provider.dispose()
+			expect(a.subscriptions[0].dispose).toHaveBeenCalledOnce()
+		})
+
+		it("disposes each subscription once across A to B, sidebar disposal and reattach", async () => {
+			const a = workspace("/a")
+			const b = workspace("/b")
+			const disposeScope = vi.spyOn(b.scope, "dispose")
+			activeScope = a.scope
+			await provider.resolveWebviewView(mockWebviewView)
+			activeScope = b.scope
+			changeEditor()
+			expect(a.subscriptions[0].dispose).toHaveBeenCalledOnce()
+			expect(a.subscriptions[0].dispose.mock.invocationCallOrder[0]).toBeLessThan(
+				b.subscribe.mock.invocationCallOrder[0],
+			)
+
+			await disposeView()
+			expect(a.subscriptions[0].dispose).toHaveBeenCalledOnce()
+			expect(b.subscriptions[0].dispose).toHaveBeenCalledOnce()
+			expect(editorDisposable.dispose).toHaveBeenCalledOnce()
+			mockPostMessage.mockClear()
+			b.getStatus.mockClear()
+			b.subscriptions[0].callback(b.status)
+			expect(mockPostMessage).not.toHaveBeenCalled()
+			expect(b.getStatus).not.toHaveBeenCalled()
+
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(b.subscribe).toHaveBeenCalledTimes(2)
+			expect(b.subscriptions[0].dispose).toHaveBeenCalledOnce()
+			mockPostMessage.mockClear()
+			b.subscriptions[1].callback(b.status)
+			expect(mockPostMessage).toHaveBeenCalledExactlyOnceWith({ type: "indexingStatusUpdate", values: b.status })
+			await provider.dispose()
+			expect(b.subscriptions[1].dispose).toHaveBeenCalledOnce()
+			expect(b.subscriptions[0].dispose).toHaveBeenCalledOnce()
+			expect(disposeScope).not.toHaveBeenCalled()
 		})
 	})
 
@@ -2957,7 +3098,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				postMessageToWebview: vi.fn().mockResolvedValue(true),
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				getCurrentTask: vi.fn(),
-				getCurrentWorkspaceCodeIndexManager: vi.fn(),
+				getCurrentWorkspaceCodeIndexScope: vi.fn(),
 				getMcpHub: vi.fn().mockReturnValue({
 					getMcpSettingsFilePath: vi.fn().mockResolvedValue("/test/mcp.json"),
 				}),
@@ -3013,7 +3154,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockReturnValue(indexingPromise),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
@@ -3170,13 +3311,13 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 	it("covers changed indexing status, secret, and missing-manager responses", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })
+		const provider = createProvider({ getCurrentWorkspaceCodeIndexScope: getScope })
 
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
 		await webviewMessageHandler(provider, { type: "requestCodeIndexSecretStatus" })
-		getManager.mockReturnValueOnce(undefined)
+		getScope.mockReturnValueOnce(undefined)
 		await webviewMessageHandler(provider, { type: "startIndexing" })
 
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -3194,7 +3335,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				.mockRejectedValueOnce(new Error("second failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await webviewMessageHandler(provider, { type: "startIndexing" })
@@ -3210,7 +3351,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("toggle failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await webviewMessageHandler(provider, { type: "stopIndexing" })
@@ -3225,7 +3366,8 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	})
 
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
-		const { CodeIndexManager } = await import("../../../services/code-index/manager")
+		const { codeIndexWorkspaceScopeRegistry } =
+			await import("../../../services/code-index/code-index-workspace-scope-registry")
 		let workspaceEnabled = false
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
@@ -3234,11 +3376,13 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("auto-enable failure")),
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
-		const getAllInstances = vi
-			.spyOn(CodeIndexManager, "getAllInstances")
-			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManager.getAllInstances>)
+		const getAllScopes = vi
+			.spyOn(codeIndexWorkspaceScopeRegistry, "getAllScopes")
+			.mockReturnValue([{ codeIndexManager: manager }] as unknown as ReturnType<
+				typeof codeIndexWorkspaceScopeRegistry.getAllScopes
+			>)
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		try {
@@ -3251,14 +3395,14 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				expect.objectContaining({ type: "indexingStatusUpdate" }),
 			)
 		} finally {
-			getAllInstances.mockRestore()
+			getAllScopes.mockRestore()
 		}
 	})
 
 	it("covers changed clear-index response paths", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })
+		const provider = createProvider({ getCurrentWorkspaceCodeIndexScope: getScope })
 
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
 		await webviewMessageHandler(provider, { type: "clearIndexData" })

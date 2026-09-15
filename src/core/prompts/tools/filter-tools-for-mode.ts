@@ -3,7 +3,7 @@ import type { ModeConfig, ToolName, ToolGroup, ModelInfo } from "@roo-code/types
 import { getModeBySlug, getToolsForMode } from "../../../shared/modes"
 import { TOOL_GROUPS, ALWAYS_AVAILABLE_TOOLS, TOOL_ALIASES } from "../../../shared/tools"
 import { defaultModeSlug } from "../../../shared/modes"
-import type { CodeIndexManager } from "../../../services/code-index/manager"
+import type { CodeIndexWorkspaceScope } from "../../../services/code-index/code-index-workspace-scope"
 import type { McpHub } from "../../../services/mcp/McpHub"
 import { isToolAllowedForMode } from "../../../core/tools/validateToolUse"
 
@@ -230,7 +230,7 @@ export function filterNativeToolsForMode(
 	mode: string | undefined,
 	customModes: ModeConfig[] | undefined,
 	experiments: Record<string, boolean> | undefined,
-	codeIndexManager?: CodeIndexManager,
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 	settings?: Record<string, any>,
 	mcpHub?: McpHub,
 	allowedMcpServers?: string[],
@@ -273,6 +273,7 @@ export function filterNativeToolsForMode(
 	allowedToolNames = customizedTools
 
 	// Conditionally exclude codebase_search if feature is disabled or not configured
+	const codeIndexManager = codeIndexWorkspaceScope?.codeIndexManager
 	if (
 		!codeIndexManager ||
 		!(codeIndexManager.isFeatureEnabled && codeIndexManager.isFeatureConfigured && codeIndexManager.isInitialized)
@@ -371,22 +372,22 @@ export function isToolAllowedInMode(
 	mode: string | undefined,
 	customModes: ModeConfig[] | undefined,
 	experiments: Record<string, boolean> | undefined,
-	codeIndexManager?: CodeIndexManager,
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 	settings?: Record<string, any>,
 ): boolean {
 	const modeSlug = mode ?? defaultModeSlug
+	const codeIndexManager = codeIndexWorkspaceScope?.codeIndexManager
+
+	if (
+		toolName === "codebase_search" &&
+		!(codeIndexManager?.isFeatureEnabled && codeIndexManager.isFeatureConfigured && codeIndexManager.isInitialized)
+	) {
+		return false
+	}
 
 	// Check if it's an always-available tool
 	if (ALWAYS_AVAILABLE_TOOLS.includes(toolName)) {
 		// But still check for conditional exclusions
-		if (toolName === "codebase_search") {
-			return !!(
-				codeIndexManager &&
-				codeIndexManager.isFeatureEnabled &&
-				codeIndexManager.isFeatureConfigured &&
-				codeIndexManager.isInitialized
-			)
-		}
 		if (toolName === "update_todo_list") {
 			return settings?.todoListEnabled !== false
 		}
@@ -429,7 +430,7 @@ export function getAvailableToolsInGroup(
 	mode: string | undefined,
 	customModes: ModeConfig[] | undefined,
 	experiments: Record<string, boolean> | undefined,
-	codeIndexManager?: CodeIndexManager,
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 	settings?: Record<string, any>,
 ): ToolName[] {
 	const toolGroup = TOOL_GROUPS[groupName]
@@ -438,7 +439,7 @@ export function getAvailableToolsInGroup(
 	}
 
 	return toolGroup.tools.filter((tool) =>
-		isToolAllowedInMode(tool as ToolName, mode, customModes, experiments, codeIndexManager, settings),
+		isToolAllowedInMode(tool as ToolName, mode, customModes, experiments, codeIndexWorkspaceScope, settings),
 	) as ToolName[]
 }
 

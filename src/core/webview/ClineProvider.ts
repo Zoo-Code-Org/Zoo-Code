@@ -90,7 +90,8 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
-import { CodeIndexManager } from "../../services/code-index/manager"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
+import { codeIndexWorkspaceScopeRegistry } from "../../services/code-index/code-index-workspace-scope-registry"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
@@ -212,7 +213,7 @@ export class ClineProvider
 	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
-	private codeIndexManager?: CodeIndexManager
+	private codeIndexWorkspaceScope?: CodeIndexWorkspaceScope
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
@@ -815,6 +816,9 @@ export class ClineProvider
 	*/
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+		this.codeIndexWorkspaceScope = undefined
+		this.codeIndexStatusSubscription?.dispose()
+		this.codeIndexStatusSubscription = undefined
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -1129,8 +1133,6 @@ export class ClineProvider
 				} else {
 					this.log("Clearing webview resources for sidebar view")
 					this.clearWebviewResources()
-					// Reset current workspace manager reference when view is disposed
-					this.codeIndexManager = undefined
 				}
 			},
 			null,
@@ -3303,22 +3305,21 @@ export class ClineProvider
 	}
 
 	/**
-	 * Gets the CodeIndexManager for the current active workspace
-	 * @returns CodeIndexManager instance for the current workspace or the default one
+	 * Gets the code-index scope for the current active workspace.
+	 * @returns Workspace scope for the active workspace or the default one.
 	 */
-	public getCurrentWorkspaceCodeIndexManager(): CodeIndexManager | undefined {
-		return CodeIndexManager.getInstance(this.context)
+	public getCurrentWorkspaceCodeIndexScope(): CodeIndexWorkspaceScope | undefined {
+		return codeIndexWorkspaceScopeRegistry.getScope(this.context)
 	}
 
 	/**
 	 * Updates the code index status subscription to listen to the current workspace manager
 	 */
 	private updateCodeIndexStatusSubscription(): void {
-		// Get the current workspace manager
-		const currentManager = this.getCurrentWorkspaceCodeIndexManager()
+		const currentWorkspaceScope = this.getCurrentWorkspaceCodeIndexScope()
 
-		// If the manager hasn't changed, no need to update subscription
-		if (currentManager === this.codeIndexManager) {
+		// If the scope hasn't changed, no need to update subscription
+		if (currentWorkspaceScope === this.codeIndexWorkspaceScope) {
 			return
 		}
 
@@ -3328,14 +3329,18 @@ export class ClineProvider
 			this.codeIndexStatusSubscription = undefined
 		}
 
-		// Update the current workspace manager reference
-		this.codeIndexManager = currentManager
+		// Update the current workspace scope reference
+		this.codeIndexWorkspaceScope = currentWorkspaceScope
 
 		// Subscribe to the new manager's progress updates if it exists
-		if (currentManager) {
+		if (currentWorkspaceScope) {
+			const currentManager = currentWorkspaceScope.codeIndexManager
 			this.codeIndexStatusSubscription = currentManager.onProgressUpdate((update: IndexProgressUpdate) => {
-				// Only send updates if this manager is still the current one
-				if (currentManager === this.getCurrentWorkspaceCodeIndexManager()) {
+				// Only send updates if this scope is still the current one
+				if (
+					currentWorkspaceScope === this.codeIndexWorkspaceScope &&
+					currentWorkspaceScope === this.getCurrentWorkspaceCodeIndexScope()
+				) {
 					// Get the full status from the manager to ensure we have all fields correctly formatted
 					const fullStatus = currentManager.getCurrentStatus()
 					void this.postMessageToWebview({
@@ -3344,10 +3349,6 @@ export class ClineProvider
 					})
 				}
 			})
-
-			if (this.view) {
-				this.webviewDisposables.push(this.codeIndexStatusSubscription)
-			}
 
 			// Send initial status for the current workspace
 			void this.postMessageToWebview({

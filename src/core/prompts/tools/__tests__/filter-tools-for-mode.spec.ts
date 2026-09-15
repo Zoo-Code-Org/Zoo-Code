@@ -1,8 +1,22 @@
 // npx vitest run core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts
 
 import type OpenAI from "openai"
+import type { ModeConfig } from "@roo-code/types"
 
-import { filterNativeToolsForMode } from "../filter-tools-for-mode"
+import type { CodeIndexManager } from "../../../../services/code-index/manager"
+import type { CodeIndexWorkspaceScope } from "../../../../services/code-index/code-index-workspace-scope"
+import { filterNativeToolsForMode, getAvailableToolsInGroup, isToolAllowedInMode } from "../filter-tools-for-mode"
+
+type Readiness = Pick<CodeIndexManager, "isFeatureEnabled" | "isFeatureConfigured" | "isInitialized">
+
+function makeWorkspaceScope(readiness: Readiness): CodeIndexWorkspaceScope {
+	return {
+		// Filtering only reads readiness; keep the same object so tests can change live state.
+		codeIndexManager: readiness as CodeIndexManager,
+		initialize: vi.fn<CodeIndexWorkspaceScope["initialize"]>(),
+		dispose: vi.fn(),
+	}
+}
 
 function makeTool(name: string): OpenAI.Chat.ChatCompletionTool {
 	return {
@@ -14,6 +28,118 @@ function makeTool(name: string): OpenAI.Chat.ChatCompletionTool {
 		},
 	} as OpenAI.Chat.ChatCompletionTool
 }
+
+describe("workspace-scoped codebase_search filtering", () => {
+	it("retains search through all three APIs when the supplied scope is ready", () => {
+		const scope = makeWorkspaceScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
+		const search = makeTool("codebase_search")
+		const read = makeTool("read_file")
+
+		expect(filterNativeToolsForMode([read, search], "code", undefined, undefined, scope)).toEqual([read, search])
+		expect(isToolAllowedInMode("codebase_search", "code", undefined, undefined, scope)).toBe(true)
+		expect(getAvailableToolsInGroup("read", "code", undefined, undefined, scope)).toContain("codebase_search")
+	})
+
+	const consumers = [
+		{
+			name: "filterNativeToolsForMode",
+			available: (scope?: CodeIndexWorkspaceScope) =>
+				filterNativeToolsForMode(
+					[makeTool("read_file"), makeTool("codebase_search")],
+					"code",
+					undefined,
+					undefined,
+					scope,
+				).flatMap((tool) => (tool.type === "function" ? [tool.function.name] : [])),
+		},
+		{
+			name: "isToolAllowedInMode",
+			available: (scope?: CodeIndexWorkspaceScope) =>
+				(["read_file", "codebase_search"] as const).filter((tool) =>
+					isToolAllowedInMode(tool, "code", undefined, undefined, scope),
+				),
+		},
+		{
+			name: "getAvailableToolsInGroup",
+			available: (scope?: CodeIndexWorkspaceScope) =>
+				getAvailableToolsInGroup("read", "code", undefined, undefined, scope),
+		},
+	]
+
+	describe.each(consumers)("$name", ({ available }) => {
+		it.each([
+			[false, false, false, false],
+			[false, false, true, false],
+			[false, true, false, false],
+			[false, true, true, false],
+			[true, false, false, false],
+			[true, false, true, false],
+			[true, true, false, false],
+			[true, true, true, true],
+		])(
+			"enabled=%s configured=%s initialized=%s exposes search=%s",
+			(isFeatureEnabled, isFeatureConfigured, isInitialized, expected) => {
+				const scope = makeWorkspaceScope({ isFeatureEnabled, isFeatureConfigured, isInitialized })
+				const tools = available(scope)
+
+				expect(tools.includes("codebase_search")).toBe(expected)
+				expect(tools).toContain("read_file")
+			},
+		)
+
+		it("hides search without a workspace scope but preserves ordinary read tools", () => {
+			const tools = available(undefined)
+
+			expect(tools).not.toContain("codebase_search")
+			expect(tools).toContain("read_file")
+		})
+
+		it.each(["isFeatureEnabled", "isFeatureConfigured", "isInitialized"] as const)(
+			"rereads %s from the same manager on every call",
+			(flag) => {
+				const readiness = { isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }
+				const scope = makeWorkspaceScope(readiness)
+
+				expect(available(scope)).toContain("codebase_search")
+				readiness[flag] = false
+				expect(available(scope)).not.toContain("codebase_search")
+				readiness[flag] = true
+				expect(available(scope)).toContain("codebase_search")
+			},
+		)
+
+		it("uses the supplied workspace rather than readiness from a previous workspace", () => {
+			const ready = makeWorkspaceScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
+			const unready = makeWorkspaceScope({
+				isFeatureEnabled: true,
+				isFeatureConfigured: true,
+				isInitialized: false,
+			})
+
+			expect(available(ready)).toContain("codebase_search")
+			expect(available(unready)).not.toContain("codebase_search")
+			expect(available(undefined)).not.toContain("codebase_search")
+			expect(available(ready)).toContain("codebase_search")
+		})
+	})
+
+	it("does not let a ready workspace bypass a custom mode without the read group", () => {
+		const scope = makeWorkspaceScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
+		const mode: ModeConfig = {
+			slug: "command-only",
+			name: "Command only",
+			roleDefinition: "Run commands only",
+			groups: ["command"],
+		}
+		const command = makeTool("execute_command")
+
+		expect(
+			filterNativeToolsForMode([command, makeTool("codebase_search")], mode.slug, [mode], undefined, scope),
+		).toEqual([command])
+		expect(isToolAllowedInMode("codebase_search", mode.slug, [mode], undefined, scope)).toBe(false)
+		expect(getAvailableToolsInGroup("read", mode.slug, [mode], undefined, scope)).not.toContain("codebase_search")
+	})
+})
 
 describe("filterNativeToolsForMode - disabledTools", () => {
 	const nativeTools: OpenAI.Chat.ChatCompletionTool[] = [
