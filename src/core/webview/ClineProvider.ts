@@ -2081,15 +2081,15 @@ export class ClineProvider
 
 		// A cancelled or timed-out switch must not be partially applied: bail out
 		// before the task history / _taskMode writes as well as the durable mode
-		// write below. The pre-write check further down still covers aborts that
-		// land while the task writes are in flight.
+		// write below. Aborts that land while the history write is in flight are
+		// handled in flight (the landed write is rolled back); the pre-write check
+		// further down still covers the remaining gap before the durable write.
 		if (signal?.aborted) {
 			return
 		}
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
-			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
 
 			try {
 				// Update the task history with the new mode first.
@@ -2099,7 +2099,20 @@ export class ClineProvider
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
+
+					// An abort that lands while the history write is in flight has
+					// already persisted the new mode: restore the pre-switch item and
+					// bail before the in-memory task write and the emit, so task
+					// history, task state, and provider mode cannot diverge.
+					if (signal?.aborted) {
+						await this.updateTaskHistory(taskHistoryItem)
+						return
+					}
+				} else if (signal?.aborted) {
+					return
 				}
+
+				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
 
 				// Only update the task's mode after successful persistence.
 				;(task as any)._taskMode = newMode
@@ -2393,23 +2406,38 @@ export class ClineProvider
 			)
 		}
 
-		// Capture this view's pin before setValue rewrites it: a view pinned to the
+		// Capture this view's pin before any rewrite: a view pinned to the
 		// deleted profile while the global selection points elsewhere must still be
 		// reconfigured, or getState() would keep the deleted profile's settings under
 		// the surviving profile's name.
 		const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
-		await this.setValue("currentApiConfigName", profileToActivate)
+		if (viewWasPinnedToDeleted) {
+			// This view's pin now dangles: re-point it. setValue also persists the
+			// survivor to the shared store, which covers the deleted-was-global case
+			// for every other view as well as this one.
+			await this.setValue("currentApiConfigName", profileToActivate)
+		} else if (deletedWasGlobal) {
+			// The shared selection changed, but this view's own pin still names a
+			// surviving profile: update the shared store only, leaving the
+			// view-local pin untouched.
+			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
+		}
 
-		if (
-			(profileToDelete.name === globalSettings.currentApiConfigName || viewWasPinnedToDeleted) &&
-			survivingSettings
-		) {
+		if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
 			// The deleted profile was the active one (globally, or for this view), so
-			// the shared provider keys and this view's buffer still carry its settings;
-			// replace both so getState() reports the surviving profile's configuration.
+			// the shared provider keys still carry its settings; replace them so
+			// getState() reports the surviving profile's configuration.
 			await this.contextProxy.setProviderSettings(survivingSettings)
-			await this._saveViewLocalStateFromMutation(survivingSettings)
+
+			if (viewWasPinnedToDeleted) {
+				// This view's nested overlay (viewLocalState.apiConfiguration, seeded
+				// by loadViewState) still serves the deleted profile's configuration:
+				// replace it with the survivor's so the re-pointed pin serves matching
+				// settings. A view pinned to another profile keeps its own overlay.
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+			}
 		}
 
 		// Re-pin other live views still buffered on the deleted profile: their
