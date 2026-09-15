@@ -14,8 +14,12 @@ export const parseCoverageSourceLines = (lcov, lane) => {
 		} else if (line.startsWith("DA:")) {
 			if (!source) throw new Error(`${lane} coverage contains DA outside a source record`)
 			if (hasSummary) throw new Error(`${lane} coverage contains DA after LF for ${source}`)
-			const lineNumber = Number(line.slice(3).split(",", 1)[0])
+			const match = /^DA:(\d+),(\d+)(?:,[^,\r\n]+)?$/.exec(line)
+			const lineNumber = match ? Number(match[1]) : Number.NaN
+			const executionCount = match ? Number(match[2]) : Number.NaN
 			if (!Number.isSafeInteger(lineNumber) || lineNumber < 1)
+				throw new Error(`${lane} coverage contains invalid DA for ${source}`)
+			if (!Number.isSafeInteger(executionCount))
 				throw new Error(`${lane} coverage contains invalid DA for ${source}`)
 			if (instrumentedLines.has(lineNumber))
 				throw new Error(`${lane} coverage contains duplicate DA for ${source}:${lineNumber}`)
@@ -24,7 +28,8 @@ export const parseCoverageSourceLines = (lcov, lane) => {
 			if (!source) throw new Error(`${lane} coverage contains LF outside a source record`)
 			if (sources.has(source)) throw new Error(`${lane} coverage contains duplicate source record: ${source}`)
 
-			const linesFound = Number(line.slice(3))
+			const match = /^LF:(\d+)$/.exec(line)
+			const linesFound = match ? Number(match[1]) : Number.NaN
 			if (!Number.isSafeInteger(linesFound) || linesFound < 0 || linesFound !== instrumentedLines.size)
 				throw new Error(`${lane} coverage contains invalid LF for ${source}`)
 			sources.set(source, instrumentedLines)
@@ -45,7 +50,8 @@ export const mergeCoverageSources = (expectedLanes, coverageByLane) => {
 	for (const [lane, sources] of coverageByLane) {
 		if (lanes.has(lane)) throw new Error(`Coverage lane is duplicated: ${lane}`)
 		lanes.add(lane)
-		if (sources.size === 0) throw new Error(`Coverage lane has no source records: ${lane}`)
+		if (sources.size === 0 || [...sources.values()].every((lines) => lines.size === 0))
+			throw new Error(`Coverage lane has no instrumented lines: ${lane}`)
 		for (const [source, instrumentedLines] of sources) {
 			const existingLines = combinedSources.get(source)
 			if (

@@ -79,6 +79,51 @@ describe("coverage source equivalence", () => {
 		)
 	})
 
+	it.each([
+		["empty source paths", "SF:\nLF:0\nend_of_record", "empty source path"],
+		["DA outside a record", "DA:1,1", "DA outside a source record"],
+		["LF outside a record", "LF:0", "LF outside a source record"],
+		["DA after LF", "SF:src/a.ts\nDA:1,1\nLF:1\nDA:2,1\nend_of_record", "DA after LF"],
+		["missing DA counts", "SF:src/a.ts\nDA:1\nLF:1\nend_of_record", "invalid DA"],
+		["nonnumeric DA counts", "SF:src/a.ts\nDA:1,nope\nLF:1\nend_of_record", "invalid DA"],
+		[
+			"unsafe DA line numbers",
+			`SF:src/a.ts\nDA:${Number.MAX_SAFE_INTEGER + 1},0\nLF:1\nend_of_record`,
+			"invalid DA",
+		],
+		["unsafe DA counts", `SF:src/a.ts\nDA:1,${Number.MAX_SAFE_INTEGER + 1}\nLF:1\nend_of_record`, "invalid DA"],
+		["duplicate DA lines", "SF:src/a.ts\nDA:1,0\nDA:1,1\nLF:2\nend_of_record", "duplicate DA"],
+		["empty LF values", "SF:src/a.ts\nLF:\nend_of_record", "invalid LF"],
+		["nonnumeric LF values", "SF:src/a.ts\nLF:nope\nend_of_record", "invalid LF"],
+		["invalid terminators", "end_of_record", "invalid record terminator"],
+	])("rejects %s", (_name, lcov, error) => {
+		expect(() => parseCoverageSourceLines(lcov, "api")).toThrow(error)
+	})
+
+	it("accepts DA and LF numeric boundaries", () => {
+		expect(() =>
+			parseCoverageSourceLines(
+				`SF:src/a.ts\nDA:1,0\nDA:${Number.MAX_SAFE_INTEGER},0,checksum\nLF:2\nend_of_record`,
+				"api",
+			),
+		).not.toThrow()
+	})
+
+	it("rejects empty and unexpected lane coverage", () => {
+		expect(() => mergeCoverageSources(["api"], [["api", new Map()]])).toThrow(
+			"Coverage lane has no instrumented lines: api",
+		)
+		expect(() =>
+			mergeCoverageSources(
+				["api"],
+				[
+					["api", parse([["src/a.ts", [1]]], "api")],
+					["core", parse([["src/a.ts", [1]]], "core")],
+				],
+			),
+		).toThrow("Unexpected coverage lane: core")
+	})
+
 	it("rejects conflicting instrumented line counts", () => {
 		expect(() =>
 			mergeCoverageSources(
