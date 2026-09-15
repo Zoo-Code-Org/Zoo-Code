@@ -118,6 +118,18 @@ async function main() {
 	/**
 	 * @type {import('esbuild').BuildOptions}
 	 */
+	// Invariant: socket.io is dev-only tooling for the browser bridge. Its single
+	// dynamic `import()` lives in BrowserBridgeServer.start(), which is reachable
+	// only through `registerCommand`'s `ROO_BROWSER_BRIDGE=1` + Development
+	// self-gate and can never execute in a production extension host. Keeping it
+	// external in production bundles ships zero bytes of socket.io/engine.io/ws
+	// (the VSIX is packaged with `--no-dependencies` anyway), while dev bundles
+	// keep inlining it so the bridge works straight from node_modules.
+	const external = ["vscode", "esbuild", "global-agent", "@vscode/ripgrep"]
+	if (production) {
+		external.push("socket.io")
+	}
+
 	const extensionConfig = {
 		...buildOptions,
 		plugins,
@@ -126,7 +138,7 @@ async function main() {
 		// global-agent must be external because it dynamically patches Node.js http/https modules
 		// which breaks when bundled. It needs access to the actual Node.js module instances.
 		// undici must be bundled because our VSIX is packaged with `--no-dependencies`.
-		external: ["vscode", "esbuild", "global-agent", "@vscode/ripgrep"],
+		external,
 	}
 
 	/**
