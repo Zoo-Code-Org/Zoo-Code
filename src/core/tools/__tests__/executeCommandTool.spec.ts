@@ -1,6 +1,7 @@
 // npx vitest run src/core/tools/__tests__/executeCommandTool.spec.ts
 
 import type { ToolUsage } from "@roo-code/types"
+import fs from "fs/promises"
 import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
@@ -354,6 +355,28 @@ describe("executeCommandTool", () => {
 
 			expect(mockEnsureDcgInstalled).toHaveBeenCalledWith("/test/storage")
 			expect(mockRunDcg).toHaveBeenCalledWith("/test/storage/dcg", "echo test", "/test/workspace")
+		})
+
+		it("rejects a missing working directory before starting DCG", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/missing/remote/workspace"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/missing/remote/workspace" }
+			vi.mocked(fs.access).mockRejectedValueOnce(new Error("ENOENT"))
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				"Working directory '/missing/remote/workspace' does not exist.",
+			)
+			expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+			expect(mockRunDcg).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
 		})
 
 		it("fails closed when the DCG install or update fails", async () => {

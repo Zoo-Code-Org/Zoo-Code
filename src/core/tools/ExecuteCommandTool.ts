@@ -76,6 +76,15 @@ export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined)
 	return process.env.ROO_CLI_RUNTIME === "1" ? 0 : requestedAgentTimeout
 }
 
+async function commandWorkingDirectoryError(workingDirectory: string): Promise<string | undefined> {
+	try {
+		await fs.access(workingDirectory)
+		return undefined
+	} catch {
+		return `Working directory '${workingDirectory}' does not exist.`
+	}
+}
+
 // Fire-and-forget: some call sites are synchronous terminal callbacks that cannot await,
 // and postMessageToWebview swallows its own errors, so void is enough.
 function postCommandExecutionStatus(provider: ClineProvider | undefined, status: CommandExecutionStatus): void {
@@ -127,10 +136,20 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				pushToolResult(formatResponse.toolError(parseError.message))
 				return
 			}
-
 			const provider = await task.providerRef.deref()
 			let dcgBlocked = false
 			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
+				const workingDirectory = customCwd
+					? path.isAbsolute(customCwd)
+						? customCwd
+						: path.resolve(task.cwd, customCwd)
+					: task.cwd
+				const workingDirectoryError = await commandWorkingDirectoryError(workingDirectory)
+				if (workingDirectoryError) {
+					task.didToolFailInCurrentTurn = true
+					pushToolResult(workingDirectoryError)
+					return
+				}
 				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
 				// Resolve through the managed installer on use so an extension update
 				// automatically installs the newly pinned and verified DCG version.
@@ -138,11 +157,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				if (!binaryPath) {
 					throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
 				}
-				const workingDirectory = customCwd
-					? path.isAbsolute(customCwd)
-						? customCwd
-						: path.resolve(task.cwd, customCwd)
-					: task.cwd
+				// Use the same validated directory as terminal execution. A missing cwd
+				// also surfaces as spawn ENOENT and can be mistaken for a missing binary.
 				const dcgResult = await runDcg(binaryPath, canonicalCommand, workingDirectory)
 				dcgBlocked = dcgResult.decision === "deny"
 				if (dcgResult.decision === "deny") {
@@ -272,7 +288,6 @@ export async function executeCommandInTerminal(
 	// Convert milliseconds back to seconds for display purposes.
 	const commandExecutionTimeoutSeconds = commandExecutionTimeout / 1000
 	let workingDir: string
-
 	if (!customCwd) {
 		workingDir = task.cwd
 	} else if (path.isAbsolute(customCwd)) {
@@ -280,11 +295,9 @@ export async function executeCommandInTerminal(
 	} else {
 		workingDir = path.resolve(task.cwd, customCwd)
 	}
-
-	try {
-		await fs.access(workingDir)
-	} catch (error) {
-		return [false, `Working directory '${workingDir}' does not exist.`]
+	const workingDirectoryError = await commandWorkingDirectoryError(workingDir)
+	if (workingDirectoryError) {
+		return [false, workingDirectoryError]
 	}
 
 	let runInBackground = false
