@@ -81,6 +81,118 @@ describe("getModelMaxOutputTokens", () => {
 		expect(result).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS) // Should be 8192, not 64_000
 	})
 
+	test("should honor modelMaxTokens override for Anthropic hybrid models when reasoning is disabled", () => {
+		const anthropicModelId = "claude-sonnet-4-20250514"
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			maxTokens: 64_000,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "anthropic",
+			enableReasoningEffort: false,
+			modelMaxTokens: 32_768,
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: anthropicModelId, model, settings })
+		expect(result).toBe(32_768)
+	})
+
+	test("should cap modelMaxTokens override at model maxTokens for Anthropic hybrid models when reasoning is disabled", () => {
+		const anthropicModelId = "claude-sonnet-4-20250514"
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			maxTokens: 64_000,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "anthropic",
+			enableReasoningEffort: false,
+			modelMaxTokens: 100_000,
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: anthropicModelId, model, settings })
+		expect(result).toBe(64_000)
+	})
+
+	test("should ignore modelMaxTokens: 0 for Anthropic hybrid models and preserve the default 8K cap", () => {
+		const anthropicModelId = "claude-sonnet-4-20250514"
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			maxTokens: 64_000,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "anthropic",
+			enableReasoningEffort: false,
+			modelMaxTokens: 0,
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: anthropicModelId, model, settings })
+		expect(result).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+	})
+
+	test("should honor modelMaxTokens override for Anthropic hybrid models via OpenRouter when reasoning is disabled", () => {
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			maxTokens: 64_000,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "openrouter",
+			enableReasoningEffort: false,
+			modelMaxTokens: 32_768,
+		}
+
+		const result = getModelMaxOutputTokens({
+			modelId: "anthropic/claude-sonnet-4-20250514",
+			model,
+			settings,
+			format: "openrouter",
+		})
+		expect(result).toBe(32_768)
+	})
+
+	test("should honor modelMaxTokens override for non-reasoning Anthropic models", () => {
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			maxTokens: 8192,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "anthropic",
+			modelMaxTokens: 4096,
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: "claude-3-5-sonnet-20241022", model, settings })
+		expect(result).toBe(4096)
+	})
+
+	test("should cap modelMaxTokens override for non-reasoning Anthropic models at model maxTokens", () => {
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			maxTokens: 8192,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "anthropic",
+			modelMaxTokens: 16_384,
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: "claude-3-5-sonnet-20241022", model, settings })
+		expect(result).toBe(8192)
+	})
+
 	test("should preserve Anthropic hybrid token handling when a model also supports binary reasoning", () => {
 		const model: ModelInfo = {
 			contextWindow: 1_000_000,
