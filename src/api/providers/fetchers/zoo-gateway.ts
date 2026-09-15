@@ -20,29 +20,48 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
  * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
  */
 
-export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export type ZooGatewayModelsFetchResult =
+	| { kind: "ok"; models: Record<string, ModelInfo>; etag?: string }
+	| { kind: "not_modified" }
+
+export async function getZooGatewayModels(
+	options?: ApiHandlerOptions & { ifNoneMatch?: string },
+): Promise<ZooGatewayModelsFetchResult> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
 	const sessionToken = resolveZooGatewaySessionToken(options?.zooSessionToken)
 	if (!sessionToken) {
-		return models
+		return { kind: "ok", models }
 	}
 
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${sessionToken}`,
+	}
+	// Stryker disable next-line OptionalChaining,ConditionalExpression: options is defined whenever sessionToken resolved from it
+	if (options?.ifNoneMatch) {
+		headers["If-None-Match"] = options.ifNoneMatch
 	}
 
 	try {
 		const response = await axios.get(`${baseURL}/models`, {
 			headers,
 			timeout: MODEL_DISCOVERY_TIMEOUT_MS,
+			validateStatus: (status) => status === 200 || status === 304,
 		})
+
+		if (response.status === 304) {
+			return { kind: "not_modified" }
+		}
+
+		// Stryker disable next-line ConditionalExpression: Node lowercases header names; non-string etag values are ignored
+		const etag = typeof response.headers.etag === "string" ? response.headers.etag : undefined
+
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 
 		if (!result.success) {
 			console.error(`Zoo Gateway models response is invalid ${JSON.stringify(result.error.format())}`)
-			return models
+			return { kind: "ok", models }
 		}
 
 		for (const model of result.data.data) {
@@ -56,6 +75,8 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 
 			models[id] = parseZooGatewayModel({ id, model })
 		}
+
+		return { kind: "ok", models, etag }
 	} catch (error) {
 		// Log only safe fields; never serialize the full error object because it
 		// includes request config/headers which carry the bearer session token.
@@ -70,7 +91,7 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 		)
 	}
 
-	return models
+	return { kind: "ok", models }
 }
 
 /**
