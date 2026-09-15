@@ -87,6 +87,7 @@ jobs:
             const codeRabbitLogin = 'coderabbitai[bot]';
             const codeRabbitLogins = new Set([codeRabbitLogin, 'coderabbitai']);
             const codeRabbitActiveLabel = 'coderabbit-review-active';
+            const codeRabbitEligibleBotLogins = new Set(['zoomote[bot]']);
             const reviewGateName = 'Zoo Code / PR review gate';
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
 
@@ -660,6 +661,8 @@ jobs:
                   review => review.state === 'CHANGES_REQUESTED'
                 );
                 const automatedAuthor = pr.user?.type === 'Bot';
+                const codeRabbitEligibleAuthor = !automatedAuthor ||
+                  codeRabbitEligibleBotLogins.has(pr.user?.login.toLowerCase());
                 const codeRabbitReviewComplete = freshCodeRabbitReview?.state === 'APPROVED';
                 const codeRabbitChangesRequested = freshCodeRabbitReview?.state === 'CHANGES_REQUESTED';
                 const maintainerApproval = freshMaintainerReviews
@@ -676,7 +679,7 @@ jobs:
                 if (codeRabbitChangesRequested || maintainerChangeRequest) {
                   desiredLabel = 'awaiting-author';
                   phase = codeRabbitChangesRequested ? 'coderabbit-changes' : 'maintainer-changes';
-                } else if (automatedAuthor) {
+                } else if (!codeRabbitEligibleAuthor) {
                   if (pr.draft) {
                     desiredLabel = null;
                     phase = 'draft';
@@ -736,7 +739,7 @@ jobs:
 
                 core.info(
                   `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
-                  `coderabbit=${freshCodeRabbitReview?.state ?? (automatedAuthor ? 'optional' : 'pending')}, ` +
+                  `coderabbit=${freshCodeRabbitReview?.state ?? (codeRabbitEligibleAuthor ? 'pending' : 'optional')}, ` +
                   `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
                 );
 
