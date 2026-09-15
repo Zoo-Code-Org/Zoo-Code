@@ -428,6 +428,15 @@ export const bedrockModels = {
 		outputPrice: 6.0,
 		description: "GPT-OSS 120B - Production-ready, general-purpose, high-reasoning model",
 	},
+	"openai.gpt-5.6-sol": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		inputPrice: 4.4,
+		outputPrice: 22.0,
+		description: "GPT-5.6 Sol - OpenAI's most capable model for coding, cybersecurity, and scientific research",
+	},
 	"meta.llama3-3-70b-instruct-v1:0": {
 		maxTokens: 8192,
 		contextWindow: 128_000,
@@ -675,6 +684,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-5",
 	"anthropic.claude-fable-5-1",
 	"anthropic.claude-fable-5",
+	"openai.gpt-5.6-sol",
 ] as const
 
 // Amazon Bedrock Service Tier types
