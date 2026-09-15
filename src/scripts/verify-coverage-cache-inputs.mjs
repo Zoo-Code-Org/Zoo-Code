@@ -4,6 +4,9 @@ import { resolve } from "node:path"
 import process from "node:process"
 import { test } from "node:test"
 
+if (process.env.GITHUB_ACTIONS !== "true" && process.env.ZOO_ALLOW_COVERAGE_INPUT_MUTATION !== "true")
+	throw new Error("Coverage cache input verification requires an ephemeral runner or explicit local opt-in")
+
 const root = resolve(import.meta.dirname, "../..")
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
 if (!pnpm) throw new Error("pnpm executable path is unavailable")
