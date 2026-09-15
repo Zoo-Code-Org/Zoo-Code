@@ -3,6 +3,7 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	mergeAbortSignals,
+	settleOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
 
@@ -130,6 +131,8 @@ describe("abort-signal utilities", () => {
 
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("AbortError")
+			// The exact message is part of the abort contract: callers (Task.ts,
+			// provider guards) must be able to recognize this error shape.
 			expect((caught as Error).message).toBe("This operation was aborted")
 		})
 	})
@@ -184,6 +187,126 @@ describe("abort-signal utilities", () => {
 
 		it("returns a fresh error on each call", () => {
 			expect(createAbortError("X")).not.toBe(createAbortError("X"))
+		})
+	})
+
+	describe("settleOnAbort", () => {
+		it("returns the pending promise unchanged when the signal is undefined", async () => {
+			expect(await settleOnAbort(Promise.resolve(42), undefined, "Test")).toBe(42)
+		})
+
+		it("rejects immediately when the signal is already aborted", async () => {
+			// A listener registered on an already-aborted signal never fires,
+			// so the aborted state must be checked up front; the pending work
+			// keeps running (a helper that skipped the check would resolve
+			// with the sentinel instead of rejecting).
+			const controller = new AbortController()
+			controller.abort()
+			const pending = new Promise<number>((resolve) => {
+				setTimeout(() => resolve(1), 20)
+			})
+
+			let caught: unknown
+			try {
+				await settleOnAbort(pending, controller.signal, "Qwen Code")
+			} catch (error) {
+				caught = error
+			}
+			await new Promise((resolve) => setTimeout(resolve, 30)) // let the sentinel arrive
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+		})
+
+		it("resolves with the pending value when it settles before the signal aborts", async () => {
+			const controller = new AbortController()
+			const pending = new Promise<number>((resolve) => {
+				setTimeout(() => resolve(7), 10)
+			})
+
+			expect(await settleOnAbort(pending, controller.signal, "Test")).toBe(7)
+		})
+
+		it("rejects with the abort contract error when the signal aborts before the pending promise settles", async () => {
+			const controller = new AbortController()
+			let resolvePending!: (value: number) => void
+			const pending = new Promise<number>((resolve) => {
+				resolvePending = resolve
+			})
+			const racing = settleOnAbort(pending, controller.signal, "LM Studio")
+			controller.abort()
+
+			let caught: unknown
+			try {
+				await racing
+			} catch (error) {
+				caught = error
+			}
+			resolvePending(1) // the underlying work still settles; it must not leak a rejection
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The LM Studio request was aborted")
+		})
+
+		it("removes the abort listener once the pending promise settles", async () => {
+			const controller = new AbortController()
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+			expect(await settleOnAbort(Promise.resolve("done"), controller.signal, "Test")).toBe("done")
+
+			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(removeSpy).toHaveBeenCalledTimes(1)
+			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		})
+
+		it("removes the abort listener when the pending promise settles after an abort", async () => {
+			const controller = new AbortController()
+			let resolvePending!: (value: number) => void
+			const pending = new Promise<number>((resolve) => {
+				resolvePending = resolve
+			})
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const racing = settleOnAbort(pending, controller.signal, "Test")
+			controller.abort()
+
+			let caught: unknown
+			try {
+				await racing
+			} catch (error) {
+				caught = error
+			}
+			resolvePending(1) // settles the underlying work, which triggers the cleanup
+			await Promise.resolve()
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(removeSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("propagates a pending promise rejection unchanged and detaches the abort listener", async () => {
+			const controller = new AbortController()
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const failure = new Error("count failed")
+
+			let caught: unknown
+			try {
+				await settleOnAbort(Promise.reject(failure), controller.signal, "Test")
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBe(failure)
+			// The rejection path must detach the listener too: a leaked listener
+			// would keep this helper's closure alive for the life of the signal.
+			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(removeSpy).toHaveBeenCalledTimes(1)
+			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 		})
 	})
 })
