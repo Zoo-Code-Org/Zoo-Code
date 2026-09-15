@@ -18,7 +18,7 @@ import {
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Task } from "../Task"
+import { Task, ApiRetryCapExceededError } from "../Task"
 import { SYSTEM_PROMPT } from "../../prompts/system"
 import { createRateLimitClock } from "../RateLimitClock"
 import { summarizeConversation } from "../../condense"
@@ -32,6 +32,7 @@ import { asyncStreamFrom } from "../../../test-utils/stream"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
 	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
@@ -1181,6 +1182,365 @@ describe("Cline", () => {
 				])
 				expect(mockDelay).toHaveBeenCalledTimes(3)
 				expect(mockDelay).toHaveBeenCalledWith(1000)
+			})
+
+			it("should cap the auto-approval retry loop on a persistent API error", async () => {
+				const cline = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(getTaskTestAccess(cline), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				// Mock delay to keep the backoff instant
+				const mockDelay = vi.fn().mockResolvedValue(undefined)
+				vi.spyOn(await import("delay"), "default").mockImplementation(mockDelay)
+
+				const saySpy = vi.spyOn(cline, "say")
+
+				// A stream that errors on every access — the API never succeeds.
+				const mockError = new Error("API Error")
+				const mockFailedStream = {
+					// eslint-disable-next-line require-yield
+					async *[Symbol.asyncIterator]() {
+						throw mockError
+					},
+					async next() {
+						throw mockError
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: unknown) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 3,
+				})
+
+				let attemptCount = 0
+				const mockSuccessStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "Success" }
+					},
+					async next() {
+						return { done: true, value: { type: "text", text: "Success" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: unknown) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+				const createMessageSpy = vi.spyOn(cline.api, "createMessage").mockImplementation(() => {
+					attemptCount++
+					// Fail fast if the retry loop is unbounded — succeeding on a 5th attempt
+					// bounds the run if the cap is mutated away, so the count assertions
+					// below redden instead of the suite hanging.
+					if (attemptCount > 4) {
+						cline.abort = true
+						return mockSuccessStream
+					}
+					return mockFailedStream
+				})
+
+				// One backoff per retry, and the cap must refuse to back off again once hit.
+				const backoffSpy = vi.spyOn(getTaskTestAccess(cline), "backoffAndAnnounce").mockResolvedValue(undefined)
+
+				// 1 initial attempt + MAX_AUTO_APPROVAL_RETRIES(3) retries, then the loop must throw.
+				const iterator = cline.attemptApiRequest(0)
+				let thrown: unknown
+				try {
+					await iterator.next()
+				} catch (e) {
+					thrown = e
+				}
+
+				// The stop is loud and names the last underlying error and the cap.
+				expect(thrown).toBeInstanceOf(ApiRetryCapExceededError)
+				expect((thrown as Error).name).toBe("ApiRetryCapExceededError")
+				expect((thrown as Error).message).toMatch(/^\[Task#attemptApiRequest\] task [\w-]+\.[\w-]+ aborted/)
+				expect((thrown as Error).message).toMatch(/capped.*roo-extensions#3195/)
+				expect((thrown as Error).message).toContain("(last: API Error)")
+				// The cause names the auto-approval cap (not the context-window path) so a
+				// mutant emptying the cause string reddens here.
+				expect((thrown as Error).message).toContain("persistent API error after")
+				expect(attemptCount).toBe(4)
+				expect(createMessageSpy).toHaveBeenCalledTimes(4)
+				// Exactly as many backoffs as retries — the request that finally threw never slept.
+				expect(backoffSpy).toHaveBeenCalledTimes(3)
+			})
+
+			it("names context-window exhaustion instead of the auto-approval cap when truncation retries are spent", async () => {
+				const cline = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(getTaskTestAccess(cline), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 3,
+				})
+
+				// A first-chunk error whose message matches the context-window patterns.
+				const mockError = Object.assign(new Error("This model has a maximum context window of 200000 tokens"), {
+					status: 400,
+				})
+				const mockFailedStream = {
+					// eslint-disable-next-line require-yield
+					async *[Symbol.asyncIterator]() {
+						throw mockError
+					},
+					async next() {
+						throw mockError
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: unknown) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+
+				let attempts = 0
+				const createMessageSpy = vi.spyOn(cline.api, "createMessage").mockImplementation(() => {
+					attempts++
+					// Valve: if the cap is mutated away, succeed instead of recursing forever —
+					// the assertions below redden rather than the suite hanging.
+					if (attempts > 1) {
+						cline.abort = true
+						return {
+							async *[Symbol.asyncIterator]() {
+								yield { type: "text", text: "Success" }
+							},
+						} as AsyncGenerator<ApiStreamChunk>
+					}
+					return mockFailedStream
+				})
+
+				// Enter with the context-window budget already spent — the fall-through must
+				// blame the context window, not the auto-approval cap.
+				const iterator = cline.attemptApiRequest(3)
+				let thrown: unknown
+				try {
+					await iterator.next()
+				} catch (e) {
+					thrown = e
+				}
+
+				expect(thrown).toBeInstanceOf(ApiRetryCapExceededError)
+				const message = (thrown as Error).message
+				expect(message).toMatch(/context window retries exhausted/)
+				expect(message).not.toMatch(/auto-approval retries/)
+				// Terminal on the first attempt — no backoff, no retry.
+				expect(createMessageSpy).toHaveBeenCalledTimes(1)
+			})
+
+			it("caps the mid-stream re-push loop in recursivelyMakeClineRequests (roo-extensions#3195)", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const state = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...state,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 1,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				let attempts = 0
+				const midStreamFailure = () =>
+					(async function* () {
+						yield { type: "text", text: "partial" }
+						throw new Error("mid-stream API Error")
+					})() as AsyncGenerator<ApiStreamChunk>
+				vi.spyOn(task.api, "createMessage").mockImplementation(() => {
+					attempts++
+					// Fail-fast bound: if the cap is mutated away the loop re-pushes forever.
+					// Aborting bounds the run so the attempt-count assertions below redden
+					// instead of the suite hanging (a success stream would route to normal
+					// completion and hang).
+					if (attempts > 6) {
+						task.abort = true
+					}
+					return midStreamFailure()
+				})
+
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+				const saySpy = vi.spyOn(task, "say")
+				const abortTaskSpy = vi.spyOn(task, "abortTask").mockImplementation(async () => {
+					task.abort = true
+				})
+
+				const result = await task.recursivelyMakeClineRequests([
+					{ type: "text", text: "original user request" },
+				])
+
+				// 1 initial attempt + 3 mid-stream retries — the 4th failure is terminal,
+				// never re-queued, and never backed off again.
+				expect(attempts).toBe(4)
+				expect(backoffSpy).toHaveBeenCalledTimes(3)
+				expect(abortTaskSpy).toHaveBeenCalledTimes(1)
+				expect(task.abortReason).toBe("streaming_failed")
+				// The stop is loud — surfaced in the transcript, naming the cap and the cause.
+				const errorCall = saySpy.mock.calls.find((call) => call[0] === "error")
+				expect(errorCall?.[1]).toMatch(
+					/^\[Task#recursivelyMakeClineRequests\] task [\w-]+\.[\w-]+ aborted after/,
+				)
+				expect(errorCall?.[1]).toMatch(/mid-stream auto-approval retries/)
+				expect(errorCall?.[1]).toMatch(/capped.*roo-extensions#3195/)
+				expect(errorCall?.[1]).toContain("(last: mid-stream API Error)")
+				expect(result).toBe(true)
+			})
+
+			it("treats ApiRetryCapExceededError as terminal in the streaming_failed handler — no re-push", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const state = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...state,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 1,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				const capError = new ApiRetryCapExceededError(
+					"[Task#attemptApiRequest] task aborted — persistent API error after 3 auto-approval retries " +
+						"(last: API Error). Retry loop capped (roo-extensions#3195).",
+				)
+				let markerCalls = 0
+				const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					markerCalls++
+					// Valve: if the marker handling is mutated away, the generic path re-pushes
+					// forever with an always-throwing stream — aborting on the 2nd call bounds
+					// the run so the count assertion below reddens instead of hanging.
+					if (markerCalls > 1) {
+						task.abort = true
+					}
+					return (
+						// eslint-disable-next-line require-yield
+						(async function* () {
+							throw capError
+						})() as AsyncGenerator<ApiStreamChunk>
+					)
+				})
+
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+				const saySpy = vi.spyOn(task, "say")
+				const abortTaskSpy = vi.spyOn(task, "abortTask").mockImplementation(async () => {
+					task.abort = true
+				})
+
+				const result = await task.recursivelyMakeClineRequests([
+					{ type: "text", text: "original user request" },
+				])
+
+				// The capped error must end the loop on the spot — one attempt, zero backoffs,
+				// no re-push into a fresh API request.
+				expect(attemptSpy).toHaveBeenCalledTimes(1)
+				expect(backoffSpy).not.toHaveBeenCalled()
+				expect(abortTaskSpy).toHaveBeenCalledTimes(1)
+				const errorCall = saySpy.mock.calls.find((call) => call[0] === "error")
+				expect(errorCall?.[1]).toContain("Retry loop capped")
+				expect(result).toBe(true)
+			})
+
+			it("re-pushes a mid-stream failure without crashing when the provider reference is gone (stateForBackoff undefined)", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				// stateForBackoff resolves undefined (no getState payload) — a GC'd/cleared
+				// provider's deref() yields the same result, without breaking unrelated
+				// providerRef.deref() uses elsewhere in the streaming path.
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					undefined as unknown as Awaited<ReturnType<typeof mockProvider.getState>>,
+				)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				let attempts = 0
+				const midStreamFailure = () =>
+					(async function* () {
+						yield { type: "text", text: "partial" }
+						throw new Error("mid-stream API Error")
+					})() as AsyncGenerator<ApiStreamChunk>
+				const terminalFailure = () =>
+					(async function* () {
+						// Yield a chunk first so the throw lands mid-stream (routed to the
+						// consumer's streaming-failed catch, not attemptApiRequest's first-chunk
+						// `ask` path, which would hang unmocked).
+						yield { type: "text", text: "partial2" }
+						throw new ApiRetryCapExceededError("terminal after re-push")
+					})() as AsyncGenerator<ApiStreamChunk>
+				vi.spyOn(task.api, "createMessage").mockImplementation(() => {
+					attempts++
+					// Fail-fast bound: a terminal-disabling mutation (e.g. instanceof → false)
+					// makes the re-push run forever — aborting bounds the run so the attempt
+					// count below reddens instead of the suite timing out.
+					if (attempts > 4) {
+						task.abort = true
+					}
+					// First failure is generic (re-pushed); the retry raises the terminal cap
+					// error so the loop ends without needing a successful stream (which would
+					// require the full presentAssistantMessage/state path).
+					return attempts === 1 ? midStreamFailure() : terminalFailure()
+				})
+
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+				vi.spyOn(task, "say")
+				vi.spyOn(task, "abortTask").mockImplementation(async () => {
+					task.abort = true
+				})
+
+				const result = await task.recursivelyMakeClineRequests([
+					{ type: "text", text: "original user request" },
+				])
+
+				// stateForBackoff is undefined: the auto-approval arm short-circuits safely and the
+				// failure is re-pushed without backoff. Mutating `stateForBackoff?.` to
+				// `stateForBackoff.` throws a TypeError inside the catch on the first failure
+				// (swallowed by the outer catch, so it still returns true) but NEVER re-pushes —
+				// which reddens the attempt count below.
+				expect(attempts).toBe(2)
+				expect(backoffSpy).not.toHaveBeenCalled()
+				expect(result).toBe(true)
 			})
 
 			it("uses the task rate limit in retry backoff when focused provider state differs", async () => {
