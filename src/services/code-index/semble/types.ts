@@ -60,7 +60,7 @@ export interface ISembleProvider {
 	startIndexing(): Promise<void>
 
 	/** Stops indexing (no-op — semble has no background process). */
-	stopIndexing(): void
+	stopIndexing(): Promise<void>
 
 	/** Searches the codebase for relevant code. */
 	searchIndex(query: string, directoryPrefix?: string): Promise<VectorStoreSearchResult[]>

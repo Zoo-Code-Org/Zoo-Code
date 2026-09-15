@@ -62,7 +62,6 @@ import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
-import { CodeIndexManager } from "../../services/code-index/manager"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
@@ -687,6 +686,7 @@ export const webviewMessageHandler = async (
 			)
 
 			provider.isViewLaunched = true
+			provider.notifyCodeIndexWebviewReady()
 			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
@@ -3078,7 +3078,7 @@ export const webviewMessageHandler = async (
 				await provider.postStateToWebview()
 
 				// Then handle validation and initialization for the current workspace
-				const currentCodeIndexManager = provider.getCurrentWorkspaceCodeIndexManager()
+				const currentCodeIndexManager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (currentCodeIndexManager) {
 					// If embedder provider changed, perform proactive validation
 					if (embedderProviderChanged) {
@@ -3157,7 +3157,7 @@ export const webviewMessageHandler = async (
 		}
 
 		case "requestIndexingStatus": {
-			const manager = provider.getCurrentWorkspaceCodeIndexManager()
+			const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 			if (!manager) {
 				// No workspace open - send error status
 				await provider.postMessageToWebview({
@@ -3221,7 +3221,7 @@ export const webviewMessageHandler = async (
 		}
 		case "startIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					await provider.postMessageToWebview({
 						type: "indexingStatusUpdate",
@@ -3262,12 +3262,12 @@ export const webviewMessageHandler = async (
 		}
 		case "stopIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
 				}
-				manager.stopIndexing()
+				await manager.stopIndexing()
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
 					values: manager.getCurrentStatus(),
@@ -3279,7 +3279,7 @@ export const webviewMessageHandler = async (
 		}
 		case "toggleWorkspaceIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot toggle workspace indexing: No workspace folder open")
 					return
@@ -3290,7 +3290,7 @@ export const webviewMessageHandler = async (
 					await manager.initialize(provider.contextProxy)
 					void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 				} else if (!enabled) {
-					manager.stopIndexing()
+					await manager.stopIndexing()
 				}
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
@@ -3305,21 +3305,24 @@ export const webviewMessageHandler = async (
 		}
 		case "setAutoEnableDefault": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot set auto-enable default: No workspace folder open")
 					return
 				}
 				// Capture prior state for every manager before persisting the global change
-				const allManagers = CodeIndexManager.getAllInstances()
-				const priorStates = new Map(allManagers.map((m) => [m, m.isWorkspaceEnabled]))
+				const allScopes = provider.codeIndexScope?.workspaceRegistry.getAllScopes() ?? []
+				const priorStates = new Map(
+					allScopes.map((scope) => [scope, scope.codeIndexManager.isWorkspaceEnabled]),
+				)
 				await manager.setAutoEnableDefault(message.bool ?? true)
 				// Apply stop/start to every affected manager
-				for (const m of allManagers) {
-					const wasEnabled = priorStates.get(m)!
+				for (const scope of allScopes) {
+					const m = scope.codeIndexManager
+					const wasEnabled = priorStates.get(scope) ?? false
 					const isNowEnabled = m.isWorkspaceEnabled
 					if (wasEnabled && !isNowEnabled) {
-						m.stopIndexing()
+						await m.stopIndexing()
 					} else if (!wasEnabled && isNowEnabled && m.isFeatureEnabled && m.isFeatureConfigured) {
 						await m.initialize(provider.contextProxy)
 						void m.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
@@ -3338,7 +3341,7 @@ export const webviewMessageHandler = async (
 		}
 		case "clearIndexData": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const manager = provider.getCurrentWorkspaceCodeIndexScope()?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot clear index data: No workspace folder open")
 					await provider.postMessageToWebview({

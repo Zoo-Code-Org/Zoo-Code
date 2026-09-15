@@ -97,6 +97,7 @@ const mockFetchOpenAiCodexRateLimitInfo = vi.mocked(fetchOpenAiCodexRateLimitInf
 
 // Mock ClineProvider
 const mockClineProvider = {
+	notifyCodeIndexWebviewReady: vi.fn(),
 	getState: vi.fn(),
 	postMessageToWebview: vi.fn(),
 	customModesManager: {
@@ -2265,6 +2266,7 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		providerForLaunch.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "unset" })
 
 		await expect(webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })).resolves.not.toThrow()
+		expect(mockClineProvider.notifyCodeIndexWebviewReady).toHaveBeenCalledOnce()
 
 		// The queued telemetry update is fire-and-forget from the handler's own point of
 		// view -- flush a microtask turn so its .then() callback runs before asserting.

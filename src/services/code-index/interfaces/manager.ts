@@ -42,12 +42,7 @@ export interface ICodeIndexManager {
 	/**
 	 * Stops any in-progress indexing operation and the file watcher
 	 */
-	stopIndexing(): void
-
-	/**
-	 * Stops the file watcher
-	 */
-	stopWatcher(): void
+	stopIndexing(): Promise<void>
 
 	/**
 	 * Clears the index data
@@ -71,7 +66,7 @@ export interface ICodeIndexManager {
 	/**
 	 * Disposes of resources used by the manager
 	 */
-	dispose(): void
+	dispose(): Promise<void>
 }
 
 export type IndexingState = "Standby" | "Indexing" | "Indexed" | "Error" | "Stopping"

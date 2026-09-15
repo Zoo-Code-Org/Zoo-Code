@@ -186,7 +186,7 @@ export class CodeIndexOrchestrator {
 
 				if (signal.aborted) {
 					await this.cacheManager.flush()
-					this.stopWatcher()
+					await this.stopWatcher()
 					this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.indexingStopped"))
 					return
 				}
@@ -247,7 +247,7 @@ export class CodeIndexOrchestrator {
 
 				if (signal.aborted) {
 					await this.cacheManager.flush()
-					this.stopWatcher()
+					await this.stopWatcher()
 					this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.indexingStopped"))
 					return
 				}
@@ -305,7 +305,7 @@ export class CodeIndexOrchestrator {
 			if (error?.name === "AbortError" || signal.aborted) {
 				console.log("[CodeIndexOrchestrator] Indexing aborted by user.")
 				await this.cacheManager.flush()
-				this.stopWatcher()
+				await this.stopWatcher()
 				this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.indexingStopped"))
 				return
 			}
@@ -350,7 +350,7 @@ export class CodeIndexOrchestrator {
 					errorMessage: error.message || t("embeddings:orchestrator.unknownError"),
 				}),
 			)
-			this.stopWatcher()
+			await this.stopWatcher()
 		} finally {
 			this._isProcessing = false
 			this._abortController = null
@@ -360,19 +360,19 @@ export class CodeIndexOrchestrator {
 	/**
 	 * Stops any in-progress indexing by aborting the scan and stopping the file watcher.
 	 */
-	public stopIndexing(): void {
+	public async stopIndexing(): Promise<void> {
 		if (this._abortController) {
 			this.stateManager.setSystemState("Stopping", t("embeddings:orchestrator.indexingStoppedPartial"))
 			this._abortController.abort()
 			this._abortController = null
 		}
-		this.stopWatcher()
+		await this.stopWatcher()
 	}
 
 	/**
 	 * Stops the file watcher and cleans up resources.
 	 */
-	public stopWatcher(): void {
+	public async stopWatcher(): Promise<void> {
 		this.fileWatcher.dispose()
 		this._fileWatcherSubscriptions.forEach((sub) => sub.dispose())
 		this._fileWatcherSubscriptions = []

@@ -208,8 +208,8 @@ describe("SembleProvider", () => {
 	})
 
 	describe("stopIndexing", () => {
-		it("should be a no-op", () => {
-			provider.stopIndexing()
+		it("should be a no-op", async () => {
+			await provider.stopIndexing()
 			// No error thrown, no state change
 			expect(provider.state).toBe("Standby")
 		})
