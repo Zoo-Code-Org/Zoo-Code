@@ -17,6 +17,7 @@ type MockTask = Partial<Task> &
 		isStreaming?: boolean
 		didFinishAbortingStream?: boolean
 		isWaitingForFirstChunk?: boolean
+		consecutiveNoAssistantMessagesCount?: number
 	}
 type CreatedHistoryTask = Awaited<ReturnType<ClineProvider["createTaskWithHistoryItem"]>>
 
@@ -451,6 +452,38 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Verify new task received focus event
 		expect(mockTask2.emit).toHaveBeenCalledWith("taskFocused")
+	})
+
+	it("hard-aborts (evicts) the current task when it is mid empty-response retry loop", async () => {
+		seedRegistry(provider, mockTask1)
+		mockTask1.consecutiveNoAssistantMessagesCount = 3
+
+		const evictSpy = vi.spyOn(provider, "evictCurrentTask").mockResolvedValue(undefined)
+		const cancelInternalSpy = vi
+			.spyOn(provider as unknown as { cancelTaskInternal: () => Promise<void> }, "cancelTaskInternal")
+			.mockResolvedValue(undefined)
+
+		await provider.cancelTask()
+
+		// The hard-abort gate must evict the task and never reach the graceful path.
+		expect(evictSpy).toHaveBeenCalledTimes(1)
+		expect(cancelInternalSpy).not.toHaveBeenCalled()
+	})
+
+	it("takes the normal graceful cancel path when not in an empty-response retry loop", async () => {
+		seedRegistry(provider, mockTask1)
+		mockTask1.consecutiveNoAssistantMessagesCount = 0
+
+		const evictSpy = vi.spyOn(provider, "evictCurrentTask").mockResolvedValue(undefined)
+		const cancelInternalSpy = vi
+			.spyOn(provider as unknown as { cancelTaskInternal: () => Promise<void> }, "cancelTaskInternal")
+			.mockResolvedValue(undefined)
+
+		await provider.cancelTask()
+
+		// With the counter at 0 the gate must not fire; the graceful path runs.
+		expect(evictSpy).not.toHaveBeenCalled()
+		expect(cancelInternalSpy).toHaveBeenCalledTimes(1)
 	})
 
 	it("should remove task from stack when creating different task", async () => {
