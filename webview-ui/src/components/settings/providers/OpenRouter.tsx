@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Checkbox } from "vscrui"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
@@ -7,16 +8,30 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	openRouterDefaultModelId,
+	allRouterModelsProvider,
+	providerIdentifiers,
+	RouterModelsMessageType,
+	type ExtensionMessage,
 } from "@roo-code/types"
+import type { RouterName } from "@roo/api"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { getOpenRouterAuthUrl } from "@src/oauth/urls"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
+import { vscode } from "@src/utils/vscode"
+import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
 
 import { ModelPicker } from "../ModelPicker"
 import { OpenRouterBalanceDisplay } from "./OpenRouterBalanceDisplay"
+
+enum RefreshStatus {
+	Idle = "idle",
+	Loading = "loading",
+	Success = "success",
+	Error = "error",
+}
 
 type OpenRouterProps = {
 	apiConfiguration: ProviderSettings
@@ -41,6 +56,65 @@ export const OpenRouter = ({
 	const { t } = useAppTranslation()
 
 	const [openRouterBaseUrlSelected, setOpenRouterBaseUrlSelected] = useState(!!apiConfiguration?.openRouterBaseUrl)
+
+	const queryClient = useQueryClient()
+	const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>(RefreshStatus.Idle)
+	const [refreshError, setRefreshError] = useState<string | undefined>()
+	// Stryker disable next-line BooleanLiteral : initial value never read before reset in handleRefreshModels
+	const errorJustReceived = useRef(false)
+
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
+			const message = event.data
+			if (message.type === RouterModelsMessageType.singleRouterModelFetchResponse && !message.success) {
+				const providerName = message.values?.provider as RouterName
+				if (providerName === providerIdentifiers.openrouter && refreshStatus === RefreshStatus.Loading) {
+					errorJustReceived.current = true
+					setRefreshStatus(RefreshStatus.Error)
+					setRefreshError(message.error)
+				}
+			} else if (message.type === RouterModelsMessageType.routerModels) {
+				const providerName = message.values?.provider as RouterName | undefined
+				// Scoped responses must match our provider; unscoped (legacy/global)
+				// broadcasts are still accepted so Loading cannot hang.
+				if (
+					(providerName === undefined || providerName === providerIdentifiers.openrouter) &&
+					refreshStatus === RefreshStatus.Loading &&
+					!errorJustReceived.current
+				) {
+					setRefreshStatus(RefreshStatus.Success)
+					void queryClient.invalidateQueries({
+						queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.openrouter],
+					})
+					void queryClient.invalidateQueries({
+						queryKey: [RouterModelsMessageType.routerModels, allRouterModelsProvider],
+					})
+				}
+			}
+		}
+
+		window.addEventListener("message", handleMessage)
+		return () => window.removeEventListener("message", handleMessage)
+	}, [refreshStatus, queryClient])
+
+	const handleRefreshModels = useCallback(
+		() => {
+			errorJustReceived.current = false
+			setRefreshStatus(RefreshStatus.Loading)
+			// Stryker disable next-line CallExpression : refreshError is unobservable outside Error status; every Error transition re-sets it in the same batch
+			setRefreshError(undefined)
+
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.openrouter,
+					refresh: true,
+				},
+			})
+		},
+		// Stryker disable next-line ArrayDeclaration : deps array is constant; replacing it with any constant array is memoization-equivalent
+		[],
+	)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -101,6 +175,33 @@ export const OpenRouter = ({
 							className="w-full mt-1"
 						/>
 					)}
+				</div>
+			)}
+			<Button
+				variant="outline"
+				onClick={handleRefreshModels}
+				disabled={refreshStatus === RefreshStatus.Loading}
+				className="w-full">
+				<div className="flex items-center gap-2">
+					{refreshStatus === RefreshStatus.Loading ? (
+						<span className="codicon codicon-loading codicon-modifier-spin" />
+					) : (
+						<span className="codicon codicon-refresh" />
+					)}
+					{t("settings:providers.refreshModels.label")}
+				</div>
+			</Button>
+			{refreshStatus === RefreshStatus.Loading && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.refreshModels.loading")}
+				</div>
+			)}
+			{refreshStatus === RefreshStatus.Success && (
+				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
+			)}
+			{refreshStatus === RefreshStatus.Error && (
+				<div className="text-sm text-vscode-errorForeground">
+					{refreshError || t("settings:providers.refreshModels.error")}
 				</div>
 			)}
 			<ModelPicker
