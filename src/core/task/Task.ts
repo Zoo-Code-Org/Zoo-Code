@@ -4348,6 +4348,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				useAvailableInputForContextPercent,
 			})
 
+			if (truncateResult.recoveryFailed) {
+				const recoveryError = truncateResult.error ?? "Context window recovery failed"
+				await this.say("condense_context_error", recoveryError)
+				throw new Error(recoveryError)
+			}
+
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
@@ -4586,6 +4592,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				if (truncateResult.recoveryFailed) {
+					const recoveryError = truncateResult.error ?? "Context window recovery failed"
+					await this.say("condense_context_error", recoveryError)
+					throw new Error(recoveryError)
+				}
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}

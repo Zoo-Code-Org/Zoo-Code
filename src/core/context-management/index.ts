@@ -472,6 +472,8 @@ export type ContextManagementOptions = {
 
 export type ContextManagementResult = SummarizeResponse & {
 	prevContextTokens: number
+	/** The caller must stop before persisting or sending when fallback recovery cannot fit the budget. */
+	recoveryFailed?: boolean
 	truncationId?: string
 	messagesRemoved?: number
 	newContextTokensAfterTruncation?: number
@@ -597,6 +599,7 @@ export async function manageContext({
 			}
 			return total
 		}
+		const modelFacingTokensBeforeRecovery = await countModelFacingTokens(messages)
 
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
 		const newContextTokensAfterTruncation = await countModelFacingTokens(truncationResult.messages)
@@ -627,13 +630,20 @@ export async function manageContext({
 		// blocks, keeping their tool_use_id and result shape so the pair stays intact.
 		const degradedMessages = await shrinkOversizedToolResults({
 			messages,
-			tokensToFree: prevContextTokens - allowedTokens,
+			// `prevContextTokens` controls whether recovery runs, while the model-facing recount
+			// controls whether its result is safe to send. Target the larger deficit so the edit
+			// satisfies both accounting views in one bounded pass.
+			tokensToFree: Math.max(prevContextTokens, modelFacingTokensBeforeRecovery) - allowedTokens,
 			apiHandler,
 		})
 
+		let newContextTokensAfterDegradation: number | undefined
 		if (degradedMessages) {
-			const newContextTokensAfterDegradation = await countModelFacingTokens(degradedMessages)
-			if (newContextTokensAfterDegradation < prevContextTokens) {
+			newContextTokensAfterDegradation = await countModelFacingTokens(degradedMessages)
+			if (
+				newContextTokensAfterDegradation < modelFacingTokensBeforeRecovery &&
+				newContextTokensAfterDegradation <= allowedTokens
+			) {
 				return {
 					messages: degradedMessages,
 					prevContextTokens,
@@ -655,8 +665,15 @@ export async function manageContext({
 			summary: "",
 			cost,
 			prevContextTokens,
+			recoveryFailed: true,
 			error: `Context window recovery failed: the conversation (${Math.round(prevContextTokens)} tokens) exceeds the available budget (${Math.round(allowedTokens)} tokens) and no messages can be removed or tool results shrunk further. Reduce the size of individual tool outputs or start a new task.`,
-			errorDetails: `Fallback truncation removed 0 messages and no eligible textual tool_result could be shrunk below its floor.`,
+			errorDetails:
+				newContextTokensAfterDegradation !== undefined &&
+				newContextTokensAfterDegradation < modelFacingTokensBeforeRecovery
+					? `Fallback degradation reduced the model-facing context to ${Math.round(newContextTokensAfterDegradation)} tokens, but it still exceeds the ${Math.round(allowedTokens)}-token budget.`
+					: truncationResult.messagesRemoved > 0
+						? `Fallback truncation selected ${truncationResult.messagesRemoved} messages but did not reduce the model-facing context, and no eligible textual tool_result could be shrunk.`
+						: `Fallback truncation removed 0 messages and no eligible textual tool_result could be shrunk below its floor.`,
 		}
 	}
 	// No truncation or condensation needed

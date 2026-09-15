@@ -2451,6 +2451,89 @@ describe("Context Management", () => {
 			expect(untouched.content).toBe(floorText)
 		}, 60000)
 
+		it("returns a terminal recovery error when degradation makes progress but remains over budget", async () => {
+			const protectedText = 'PROTECTED_CONTEXT {"kind":"instruction","value":"must remain visible"}\n'.repeat(
+				5000,
+			)
+			const shrinkableText = "eligible tool output\n".repeat(100)
+			const messages: ApiMessage[] = [
+				{ role: "user", content: protectedText, ts: 1000 },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_01", name: "fetch_report", input: {} }],
+					ts: 1100,
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_01", content: shrinkableText }],
+					ts: 1200,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.recoveryFailed).toBe(true)
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.errorDetails).toContain("still exceeds the 60000-token budget")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages)
+		}, 60000)
+
+		it("rejects message removal that does not reduce the effective API history", async () => {
+			const condenseId = "condense-1"
+			const oversizedSummary =
+				"## Conversation Summary\nProtected summary content that remains API-visible.\n".repeat(5000)
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000, condenseParent: condenseId },
+				{ role: "assistant", content: "First answer", ts: 1100, condenseParent: condenseId },
+				{ role: "user", content: "Follow-up", ts: 1200, condenseParent: condenseId },
+				{ role: "assistant", content: "Second answer", ts: 1300, condenseParent: condenseId },
+				{
+					role: "user",
+					content: oversizedSummary,
+					ts: 1400,
+					isSummary: true,
+					condenseId,
+				},
+			]
+
+			// truncateConversation selects two pre-summary messages, but they are already
+			// hidden by the active summary, so the request sent to the API does not shrink.
+			expect(truncateConversation(messages, 0.5, taskId).messagesRemoved).toBe(2)
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 0,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.recoveryFailed).toBe(true)
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.errorDetails).toContain("selected 2 messages but did not reduce the model-facing context")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages)
+		}, 60000)
+
 		it("returns a controlled error when nothing can be removed and no tool result can shrink", async () => {
 			const messages: ApiMessage[] = [
 				{ role: "user", content: "First message", ts: 1000 },
@@ -2476,6 +2559,7 @@ describe("Context Management", () => {
 			// unrelated error would satisfy a `toBeDefined()` assertion.
 			expect(result.error).toContain("Context window recovery failed")
 			expect(result.errorDetails).toContain("removed 0 messages and no eligible textual tool_result")
+			expect(result.recoveryFailed).toBe(true)
 			expect(result.truncationId).toBeUndefined()
 			expect(result.messages).toBe(messages) // unchanged history, no fake truncation event
 		})
