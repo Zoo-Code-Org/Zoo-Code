@@ -1,0 +1,96 @@
+{
+	"title": "Pulpit",
+	"done": "Wstecz",
+	"range": {
+		"today": "Dziś",
+		"7d": "7 dni",
+		"30d": "30 dni",
+		"custom": "Niestandardowy",
+		"all": "Wszystko"
+	},
+	"summary": {
+		"totalTokens": "Tokeny łącznie",
+		"inputTokens": "Tokeny wejściowe",
+		"outputTokens": "Tokeny wyjściowe",
+		"cacheTokens": "Tokeny pamięci podręcznej",
+		"cost": "Koszt"
+	},
+	"states": {
+		"loading": "Ładowanie...",
+		"error": "Nie udało się załadować statystyk",
+		"empty": "Brak danych użycia",
+		"emptyHint": "Rozpocznij rozmowę, aby zobaczyć statystyki"
+	},
+	"actions": {
+		"refresh": "Odśwież",
+		"exportJson": "Eksportuj JSON",
+		"exportCsv": "Eksportuj CSV",
+		"clear": "Wyczyść statystyki"
+	},
+	"breakdown": {
+		"title": "Podział",
+		"model": "Model",
+		"provider": "Dostawca",
+		"mode": "Tryb",
+		"events": "Zdarzenia",
+		"inputTokens": "Wejście",
+		"outputTokens": "Wyjście",
+		"cacheReadTokens": "Odczyt pamięci",
+		"cacheWriteTokens": "Zapis pamięci",
+		"reasoningTokens": "Wnioskowanie",
+		"totalTokens": "Łącznie",
+		"costUsd": "Koszt",
+		"unknown": "Nieznany"
+	},
+	"coverage": {
+		"title": "Zakres danych",
+		"liveFrom": "Na żywo od",
+		"lastUpdated": "Ostatnia aktualizacja",
+		"backfilledEvents": "Zdarzenia uzupełnione wstecz",
+		"paused": "Nagrywanie wstrzymane (osiągnięto limit pamięci)"
+	},
+	"clearDialog": {
+		"title": "Wyczyść statystyki",
+		"description": "Czy na pewno chcesz wyczyścić wszystkie statystyki użycia? Tej operacji nie można cofnąć.",
+		"cancel": "Anuluj",
+		"confirm": "Wyczyść"
+	},
+	"customRange": {
+		"from": "Od",
+		"to": "Do"
+	},
+	"cacheRatio": {
+		"label": "Współczynnik pamięci podręcznej do szacowania",
+		"hint": "Stosowany, gdy dostawca nie zgłasza danych pamięci podręcznej"
+	},
+	"sessionDetail": {
+		"summary": "Podsumowanie sesji",
+		"apiCalls": "Wywołania API",
+		"noApiCalls": "Brak zarejestrowanych wywołań API",
+		"input": "Wejście",
+		"output": "Wyjście",
+		"cost": "Koszt",
+		"model": "Model",
+		"mode": "Tryb",
+		"time": "Czas",
+		"status": "Status"
+	},
+	"time": {
+		"justNow": "przed chwilą",
+		"minutesAgo": "{{count}} min temu",
+		"hoursAgo": "{{count}} godz. temu",
+		"yesterday": "wczoraj",
+		"daysAgo": "{{count}} dni temu"
+	},
+	"tasks": {
+		"title": "Zadania",
+		"noTasks": "Nie zarejestrowano żadnych zadań",
+		"filterModel": "Wszystkie modele",
+		"filterProvider": "Wszyscy dostawcy",
+		"callCount": "{{count}} wywołań"
+	},
+	"taskAggregate": {
+		"modes": "Tryby",
+		"models": "Modele"
+	}
+}
