@@ -131,6 +131,15 @@ vi.mock("p-wait-for", () => ({
 	default: vi.fn().mockImplementation(async () => Promise.resolve()),
 }))
 
+// Task tests do not exercise indexing; keep workspace resolution and its cache out of this suite.
+vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getOrCreate: vi.fn().mockReturnValue(undefined),
+		getAllInstances: vi.fn().mockReturnValue([]),
+		disposeAll: vi.fn(),
+	},
+}))
+
 vi.mock("vscode", () => {
 	const mockDisposable = { dispose: vi.fn() }
 	const mockEventEmitter = { event: vi.fn(), fire: vi.fn() }
