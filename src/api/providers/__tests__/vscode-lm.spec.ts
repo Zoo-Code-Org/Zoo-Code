@@ -1965,6 +1965,12 @@ describe("quoting heuristics on the incremental scanner", () => {
 		expect(callsOf(`${open}\n${fence}\n${fence} j\n${todo()}`)).toHaveLength(0)
 	})
 
+	it("tracks the line start across a newline that follows an earlier block on its own line", () => {
+		// The first block leaves the scanner mid-line; the newline after it arrives in a later span,
+		// so the running offset must survive that hand-off for the second block's cue to be found.
+		expect(callsOf(`${open}\n${todo()}\nnever ${todo()}`)).toHaveLength(1)
+	})
+
 	it("measures the cue window from the line start when the preceding chunk ends mid-line", () => {
 		// The cue sits in the preceding chunk, so the line-start offset must carry across the
 		// boundary; drifting it lands on a different slice and the quoted block is wrongly recovered.
