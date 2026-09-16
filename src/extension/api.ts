@@ -323,6 +323,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	public async sendMessage(text?: string, images?: string[]) {
 		const currentTask = this.sidebarProvider.getCurrentTask()
 
+		// Ensure steering input reaches the active task before it can finish.
+		if (currentTask?.isStreaming) {
+			currentTask.messageQueueService.addMessage(text ?? "", images)
+			return
+		}
+
 		// In headless/sandbox flows the webview may not be launched, so routing
 		// through invoke=sendMessage drops the message. Deliver directly to the
 		// task ask-response channel instead.
