@@ -36,13 +36,6 @@ jobs:
                   fetch-depth: 0
                   persist-credentials: false
 
-            - name: Fetch pull request base
-              if: github.event_name == 'pull_request'
-              env:
-                  BASE_REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
-                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
-              run: git fetch --no-tags "$BASE_REPOSITORY_URL" "$BASE_SHA"
-
             - name: Setup Node.js and pnpm
               if: github.event_name == 'pull_request'
               uses: ./.github/actions/setup-node-pnpm
@@ -56,9 +49,10 @@ jobs:
             - name: Enforce executable-line scope and run advisory mutation testing
               if: github.event_name == 'pull_request'
               env:
-                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
                   HEAD_SHA: ${{ github.sha }}
-              run: node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
+              run: |
+                  BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
+                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
 
             - name: Upload mutation reports
               id: mutation_report
