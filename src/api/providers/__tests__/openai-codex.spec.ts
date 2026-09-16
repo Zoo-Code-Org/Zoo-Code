@@ -517,6 +517,51 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		expect(getAccountId).not.toHaveBeenCalled()
 	})
 
+	// The abort lands in the only window the consumer guard can still act: event2's `delta`
+	// getter fires it while processEvent builds the chunk - after executeRequest's
+	// top-of-loop check has passed, before completePrompt's own. The post-loop check throws
+	// the same AbortError whether or not the guard breaks, so what distinguishes the guarded
+	// loop from a mutated one is the pull count: the guard stops pulling after the chunk that
+	// the abort rode in on, a loop that keeps running pulls the SDK stream a third time.
+	it("breaks the streaming consumer loop at the top-of-loop guard and stops pulling", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		let sdkPulls = 0
+
+		const event1 = { type: "response.output_text.delta", delta: "pre-abort" }
+		const event2 = {
+			type: "response.output_text.delta",
+			get delta() {
+				controller.abort()
+				return "post-abort"
+			},
+		}
+
+		const create = vitest.fn().mockImplementation(() => {
+			return Promise.resolve({
+				[Symbol.asyncIterator]() {
+					return {
+						next: async () => {
+							sdkPulls++
+							return { value: sdkPulls === 1 ? event1 : event2, done: false }
+						},
+						return: async () => ({ value: undefined, done: true }),
+					}
+				},
+			})
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+
+		await expect(handler.completePrompt("Hello", { abortSignal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+
+		// event1 is pulled and joined; event2 is pulled (its getter fires the abort) but the
+		// guard breaks before it is joined - a third pull only happens when the mutated
+		// top-of-loop check keeps the loop running.
+		expect(sdkPulls).toBe(2)
+	})
+
 	// The SSE fallback is for an SDK that could not be used at all. Replaying the request after the
 	// SDK has already produced output would append a second generation to the first.
 	it("does not replay over SSE when the SDK fails after emitting", async () => {
