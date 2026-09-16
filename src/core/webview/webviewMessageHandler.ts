@@ -62,7 +62,7 @@ import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
-import { CodeIndexManager } from "../../services/code-index/manager"
+import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
@@ -3311,7 +3311,7 @@ export const webviewMessageHandler = async (
 					return
 				}
 				// Capture prior state for every manager before persisting the global change
-				const allManagers = CodeIndexManager.getAllInstances()
+				const allManagers = CodeIndexManagerRegistry.getAllInstances()
 				const priorStates = new Map(allManagers.map((m) => [m, m.isWorkspaceEnabled]))
 				await manager.setAutoEnableDefault(message.bool ?? true)
 				// Apply stop/start to every affected manager
