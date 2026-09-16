@@ -368,6 +368,7 @@ function parseLeakedInvokeParams(
 ): Record<string, unknown> | undefined {
 	const input: Record<string, unknown> = {}
 	const paramPattern = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
+	let consumedUpTo = 0
 	for (const match of body.matchAll(paramPattern)) {
 		const name = match[1]
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
@@ -375,6 +376,12 @@ function parseLeakedInvokeParams(
 			return undefined
 		}
 		input[name] = converted.value
+		consumedUpTo = (match.index ?? 0) + match[0].length
+	}
+	// An unclosed parameter tag is skipped by the pattern above, so recovering would dispatch a
+	// call missing an argument the model wrote; fail closed instead.
+	if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo))) {
+		return undefined
 	}
 	return input
 }
@@ -419,7 +426,9 @@ export function extractLeakedToolCalls(
 		leftover += text.slice(lastIndex, open.index)
 		const name = open[1]
 		scan.advance(text.slice(scannedUpTo, open.index))
-		scannedUpTo = open.index
+		// Only text outside invoke bodies may move parser state, otherwise markup quoted in one
+		// block could open a wrapper or fence that changes the verdict on a later block.
+		scannedUpTo = blockEnd
 		const recoverable =
 			validTools.has(name) && scan.isInsideFunctionCallsWrapper() && !isQuotedAsCode(text, blockEnd, scan)
 		// Parsing may still fail closed when a parameter doesn't match its declared type.

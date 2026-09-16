@@ -1276,6 +1276,29 @@ describe("leaked tool-call recovery", () => {
 			expect(calls).toHaveLength(0)
 			expect(leftoverText).toBe(text)
 		})
+
+		it("does not let a wrapper marker quoted inside an unrecovered invoke body arm a later bare invoke", () => {
+			// A wrapper tag is only real when it appears outside an invoke body, otherwise quoted
+			// markup in one block can authorize recovery of an unwrapped block after it.
+			const text =
+				invoke("some_other_tool", `<function${"_calls"}>`) +
+				"\n" +
+				invoke("update_todo_list", param("todos", "[x] one"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on an invoke whose parameter markup is left unclosed", () => {
+			// Partially parsed parameters would dispatch a call missing arguments the model wrote.
+			const text = wrap(invoke("update_todo_list", `<param${"eter"} name="todos">[x] one`))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+		})
 	})
 
 	// The bare-invoke cases above short-circuit at the wrapper check, so they never exercise the
