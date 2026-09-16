@@ -156,9 +156,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * Tears down the per-task stream state: otherwise the abort listener leaks for
 	 * the task's lifetime, and when a streaming delta had failed, the streamFailed
 	 * guard would suppress the diff preview of every later write_to_file in this
-	 * task. When a streaming delta already hit a fatal filesystem error, that error
-	 * is what the user can act on, so report it with the same "writing file"
-	 * context execute()'s catch uses, and suppress the incidental parse error.
+	 * task. Restores the diff document: streaming may have opened it with
+	 * unapproved partial content, and execute()'s error cleanup (revert + reset)
+	 * never fires on this path, so a user save could persist the content without
+	 * the teardown here. When a streaming delta already hit a fatal filesystem
+	 * error, that error is what the user can act on, so report it with the same
+	 * "writing file" context execute()'s catch uses, and suppress the incidental
+	 * parse error.
 	 */
 	override async onParameterParseFailure(task: Task, callbacks: ToolCallbacks, parseError: Error): Promise<boolean> {
 		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
@@ -166,6 +170,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			return false
 		}
 		this.resetTaskPartialState(task)
+		// Streaming may have opened the diff view with unapproved partial content.
+		// execute() never runs on this path, so its error cleanup (revert + reset)
+		// never fires: restore the document here so a user save cannot persist
+		// content the write never completed (the same invariant the denial and
+		// streaming-failure paths maintain). Both helpers no-op when no view is
+		// open.
+		await this.revertDiffChangesBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
 		if (!state.streamError) {
 			return false
 		}
