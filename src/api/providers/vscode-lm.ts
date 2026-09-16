@@ -96,12 +96,7 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
  */
 class QuotingScanState {
 	private openFence: { marker: string; width: number } | null = null
-	private linePhase: "leading" | "marker" | "suffix" | "invalid" = "leading"
-	private leadingSpaces = 0
-	private lineMarker = ""
-	private lineWidth = 0
-	private lineSuffixBlank = true
-	private lineBackticks = 0
+	private currentLine = ""
 	private wrapperOpen = false
 	private position = 0
 	/** Index, in the scanned stream, of the first character of the line now being scanned. */
@@ -114,15 +109,17 @@ class QuotingScanState {
 		for (const wrapperTag of span.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
 			this.wrapperOpen = wrapperTag[1] === ""
 		}
-		for (let iter = 0; iter < span.length; iter += 1) {
-			const character = span[iter]
-			if (character === "\n") {
+		const lines = span.split("\n")
+		for (const [index, line] of lines.entries()) {
+			this.currentLine += line
+			if (index < lines.length - 1) {
 				this.openFence = this.fenceAfterCurrentLine()
-				this.resetLine()
+				this.position += line.length + 1
+				this.lineStart = this.position
+				this.currentLine = ""
 			} else {
-				this.consumeLineCharacter(character)
+				this.position += line.length
 			}
-			this.position += 1
 		}
 	}
 
@@ -133,68 +130,27 @@ class QuotingScanState {
 
 	/** An odd count means the stream ends inside an inline code span. */
 	hasOddBacktickCountOnLine(): boolean {
-		return this.lineBackticks % 2 === 1
+		return (this.currentLine.match(/`/g)?.length ?? 0) % 2 === 1
 	}
 
 	isInsideFunctionCallsWrapper(): boolean {
 		return this.wrapperOpen
 	}
 
-	private resetLine(): void {
-		this.linePhase = "leading"
-		this.leadingSpaces = 0
-		this.lineMarker = ""
-		this.lineWidth = 0
-		this.lineSuffixBlank = true
-		this.lineBackticks = 0
-		this.lineStart = this.position + 1
-	}
-
-	/**
-	 * Recognizes ` {0,3}(`{3,}|~{3,})` followed by an info string one character at a time, so the
-	 * fence character, its width, and whether the suffix is blank are known without re-reading the line.
-	 */
-	private consumeLineCharacter(character: string): void {
-		if (character === "`") {
-			this.lineBackticks += 1
-		}
-		if (this.linePhase === "leading") {
-			if (character === " ") {
-				this.leadingSpaces += 1
-				if (this.leadingSpaces > 3) {
-					this.linePhase = "invalid"
-				}
-			} else if (character === "`" || character === "~") {
-				this.linePhase = "marker"
-				this.lineMarker = character
-				this.lineWidth = 1
-			} else {
-				this.linePhase = "invalid"
-			}
-		} else if (this.linePhase === "marker") {
-			if (character === this.lineMarker) {
-				this.lineWidth += 1
-			} else {
-				this.linePhase = "suffix"
-				this.lineSuffixBlank = character.trim() === ""
-			}
-		} else if (this.linePhase === "suffix" && character.trim() !== "") {
-			this.lineSuffixBlank = false
-		}
-	}
-
 	/** Fence state including the partial line now being scanned, which may itself open a fence. */
 	private fenceAfterCurrentLine(): { marker: string; width: number } | null {
-		const isFenceLine = (this.linePhase === "marker" || this.linePhase === "suffix") && this.lineWidth >= 3
-		if (!isFenceLine) {
+		const fenceMatch = this.currentLine.match(/^ {0,3}(`{3,}|~{3,})([^\n]*)$/)
+		if (!fenceMatch) {
 			return this.openFence
 		}
+		const marker = fenceMatch[1][0]
+		const width = fenceMatch[1].length
 		if (!this.openFence) {
-			return { marker: this.lineMarker, width: this.lineWidth }
+			return { marker, width }
 		}
 		// CommonMark allows an info string only on an opening fence, never a closing one.
 		const closesFence =
-			this.lineMarker === this.openFence.marker && this.lineWidth >= this.openFence.width && this.lineSuffixBlank
+			marker === this.openFence.marker && width >= this.openFence.width && fenceMatch[2].trim() === ""
 		return closesFence ? null : this.openFence
 	}
 }
