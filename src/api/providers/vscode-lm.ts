@@ -96,11 +96,9 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
  */
 class QuotingScanState {
 	private openFence: { marker: string; width: number } | null = null
-	private currentLine = ""
 	private wrapperOpen = false
-	private position = 0
-	/** Index, in the scanned stream, of the first character of the line now being scanned. */
-	lineStart = 0
+	/** Text of the line now being scanned, up to the point the scan has reached. */
+	sameLineBefore = ""
 
 	/** Consumes the next contiguous span of the stream. Spans must not overlap or skip text. */
 	advance(span: string): void {
@@ -111,14 +109,10 @@ class QuotingScanState {
 		}
 		const lines = span.split("\n")
 		for (const [index, line] of lines.entries()) {
-			this.currentLine += line
+			this.sameLineBefore += line
 			if (index < lines.length - 1) {
 				this.openFence = this.fenceAfterCurrentLine()
-				this.position += line.length + 1
-				this.lineStart = this.position
-				this.currentLine = ""
-			} else {
-				this.position += line.length
+				this.sameLineBefore = ""
 			}
 		}
 	}
@@ -130,7 +124,7 @@ class QuotingScanState {
 
 	/** An odd count means the stream ends inside an inline code span. */
 	hasOddBacktickCountOnLine(): boolean {
-		return (this.currentLine.match(/`/g)?.length ?? 0) % 2 === 1
+		return (this.sameLineBefore.match(/`/g)?.length ?? 0) % 2 === 1
 	}
 
 	isInsideFunctionCallsWrapper(): boolean {
@@ -140,7 +134,7 @@ class QuotingScanState {
 	/** Fence state including the partial line now being scanned, which may itself open a fence. */
 	private fenceAfterCurrentLine(): { marker: string; width: number } | null {
 		// The scanned line never contains a newline, so the run's suffix is simply the rest of it.
-		const fenceMatch = this.currentLine.match(/^ {0,3}(`{3,}|~{3,})/)
+		const fenceMatch = this.sameLineBefore.match(/^ {0,3}(`{3,}|~{3,})/)
 		if (!fenceMatch) {
 			return this.openFence
 		}
@@ -150,7 +144,7 @@ class QuotingScanState {
 			return { marker, width }
 		}
 		// CommonMark allows an info string only on an opening fence, never a closing one.
-		const suffix = this.currentLine.slice(fenceMatch[0].length)
+		const suffix = this.sameLineBefore.slice(fenceMatch[0].length)
 		const closesFence = marker === this.openFence.marker && width >= this.openFence.width && suffix.trim() === ""
 		return closesFence ? null : this.openFence
 	}
@@ -224,12 +218,12 @@ function hasQuotingCue(sameLineBefore: string): boolean {
 }
 
 /**
- * True when the block spanning `[index, endIndex)` is being quoted — inside a fenced code block,
- * inside an inline code span, or embedded mid-sentence in plain prose — rather than invoked.
+ * True when the block ending at `endIndex` is being quoted — inside a fenced code block, inside an
+ * inline code span, or embedded mid-sentence in plain prose — rather than invoked.
  *
- * `scan` must already be advanced to `index`.
+ * `scan` must already be advanced to the start of the block.
  */
-function isQuotedAsCode(text: string, index: number, endIndex: number, scan: QuotingScanState): boolean {
+function isQuotedAsCode(text: string, endIndex: number, scan: QuotingScanState): boolean {
 	if (scan.isInsideCodeFence() || scan.hasOddBacktickCountOnLine()) {
 		return true
 	}
@@ -243,7 +237,7 @@ function isQuotedAsCode(text: string, index: number, endIndex: number, scan: Quo
 	// A quoted invoke that ENDS its line leaves no trailing text to judge, and a real leak is
 	// commonly narrated too — keying off leading prose alone regressed genuine recoveries, so only
 	// this narrow cue suppresses it.
-	return hasQuotingCue(stripTagsCompletely(text.slice(scan.lineStart, index)))
+	return hasQuotingCue(stripTagsCompletely(scan.sameLineBefore))
 }
 
 /**
@@ -406,11 +400,10 @@ export function extractLeakedToolCalls(
 	let lastIndex = 0
 
 	// Quote detection needs the text streamed before the buffer, since a fence may have opened
-	// there. Joined once, not per candidate, and scanned by state that only ever moves forward.
-	const scannedText = precedingText + text
+	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
 	const scan = new QuotingScanState()
 	scan.advance(precedingText)
-	let scannedUpTo = precedingText.length
+	let scannedUpTo = 0
 
 	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
 	const closePattern = /<\/(?:antml:)?invoke\s*>/gi
@@ -425,12 +418,10 @@ export function extractLeakedToolCalls(
 		const blockEnd = close.index + close[0].length
 		leftover += text.slice(lastIndex, open.index)
 		const name = open[1]
-		scan.advance(scannedText.slice(scannedUpTo, precedingText.length + open.index))
-		scannedUpTo = precedingText.length + open.index
+		scan.advance(text.slice(scannedUpTo, open.index))
+		scannedUpTo = open.index
 		const recoverable =
-			validTools.has(name) &&
-			scan.isInsideFunctionCallsWrapper() &&
-			!isQuotedAsCode(scannedText, scannedUpTo, precedingText.length + blockEnd, scan)
+			validTools.has(name) && scan.isInsideFunctionCallsWrapper() && !isQuotedAsCode(text, blockEnd, scan)
 		// Parsing may still fail closed when a parameter doesn't match its declared type.
 		const input = recoverable
 			? parseLeakedInvokeParams(text.slice(bodyStart, close.index), schemaFor(name))
