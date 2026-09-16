@@ -155,7 +155,8 @@ export abstract class BaseTool<TName extends ToolName> {
 				throw new Error("Tool call is missing native arguments (nativeArgs).")
 			}
 		} catch (error) {
-			console.error(`Error parsing parameters:`, error)
+			const parseError = error instanceof Error ? error : new Error(String(error))
+			console.error(`Error parsing parameters:`, parseError)
 			// Final args could not be parsed (e.g. the model's tool call was truncated
 			// mid-JSON by the output token limit), so execute() will never run. If a
 			// streaming delta already opened a partial "tool" ask (partial: true),
@@ -163,8 +164,14 @@ export abstract class BaseTool<TName extends ToolName> {
 			await task.finalizePartialToolAsk().catch((finalizeError) => {
 				console.error(`Error finalizing ${this.name} partial tool ask:`, finalizeError)
 			})
-			const errorMessage = `Failed to parse ${this.name} parameters: ${error instanceof Error ? error.message : String(error)}`
-			await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
+			// execute() never runs on this path, so tools that keep per-task state
+			// outside execute() (streaming failure marks, abort listeners) get their
+			// one remaining teardown boundary here.
+			const reportedStreamingFailure = await this.onParameterParseFailure(task, callbacks, parseError)
+			if (!reportedStreamingFailure) {
+				const errorMessage = `Failed to parse ${this.name} parameters: ${parseError.message}`
+				await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
+			}
 			// Note: handleError already emits a tool_result via formatResponse.toolError in the caller.
 			// Do NOT call pushToolResult here to avoid duplicate tool_result payloads.
 			return
@@ -172,5 +179,24 @@ export abstract class BaseTool<TName extends ToolName> {
 
 		// Execute with typed parameters
 		await this.execute(params, task, callbacks)
+	}
+
+	/**
+	 * Teardown boundary for the native-argument parse-failure path in handle().
+	 *
+	 * When nativeArgs are missing or malformed, execute() never runs, so per-task
+	 * state a tool registered outside execute() (streaming failure marks, abort
+	 * listeners) is never torn down there. Streaming tools override this to tear
+	 * that state down and, when a streaming delta already failed, to report the
+	 * captured streaming error instead of the generic parse error.
+	 *
+	 * @param task - Task instance
+	 * @param callbacks - Tool execution callbacks
+	 * @param parseError - The native-argument parse error
+	 * @returns true when the override already reported the failure to the user,
+	 *   so handle() suppresses the generic parse error
+	 */
+	protected async onParameterParseFailure(task: Task, callbacks: ToolCallbacks, parseError: Error): Promise<boolean> {
+		return false
 	}
 }

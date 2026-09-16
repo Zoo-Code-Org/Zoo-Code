@@ -31,6 +31,10 @@ interface TaskPartialStreamState {
 	lastSeenPartialPath: string | undefined
 	/** True once a streaming delta hit a fatal filesystem error. */
 	streamFailed: boolean
+	/** The original filesystem error of the failed streaming delta, reported once
+	 * by onParameterParseFailure() when the final block fails to parse (so
+	 * execute() never runs and would never report it). */
+	streamError: Error | undefined
 	/** The task that owns this state; target for abort-listener deregistration. */
 	task: Task
 	/** TaskAborted listener that tears this state down; registered once per task. */
@@ -89,6 +93,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const state: TaskPartialStreamState = {
 			lastSeenPartialPath: undefined,
 			streamFailed: false,
+			streamError: undefined,
 			task,
 			abortCleanup: () => this.resetTaskPartialState(task),
 		}
@@ -142,6 +147,31 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		await task.finalizePartialToolAsk(text).catch((finalizeError) => {
 			console.error("Error finalizing write_to_file partial tool ask:", finalizeError)
 		})
+	}
+
+	/**
+	 * Teardown boundary for the handle() parse-failure path, where execute() never
+	 * runs and therefore its finally (resetTaskPartialState) never runs either.
+	 *
+	 * Tears down the per-task stream state: otherwise the abort listener leaks for
+	 * the task's lifetime, and when a streaming delta had failed, the streamFailed
+	 * guard would suppress the diff preview of every later write_to_file in this
+	 * task. When a streaming delta already hit a fatal filesystem error, that error
+	 * is what the user can act on, so report it with the same "writing file"
+	 * context execute()'s catch uses, and suppress the incidental parse error.
+	 */
+	override async onParameterParseFailure(task: Task, callbacks: ToolCallbacks, parseError: Error): Promise<boolean> {
+		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
+		if (!state) {
+			return false
+		}
+		this.resetTaskPartialState(task)
+		if (!state.streamError) {
+			return false
+		}
+		void parseError
+		await callbacks.handleError("writing file", state.streamError)
+		return true
 	}
 
 	override resetPartialState(): void {
@@ -287,6 +317,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
 				if (!didApprove) {
+					// The prevent-focus branch set editType/originalContent on the provider
+					// before asking. Clear them on denial (no diff document was opened in
+					// this branch, so reset() is sufficient; the non-prevent-focus denial
+					// branch resets through revertChanges()), so a later write re-checks
+					// the file system instead of reusing the stale editType.
+					await this.resetDiffViewAfterWrite(task)
 					return
 				}
 
@@ -444,8 +480,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// the non-partial block arrives (it does not depend on this throw).
 				console.error(`Error streaming write_to_file diff view:`, error)
 				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
-				// partial tool message each time.
+				// partial tool message each time. Retain the original error: if the final
+				// block later fails to parse, execute() never runs and only
+				// onParameterParseFailure() can report this failure to the user.
 				partialStreamState.streamFailed = true
+				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
 				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
 				// The write was never approved: restore the document so a user save cannot
 				// persist the failed streamed content (reset() alone leaves it dirty).

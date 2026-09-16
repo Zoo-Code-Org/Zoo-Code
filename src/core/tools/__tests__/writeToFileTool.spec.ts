@@ -715,6 +715,54 @@ describe("writeToFileTool", () => {
 				consoleErrorSpy.mockRestore()
 			}
 		})
+
+		it("reports the captured streaming error instead of the parse error when the final block fails to parse, and clears the per-task state", async () => {
+			// A streaming delta fails with a filesystem error (streamFailed + streamError are
+			// captured). The final block then arrives without nativeArgs, so execute() never
+			// runs: the parse-failure teardown boundary must report the original filesystem
+			// error under the "writing file" context (not the incidental parse error) and tear
+			// down the per-task state, so the next write_to_file stream in this task is not
+			// blocked by the stale streamFailed guard and no abort listener leaks.
+			const fsError = new Error("EACCES: permission denied")
+			mockCline.diffViewProvider.open.mockRejectedValue(fsError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
+
+				const toolUse: ToolUse = {
+					type: "tool_use",
+					name: "write_to_file",
+					params: { path: testFilePath, content: testContent },
+					nativeArgs: undefined,
+					partial: false,
+				}
+				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: vi.fn(),
+				})
+
+				expect(mockHandleError).toHaveBeenCalledTimes(1)
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", fsError)
+				expect(mockHandleError).not.toHaveBeenCalledWith(
+					expect.stringContaining("parsing write_to_file"),
+					expect.anything(),
+				)
+				// Per-task state torn down at this boundary: guard cleared, listener detached.
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+
+				// The next stream for the same task must issue a partial ask again (the stale
+				// streamFailed guard is gone).
+				mockCline.diffViewProvider.open.mockResolvedValue(undefined)
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
+				expect(mockCline.ask).toHaveBeenCalledTimes(2)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
 	})
 
 	describe("path stabilization predicate", () => {
@@ -725,6 +773,7 @@ describe("writeToFileTool", () => {
 			return {
 				lastSeenPartialPath,
 				streamFailed: false,
+				streamError: undefined,
 				task: mockCline,
 				abortCleanup: () => {},
 			}
@@ -1387,6 +1436,25 @@ describe("writeToFileTool", () => {
 			expect(mockCline.ask).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+		})
+
+		it("clears the provider state when prevent-focus approval is denied", async () => {
+			// The prevent-focus branch stamps editType/originalContent on the provider before
+			// asking. On denial nothing was approved and no diff document was opened, so the
+			// provider state must be cleared (reset) to make a later write re-check the file
+			// system instead of reusing the stale editType. The non-prevent-focus denial branch
+			// resets through revertChanges(); this branch must not call it (no document to
+			// revert).
+			enablePreventFocusDisruption()
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockAskApproval).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
 		})
 	})
 })
