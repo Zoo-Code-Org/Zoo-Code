@@ -14,7 +14,7 @@ const command = process.platform === "win32" ? process.execPath : pnpm
 const args = process.platform === "win32" ? [pnpm] : []
 const lanes = ["api", "core", "services", "misc", "tree-sitter"]
 
-const hashes = () => {
+const coverageTasks = () => {
 	const result = spawnSync(
 		command,
 		[...args, "turbo", "run", ...lanes.map((lane) => `test:coverage:${lane}`), "--filter=zoo-code", "--dry=json"],
@@ -25,14 +25,14 @@ const hashes = () => {
 		throw new Error(details || `pnpm exited with status ${result.status ?? "unknown"}`)
 	}
 	const graph = JSON.parse(result.stdout)
-	return Object.fromEntries(
-		lanes.map((lane) => {
-			const task = graph.tasks.find(({ taskId }) => taskId === `zoo-code#test:coverage:${lane}`)
-			if (!task) throw new Error(`Coverage lane missing from Turbo graph: ${lane}`)
-			return [lane, task.hash]
-		}),
-	)
+	return lanes.map((lane) => {
+		const task = graph.tasks.find(({ taskId }) => taskId === `zoo-code#test:coverage:${lane}`)
+		if (!task) throw new Error(`Coverage lane missing from Turbo graph: ${lane}`)
+		return task
+	})
 }
+
+const hashes = () => Object.fromEntries(coverageTasks().map((task) => [task.task.split(":").at(-1), task.hash]))
 
 const withChangedFiles = (paths, run) => {
 	const originals = paths.map((path) => [path, readFileSync(resolve(root, path), "utf8")])
@@ -49,9 +49,12 @@ const changedLanes = (before, after) => lanes.filter((lane) => before[lane] !== 
 
 test("coverage lane hashes ignore post-coverage verifier implementation", () => {
 	const before = hashes()
+	const self = "scripts/verify-coverage-cache-inputs.mjs"
+	for (const task of coverageTasks()) {
+		if (Object.hasOwn(task.inputs, self)) throw new Error(`${self} is an input of ${task.taskId}`)
+	}
 	for (const path of [
 		"src/scripts/coverage-contract.mjs",
-		"src/scripts/verify-coverage-cache-inputs.mjs",
 		"src/scripts/verify-coverage-contract.mjs",
 		"src/scripts/verify-lcov.mjs",
 	]) {
