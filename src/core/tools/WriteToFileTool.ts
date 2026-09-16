@@ -387,14 +387,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// partial: true on the webview message; without this, the spinner persists even
 			// after the error bubble appears.
 			await this.finalizePartialToolAskAfterFailure(task)
-			await handleError("writing file", error as Error)
-			// Before approval the diff document holds unapproved streamed content: restore it
-			// so a user save cannot persist it. After approval the content is the user's
-			// accepted edit -- keep it in the editor (dirty) so they can save it manually.
-			if (!writeApproved) {
-				await this.revertDiffChangesBeforeReset(task)
+			// The diff cleanup runs in a finally around handleError: the production
+			// handleError awaits Task.say(), which rejects when the task is aborted, and a
+			// rejected handleError must not skip restoring the unapproved streamed content.
+			try {
+				await handleError("writing file", error as Error)
+			} finally {
+				// Before approval the diff document holds unapproved streamed content:
+				// restore it so a user save cannot persist it. After approval the content
+				// is the user's accepted edit -- keep it in the editor (dirty) so they can
+				// save it manually.
+				if (!writeApproved) {
+					await this.revertDiffChangesBeforeReset(task)
+				}
+				await this.resetDiffViewAfterWrite(task)
 			}
-			await this.resetDiffViewAfterWrite(task)
 			return
 		} finally {
 			this.resetTaskPartialState(task)

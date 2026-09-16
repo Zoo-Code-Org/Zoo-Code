@@ -725,6 +725,15 @@ describe("writeToFileTool", () => {
 			// blocked by the stale streamFailed guard and no abort listener leaks.
 			const fsError = new Error("EACCES: permission denied")
 			mockCline.diffViewProvider.open.mockRejectedValue(fsError)
+			// Capture the abort listener of the state created by the first deltas: it is the
+			// exact reference that the parse-failure teardown must detach.
+			let abortListener: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted && abortListener === undefined) {
+					abortListener = listener
+				}
+				return mockCline
+			})
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			try {
 				await executeWriteFileTool({}, { isPartial: true })
@@ -749,9 +758,11 @@ describe("writeToFileTool", () => {
 					expect.stringContaining("parsing write_to_file"),
 					expect.anything(),
 				)
-				// Per-task state torn down at this boundary: guard cleared, listener detached.
+				// Per-task state torn down at this boundary: guard cleared, the exact
+				// registered abort listener detached.
 				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+				expect(abortListener).toBeTypeOf("function")
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 
 				// The next stream for the same task must issue a partial ask again (the stale
 				// streamFailed guard is gone).
@@ -1363,6 +1374,31 @@ describe("writeToFileTool", () => {
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
 			// The write was never approved, so the diff document is reverted before reset
 			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+		})
+
+		it("runs diff cleanup when handleError rejects", async () => {
+			// The production handleError awaits Task.say(), which rejects when the task is
+			// aborted. A rejected handleError must not skip the diff cleanup: the unapproved
+			// streamed content has to be reverted and the diff view reset, or a user save
+			// could persist the failed write. The handleError rejection itself propagates
+			// (it is not swallowed by the cleanup).
+			mockHandleError.mockRejectedValue(new Error("handleError rejected (aborted task)"))
+			mockedCreateDirectoriesForFile.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
+			)
+
+			await expect(executeWriteFileTool({}, { fileExists: false })).rejects.toThrow(
+				"handleError rejected (aborted task)",
+			)
+
+			// handleError was attempted with the write context...
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			// ...and the diff cleanup still ran despite its rejection: the unapproved
+			// content is reverted before the diff view reset.
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		})
 	})
 
