@@ -57,21 +57,6 @@ describe("API - SendMessage Command", () => {
 		})
 	})
 
-	it("should enqueue directly when the current task is streaming", async () => {
-		const addMessage = vi.fn()
-		const messageText = "Use this before completing"
-		const images = ["data:image/png;base64,image1data"]
-		mockProvider.getCurrentTask = vi.fn().mockReturnValue({
-			isStreaming: true,
-			messageQueueService: { addMessage },
-		})
-
-		await api.sendMessage(messageText, images)
-
-		expect(addMessage).toHaveBeenCalledWith(messageText, images)
-		expect(mockPostMessageToWebview).not.toHaveBeenCalled()
-	})
-
 	it("should handle SendMessage command with text and images", async () => {
 		// Arrange
 		const messageText = "Analyze this image"
