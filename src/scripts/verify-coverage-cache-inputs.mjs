@@ -1,11 +1,9 @@
 import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import process from "node:process"
-import { test } from "node:test"
-
-if (process.env.GITHUB_ACTIONS !== "true" && process.env.ZOO_ALLOW_COVERAGE_INPUT_MUTATION !== "true")
-	throw new Error("Coverage cache input verification requires an ephemeral runner or explicit local opt-in")
+import { after, test } from "node:test"
 
 const root = resolve(import.meta.dirname, "../..")
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
@@ -13,11 +11,39 @@ if (!pnpm) throw new Error("pnpm executable path is unavailable")
 const command = process.platform === "win32" ? process.execPath : pnpm
 const args = process.platform === "win32" ? [pnpm] : []
 const lanes = ["api", "core", "services", "misc", "tree-sitter"]
+const probeRoot = mkdtempSync(resolve(tmpdir(), "zoo-code-coverage-cache-inputs-"))
+
+const git = (gitArgs) => {
+	const result = spawnSync("git", gitArgs, { cwd: root, encoding: "utf8" })
+	if (result.status !== 0) {
+		const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
+		throw new Error(details || `git exited with status ${result.status ?? "unknown"}`)
+	}
+}
+
+git(["worktree", "add", "--detach", probeRoot, "HEAD"])
+after(() => {
+	try {
+		git(["worktree", "remove", "--force", probeRoot])
+	} finally {
+		rmSync(probeRoot, { recursive: true, force: true })
+	}
+})
 
 const coverageTasks = () => {
 	const result = spawnSync(
 		command,
-		[...args, "turbo", "run", ...lanes.map((lane) => `test:coverage:${lane}`), "--filter=zoo-code", "--dry=json"],
+		[
+			...args,
+			"turbo",
+			"--cwd",
+			probeRoot,
+			"run",
+			...lanes.map((lane) => `test:coverage:${lane}`),
+			"--filter=zoo-code",
+			"--dry=json",
+			"--no-daemon",
+		],
 		{ cwd: root, encoding: "utf8" },
 	)
 	if (result.status !== 0) {
@@ -35,13 +61,13 @@ const coverageTasks = () => {
 const hashes = () => Object.fromEntries(coverageTasks().map((task) => [task.task.split(":").at(-1), task.hash]))
 
 const withChangedFiles = (paths, run) => {
-	const originals = paths.map((path) => [path, readFileSync(resolve(root, path), "utf8")])
+	const originals = paths.map((path) => [path, readFileSync(resolve(probeRoot, path), "utf8")])
 	try {
 		for (const [path, contents] of originals)
-			writeFileSync(resolve(root, path), `${contents}\n// cache-input-test\n`)
+			writeFileSync(resolve(probeRoot, path), `${contents}\n// cache-input-test\n`)
 		return run()
 	} finally {
-		for (const [path, contents] of originals) writeFileSync(resolve(root, path), contents)
+		for (const [path, contents] of originals) writeFileSync(resolve(probeRoot, path), contents)
 	}
 }
 
