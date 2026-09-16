@@ -33,13 +33,16 @@ export class TerminalRegistry {
 		// TODO: This initialization code is VSCode specific, and therefore
 		// should probably live elsewhere.
 
-		// Register handler for terminal close events to clean up temporary
-		// directories.
+		// Treat terminal closure as a completion path because VS Code may not emit
+		// onDidEndTerminalShellExecution after the terminal is disposed.
 		const closeDisposable = vscode.window.onDidCloseTerminal((vsceTerminal) => {
-			const terminal = this.getTerminalByVSCETerminal(vsceTerminal)
+			// Do not use getTerminalByVSCETerminal here: exitStatus is already set when
+			// this event fires, so that helper removes closed terminals before returning.
+			const terminal = this.terminals.find((t) => t instanceof Terminal && t.terminal === vsceTerminal)
 
-			if (terminal) {
-				ShellIntegrationManager.zshCleanupTmpDir(terminal.id)
+			if (terminal instanceof Terminal) {
+				terminal.handleClose()
+				this.removeTerminal(terminal.id)
 			}
 		})
 
