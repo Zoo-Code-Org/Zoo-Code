@@ -1913,6 +1913,59 @@ describe("leaked tool-call parser contracts", () => {
 	})
 })
 
+describe("quoting heuristics on the incremental scanner", () => {
+	const tools = new Set(["update_todo_list"])
+	const open = `<function${"_calls"}>`
+	const todo = () =>
+		`<in${"voke"} name="update_todo_list"><param${"eter"} name="todos">x</param${"eter"}></in${"voke"}>`
+	const callsOf = (text: string) => extractLeakedToolCalls(text, tools).calls
+	const fence = "```"
+
+	it("suppresses on an unterminated tag left after the block on the same line", () => {
+		expect(callsOf(`${open}\n${todo()} <`)).toHaveLength(0)
+	})
+
+	it("suppresses on narrative words following the block on the same line", () => {
+		expect(callsOf(`${open}\n${todo()} trailing words`)).toHaveLength(0)
+	})
+
+	it("suppresses on a stray closing angle bracket after the block", () => {
+		expect(callsOf(`${open}\n${todo()} >`)).toHaveLength(0)
+	})
+
+	it("suppresses when an unterminated tag precedes the block after a quoting cue", () => {
+		expect(callsOf(`${open}\nnever <${todo()}`)).toHaveLength(0)
+	})
+
+	it("recovers when a sentence terminator inside an unterminated tag ends the cue's sentence", () => {
+		expect(callsOf(`${open}\nnever <a.b${todo()}`)).toHaveLength(1)
+	})
+
+	it("recovers when the terminator immediately closes the cue's sentence", () => {
+		expect(callsOf(`${open}\nnever.${todo()}`)).toHaveLength(1)
+	})
+
+	it("treats a repeated non-fence character run as ordinary text", () => {
+		expect(callsOf(`${open}\n---\n${todo()}`)).toHaveLength(1)
+	})
+
+	it("closes a fence whose run is bare", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence}\n${todo()}`)).toHaveLength(1)
+	})
+
+	it("closes a fence whose suffix is whitespace only", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence} \n${todo()}`)).toHaveLength(1)
+	})
+
+	it("keeps a fence open when its closing run carries a single-character info string", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence}j\n${todo()}`)).toHaveLength(0)
+	})
+
+	it("keeps a fence open when its closing run carries a space-separated info string", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence} j\n${todo()}`)).toHaveLength(0)
+	})
+})
+
 describe("leaked tool-call parser scaling", () => {
 	const tools = new Set(["update_todo_list"])
 	const todo = () =>
