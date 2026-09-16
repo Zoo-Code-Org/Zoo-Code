@@ -60,6 +60,7 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 					}),
 				}),
 			},
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		}

@@ -444,6 +444,7 @@
 		"test": "vitest run",
 		"verify:coverage-contract": "node scripts/verify-coverage-contract.mjs",
 		"verify:coverage-cache-inputs": "node --test scripts/verify-coverage-cache-inputs.mjs",
+		"merge:coverage": "node scripts/merge-lcov.mjs coverage/merged/lcov.info coverage/api/lcov.info coverage/core/lcov.info coverage/services/lcov.info coverage/misc/lcov.info coverage/tree-sitter/lcov.info",
 		"test:unit": "vitest run --config vitest.unit.config.ts",
 		"test:dist": "vitest run --config vitest.dist.config.ts",
 		"test:coverage": "vitest run --coverage",
