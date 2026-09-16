@@ -173,6 +173,14 @@ jobs:
                   node src/scripts/verify-lcov.mjs src/coverage/services/lcov.info
                   node src/scripts/verify-lcov.mjs src/coverage/misc/lcov.info
                   node src/scripts/verify-lcov.mjs src/coverage/tree-sitter/lcov.info
+            - name: Merge extension coverage reports
+              run: |
+                  mkdir -p src/coverage/merged
+                  pnpm --dir src run merge:coverage
+                  node src/scripts/verify-lcov.mjs src/coverage/merged/lcov.info
+            # Validate cache boundaries before publishing any new Turbo entries.
+            - name: Verify coverage cache inputs
+              run: pnpm --dir src run verify:coverage-cache-inputs
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -184,21 +192,16 @@ jobs:
             # there mostly adds Codecov overhead without changing pass/fail
             # behavior.
             # Coverage is uploaded in separate steps so each LCOV gets the
-            # correct flag set. Codecov double-counts overlapping lines when a
-            # single upload carries multiple flags whose paths overlap, so the
-            # core lanes and webview lane must be uploaded individually with
-            # their own flag.
+            # correct flag set. Extension lanes instrument the same sources, so
+            # union them before upload; a line is covered when any lane executes
+            # it. Core and webview reports retain their independent flags.
             # See https://docs.codecov.com/docs/flags
             - name: Upload non-core coverage to Codecov
               if: matrix.upload-coverage
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: >-
-                      src/coverage/api/lcov.info,
-                      src/coverage/core/lcov.info,
-                      src/coverage/services/lcov.info,
-                      src/coverage/misc/lcov.info,
-                      src/coverage/tree-sitter/lcov.info,
+                      src/coverage/merged/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
                       apps/cli/coverage/lcov.info
@@ -240,6 +243,7 @@ jobs:
                       src/coverage/services/lcov.info
                       src/coverage/misc/lcov.info
                       src/coverage/tree-sitter/lcov.info
+                      src/coverage/merged/lcov.info
                       webview-ui/coverage/lcov.info
                       packages/cloud/coverage/lcov.info
                       packages/telemetry/coverage/lcov.info

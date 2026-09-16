@@ -24,6 +24,10 @@
 			"dependsOn": ["^build"],
 			"inputs": [
 				"$TURBO_DEFAULT$",
+				"!scripts/verify-coverage-cache-inputs.mjs",
+				"!scripts/coverage-contract.mjs",
+				"!scripts/verify-coverage-contract.mjs",
+				"!scripts/verify-lcov.mjs",
 				"!core/**/*.{test,spec}.{ts,tsx}",
 				"!services/**/*.{test,spec}.{ts,tsx}",
 				"!__tests__/**/*.{test,spec}.{ts,tsx}",
@@ -42,6 +46,10 @@
 			"dependsOn": ["^build"],
 			"inputs": [
 				"$TURBO_DEFAULT$",
+				"!scripts/verify-coverage-cache-inputs.mjs",
+				"!scripts/coverage-contract.mjs",
+				"!scripts/verify-coverage-contract.mjs",
+				"!scripts/verify-lcov.mjs",
 				"!api/**/*.{test,spec}.{ts,tsx}",
 				"!services/**/*.{test,spec}.{ts,tsx}",
 				"!__tests__/**/*.{test,spec}.{ts,tsx}",
@@ -60,6 +68,10 @@
 			"dependsOn": ["^build"],
 			"inputs": [
 				"$TURBO_DEFAULT$",
+				"!scripts/verify-coverage-cache-inputs.mjs",
+				"!scripts/coverage-contract.mjs",
+				"!scripts/verify-coverage-contract.mjs",
+				"!scripts/verify-lcov.mjs",
 				"!api/**/*.{test,spec}.{ts,tsx}",
 				"!core/**/*.{test,spec}.{ts,tsx}",
 				"!services/tree-sitter/**/*.{test,spec}.{ts,tsx}",
@@ -79,6 +91,10 @@
 			"dependsOn": ["^build"],
 			"inputs": [
 				"$TURBO_DEFAULT$",
+				"!scripts/verify-coverage-cache-inputs.mjs",
+				"!scripts/coverage-contract.mjs",
+				"!scripts/verify-coverage-contract.mjs",
+				"!scripts/verify-lcov.mjs",
 				"!api/**/*.{test,spec}.{ts,tsx}",
 				"!core/**/*.{test,spec}.{ts,tsx}",
 				"!services/**/*.{test,spec}.{ts,tsx}",

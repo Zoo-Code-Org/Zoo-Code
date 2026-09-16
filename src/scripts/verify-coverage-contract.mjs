@@ -5,6 +5,8 @@ import { relative, resolve } from "node:path"
 import process from "node:process"
 import { promisify } from "node:util"
 
+import { mergeCoverageSources, parseCoverageSourceLines } from "./coverage-contract.mjs"
+
 const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
 if (!pnpm) throw new Error("pnpm executable path is unavailable")
 const command = process.platform === "win32" ? process.execPath : pnpm
@@ -151,16 +153,9 @@ try {
 	rmSync(collectionDirectory, { recursive: true, force: true })
 }
 
-const coverageSources = new Map()
-for (const lane of [...ownershipLanes, "tree-sitter"]) {
-	let source
-	for (const line of readFileSync(resolve(root, "coverage", lane, "lcov.info"), "utf8").split(/\r?\n/)) {
-		if (line.startsWith("SF:")) source = line.slice(3)
-		if (line.startsWith("LF:")) coverageSources.set(source, Number(line.slice(3)))
-	}
-}
-const instrumentedLines = [...coverageSources.values()].reduce((sum, lines) => sum + lines, 0)
-if (coverageSources.size !== 469 || instrumentedLines !== 30_299)
-	throw new Error(
-		`Coverage source population changed: ${coverageSources.size} records and ${instrumentedLines} lines; verify equivalence and update the baseline deliberately`,
-	)
+const coverageLanes = [...ownershipLanes, "tree-sitter"]
+const coverageByLane = coverageLanes.map((lane) => [
+	lane,
+	parseCoverageSourceLines(readFileSync(resolve(root, "coverage", lane, "lcov.info"), "utf8"), lane),
+])
+mergeCoverageSources(coverageLanes, coverageByLane)
