@@ -90,6 +90,8 @@ jobs:
               run: pnpm lint
             - name: Check types
               run: pnpm check-types
+            - name: Validate Code QA workflow
+              run: pnpm test:code-qa-ci
             - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
             - name: Validate MCP OAuth integration
@@ -135,11 +137,11 @@ jobs:
                     - os: ubuntu-latest
                       name: ubuntu-latest
                       codecov-flag: ubuntu
-                      upload-coverage: true
+                      collect-coverage: true
                     - os: windows-latest
                       name: windows-latest
                       codecov-flag: windows
-                      upload-coverage: false
+                      collect-coverage: false
         steps:
             - name: Checkout code
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,18 +157,36 @@ jobs:
                       ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
                       ${{ runner.os }}-turbo-
             - name: Run non-extension package coverage
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
+            - name: Run non-extension package tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
             - name: Run extension coverage lanes
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage:api test:coverage:core test:coverage:services test:coverage:misc test:coverage:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only
+            - name: Run extension unit tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test:unit --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Verify extension coverage contract
+              if: matrix.collect-coverage
               run: pnpm --dir src run verify:coverage-contract
             - name: Run extension dist smoke test
               run: pnpm turbo run test:dist --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Run core unit coverage
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core unit tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Run core integration coverage
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core integration tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Verify extension coverage reports
+              if: matrix.collect-coverage
               run: |
                   node src/scripts/verify-lcov.mjs src/coverage/api/lcov.info
                   node src/scripts/verify-lcov.mjs src/coverage/core/lcov.info
@@ -174,12 +194,14 @@ jobs:
                   node src/scripts/verify-lcov.mjs src/coverage/misc/lcov.info
                   node src/scripts/verify-lcov.mjs src/coverage/tree-sitter/lcov.info
             - name: Merge extension coverage reports
+              if: matrix.collect-coverage
               run: |
                   mkdir -p src/coverage/merged
                   pnpm --dir src run merge:coverage
                   node src/scripts/verify-lcov.mjs src/coverage/merged/lcov.info
             # Validate cache boundaries before publishing any new Turbo entries.
             - name: Verify coverage cache inputs
+              if: matrix.collect-coverage
               run: pnpm --dir src run verify:coverage-cache-inputs
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
@@ -197,7 +219,7 @@ jobs:
             # it. Core and webview reports retain their independent flags.
             # See https://docs.codecov.com/docs/flags
             - name: Upload non-core coverage to Codecov
-              if: matrix.upload-coverage
+              if: matrix.collect-coverage
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: >-
@@ -209,7 +231,7 @@ jobs:
                   flags: ${{ matrix.codecov-flag }}
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload webview JSDOM coverage to Codecov
-              if: matrix.upload-coverage
+              if: matrix.collect-coverage
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: webview-ui/coverage/lcov.info
@@ -217,7 +239,7 @@ jobs:
                   flags: webview-ui
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload core unit coverage to Codecov
-              if: matrix.upload-coverage
+              if: matrix.collect-coverage
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: packages/core/coverage/unit/lcov.info
@@ -225,7 +247,7 @@ jobs:
                   flags: ${{ matrix.codecov-flag }},core-unit
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload core integration coverage to Codecov
-              if: matrix.upload-coverage
+              if: matrix.collect-coverage
               uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
               with:
                   files: packages/core/coverage/integration/lcov.info
@@ -233,7 +255,7 @@ jobs:
                   flags: ${{ matrix.codecov-flag }},core-integration
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload coverage reports to GitHub
-              if: matrix.upload-coverage
+              if: matrix.collect-coverage
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                   name: coverage-reports-${{ matrix.name }}
