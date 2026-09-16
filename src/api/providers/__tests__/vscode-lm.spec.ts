@@ -1912,3 +1912,65 @@ describe("leaked tool-call parser contracts", () => {
 		})
 	})
 })
+
+describe("leaked tool-call parser scaling", () => {
+	const tools = new Set(["update_todo_list"])
+	const todo = () =>
+		`<in${"voke"} name="update_todo_list"><param${"eter"} name="todos">x</param${"eter"}></in${"voke"}>`
+
+	/** Median wall-clock cost of `run`, which is far steadier than a single sample under CI noise. */
+	const medianMs = (run: () => void): number => {
+		const samples: number[] = []
+		for (let iter = 0; iter < 5; iter += 1) {
+			const start = performance.now()
+			run()
+			samples.push(performance.now() - start)
+		}
+		return samples.sort((left, right) => left - right)[2]
+	}
+
+	/**
+	 * Cost at 4x input over cost at 1x. Linear work lands near 4; the quadratic scans this pins
+	 * landed near 16 or worse. Absolute timings are machine-dependent, so only the ratio is asserted.
+	 */
+	const growthFactor = (build: (size: number) => string, baseSize: number, run: (input: string) => void): number => {
+		const small = build(baseSize)
+		const large = build(baseSize * 4)
+		// Warm both paths so JIT compilation is not charged to the first measurement.
+		run(small)
+		run(large)
+		return (
+			medianMs(() => run(large)) /
+			Math.max(
+				medianMs(() => run(small)),
+				0.001,
+			)
+		)
+	}
+
+	it("scans ordinary wrapped output in time linear in message length", () => {
+		const build = (count: number) => `<function${"_calls"}>\n${`${todo()}\n`.repeat(count)}</function${"_calls"}>\n`
+		const growth = growthFactor(build, 150, (input) => extractLeakedToolCalls(input, tools))
+
+		// Re-splitting the prefix per candidate made this ~16x; 10 leaves room for CI noise.
+		expect(growth).toBeLessThan(10)
+		expect(extractLeakedToolCalls(build(150), tools).calls).toHaveLength(150)
+	})
+
+	it("scans unclosed markup, deep nesting, and repeated quoting cues without quadratic blowup", () => {
+		const unclosed = (count: number) =>
+			`<function${"_calls"}>\n${`<in${"voke"} name="update_todo_list">\n`.repeat(count)}`
+		expect(growthFactor(unclosed, 400, (input) => extractLeakedToolCalls(input, tools))).toBeLessThan(10)
+
+		// Nested tags before the block exercise tag stripping; cues with a trailing terminator
+		// exercise the quoting-cue scan. Both are read through the public entry point.
+		const nested = (depth: number) =>
+			`<function${"_calls"}>\n${"<".repeat(depth)}tag${">".repeat(depth)} ${todo()}\n`
+		expect(growthFactor(nested, 500, (input) => extractLeakedToolCalls(input, tools))).toBeLessThan(10)
+
+		const cues = (count: number) => `<function${"_calls"}>\n${"never. ".repeat(count)}never ${todo()}\n`
+		expect(growthFactor(cues, 500, (input) => extractLeakedToolCalls(input, tools))).toBeLessThan(10)
+		// The cue still suppresses recovery, so the fast path did not silently change the verdict.
+		expect(extractLeakedToolCalls(cues(500), tools).calls).toHaveLength(0)
+	})
+})

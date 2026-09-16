@@ -88,42 +88,142 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 const MAX_PARTIAL_INVOKE_CARRY = 64
 
 /**
- * True when `before` ends inside an open Markdown code fence. Tracks the fence character and its
- * width so tilde fences and fences of 4+ backticks (which may legally contain shorter fences) are
- * recognized, rather than counting three-backtick runs for parity.
+ * Left-to-right scan state behind the quoting heuristics: open code fence, current line start,
+ * backticks seen on the current line, and whether a `<function_calls>` wrapper is open.
+ *
+ * State is threaded through the match loop and advanced only over newly consumed text. Rebuilding
+ * each candidate's prefix and re-walking it was quadratic in message length on ordinary output.
  */
-function isInsideCodeFence(before: string): boolean {
-	let openFence: { marker: string; width: number } | null = null
-	for (const line of before.split("\n")) {
-		const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})([^\n]*)$/)
-		if (!fenceMatch) {
-			continue
+class QuotingScanState {
+	private openFence: { marker: string; width: number } | null = null
+	private linePhase: "leading" | "marker" | "suffix" | "invalid" = "leading"
+	private leadingSpaces = 0
+	private lineMarker = ""
+	private lineWidth = 0
+	private lineSuffixBlank = true
+	private lineBackticks = 0
+	private wrapperOpen = false
+	private position = 0
+	/** Index, in the scanned stream, of the first character of the line now being scanned. */
+	lineStart = 0
+
+	/** Consumes the next contiguous span of the stream. Spans must not overlap or skip text. */
+	advance(span: string): void {
+		// A wrapper tag admits only whitespace before its `>`, so it can never straddle a span
+		// boundary, which always falls on the `<` of an `<invoke>` marker.
+		for (const wrapperTag of span.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
+			this.wrapperOpen = wrapperTag[1] === ""
 		}
-		const marker = fenceMatch[1][0]
-		const width = fenceMatch[1].length
-		// CommonMark allows an info string only on an opening fence, never a closing one.
-		if (!openFence) {
-			openFence = { marker, width }
-		} else if (marker === openFence.marker && width >= openFence.width && fenceMatch[2].trim() === "") {
-			openFence = null
+		for (let iter = 0; iter < span.length; iter += 1) {
+			const character = span[iter]
+			if (character === "\n") {
+				this.openFence = this.fenceAfterCurrentLine()
+				this.resetLine()
+			} else {
+				this.consumeLineCharacter(character)
+			}
+			this.position += 1
 		}
 	}
-	return openFence !== null
+
+	/** True when the stream so far ends inside an open Markdown code fence. */
+	isInsideCodeFence(): boolean {
+		return this.fenceAfterCurrentLine() !== null
+	}
+
+	/** An odd count means the stream ends inside an inline code span. */
+	hasOddBacktickCountOnLine(): boolean {
+		return this.lineBackticks % 2 === 1
+	}
+
+	isInsideFunctionCallsWrapper(): boolean {
+		return this.wrapperOpen
+	}
+
+	private resetLine(): void {
+		this.linePhase = "leading"
+		this.leadingSpaces = 0
+		this.lineMarker = ""
+		this.lineWidth = 0
+		this.lineSuffixBlank = true
+		this.lineBackticks = 0
+		this.lineStart = this.position + 1
+	}
+
+	/**
+	 * Recognizes ` {0,3}(`{3,}|~{3,})` followed by an info string one character at a time, so the
+	 * fence character, its width, and whether the suffix is blank are known without re-reading the line.
+	 */
+	private consumeLineCharacter(character: string): void {
+		if (character === "`") {
+			this.lineBackticks += 1
+		}
+		if (this.linePhase === "leading") {
+			if (character === " ") {
+				this.leadingSpaces += 1
+				if (this.leadingSpaces > 3) {
+					this.linePhase = "invalid"
+				}
+			} else if (character === "`" || character === "~") {
+				this.linePhase = "marker"
+				this.lineMarker = character
+				this.lineWidth = 1
+			} else {
+				this.linePhase = "invalid"
+			}
+		} else if (this.linePhase === "marker") {
+			if (character === this.lineMarker) {
+				this.lineWidth += 1
+			} else {
+				this.linePhase = "suffix"
+				this.lineSuffixBlank = character.trim() === ""
+			}
+		} else if (this.linePhase === "suffix" && character.trim() !== "") {
+			this.lineSuffixBlank = false
+		}
+	}
+
+	/** Fence state including the partial line now being scanned, which may itself open a fence. */
+	private fenceAfterCurrentLine(): { marker: string; width: number } | null {
+		const isFenceLine = (this.linePhase === "marker" || this.linePhase === "suffix") && this.lineWidth >= 3
+		if (!isFenceLine) {
+			return this.openFence
+		}
+		if (!this.openFence) {
+			return { marker: this.lineMarker, width: this.lineWidth }
+		}
+		// CommonMark allows an info string only on an opening fence, never a closing one.
+		const closesFence =
+			this.lineMarker === this.openFence.marker && this.lineWidth >= this.openFence.width && this.lineSuffixBlank
+		return closesFence ? null : this.openFence
+	}
 }
 
 /**
- * Strips well-formed tags repeatedly until the result stops changing. A single pass is unsafe:
- * `<<invoke>>` reassembles into a live-looking tag after one replacement.
+ * Strips well-formed tags, including nested ones. Removing a tag can reassemble a live-looking tag
+ * from the characters around it (`<<invoke>>`), so tags are matched with a single-pass stack rather
+ * than by re-replacing until the text stops changing.
  */
 function stripTagsCompletely(text: string): string {
-	let current = text
-	for (;;) {
-		const stripped = current.replace(/<[^<>]*>/g, "")
-		if (stripped === current) {
-			return stripped
+	let output = ""
+	// Bodies of `<` runs still awaiting a `>`; an unterminated one is never a tag, so it is emitted verbatim.
+	const pendingTags: string[] = []
+	for (let iter = 0; iter < text.length; iter += 1) {
+		const character = text[iter]
+		if (character === "<") {
+			pendingTags.push("")
+		} else if (character === ">" && pendingTags.length > 0) {
+			pendingTags.pop()
+		} else if (pendingTags.length > 0) {
+			pendingTags[pendingTags.length - 1] += character
+		} else {
+			output += character
 		}
-		current = stripped
 	}
+	for (const pending of pendingTags) {
+		output += `<${pending}`
+	}
+	return output
 }
 
 /**
@@ -143,49 +243,50 @@ export function trailingPartialToolMarkerLength(text: string): number {
 }
 
 /**
- * True when an unclosed `<function_calls>` wrapper is open at the end of `before`.
- *
- * Every wrapped-leak sample we have came with this wrapper, and the quoted-in-prose cases were
- * bare, making the wrapper the sharpest discriminator available. Requiring it keeps untrusted bare
- * `<invoke>` markup — which a prompt-injected file or a quoted example can contain — from becoming
- * a real call. It is a heuristic filter, not a security boundary.
+ * Words that mark nearby markup as being talked about rather than invoked.
  */
-function isInsideFunctionCallsWrapper(before: string): boolean {
-	const lastOpen = before.search(/<(?:antml:)?function_calls\s*>(?![\s\S]*<(?:antml:)?function_calls\s*>)/i)
-	if (lastOpen === -1) {
-		return false
+const QUOTING_CUE_PATTERN =
+	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b/gi
+
+/**
+ * True when a quoting cue falls in the unterminated final sentence of `sameLineBefore`. Pairing the
+ * cue with a terminator-free tail in one pattern re-scanned that tail once per cue.
+ */
+function hasQuotingCue(sameLineBefore: string): boolean {
+	const lastTerminator = Math.max(
+		sameLineBefore.lastIndexOf("."),
+		sameLineBefore.lastIndexOf("!"),
+		sameLineBefore.lastIndexOf("?"),
+	)
+	for (const cue of sameLineBefore.matchAll(QUOTING_CUE_PATTERN)) {
+		if (cue.index + cue[0].length > lastTerminator) {
+			return true
+		}
 	}
-	return !/<\/(?:antml:)?function_calls\s*>/i.test(before.slice(lastOpen))
+	return false
 }
 
 /**
  * True when the block spanning `[index, endIndex)` is being quoted — inside a fenced code block,
  * inside an inline code span, or embedded mid-sentence in plain prose — rather than invoked.
+ *
+ * `scan` must already be advanced to `index`.
  */
-function isQuotedAsCode(text: string, index: number, endIndex: number): boolean {
-	const before = text.slice(0, index)
-	if (isInsideCodeFence(before)) {
-		return true
-	}
-	const lineStart = before.lastIndexOf("\n") + 1
-	const sameLineBefore = before.slice(lineStart)
-	if ((sameLineBefore.match(/`/g)?.length ?? 0) % 2 === 1) {
+function isQuotedAsCode(text: string, index: number, endIndex: number, scan: QuotingScanState): boolean {
+	if (scan.isInsideCodeFence() || scan.hasOddBacktickCountOnLine()) {
 		return true
 	}
 	// Narrative words after the block on the same line mean the markup is being talked about
 	// (e.g. "never emit <invoke ...> directly"), which must not be replayed as a live call.
-	const after = text.slice(endIndex)
-	const lineEnd = after.indexOf("\n")
-	const restOfLine = lineEnd === -1 ? after : after.slice(0, lineEnd)
+	const lineEnd = text.indexOf("\n", endIndex)
+	const restOfLine = text.slice(endIndex, lineEnd === -1 ? undefined : lineEnd)
 	if (stripTagsCompletely(restOfLine).trim().length > 0) {
 		return true
 	}
 	// A quoted invoke that ENDS its line leaves no trailing text to judge, and a real leak is
 	// commonly narrated too — keying off leading prose alone regressed genuine recoveries, so only
 	// this narrow cue suppresses it.
-	const quotingCue =
-		/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
-	return quotingCue.test(stripTagsCompletely(sameLineBefore))
+	return hasQuotingCue(stripTagsCompletely(text.slice(scan.lineStart, index)))
 }
 
 /**
@@ -347,28 +448,44 @@ export function extractLeakedToolCalls(
 	let leftover = ""
 	let lastIndex = 0
 
-	const blockPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
-	for (const match of text.matchAll(blockPattern)) {
-		leftover += text.slice(lastIndex, match.index)
-		const name = match[1]
-		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
+	// Quote detection needs the text streamed before the buffer, since a fence may have opened
+	// there. Joined once, not per candidate, and scanned by state that only ever moves forward.
+	const scannedText = precedingText + text
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	let scannedUpTo = precedingText.length
+
+	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
+	const closePattern = /<\/(?:antml:)?invoke\s*>/gi
+	for (let open = openPattern.exec(text); open !== null; open = openPattern.exec(text)) {
+		const bodyStart = open.index + open[0].length
+		closePattern.lastIndex = bodyStart
+		const close = closePattern.exec(text)
+		// With no closing tag after this open there is none after any later open either.
+		if (!close) {
+			break
+		}
+		const blockEnd = close.index + close[0].length
+		leftover += text.slice(lastIndex, open.index)
+		const name = open[1]
+		scan.advance(scannedText.slice(scannedUpTo, precedingText.length + open.index))
+		scannedUpTo = precedingText.length + open.index
 		const recoverable =
 			validTools.has(name) &&
-			isInsideFunctionCallsWrapper(precedingText + text.slice(0, match.index)) &&
-			!isQuotedAsCode(
-				precedingText + text,
-				precedingText.length + match.index,
-				precedingText.length + match.index + match[0].length,
-			)
+			scan.isInsideFunctionCallsWrapper() &&
+			!isQuotedAsCode(scannedText, scannedUpTo, precedingText.length + blockEnd, scan)
 		// Parsing may still fail closed when a parameter doesn't match its declared type.
-		const input = recoverable ? parseLeakedInvokeParams(match[2], schemaFor(name)) : undefined
+		const input = recoverable
+			? parseLeakedInvokeParams(text.slice(bodyStart, close.index), schemaFor(name))
+			: undefined
 		if (input) {
 			calls.push({ name, input })
 		} else {
 			// Not one of our tools, quoted as code, or un-convertible — keep the block as literal text.
-			leftover += match[0]
+			leftover += text.slice(open.index, blockEnd)
 		}
-		lastIndex = match.index + match[0].length
+		lastIndex = blockEnd
+		openPattern.lastIndex = blockEnd
 	}
 	leftover += text.slice(lastIndex)
 
