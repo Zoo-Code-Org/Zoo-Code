@@ -142,6 +142,7 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 vi.mock("../services/code-index/code-index-manager-registry", () => ({
 	CodeIndexManagerRegistry: {
 		getOrCreate: vi.fn().mockReturnValue(null),
+		disposeAll: vi.fn(),
 	},
 }))
 

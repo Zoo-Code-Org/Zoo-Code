@@ -408,4 +408,5 @@ export async function deactivate() {
 
 	Terminal.setTerminalProfile(undefined)
 	TerminalRegistry.cleanup()
+	CodeIndexManagerRegistry.disposeAll()
 }
