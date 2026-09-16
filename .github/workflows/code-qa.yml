@@ -178,6 +178,9 @@ jobs:
                   mkdir -p src/coverage/merged
                   pnpm --dir src run merge:coverage
                   node src/scripts/verify-lcov.mjs src/coverage/merged/lcov.info
+            # Validate cache boundaries before publishing any new Turbo entries.
+            - name: Verify coverage cache inputs
+              run: pnpm --dir src run verify:coverage-cache-inputs
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -248,7 +251,3 @@ jobs:
                       packages/core/coverage/unit/lcov.info
                       packages/core/coverage/integration/lcov.info
                   retention-days: 7
-            # Hash probes mutate only a disposable worktree and run last to keep
-            # verification overhead off the critical coverage path.
-            - name: Verify coverage cache inputs
-              run: pnpm --dir src run verify:coverage-cache-inputs
