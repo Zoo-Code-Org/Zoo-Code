@@ -2,7 +2,17 @@ import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 
-import { readTaskSessionsFromStoragePath } from "../index.js"
+import type { HistoryItem } from "@roo-code/types"
+
+import {
+	ABSENT_TASK_FILE_PREIMAGE,
+	INVALID_TASK_FILE_PREIMAGE,
+	expectedTaskFileStates,
+	isValidTaskFilePreImage,
+	matchesExpectedHistoryItem,
+	readTaskSessionsFromStoragePath,
+	taskFilePreImage,
+} from "../index.js"
 
 describe("readTaskSessionsFromStoragePath", () => {
 	let tempDir: string
@@ -110,5 +120,39 @@ describe("readTaskSessionsFromStoragePath", () => {
 
 	it("returns an empty list when tasks directory does not exist", async () => {
 		await expect(readTaskSessionsFromStoragePath(tempDir)).resolves.toEqual([])
+	})
+})
+
+describe("task file pre-images", () => {
+	const item: HistoryItem = {
+		id: "task-1",
+		number: 1,
+		ts: 1,
+		task: "Task",
+		tokensIn: 0,
+		tokensOut: 0,
+		totalCost: 0,
+	}
+
+	it("distinguishes validated, absent, and invalid pre-images", () => {
+		const valid = taskFilePreImage(item, item.id, true)
+		expect(valid).toEqual(item)
+		expect(valid).not.toBe(item)
+		expect(taskFilePreImage(null, item.id, false)).toBe(ABSENT_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage(null, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage({ ...item, id: "other" }, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage({ ...item, id: "other" }, item.id, false)).toBe(INVALID_TASK_FILE_PREIMAGE)
+		expect(taskFilePreImage({ id: item.id }, item.id, true)).toBe(INVALID_TASK_FILE_PREIMAGE)
+	})
+
+	it("recognizes valid snapshots and expected records", () => {
+		expect(isValidTaskFilePreImage(item)).toBe(true)
+		expect(isValidTaskFilePreImage(ABSENT_TASK_FILE_PREIMAGE)).toBe(false)
+		expect(isValidTaskFilePreImage(INVALID_TASK_FILE_PREIMAGE)).toBe(false)
+		expect(expectedTaskFileStates(item, { ...item })).toEqual([item, item])
+		expect(expectedTaskFileStates(item, ABSENT_TASK_FILE_PREIMAGE)).toEqual([item])
+		expect(expectedTaskFileStates(item, INVALID_TASK_FILE_PREIMAGE)).toEqual([item])
+		expect(matchesExpectedHistoryItem(item, [{ ...item }], (left, right) => left.id === right.id)).toBe(true)
+		expect(matchesExpectedHistoryItem(item, [], (left, right) => left.id === right.id)).toBe(false)
 	})
 })

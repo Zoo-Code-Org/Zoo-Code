@@ -53,6 +53,12 @@ export const PACKAGE_CONFIGS = [
 		vitestConfig: "vitest.config.ts",
 		vitestRelated: false,
 		discoverRelatedTests: true,
+		testFilesBySource: {
+			"core/webview/ClineProvider.ts": [
+				"__tests__/ClineProvider.history-resume-delegation.spec.ts",
+				"__tests__/ClineProvider.delegation.spec.ts",
+			],
+		},
 		excludedPaths: ["src/esbuild.mjs", "src/eslint.config.mjs", "src/utils/vitest-verbosity.ts"],
 	},
 ]
@@ -297,7 +303,7 @@ export function parseVitestTestFiles(report, runRoot) {
 	]
 }
 
-export function preferDirectTestFiles(testFiles, sourceFiles) {
+export function preferDirectTestFiles(testFiles, sourceFiles, testFilesBySource = {}) {
 	const sourceNames = sourceFiles.map((sourceFile) =>
 		path.posix.basename(sourceFile, path.posix.extname(sourceFile)).toLowerCase(),
 	)
@@ -309,10 +315,14 @@ export function preferDirectTestFiles(testFiles, sourceFiles) {
 			/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(normalizedTestName)
 		)
 	}
-	if (sourceNames.some((sourceName) => !testFiles.some((testFile) => isDirectMatch(testFile, sourceName)))) {
-		return testFiles
-	}
-	return testFiles.filter((testFile) => sourceNames.some((sourceName) => isDirectMatch(testFile, sourceName)))
+	const hasIndirectSource = sourceNames.some(
+		(sourceName) => !testFiles.some((testFile) => isDirectMatch(testFile, sourceName)),
+	)
+	const selected = hasIndirectSource
+		? testFiles
+		: testFiles.filter((testFile) => sourceNames.some((sourceName) => isDirectMatch(testFile, sourceName)))
+	const configured = sourceFiles.flatMap((sourceFile) => testFilesBySource[sourceFile] ?? [])
+	return [...new Set([...selected, ...configured])]
 }
 
 export function shouldUseVitestRelated(packageEntry) {
@@ -365,6 +375,7 @@ export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory
 	const testFiles = preferDirectTestFiles(
 		parseVitestTestFiles(JSON.parse(fs.readFileSync(outputFile, "utf8")), runRoot),
 		sourceFiles,
+		packageEntry.testFilesBySource,
 	)
 	if (testFiles.length === 0)
 		throw new Error(`${packageEntry.id} has no tests related to the changed executable lines`)

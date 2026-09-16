@@ -75,7 +75,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 		await privateClineProvider.removeClineFromStack.call(provider)
 
 		expect(provider["taskRegistry"].length).toBe(0)
-		expect(childTask.abortTask).toHaveBeenCalledWith(true)
+		expect(childTask.abortTask).toHaveBeenCalledWith(true, {})
 		expect(childTask.emit).toHaveBeenCalledWith(expect.stringContaining("taskUnfocused"))
 	})
 
@@ -105,7 +105,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		expect(provider["taskRegistry"].taskIds).toEqual(["top-1"])
 		expect(provider["taskRegistry"].current).toBe(topTask)
-		expect(focusedTask.abortTask).toHaveBeenCalledWith(true)
+		expect(focusedTask.abortTask).toHaveBeenCalledWith(true, {})
 		expect(topTask.abortTask).not.toHaveBeenCalled()
 	})
 

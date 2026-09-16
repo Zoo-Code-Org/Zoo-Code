@@ -6,9 +6,15 @@ import * as os from "os"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
+import {
+	TASK_HISTORY_BACKUP_RETENTION_MS,
+	TaskHistoryStore,
+	assertValidTransition,
+	type AtomicUpdatePairOptions,
+} from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { lockJsonFile, safeWriteJson } from "../../../utils/safeWriteJson"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
@@ -18,6 +24,9 @@ vi.mock("../../../utils/storage", () => ({
 
 // Mock safeWriteJson to use plain fs writes in tests (avoids proper-lockfile issues)
 vi.mock("../../../utils/safeWriteJson", () => ({
+	lockJsonFile: vi
+		.fn()
+		.mockImplementation(async () => Object.assign(async () => {}, { getCompromiseError: () => undefined })),
 	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
 		await fs.mkdir(path.dirname(filePath), { recursive: true })
 		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
@@ -45,6 +54,9 @@ describe("TaskHistoryStore", () => {
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-test-"))
 		store = new TaskHistoryStore(tmpDir)
+		vi.mocked(lockJsonFile)
+			.mockReset()
+			.mockImplementation(async () => Object.assign(async () => {}, { getCompromiseError: () => undefined }))
 	})
 
 	afterEach(async () => {
@@ -76,6 +88,82 @@ describe("TaskHistoryStore", () => {
 			expect(store.getAll()).toHaveLength(2)
 			expect(store.get("task-1")).toBeDefined()
 			expect(store.get("task-2")).toBeDefined()
+		})
+
+		it("retains stale backups when repair replay fails", async () => {
+			const taskDir = path.join(tmpDir, "tasks", "repair-pending")
+			const historyPath = path.join(taskDir, GlobalFileNames.historyItem)
+			const backupPath = path.join(
+				taskDir,
+				`.history_item.json.bak_${Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2}_backup.tmp`,
+			)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(
+				historyPath,
+				JSON.stringify(makeHistoryItem({ id: "repair-pending", status: "completed" })),
+			)
+			await fs.writeFile(backupPath, "recoverable")
+			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			await fs.utimes(backupPath, old, old)
+			const replayDelegationRepairIntent = vi.fn().mockRejectedValue(new Error("repair pending"))
+			Reflect.set(store, "replayDelegationRepairIntent", replayDelegationRepairIntent)
+			vi.mocked(lockJsonFile).mockClear()
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await store.initialize()
+
+			await expect(fs.access(backupPath)).resolves.toBeUndefined()
+			expect(lockJsonFile).not.toHaveBeenCalled()
+			consoleError.mockRestore()
+		})
+
+		it("retains stale backups if the cleanup lock is compromised", async () => {
+			const taskDir = path.join(tmpDir, "tasks", "cleanup-compromised")
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "cleanup-compromised", status: "completed" }))
+			const backupPath = path.join(
+				taskDir,
+				`.history_item.json.bak_${Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2}_backup.tmp`,
+			)
+			await fs.writeFile(backupPath, "recoverable")
+			const old = new Date(Date.now() - TASK_HISTORY_BACKUP_RETENTION_MS * 2)
+			await fs.utimes(backupPath, old, old)
+			const compromised = new Error("cleanup lock compromised")
+			const getCompromiseError = vi.fn(() => compromised)
+			vi.mocked(lockJsonFile)
+				.mockReset()
+				.mockResolvedValueOnce(
+					Object.assign(vi.fn().mockRejectedValue(compromised), {
+						getCompromiseError,
+					}),
+				)
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			const pruneStaleHistoryBackups = Reflect.get(store, "pruneStaleHistoryBackups") as (
+				tasksDir: string,
+			) => Promise<void>
+
+			await Reflect.apply(pruneStaleHistoryBackups, store, [path.dirname(taskDir)])
+
+			expect(getCompromiseError).toHaveBeenCalled()
+			await expect(fs.access(backupPath)).resolves.toBeUndefined()
+			expect(consoleError).toHaveBeenCalledWith(
+				"[TaskHistoryStore] Failed to prune stale backups for cleanup-compromised:",
+				compromised,
+			)
+			consoleError.mockRestore()
+		})
+
+		it("does not acquire task-file locks when no stale backup candidate exists", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "no-backup", status: "completed" }))
+			vi.mocked(lockJsonFile).mockClear()
+			const pruneStaleHistoryBackups = Reflect.get(store, "pruneStaleHistoryBackups") as (
+				tasksDir: string,
+			) => Promise<void>
+
+			await Reflect.apply(pruneStaleHistoryBackups, store, [path.join(tmpDir, "tasks")])
+
+			expect(lockJsonFile).not.toHaveBeenCalled()
 		})
 	})
 
@@ -577,7 +665,120 @@ describe("TaskHistoryStore", () => {
 		})
 	})
 
+	describe("withTaskFileLock()", () => {
+		it("releases the file lock exactly once when the callback throws synchronously", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "locked-callback", status: "active" }))
+			const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+				getCompromiseError: () => undefined,
+			})
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+			const callbackError = new Error("locked callback failed")
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(
+				store.withTaskFileLock("locked-callback", () => {
+					throw callbackError
+				}),
+			).rejects.toBe(callbackError)
+			expect(release).toHaveBeenCalledTimes(1)
+			expect(consoleError).not.toHaveBeenCalled()
+			consoleError.mockRestore()
+		})
+
+		it("surfaces a release failure after a successful callback", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "release-failure", status: "active" }))
+			const releaseError = new Error("release failed")
+			const release = Object.assign(vi.fn().mockRejectedValue(releaseError), {
+				getCompromiseError: () => undefined,
+			})
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+
+			await expect(store.withTaskFileLock("release-failure", async () => "completed")).rejects.toBe(releaseError)
+			expect(release).toHaveBeenCalledOnce()
+		})
+
+		it("preserves a callback failure when release also fails", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "callback-release-failure", status: "active" }))
+			const callbackError = new Error("callback failed")
+			const releaseError = new Error("release failed")
+			const release = Object.assign(vi.fn().mockRejectedValue(releaseError), {
+				getCompromiseError: () => undefined,
+			})
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(
+				store.withTaskFileLock("callback-release-failure", async () => {
+					throw callbackError
+				}),
+			).rejects.toBe(callbackError)
+			expect(consoleError).toHaveBeenCalledWith(
+				"[TaskHistoryStore] Lock release failed for callback-release-failure after callback failure:",
+				releaseError,
+			)
+			consoleError.mockRestore()
+		})
+	})
+
+	describe("atomicReadAndUpdate()", () => {
+		it("treats an explicit active status as a no-op for a legacy record", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "legacy-active", status: undefined }))
+
+			await expect(
+				store.atomicReadAndUpdate("legacy-active", (current) => ({ ...current, status: "active" })),
+			).resolves.toEqual([expect.objectContaining({ id: "legacy-active", status: "active" })])
+		})
+	})
+
 	describe("atomicUpdatePair()", () => {
+		it("does not claim the first file lock when no lock-scoped option is enabled", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "first-unlocked", status: "active" }))
+			await store.upsert(makeHistoryItem({ id: "second-unlocked", status: "active" }))
+			vi.mocked(lockJsonFile).mockClear()
+			vi.mocked(safeWriteJson).mockClear()
+
+			await store.atomicUpdatePair(
+				"first-unlocked",
+				"second-unlocked",
+				(first) => ({ ...first, status: "completed" }),
+				(second) => ({ ...second, status: "completed" }),
+			)
+
+			expect(lockJsonFile).not.toHaveBeenCalled()
+			expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]).toMatchObject({ heldLock: undefined })
+		})
+
+		it.each([
+			["disk guard", { firstDiskGuard: () => {} }],
+			["callback compensation", { rollbackBothOnCallbackFailure: true }],
+			["lock-scoped callback", { whileFirstFileLocked: async () => {} }],
+		] satisfies Array<[string, AtomicUpdatePairOptions]>)(
+			"holds the first file lock when only the %s option is enabled",
+			async (_description, options) => {
+				await store.initialize()
+				await store.upsert(makeHistoryItem({ id: "first-locked", status: "active" }))
+				await store.upsert(makeHistoryItem({ id: "second-locked", status: "active" }))
+				vi.mocked(lockJsonFile).mockClear()
+				vi.mocked(safeWriteJson).mockClear()
+
+				await store.atomicUpdatePair(
+					"first-locked",
+					"second-locked",
+					(first) => ({ ...first, status: "completed" }),
+					(second) => ({ ...second, status: "completed" }),
+					options,
+				)
+
+				expect(lockJsonFile).toHaveBeenCalledTimes(1)
+				expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]?.heldLock).toEqual(expect.any(Function))
+			},
+		)
+
 		it("updates both records and both files are written before lock releases", async () => {
 			await store.initialize()
 
@@ -649,9 +850,7 @@ describe("TaskHistoryStore", () => {
 					(c) => ({ ...c, id: "wrong-id" }),
 					(p) => p,
 				),
-			).rejects.toThrow(
-				"[TaskHistoryStore] atomicUpdatePair: first updater changed id from child-id-check to wrong-id",
-			)
+			).rejects.toThrow("First updater changed task id")
 		})
 
 		it("throws when second updater returns a different id", async () => {
@@ -669,9 +868,7 @@ describe("TaskHistoryStore", () => {
 					(c) => c,
 					(p) => ({ ...p, id: "wrong-id" }),
 				),
-			).rejects.toThrow(
-				"[TaskHistoryStore] atomicUpdatePair: second updater changed id from parent-id-check2 to wrong-id",
-			)
+			).rejects.toThrow("Second updater changed task id")
 		})
 
 		it("throws when first task ID is not in cache", async () => {

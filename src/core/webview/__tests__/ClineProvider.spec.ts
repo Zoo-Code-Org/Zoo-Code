@@ -1142,6 +1142,38 @@ describe("ClineProvider", () => {
 		expect(disposeCalls).toHaveLength(1)
 	})
 
+	test("dispose drains delegation transitions before cleaning tasks created by them", async () => {
+		let releaseTransition!: () => void
+		let transitionStarted!: () => void
+		const transitionCanFinish = new Promise<void>((resolve) => (releaseTransition = resolve))
+		const transitionDidStart = new Promise<void>((resolve) => (transitionStarted = resolve))
+		const lateTask = {
+			taskId: "late-delegation-task",
+			instanceId: "late-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const transition = provider["runDelegationTransition"]("disposing-parent", async () => {
+			transitionStarted()
+			await transitionCanFinish
+			provider["taskRegistry"].push(lateTask as unknown as Task)
+		})
+		await transitionDidStart
+
+		let shutdownComplete = false
+		const shutdown = provider.dispose().then(() => (shutdownComplete = true))
+		await Promise.resolve()
+		expect(shutdownComplete).toBe(false)
+		expect(lateTask.abortTask).not.toHaveBeenCalled()
+
+		releaseTransition()
+		await transition
+		await shutdown
+		expect(lateTask.abortTask).toHaveBeenCalledOnce()
+		expect(lateTask.dispose).toHaveBeenCalledOnce()
+	})
+
 	test("dispose drains every task in abort-then-cleanup order", async () => {
 		let resolveCurrentAbort!: () => void
 		let resolveCurrentCleanup!: () => void

@@ -873,7 +873,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		await provider["removeClineFromStack"]()
 
 		expect(provider["taskRegistry"].length).toBe(0)
-		expect(childTask.abortTask).toHaveBeenCalledWith(true)
+		expect(childTask.abortTask).toHaveBeenCalledWith(true, {})
 		// No history writes — lifecycle only
 		expect(updateTaskHistorySpy).not.toHaveBeenCalled()
 		expect(provider.getTaskWithId).not.toHaveBeenCalled()
