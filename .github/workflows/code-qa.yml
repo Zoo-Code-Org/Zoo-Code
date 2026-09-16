@@ -247,3 +247,7 @@ jobs:
                       packages/core/coverage/unit/lcov.info
                       packages/core/coverage/integration/lcov.info
                   retention-days: 7
+            # This mutates tracked inputs briefly. Keep it last so an interrupted
+            # ephemeral runner cannot publish or consume the changed workspace.
+            - name: Verify coverage cache inputs
+              run: pnpm --dir src run verify:coverage-cache-inputs
