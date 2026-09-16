@@ -45,34 +45,6 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 - Keep e2e tests focused on high-value smoke coverage across boundaries. Avoid placing detailed protocol, parsing, storage, retry, or edge-case assertions in e2e when they can be covered reliably at a lower layer.
 - When fixing a regression, add the regression test at the lowest layer that would have failed for the bug. Add an e2e test only if lower-level tests cannot represent the failure mode.
 
-## String Parsing and Scanning Performance
-
-Text scanners in this repo run on model output that can reach tens of kilobytes, so treat scanning cost as a design
-constraint, not a review afterthought. The leaked tool-call recovery parser in `src/api/providers/vscode-lm.ts` is the
-worked example for every point below.
-
-- Never re-scan a growing prefix inside a per-match loop. Recomputing `text.slice(0, match.index)` and re-splitting or
-  re-walking it for each match is O(n²) in message length, and it fires on ordinary output, not just adversarial input:
-  measured 0.58 ms for 50 invokes / 4 KB versus 24.93 ms for 400 invokes / 32 KB, with lines walked quadrupling per
-  doubling of input. Thread incremental state (last index, running line count) through the loop instead.
-- Streaming multiplies the exponent. Re-running a whole-buffer scan on every streamed chunk turns an O(n²) scan into
-  O(n³); a 49 KB message across 400 chunks cost 4.2 s of main-thread time. A parser invoked per chunk must be
-  incremental over the newly arrived text, never over the accumulated buffer.
-- Watch regex constructs whose cost is invisible when reading them:
-    - Negative lookahead such as `(?![\s\S]*<tag>)` rescans to end-of-string at every match position — O(N·k) for k
-      occurrences. Use `lastIndexOf` over the candidate spellings instead.
-    - Lazy quantifiers such as `[\s\S]*?</tag>` rescan to end-of-text for every candidate when the closing tag is
-      absent. Use `indexOf` with index-pair slicing, or pre-check that the tags balance.
-    - Unanchored trailing patterns such as `[^.!?\n]*$` re-scan the line tail at every match when the terminator is
-      absent. Slice at the last terminator first, then test only the remainder.
-    - Iteratively stripping one nesting layer per pass is O(D·N) with allocation churn per pass. Prefer a single-pass
-      stack scanner.
-- Measure before optimizing, and judge by whether realistic model output triggers the quadratic. A quadratic reachable
-  only through adversarial input (tens of thousands of unclosed tags) is usually not worth hardening; one that fires on
-  ordinary output is.
-- Pin complexity with a scaling assertion rather than a wall-clock threshold: assert that cost at 4× input stays within
-  a fixed multiple of cost at 1× input. Absolute timings are machine-dependent and flaky in CI.
-
 ## Task Lifecycle Changes
 
 - Read `docs/architecture/task-lifecycle-model.md` before changing task status, delegation, interruption, completion, abandonment, persistence ownership, or scheduler fan-out behavior.
