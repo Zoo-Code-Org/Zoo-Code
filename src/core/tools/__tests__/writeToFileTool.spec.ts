@@ -1381,22 +1381,42 @@ describe("writeToFileTool", () => {
 			// aborted. A rejected handleError must not skip the diff cleanup: the unapproved
 			// streamed content has to be reverted and the diff view reset, or a user save
 			// could persist the failed write. The handleError rejection itself propagates
-			// (it is not swallowed by the cleanup).
+			// (it is not swallowed by the cleanup). As in the missing-parameter tests
+			// above, the revert mock awaits a deferred so the test proves the cleanup
+			// AWAITs revertChanges() before reset(): with the revert still pending,
+			// reset() must not have run yet.
 			mockHandleError.mockRejectedValue(new Error("handleError rejected (aborted task)"))
 			mockedCreateDirectoriesForFile.mockRejectedValue(
 				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
 			)
+			const diffViewCallOrder: string[] = []
+			let resolveRevert: () => void = () => {}
+			const revertDeferred = new Promise<void>((resolve) => {
+				resolveRevert = resolve
+			})
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+				await revertDeferred
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
 
-			await expect(executeWriteFileTool({}, { fileExists: false })).rejects.toThrow(
-				"handleError rejected (aborted task)",
-			)
+			const executePromise = executeWriteFileTool({}, { fileExists: false })
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-			// handleError was attempted with the write context...
+			// handleError was attempted with the write context and the cleanup has reached
+			// the deferred revert...
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-			// ...and the diff cleanup still ran despite its rejection: the unapproved
-			// content is reverted before the diff view reset.
 			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			// ...and while the revert is still pending, reset() must not have run yet.
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+
+			resolveRevert()
+			await expect(executePromise).rejects.toThrow("handleError rejected (aborted task)")
+
+			// The unapproved content is reverted before the diff view reset.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		})
