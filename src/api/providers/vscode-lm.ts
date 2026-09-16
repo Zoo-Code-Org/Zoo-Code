@@ -139,7 +139,8 @@ class QuotingScanState {
 
 	/** Fence state including the partial line now being scanned, which may itself open a fence. */
 	private fenceAfterCurrentLine(): { marker: string; width: number } | null {
-		const fenceMatch = this.currentLine.match(/^ {0,3}(`{3,}|~{3,})([^\n]*)$/)
+		// The scanned line never contains a newline, so the run's suffix is simply the rest of it.
+		const fenceMatch = this.currentLine.match(/^ {0,3}(`{3,}|~{3,})/)
 		if (!fenceMatch) {
 			return this.openFence
 		}
@@ -149,8 +150,8 @@ class QuotingScanState {
 			return { marker, width }
 		}
 		// CommonMark allows an info string only on an opening fence, never a closing one.
-		const closesFence =
-			marker === this.openFence.marker && width >= this.openFence.width && fenceMatch[2].trim() === ""
+		const suffix = this.currentLine.slice(fenceMatch[0].length)
+		const closesFence = marker === this.openFence.marker && width >= this.openFence.width && suffix.trim() === ""
 		return closesFence ? null : this.openFence
 	}
 }

@@ -1964,6 +1964,12 @@ describe("quoting heuristics on the incremental scanner", () => {
 	it("keeps a fence open when its closing run carries a space-separated info string", () => {
 		expect(callsOf(`${open}\n${fence}\n${fence} j\n${todo()}`)).toHaveLength(0)
 	})
+
+	it("measures the cue window from the line start when the preceding chunk ends mid-line", () => {
+		// The cue sits in the preceding chunk, so the line-start offset must carry across the
+		// boundary; drifting it lands on a different slice and the quoted block is wrongly recovered.
+		expect(extractLeakedToolCalls(todo(), tools, `${open}\nnever `).calls).toHaveLength(0)
+	})
 })
 
 describe("leaked tool-call parser scaling", () => {
