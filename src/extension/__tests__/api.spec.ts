@@ -26,5 +26,9 @@ describe("API.sendMessage", () => {
 
 		expect(addMessage).toHaveBeenCalledWith("Use this before completing", images)
 		expect(postMessageToWebview).not.toHaveBeenCalled()
+
+		addMessage.mockClear()
+		await api.sendMessage(undefined, images)
+		expect(addMessage).toHaveBeenCalledWith("", images)
 	})
 })
