@@ -38,8 +38,12 @@ import {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 describe("mutation testing workflow", () => {
+	const readWorkflow = () =>
+		fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+	const shouldRun = ({ eventName, draft }) => eventName === "merge_group" || draft === false
+
 	it("checks out the pull request merge result from the base repository", () => {
-		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+		const workflow = readWorkflow()
 
 		assert.ok(workflow.includes("    pull_request:"))
 		assert.ok(!workflow.includes("pull_request_target:"))
@@ -60,6 +64,32 @@ describe("mutation testing workflow", () => {
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
 		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
+	})
+
+	it("waits until a draft pull request is ready before emitting mutation annotations", () => {
+		const workflow = readWorkflow()
+
+		assert.ok(workflow.includes("types: [edited, opened, reopened, ready_for_review, synchronize]"))
+		assert.ok(
+			workflow.includes("if: github.event_name == 'merge_group' || github.event.pull_request.draft == false"),
+		)
+
+		const draftToReadyRuns = [
+			{ eventName: "pull_request", action: "opened", draft: true },
+			{ eventName: "pull_request", action: "ready_for_review", draft: false },
+		].filter(shouldRun)
+
+		assert.deepEqual(
+			draftToReadyRuns.map(({ action }) => action),
+			["ready_for_review"],
+		)
+	})
+
+	it("retains mutation testing for reviewable pull request updates and the merge queue", () => {
+		for (const action of ["opened", "ready_for_review", "synchronize", "reopened"]) {
+			assert.equal(shouldRun({ eventName: "pull_request", draft: false }), true, action)
+		}
+		assert.equal(shouldRun({ eventName: "merge_group" }), true, "merge queue")
 	})
 })
 
