@@ -1299,6 +1299,42 @@ describe("leaked tool-call recovery", () => {
 
 			expect(calls).toHaveLength(0)
 		})
+
+		it("fails closed on a malformed parameter opener before a well-formed parameter", () => {
+			// The strict pattern skips the unquoted-attribute opener, so recovering `beta` alone
+			// would dispatch a call missing `alpha`.
+			const text = wrap(
+				invoke("update_todo_list", `<param${"eter"} name=alpha>A</param${"eter"}>` + param("beta", "B")),
+			)
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on a malformed parameter opener between two well-formed parameters", () => {
+			// The defect is any unparseable opener in an inter-match gap, not only a leading one.
+			const text = wrap(
+				invoke(
+					"update_todo_list",
+					param("alpha", "A") + `<param${"eter"} name=mid>M</param${"eter"}>` + param("beta", "B"),
+				),
+			)
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("still recovers an invoke whose multiple parameters are all well-formed", () => {
+			const text = wrap(invoke("update_todo_list", param("alpha", "A") + param("beta", "B")))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { alpha: "A", beta: "B" } }])
+		})
 	})
 
 	// The bare-invoke cases above short-circuit at the wrapper check, so they never exercise the

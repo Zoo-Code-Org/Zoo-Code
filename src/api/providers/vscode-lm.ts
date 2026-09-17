@@ -395,6 +395,11 @@ function parseLeakedInvokeParams(
 	let consumedUpTo = 0
 	for (const match of body.matchAll(paramPattern)) {
 		const name = match[1]
+		// A `<parameter` token in the gap before this match is an opener the pattern could not
+		// parse, so recovering would dispatch a call missing an argument the model wrote.
+		if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo, match.index ?? 0))) {
+			return undefined
+		}
 		// A nested unclosed `<parameter` inside the captured value means the lazy pattern swallowed
 		// markup as data and dropped the inner parameter, so fail closed rather than dispatch it.
 		if (/<(?:antml:)?parameter\b/i.test(match[2])) {
