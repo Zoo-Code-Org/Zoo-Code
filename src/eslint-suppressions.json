@@ -794,11 +794,6 @@
 			"count": 2
 		}
 	},
-	"core/task/Task.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
 	"core/task/__tests__/Task.dispose.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -1022,11 +1017,6 @@
 	"core/tools/validateToolUse.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"core/webview/ClineProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
