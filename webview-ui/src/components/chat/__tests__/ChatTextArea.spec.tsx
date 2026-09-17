@@ -1274,6 +1274,23 @@ describe("ChatTextArea", () => {
 				expect.objectContaining({ type: "upsertApiConfiguration" }),
 			)
 		})
+
+		it("posts upsertApiConfiguration with the current config name when a model is selected", () => {
+			render(<ChatTextArea {...defaultProps} />)
+
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+			fireEvent.click(screen.getAllByText(/claude-3-5-haiku/i)[0])
+
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "upsertApiConfiguration",
+					text: "default",
+					apiConfiguration: expect.objectContaining({
+						apiModelId: expect.stringContaining("claude-3-5-haiku"),
+					}),
+				}),
+			)
+		})
 	})
 
 	describe("blank suggestion copy crash (issue #1226)", () => {

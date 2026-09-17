@@ -26,12 +26,11 @@ import {
 	isStaticModelProvider,
 } from "../settings/utils/providerModelConfig"
 import { filterModels } from "../settings/utils/organizationFilters"
-
-const SEARCH_THRESHOLD = 6
+import { SEARCH_THRESHOLD } from "./selectorConstants"
 
 interface ModelSelectorProps {
 	apiConfiguration: ProviderSettings
-	currentApiConfigName?: string
+	onChange: (apiConfiguration: ProviderSettings) => void
 	disabled?: boolean
 	title: string
 	triggerClassName?: string
@@ -40,7 +39,7 @@ interface ModelSelectorProps {
 
 export const ModelSelector = ({
 	apiConfiguration,
-	currentApiConfigName,
+	onChange,
 	disabled = false,
 	title,
 	triggerClassName = "",
@@ -152,18 +151,17 @@ export const ModelSelector = ({
 				modelMaxTokens: undefined,
 				modelMaxThinkingTokens: undefined,
 			}
+			if (provider === providerIdentifiers.bedrock && modelId !== "custom-arn") {
+				;(updated as Record<string, unknown>)["awsCustomArn"] = undefined
+			}
 			;(updated as Record<string, unknown>)[modelConfig.field] = modelId
 
-			vscode.postMessage({
-				type: "upsertApiConfiguration",
-				text: currentApiConfigName,
-				apiConfiguration: updated,
-			})
+			onChange(updated)
 
 			setOpen(false)
 			setSearchValue("")
 		},
-		[apiConfiguration, modelConfig, currentApiConfigName],
+		[apiConfiguration, modelConfig, provider, onChange],
 	)
 
 	const renderModelItem = useCallback(

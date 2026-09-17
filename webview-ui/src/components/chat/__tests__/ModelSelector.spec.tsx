@@ -96,6 +96,7 @@ const manyDynamicModels = Object.fromEntries(
 )
 
 describe("ModelSelector", () => {
+	const onChangeMock = vi.fn()
 	const focusDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "focus")
 	beforeAll(() => {
 		// Global setup replaces focus with a no-op for FAST; keyboard tests need native DOM focus.
@@ -122,13 +123,17 @@ describe("ModelSelector", () => {
 
 	it.each([true, false])("distinguishes a pending dynamic list from a settled list (has models: %s)", (hasModels) => {
 		useRouterModelsMock.mockReturnValue({ data: undefined, isLoading: true })
-		const props = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter }, title: "Select model" }
+		const props = {
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+			title: "Select model",
+			onChange: onChangeMock,
+		}
 		const { rerender } = render(<ModelSelector {...props} />)
 		expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("common:ui.loading")
 		expect(screen.getByTestId("model-selector-trigger")).toBeDisabled()
 		expect(screen.queryByTestId("model-selector-disabled")).not.toBeInTheDocument()
 		fireEvent.click(screen.getByTestId("model-selector-trigger"))
-		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(onChangeMock).not.toHaveBeenCalled()
 
 		useRouterModelsMock.mockReturnValue({
 			data: { openrouter: hasModels ? { "model-a": makeModelInfo() } : {} },
@@ -148,7 +153,11 @@ describe("ModelSelector", () => {
 		const user = userEvent.setup()
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
 		render(
-			<ModelSelector apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }} title="Select model" />,
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }}
+				title="Select model"
+				onChange={onChangeMock}
+			/>,
 		)
 		await user.click(screen.getByTestId("model-selector-trigger"))
 		const search = screen.getByRole("textbox")
@@ -163,18 +172,17 @@ describe("ModelSelector", () => {
 		expect(screen.getByRole("button", { name: "openrouter/model-0" })).toHaveFocus()
 		await user.keyboard(" ")
 		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "upsertApiConfiguration",
-				apiConfiguration: expect.objectContaining({ openRouterModelId: "openrouter/model-0" }),
-			}),
-		)
+		expect(onChangeMock).toHaveBeenCalledWith(expect.objectContaining({ openRouterModelId: "openrouter/model-0" }))
 	})
 
 	it("blocks model updates when disabled after the model list is rendered", async () => {
 		const user = userEvent.setup()
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: { "model-a": makeModelInfo() } }, isLoading: false })
-		const props = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter }, title: "Select model" }
+		const props = {
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+			title: "Select model",
+			onChange: onChangeMock,
+		}
 		const { rerender } = render(<ModelSelector {...props} />)
 		await user.click(screen.getByTestId("model-selector-trigger"))
 		const model = screen.getByRole("button", { name: "model-a" })
@@ -183,10 +191,10 @@ describe("ModelSelector", () => {
 		expect(model).toBeDisabled()
 		await user.keyboard("{Enter}")
 		await user.click(model)
-		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(onChangeMock).not.toHaveBeenCalled()
 	})
 
-	it("renders the static model list for a static provider and sends upsertApiConfiguration on select", () => {
+	it("renders the static model list for a static provider and calls onChange on select", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
@@ -195,7 +203,7 @@ describe("ModelSelector", () => {
 						apiModelId: "claude-sonnet-4-5",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -206,12 +214,8 @@ describe("ModelSelector", () => {
 		const anotherModel = screen.getAllByText(/claude-3-5-haiku/i)[0]
 		fireEvent.click(anotherModel)
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "upsertApiConfiguration",
-				text: "default",
-				apiConfiguration: expect.objectContaining({ apiModelId: expect.stringContaining("claude-3-5-haiku") }),
-			}),
+		expect(onChangeMock).toHaveBeenCalledWith(
+			expect.objectContaining({ apiModelId: expect.stringContaining("claude-3-5-haiku") }),
 		)
 	})
 
@@ -227,7 +231,7 @@ describe("ModelSelector", () => {
 						modelMaxThinkingTokens: 2048,
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -235,13 +239,11 @@ describe("ModelSelector", () => {
 
 		fireEvent.click(screen.getAllByText(/claude-3-5-haiku/i)[0])
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
+		expect(onChangeMock).toHaveBeenCalledWith(
 			expect.objectContaining({
-				apiConfiguration: expect.objectContaining({
-					reasoningEffort: undefined,
-					modelMaxTokens: undefined,
-					modelMaxThinkingTokens: undefined,
-				}),
+				reasoningEffort: undefined,
+				modelMaxTokens: undefined,
+				modelMaxThinkingTokens: undefined,
 			}),
 		)
 		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "false")
@@ -272,7 +274,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -301,7 +303,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -314,12 +316,7 @@ describe("ModelSelector", () => {
 
 		fireEvent.click(screen.getByText("openrouter/model-b"))
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "upsertApiConfiguration",
-				apiConfiguration: expect.objectContaining({ openRouterModelId: "openrouter/model-b" }),
-			}),
-		)
+		expect(onChangeMock).toHaveBeenCalledWith(expect.objectContaining({ openRouterModelId: "openrouter/model-b" }))
 	})
 
 	it.each([
@@ -334,7 +331,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: provider, apiModelId: staticModel } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -356,7 +353,7 @@ describe("ModelSelector", () => {
 			render(
 				<ModelSelector
 					apiConfiguration={{ apiProvider: provider, apiModelId: staticModel } satisfies ProviderSettings}
-					currentApiConfigName="default"
+					onChange={onChangeMock}
 					title="Select model"
 				/>,
 			)
@@ -370,7 +367,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -385,7 +382,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -400,7 +397,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{} satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -418,7 +415,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -434,7 +431,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: retiredProviderIdentifiers.groq } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -456,7 +453,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: retiredProviderIdentifiers.groq } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -471,7 +468,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -490,7 +487,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -504,7 +501,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -522,7 +519,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 				disabled
 			/>,
@@ -540,7 +537,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -554,7 +551,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -568,7 +565,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -581,7 +578,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -593,7 +590,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 				triggerClassName="my-custom-trigger"
 			/>,
@@ -617,7 +614,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -651,7 +648,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -675,7 +672,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -694,7 +691,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -714,7 +711,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -744,7 +741,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -778,7 +775,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -807,7 +804,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -835,7 +832,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -860,7 +857,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-0",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -885,7 +882,7 @@ describe("ModelSelector", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } satisfies ProviderSettings}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -909,7 +906,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -932,7 +929,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/brand-new-model",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -959,7 +956,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -974,7 +971,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-b",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -989,50 +986,7 @@ describe("ModelSelector", () => {
 
 		fireEvent.click(list.getByText("openrouter/model-a"))
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				apiConfiguration: expect.objectContaining({ openRouterModelId: "openrouter/model-a" }),
-			}),
-		)
-	})
-
-	it("sends the current config name on select even after it changes on rerender", () => {
-		useRouterModelsMock.mockReturnValue({
-			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
-			isLoading: false,
-		})
-		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
-
-		const { rerender } = render(
-			<ModelSelector
-				apiConfiguration={
-					{
-						apiProvider: providerIdentifiers.openrouter,
-						openRouterModelId: "openrouter/model-a",
-					} satisfies ProviderSettings
-				}
-				currentApiConfigName="config-one"
-				title="Select model"
-			/>,
-		)
-		fireEvent.click(screen.getByTestId("model-selector-trigger"))
-
-		rerender(
-			<ModelSelector
-				apiConfiguration={
-					{
-						apiProvider: providerIdentifiers.openrouter,
-						openRouterModelId: "openrouter/model-a",
-					} satisfies ProviderSettings
-				}
-				currentApiConfigName="config-two"
-				title="Select model"
-			/>,
-		)
-
-		fireEvent.click(within(screen.getByTestId("popover-content")).getByText("openrouter/model-b"))
-
-		expect(vscode.postMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "config-two" }))
+		expect(onChangeMock).toHaveBeenCalledWith(expect.objectContaining({ openRouterModelId: "openrouter/model-a" }))
 	})
 
 	it("hides the custom-arn pseudo-model for a Bedrock provider and allows selecting a normal model", () => {
@@ -1044,9 +998,10 @@ describe("ModelSelector", () => {
 					{
 						apiProvider: providerIdentifiers.bedrock,
 						apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+						awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:custom-model/stale-arn",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 			/>,
 		)
@@ -1061,16 +1016,15 @@ describe("ModelSelector", () => {
 		expect(list.queryByText("Use Custom ARN")).not.toBeInTheDocument()
 		expect(list.queryByText("custom-arn")).not.toBeInTheDocument()
 
-		// Selecting a normal Bedrock model sends the expected apiModelId update.
+		// Selecting a normal Bedrock model sends the expected apiModelId update and clears any
+		// stale awsCustomArn left over from a previous "Use Custom ARN" selection in Settings,
+		// so the extension doesn't keep reading the old ARN instead of the newly chosen model.
 		fireEvent.click(list.getByText("anthropic.claude-3-5-haiku-20241022-v1:0"))
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
+		expect(onChangeMock).toHaveBeenCalledWith(
 			expect.objectContaining({
-				type: "upsertApiConfiguration",
-				text: "default",
-				apiConfiguration: expect.objectContaining({
-					apiModelId: "anthropic.claude-3-5-haiku-20241022-v1:0",
-				}),
+				apiModelId: "anthropic.claude-3-5-haiku-20241022-v1:0",
+				awsCustomArn: undefined,
 			}),
 		)
 	})
@@ -1096,7 +1050,7 @@ describe("ModelSelector", () => {
 						apiModelId: "claude-3-5-haiku-20241022",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 				organizationAllowList={allowList}
 			/>,
@@ -1110,6 +1064,34 @@ describe("ModelSelector", () => {
 
 		// Other models are filtered out by the allow list.
 		expect(list.queryByText("claude-sonnet-4-5")).not.toBeInTheDocument()
+	})
+
+	it("shows the disabled view when the provider is entirely absent from the organization allow list", () => {
+		useSelectedModelMock.mockReturnValue({ id: "claude-3-5-haiku-20241022", isLoading: false })
+
+		// allowAll is false and `providers` has no entry at all for the current provider, so
+		// filterModels returns {} for it rather than an allowed subset.
+		const allowList: OrganizationAllowList = {
+			allowAll: false,
+			providers: {},
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-haiku-20241022",
+					} satisfies ProviderSettings
+				}
+				onChange={onChangeMock}
+				title="Select model"
+				organizationAllowList={allowList}
+			/>,
+		)
+
+		expect(screen.queryByTestId("model-selector-trigger")).not.toBeInTheDocument()
+		expect(screen.getByTestId("model-selector-disabled")).toBeInTheDocument()
 	})
 
 	it("filters dynamic router models by the organization allow list", () => {
@@ -1137,7 +1119,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 				organizationAllowList={allowList}
 			/>,
@@ -1173,7 +1155,7 @@ describe("ModelSelector", () => {
 						openRouterModelId: "openrouter/model-a",
 					} satisfies ProviderSettings
 				}
-				currentApiConfigName="default"
+				onChange={onChangeMock}
 				title="Select model"
 				organizationAllowList={allowList}
 			/>,

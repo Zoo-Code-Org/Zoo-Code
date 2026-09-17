@@ -3,7 +3,7 @@ import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
-import type { ExtensionMessage } from "@roo-code/types"
+import type { ExtensionMessage, ProviderSettings } from "@roo-code/types"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -948,6 +948,18 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[setMode],
 		)
 
+		// Common model selector handler
+		const handleModelChange = useCallback(
+			(value: ProviderSettings) => {
+				vscode.postMessage({
+					type: "upsertApiConfiguration",
+					text: currentApiConfigName,
+					apiConfiguration: value,
+				})
+			},
+			[currentApiConfigName],
+		)
+
 		// Helper function to handle API config change
 		const handleApiConfigChange = useCallback((value: string) => {
 			vscode.postMessage({ type: "loadApiConfigurationById", text: value })
@@ -1325,7 +1337,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						/>
 						<ModelSelector
 							apiConfiguration={apiConfiguration}
-							currentApiConfigName={currentApiConfigName}
+							onChange={handleModelChange}
 							disabled={selectApiConfigDisabled || !hasPersistedApiConfiguration}
 							title={hasPersistedApiConfiguration ? t("chat:selectModel") : t("chat:selectApiConfig")}
 							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0"
