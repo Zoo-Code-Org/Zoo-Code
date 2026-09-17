@@ -114,7 +114,7 @@ class QuotingScanState {
 				// boundary, which always falls on the `<` of an `<invoke>` marker.
 				for (const wrapperTag of line.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
 					const textBeforeTag = this.sameLineBefore.slice(0, lineStart + wrapperTag.index)
-					if ((textBeforeTag.match(/`/g)?.length ?? 0) % 2 === 0) {
+					if (!this.insideInlineSpanAt(textBeforeTag)) {
 						this.wrapperOpen = wrapperTag[1] === ""
 					}
 				}
@@ -131,9 +131,23 @@ class QuotingScanState {
 		return this.fenceAfterCurrentLine() !== null
 	}
 
-	/** An odd count means the stream ends inside an inline code span. */
+	/** True when the stream so far ends inside an inline code span. */
 	hasOddBacktickCountOnLine(): boolean {
-		return (this.sameLineBefore.match(/`/g)?.length ?? 0) % 2 === 1
+		return this.insideInlineSpanAt(this.sameLineBefore)
+	}
+
+	/** CommonMark: a code span closes only on a backtick run of the SAME width that opened it. */
+	private insideInlineSpanAt(prefix: string): boolean {
+		let activeWidth = 0
+		for (const run of prefix.matchAll(/`+/g)) {
+			const width = run[0].length
+			if (activeWidth === 0) {
+				activeWidth = width
+			} else if (width === activeWidth) {
+				activeWidth = 0
+			}
+		}
+		return activeWidth !== 0
 	}
 
 	isInsideFunctionCallsWrapper(): boolean {

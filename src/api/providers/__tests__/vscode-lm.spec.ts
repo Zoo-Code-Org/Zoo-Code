@@ -1720,6 +1720,40 @@ describe("leaked tool-call parser contracts", () => {
 			expect(callsOf(text)).toHaveLength(0)
 		})
 
+		it("does not let a wrapper opener inside a double-backtick span arm a later bare invoke", () => {
+			const text = [`Example: \`\`<function${"_calls"}>\`\``, "", todo()].join("\n")
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("keeps a double-backtick span quoted when it nests a literal single backtick", () => {
+			const text = [`Example: \`\`<function${"_calls"}> \` here\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside a four-backtick span arm a later bare invoke", () => {
+			const text = [`Example: \`\`\`\`<function${"_calls"}>\`\`\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a double-backtick span with a wider backtick run", () => {
+			const text = [`Example: \`\`<function${"_calls"}>\`\`\` still quoted`, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("still arms on a wrapper opener that is not inside any backtick span", () => {
+			expect(callsOf(wrap(todo()))).toHaveLength(1)
+		})
+
+		it("does not leak an unterminated double-backtick span across a newline", () => {
+			expect(callsOf(wrapLines("see ``\n" + todo()))).toHaveLength(1)
+		})
+
 		it("still arms on a real wrapper opener that follows a closed code fence", () => {
 			const text = ["```", "example", "```", "", `<function${"_calls"}>`, todo()].join("\n")
 
