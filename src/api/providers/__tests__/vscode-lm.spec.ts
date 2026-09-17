@@ -1741,9 +1741,21 @@ describe("leaked tool-call parser contracts", () => {
 		})
 
 		it("does not close a double-backtick span with a wider backtick run", () => {
-			const text = [`Example: \`\`<function${"_calls"}>\`\`\` still quoted`, "", todo()].join("\n")
+			const text = [`Example: \`\`quoted \`\`\` <function${"_calls"}>\`\``, "", todo()].join("\n")
 
 			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a double-backtick span with either a wider or a narrower backtick run", () => {
+			const text = [`Example: \`\`a \`\`\` b \` c <function${"_calls"}>\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("arms on a wrapper opener that follows a closed double-backtick span", () => {
+			const text = [`Example: \`\`quoted\`\` then <function${"_calls"}>`, todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(1)
 		})
 
 		it("still arms on a wrapper opener that is not inside any backtick span", () => {
