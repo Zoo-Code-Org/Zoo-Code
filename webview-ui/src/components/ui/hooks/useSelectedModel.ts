@@ -31,6 +31,7 @@ import {
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
+	ioIntelligenceDefaultModelInfo,
 	nanoGptDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
@@ -449,6 +450,15 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels[providerIdentifiers.kenari]?.[id] ?? kenariDefaultModelInfo
+			return { id, info }
+		}
+		case providerIdentifiers.ioIntelligence: {
+			const id = getValidatedModelId(
+				apiConfiguration.ioIntelligenceModelId,
+				routerModels[providerIdentifiers.ioIntelligence],
+				defaultModelId,
+			)
+			const info = routerModels[providerIdentifiers.ioIntelligence]?.[id] ?? ioIntelligenceDefaultModelInfo
 			return { id, info }
 		}
 		case providerIdentifiers.nanogpt: {

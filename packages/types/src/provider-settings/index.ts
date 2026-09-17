@@ -30,6 +30,7 @@ import { qwenCodeProviderDefinition } from "./qwen-code.js"
 import { vercelAiGatewayProviderDefinition } from "./vercel-ai-gateway.js"
 import { opencodeGoProviderDefinition } from "./opencode-go.js"
 import { kenariProviderDefinition } from "./kenari.js"
+import { ioIntelligenceProviderDefinition } from "./io-intelligence.js"
 import { nanoGptProviderDefinition } from "./nanogpt.js"
 import { zooGatewayProviderDefinition } from "./zoo-gateway.js"
 import { basetenProviderDefinition } from "./baseten.js"
@@ -82,6 +83,7 @@ export const providerDefinitionList = [
 	opencodeGoProviderDefinition,
 	kenariProviderDefinition,
 	nanoGptProviderDefinition,
+	ioIntelligenceProviderDefinition,
 	zooGatewayProviderDefinition,
 	basetenProviderDefinition,
 ] as const satisfies readonly ProviderDefinition[]

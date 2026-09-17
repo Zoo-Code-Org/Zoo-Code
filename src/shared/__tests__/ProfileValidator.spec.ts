@@ -281,6 +281,22 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
+		// Test for io-intelligence provider which uses ioIntelligenceModelId
+		it(`should extract ioIntelligenceModelId for io-intelligence provider`, () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.ioIntelligence]: { allowAll: false, models: ["test-model"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceModelId: "test-model",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,

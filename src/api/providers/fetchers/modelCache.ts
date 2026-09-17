@@ -21,6 +21,7 @@ import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
 import { getKenariModels } from "./kenari"
+import { getIOIntelligenceModels } from "./io-intelligence"
 import { getNanoGptModels } from "./nanogpt"
 import { getRequestyModels } from "./requesty"
 import { getUnboundModels } from "./unbound"
@@ -255,6 +256,10 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case providerIdentifiers.kenari:
 			models = await getKenariModels(options.apiKey)
 			break
+		case providerIdentifiers.ioIntelligence:
+			// Public catalog; an optional key can scope the visible model set.
+			models = await getIOIntelligenceModels(options.apiKey)
+			break
 		case providerIdentifiers.nanogpt:
 			models = await getNanoGptModels(options.apiKey)
 			break
@@ -466,6 +471,10 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 			{
 				provider: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt },
+			},
+			{
+				provider: providerIdentifiers.ioIntelligence,
+				options: { provider: providerIdentifiers.ioIntelligence },
 			},
 		]
 

@@ -52,6 +52,7 @@ describe("Model Validation Functions", () => {
 		requesty: {},
 		unbound: {},
 		litellm: {},
+		"io-intelligence": {},
 		ollama: {},
 		lmstudio: {},
 		"vercel-ai-gateway": {},

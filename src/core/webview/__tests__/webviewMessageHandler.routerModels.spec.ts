@@ -94,6 +94,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -162,6 +164,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -210,6 +214,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -467,6 +473,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -554,6 +562,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -605,6 +615,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
