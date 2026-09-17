@@ -124,6 +124,13 @@ export const ModelSelector = ({
 		return fzfInstance.find(searchValue).map((result) => result.item.original)
 	}, [modelIds, searchValue, fzfInstance])
 
+	const handleOpenChange = useCallback((next: boolean) => {
+		setOpen(next)
+		if (!next) {
+			setSearchValue("")
+		}
+	}, [])
+
 	const handleEditClick = useCallback(
 		() => {
 			vscode.postMessage({ type: "switchTab", tab: "settings" })
@@ -215,7 +222,7 @@ export const ModelSelector = ({
 	}
 
 	return (
-		<Popover open={open} onOpenChange={setOpen} data-testid="model-selector-root">
+		<Popover open={open} onOpenChange={handleOpenChange} data-testid="model-selector-root">
 			<StandardTooltip content={title}>
 				<PopoverTrigger
 					disabled={isDisabled}
