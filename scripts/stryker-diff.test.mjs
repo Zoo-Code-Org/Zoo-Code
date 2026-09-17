@@ -57,6 +57,8 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
 		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
+		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
 		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
@@ -519,6 +521,49 @@ describe("selectFromGit", () => {
 			assert.deepEqual(
 				manifest.packages.map(({ id, selectors }) => ({ id, selectors })),
 				[{ id: "core", selectors: ["src/value.ts:3-3"] }],
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("does not charge intervening base-branch changes to the pull request", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-stale-base-"))
+		const runGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim()
+
+		try {
+			runGit("init", "--initial-branch=main")
+			runGit("config", "user.name", "Mutation Test")
+			runGit("config", "user.email", "mutation@example.com")
+			fs.mkdirSync(path.join(repo, "packages/core/src"), { recursive: true })
+			fs.writeFileSync(path.join(repo, "packages/core/src/pr.ts"), "export const pr = false\n")
+			fs.writeFileSync(path.join(repo, "packages/core/src/base.ts"), "export const base = false\n")
+			runGit("add", ".")
+			runGit("commit", "-m", "initial")
+			const staleBaseSha = runGit("rev-parse", "HEAD")
+
+			runGit("checkout", "-b", "feature")
+			fs.writeFileSync(path.join(repo, "packages/core/src/pr.ts"), "export const pr = true\n")
+			runGit("commit", "-am", "change pull request")
+
+			runGit("checkout", "main")
+			fs.writeFileSync(path.join(repo, "packages/core/src/base.ts"), "export const base = true\n")
+			runGit("commit", "-am", "advance base branch")
+			const currentBaseSha = runGit("rev-parse", "HEAD")
+			runGit("merge", "--no-ff", "feature", "-m", "synthetic pull request merge")
+			const mergeSha = runGit("rev-parse", "HEAD")
+			const mergeResultBaseSha = runGit("rev-parse", `${mergeSha}^1`)
+			assert.equal(mergeResultBaseSha, currentBaseSha)
+
+			assert.deepEqual(
+				selectFromGit(repo, staleBaseSha, mergeSha).packages[0].files.map(({ path: filePath }) => filePath),
+				["packages/core/src/base.ts", "packages/core/src/pr.ts"],
+			)
+			assert.deepEqual(
+				selectFromGit(repo, mergeResultBaseSha, mergeSha).packages[0].files.map(
+					({ path: filePath }) => filePath,
+				),
+				["packages/core/src/pr.ts"],
 			)
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })
