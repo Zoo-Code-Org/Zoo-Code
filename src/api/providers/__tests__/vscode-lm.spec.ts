@@ -1708,6 +1708,24 @@ describe("leaked tool-call parser contracts", () => {
 			expect(callsOf(`${wrap("")}\n${wrap(todo())}`)).toHaveLength(1)
 		})
 
+		it("does not let a wrapper opener inside a closed code fence arm a later bare invoke", () => {
+			const text = ["```", `<function${"_calls"}>`, "```", "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside an inline-code span arm a later bare invoke", () => {
+			const text = [`Use \`<function${"_calls"}>\` to open a block.`, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("still arms on a real wrapper opener that follows a closed code fence", () => {
+			const text = ["```", "example", "```", "", `<function${"_calls"}>`, todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
 		it("arms on an opening wrapper tag carrying inner whitespace", () => {
 			expect(callsOf(`<function${"_calls"} >${todo()}`)).toHaveLength(1)
 		})

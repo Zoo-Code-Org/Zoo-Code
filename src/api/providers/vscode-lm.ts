@@ -102,14 +102,23 @@ class QuotingScanState {
 
 	/** Consumes the next contiguous span of the stream. Spans must not overlap or skip text. */
 	advance(span: string): void {
-		// A wrapper tag admits only whitespace before its `>`, so it can never straddle a span
-		// boundary, which always falls on the `<` of an `<invoke>` marker.
-		for (const wrapperTag of span.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
-			this.wrapperOpen = wrapperTag[1] === ""
-		}
 		const lines = span.split("\n")
 		for (const [index, line] of lines.entries()) {
+			const lineStart = this.sameLineBefore.length
+			const fenceBeforeLine = this.openFence
 			this.sameLineBefore += line
+			// A wrapper opener shown as an example must not arm wrapped-only recovery for a later
+			// bare invoke, so tags are read in source order and only while outside quoted code.
+			if (fenceBeforeLine === null && !/^ {0,3}(?:`{3,}|~{3,})/.test(this.sameLineBefore)) {
+				// A wrapper tag admits only whitespace before its `>`, so it never straddles a span
+				// boundary, which always falls on the `<` of an `<invoke>` marker.
+				for (const wrapperTag of line.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
+					const textBeforeTag = this.sameLineBefore.slice(0, lineStart + wrapperTag.index)
+					if ((textBeforeTag.match(/`/g)?.length ?? 0) % 2 === 0) {
+						this.wrapperOpen = wrapperTag[1] === ""
+					}
+				}
+			}
 			if (index < lines.length - 1) {
 				this.openFence = this.fenceAfterCurrentLine()
 				this.sameLineBefore = ""
