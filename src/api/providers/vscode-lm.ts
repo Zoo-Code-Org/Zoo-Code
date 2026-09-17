@@ -163,11 +163,12 @@ class QuotingScanState {
 		}
 		const marker = fenceMatch[1][0]
 		const width = fenceMatch[1].length
+		const suffix = this.sameLineBefore.slice(fenceMatch[0].length)
 		if (!this.openFence) {
-			return { marker, width }
+			// CommonMark: a backtick opening fence's info string may not contain a backtick.
+			return marker === "`" && suffix.includes("`") ? null : { marker, width }
 		}
 		// CommonMark allows an info string only on an opening fence, never a closing one.
-		const suffix = this.sameLineBefore.slice(fenceMatch[0].length)
 		const closesFence = marker === this.openFence.marker && width >= this.openFence.width && suffix.trim() === ""
 		return closesFence ? null : this.openFence
 	}
@@ -394,6 +395,11 @@ function parseLeakedInvokeParams(
 	let consumedUpTo = 0
 	for (const match of body.matchAll(paramPattern)) {
 		const name = match[1]
+		// A nested unclosed `<parameter` inside the captured value means the lazy pattern swallowed
+		// markup as data and dropped the inner parameter, so fail closed rather than dispatch it.
+		if (/<(?:antml:)?parameter\b/i.test(match[2])) {
+			return undefined
+		}
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
 		if (!converted) {
 			return undefined

@@ -1806,6 +1806,20 @@ describe("leaked tool-call parser contracts", () => {
 			expect(callsOf(wrapLines("~~~\n```\n" + todo() + "\n"))).toHaveLength(0)
 		})
 
+		it("does not treat a closed inline-code run before the wrapper as a fence", () => {
+			const text = "text ```x``` " + `<function${"_calls"}>` + "\n" + todo()
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("does not open a backtick fence whose info string contains a backtick", () => {
+			expect(callsOf("```lang`value\nmore\n" + wrapLines(todo()))).toHaveLength(1)
+		})
+
+		it("still opens a tilde fence whose info string contains a backtick", () => {
+			expect(callsOf("~~~lang`value\nmore\n" + wrapLines(todo()))).toHaveLength(0)
+		})
+
 		it("suppresses on an odd backtick count earlier in the line", () => {
 			expect(callsOf(wrapLines("see `" + todo()))).toHaveLength(0)
 		})
@@ -1872,6 +1886,21 @@ describe("leaked tool-call parser contracts", () => {
 
 		it("rejects a number for a declared object", () => {
 			expect(convert({ value: { type: "object" } }, "5")).toHaveLength(0)
+		})
+
+		it("fails closed on a nested unclosed parameter tag and passes the text through", () => {
+			const schemas = schemaFor({ a: { type: "string" }, b: { type: "string" } })
+			const body = `<param${"eter"} name="a">` + param("b", "1") + "\n"
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("also rejects a declared-string value containing literal parameter markup", () => {
+			// Deliberate narrowing: failing closed beats dispatching a wrongly-parsed argument.
+			expect(convert({ value: { type: "string" } }, `see <param${"eter"} name="b">`)).toHaveLength(0)
 		})
 
 		it("rejects a number for a declared boolean", () => {
