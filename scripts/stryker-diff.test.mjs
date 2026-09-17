@@ -555,9 +555,11 @@ describe("selectFromGit", () => {
 			const mergeResultBaseSha = runGit("rev-parse", `${mergeSha}^1`)
 			assert.equal(mergeResultBaseSha, currentBaseSha)
 
+			// A stale base is normalized to the merge's first parent, so the advanced base branch
+			// file is not charged to the pull request.
 			assert.deepEqual(
 				selectFromGit(repo, staleBaseSha, mergeSha).packages[0].files.map(({ path: filePath }) => filePath),
-				["packages/core/src/base.ts", "packages/core/src/pr.ts"],
+				["packages/core/src/pr.ts"],
 			)
 			assert.deepEqual(
 				selectFromGit(repo, mergeResultBaseSha, mergeSha).packages[0].files.map(
