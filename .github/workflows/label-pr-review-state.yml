@@ -14,7 +14,7 @@ on:
   # This workflow only reads PR metadata and never checks out or executes PR code.
   # pull_request_target gives fork PRs a token that can update labels and comments.
   pull_request_target:
-    types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled, unlabeled]
+    types: [opened, reopened, ready_for_review, synchronize, review_requested, review_request_removed, labeled, unlabeled]
   pull_request_review:
     types: [submitted, dismissed]
   # Fork review events have a read-only token. CodeRabbit's status-comment update
@@ -339,7 +339,7 @@ jobs:
                 'coderabbit-changes': 'Address automated review findings and push fixes.',
                 coderabbit: 'Required CI passed. Waiting for automated review of the latest commit.',
                 'draft-approved': 'Automated review complete for the latest commit. Mark the draft ready.',
-                'maintainer-changes': 'Address maintainer or CODEOWNER feedback, then push an update.',
+                'maintainer-changes': 'Address maintainer or CODEOWNER feedback, push an update, then re-request review from the blocking maintainer.',
                 maintainer: 'Awaiting fresh human maintainer or CODEOWNER approval.',
                 approved: 'The required review sequence passed. Remaining merge requirements apply.',
               };
@@ -641,6 +641,81 @@ jobs:
                   }
                 }
 
+                // Durable per-maintainer change-request blockers (issue #1671).
+                // Unlike approvals and CodeRabbit reviews, a human maintainer's
+                // CHANGES_REQUESTED stays binding across author pushes, base-branch
+                // merges, CI runs, and CodeRabbit reviews until that same
+                // maintainer's blocker is cleared by one of:
+                //   1. the PR author explicitly re-requesting review from them,
+                //   2. a newer review from that maintainer (its state decides), or
+                //   3. GitHub dismissing the blocking review.
+                // Latest state per reviewer is keyed by review id (monotonically
+                // increasing) so reordered or duplicate history cannot change the
+                // result. COMMENTED reviews are neutral and never clear a blocker;
+                // a DISMISSED latest review clears it.
+                const latestHumanReview = new Map();
+                for (const r of reviews) {
+                  const reviewer = r.user?.login?.toLowerCase();
+                  if (!reviewer ||
+                      r.user?.type === 'Bot' ||
+                      codeRabbitLogins.has(reviewer) ||
+                      reviewer === pr.user?.login?.toLowerCase() ||
+                      r.state === 'COMMENTED') {
+                    continue;
+                  }
+                  const previous = latestHumanReview.get(reviewer);
+                  if (!previous || r.id > previous.id) {
+                    latestHumanReview.set(reviewer, r);
+                  }
+                }
+                const maintainerBlockers = new Map();
+                for (const [reviewer, review] of latestHumanReview) {
+                  if (review.state !== 'CHANGES_REQUESTED') continue;
+                  if (['admin', 'maintain', 'write'].includes(await permissionFor(review.user.login))) {
+                    maintainerBlockers.set(reviewer, review);
+                  }
+                }
+
+                // Clear blockers the author explicitly re-requested. Only a
+                // review_requested timeline event whose actor is the PR author and
+                // whose requested reviewer is the blocking maintainer clears that
+                // maintainer's blocker. Team requests carry no requested_reviewer
+                // and never clear an individual blocker; review_request_removed
+                // events only trigger reconciliation and are not clearing evidence.
+                // If the timeline cannot be reconstructed, fail closed: keep every
+                // blocker so awaiting-author is preserved.
+                if (maintainerBlockers.size > 0) {
+                  let timelineEvents = null;
+                  try {
+                    timelineEvents = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                      owner, repo, issue_number: pr.number, per_page: 100,
+                    });
+                  } catch (error) {
+                    core.warning(
+                      `PR #${pr.number}: could not reconstruct review-request history; ` +
+                      `preserving maintainer blockers: ${error.message}`
+                    );
+                  }
+                  if (timelineEvents) {
+                    const authorLogin = pr.user?.login?.toLowerCase();
+                    for (const event of timelineEvents) {
+                      if (event.event !== 'review_requested') continue;
+                      if (event.actor?.login?.toLowerCase() !== authorLogin) continue;
+                      const requested = event.requested_reviewer?.login?.toLowerCase();
+                      if (!requested) continue;
+                      const blocker = maintainerBlockers.get(requested);
+                      if (!blocker) continue;
+                      const requestedAt = Date.parse(event.created_at ?? '');
+                      const blockedAt = Date.parse(blocker.submitted_at ?? '');
+                      // A re-request only clears blockers it follows; missing or
+                      // unparsable timestamps fail closed and keep the blocker.
+                      if (!Number.isNaN(requestedAt) && !Number.isNaN(blockedAt) && requestedAt >= blockedAt) {
+                        maintainerBlockers.delete(requested);
+                      }
+                    }
+                  }
+                }
+
                 const codeRabbitReview = latest.get(codeRabbitLogin);
                 const freshCodeRabbitReview = codeRabbitReview?.commit_id === pr.head.sha
                   ? codeRabbitReview
@@ -657,9 +732,6 @@ jobs:
                     freshMaintainerReviews.push(review);
                   }
                 }
-                const maintainerChangeRequest = freshMaintainerReviews.find(
-                  review => review.state === 'CHANGES_REQUESTED'
-                );
                 const automatedAuthor = pr.user?.type === 'Bot';
                 const codeRabbitEligibleAuthor = !automatedAuthor ||
                   codeRabbitEligibleBotLogins.has(pr.user?.login.toLowerCase());
@@ -676,7 +748,7 @@ jobs:
                 let phase;
                 let activateCodeRabbit = false;
                 let recycleCodeRabbitLabel = false;
-                if (codeRabbitChangesRequested || maintainerChangeRequest) {
+                if (codeRabbitChangesRequested || maintainerBlockers.size > 0) {
                   desiredLabel = 'awaiting-author';
                   phase = codeRabbitChangesRequested ? 'coderabbit-changes' : 'maintainer-changes';
                 } else if (!codeRabbitEligibleAuthor) {
@@ -740,7 +812,7 @@ jobs:
                 core.info(
                   `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
                   `coderabbit=${freshCodeRabbitReview?.state ?? (codeRabbitEligibleAuthor ? 'pending' : 'optional')}, ` +
-                  `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
+                  `maintainer=${maintainerApproval?.state ?? 'pending'}, blockers=${maintainerBlockers.size} → ${desiredLabel ?? '(none)'}`
                 );
 
                 const readyForMaintainer = phase === 'maintainer' || phase === 'approved';
