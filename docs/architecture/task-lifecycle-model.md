@@ -163,9 +163,9 @@ CI runs `pnpm lifecycle:model-check` in `.github/workflows/code-qa.yml` after li
 
 ## Gap audit
 
-This is the authoritative active tracker. It is behavior-led and self-contained; issue links are historical provenance rather than specifications. Coverage status uses these evidence classes:
+This section is a summary tracker. Issue links are historical provenance rather than specifications. Coverage status uses these evidence classes:
 
-The exhaustive repository inventory, ranked stable burn-down register, source-based methodology, and follow-up checklist live in the [Task lifecycle verification GAP report](./task-lifecycle-gap-report.md). This page remains the executable model-suite specification.
+The [Task lifecycle verification GAP report](./task-lifecycle-gap-report.md) is the authoritative register. It holds the exhaustive repository inventory, the ranked stable burn-down register, the source-based methodology, and the follow-up checklist. This page remains the executable model-suite specification.
 
 - **Production-backed bounded:** exhaustive only for the declared state space while executing production functions.
 - **Abstract bounded:** exhaustive only for model-authored transitions; refinement depends on separate adapter tests.
