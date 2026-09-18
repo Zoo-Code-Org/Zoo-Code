@@ -1146,6 +1146,31 @@ describe("NanoGPT key-scoped cache isolation", () => {
 	})
 })
 
+describe("IO Intelligence key-scoped cache isolation", () => {
+	const ioIntelligenceModels = {
+		"meta-llama/Llama-3.3-70B-Instruct": { maxTokens: 8_192, contextWindow: 128_000, supportsPromptCache: false },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetIOIntelligenceModels.mockResolvedValue(ioIntelligenceModels)
+	})
+
+	it("separates public, key A, and key B cache identities without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.ioIntelligence })
+		await getModels({ provider: providerIdentifiers.ioIntelligence, apiKey: "ionet-key-a" })
+		await getModels({ provider: providerIdentifiers.ioIntelligence, apiKey: "ionet-key-b" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(3)
+		expect(cacheKeys).toContain("io-intelligence")
+		expect(cacheKeys.every((key) => !key.includes("ionet-key-a") && !key.includes("ionet-key-b"))).toBe(true)
+	})
+})
+
 describe("compound cache key derivation across scoping dimensions", () => {
 	// Exercises every branch of getCacheKey via the public getModels() entry point.
 	// litellm is url-scoped AND key-scoped; openrouter is neither, so it hits the bare

@@ -11,38 +11,49 @@ import {
 const ioIntelligenceModelSchema = z.object({
 	id: z.string().min(1),
 	name: z.string().optional(),
-	object: z.string().optional(),
-	created: z.number().optional(),
-	owned_by: z.string().optional(),
-	root: z.string().nullable().optional(),
-	parent: z.string().nullable().optional(),
 	max_model_len: z.number().nullable().optional(),
+	context_window: z.number().int().positive().nullish(),
+	max_tokens: z.number().int().positive().nullish(),
+	supports_tools: z.boolean().optional(),
+	supports_prompt_cache: z.boolean().optional(),
+	input_modalities: z.array(z.string()).optional(),
+	input_token_price: z.number().nonnegative().optional(),
+	output_token_price: z.number().nonnegative().optional(),
+	cache_read_token_price: z.number().nonnegative().optional(),
 })
 
 export type IOIntelligenceModel = z.infer<typeof ioIntelligenceModelSchema>
-
-const ioIntelligenceModelsResponseSchema = z.object({
-	object: z.string().optional(),
-	data: z.array(z.unknown()),
-})
 
 function getSafeErrorMessage(error: unknown, apiKey?: string): string {
 	const message = error instanceof Error ? error.message : String(error)
 	return apiKey ? message.replaceAll(apiKey, "[REDACTED]") : message
 }
 
+const ioIntelligenceModelsResponseSchema = z.object({
+	object: z.string().optional(),
+	data: z.array(z.unknown()),
+})
+
 export const parseIoIntelligenceModel = (model: IOIntelligenceModel): ModelInfo => ({
-	maxTokens: ioIntelligenceDefaultModelInfo.maxTokens,
-	contextWindow: model.max_model_len ?? ioIntelligenceDefaultModelInfo.contextWindow,
-	supportsImages: false,
-	supportsPromptCache: false,
+	maxTokens: model.max_tokens ?? ioIntelligenceDefaultModelInfo.maxTokens,
+	contextWindow: model.context_window ?? model.max_model_len ?? ioIntelligenceDefaultModelInfo.contextWindow,
+	supportsImages: model.input_modalities?.includes("image") ?? false,
+	supportsPromptCache: model.supports_prompt_cache ?? false,
+	...(model.input_token_price !== undefined ? { inputPrice: model.input_token_price * 1_000_000 } : {}),
+	...(model.output_token_price !== undefined ? { outputPrice: model.output_token_price * 1_000_000 } : {}),
+	...(model.cache_read_token_price !== undefined
+		? { cacheReadsPrice: model.cache_read_token_price * 1_000_000 }
+		: {}),
 	...(model.name !== undefined ? { displayName: model.name } : {}),
 	description: model.name ?? model.id,
 })
 
 /**
- * Fetches IO Intelligence's public /models catalog, optionally scoped by a
- * Bearer key. Model ids are Hugging Face-style `org/name` identifiers.
+ * Fetches the public IO Intelligence (io.net) model catalog.
+ *
+ * The catalog can be listed without an API key, while a Bearer key scopes the
+ * visible models for the account (io.net exposes per-tier access). Prices are
+ * published per token and normalized to per-million-token units.
  */
 export async function getIOIntelligenceModels(apiKey?: string): Promise<ModelRecord> {
 	try {
@@ -61,6 +72,13 @@ export async function getIOIntelligenceModels(apiKey?: string): Promise<ModelRec
 			const modelResult = ioIntelligenceModelSchema.safeParse(rawModel)
 			if (!modelResult.success) {
 				console.warn("Skipping invalid IO Intelligence model entry")
+				continue
+			}
+
+			// Zoo Code is agentic-first: io.net marks a few catalog models as not
+			// supporting tools. An explicit false is authoritative; an omitted flag
+			// remains unknown and therefore eligible (mirrors the NanoGPT fetcher).
+			if (modelResult.data.supports_tools === false) {
 				continue
 			}
 

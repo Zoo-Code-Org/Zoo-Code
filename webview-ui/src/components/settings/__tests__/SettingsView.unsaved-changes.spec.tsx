@@ -761,4 +761,85 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		expect(onDone).toHaveBeenCalledOnce()
 		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})
+
+	it("buffers and saves the complete IO Intelligence provider configuration from cached state", async () => {
+		const liveApiConfiguration = {
+			apiProvider: providerIdentifiers.ioIntelligence,
+			ioIntelligenceApiKey: "original-key",
+			ioIntelligenceModelId: "meta-llama/original",
+		}
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: liveApiConfiguration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<div>
+				<input
+					data-testid="cached-ionet-key"
+					value={apiConfiguration.ioIntelligenceApiKey ?? ""}
+					onChange={(event) => setApiConfigurationField("ioIntelligenceApiKey", event.target.value)}
+				/>
+				<input
+					data-testid="cached-ionet-model"
+					value={apiConfiguration.ioIntelligenceModelId ?? ""}
+					onChange={(event) => setApiConfigurationField("ioIntelligenceModelId", event.target.value)}
+				/>
+			</div>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+
+		expect(await screen.findByTestId("cached-ionet-key")).toHaveValue("original-key")
+		expect(screen.getByTestId("cached-ionet-model")).toHaveValue("meta-llama/original")
+
+		fireEvent.change(screen.getByTestId("cached-ionet-key"), { target: { value: "unsaved-key" } })
+		fireEvent.change(screen.getByTestId("cached-ionet-model"), { target: { value: "zai-org/next" } })
+
+		expect(liveApiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.ioIntelligence,
+			ioIntelligenceApiKey: "original-key",
+			ioIntelligenceModelId: "meta-llama/original",
+		})
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "unsaved-key",
+				ioIntelligenceModelId: "zai-org/next",
+			},
+		})
+	})
+
+	it("discards IO Intelligence cached edits and restores the extension values", async () => {
+		const onDone = vi.fn()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "saved-key",
+				ioIntelligenceModelId: "meta-llama/saved",
+			},
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<input
+				data-testid="cached-ionet-key"
+				value={apiConfiguration.ioIntelligenceApiKey ?? ""}
+				onChange={(event) => setApiConfigurationField("ioIntelligenceApiKey", event.target.value)}
+			/>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
+		fireEvent.change(await screen.findByTestId("cached-ionet-key"), { target: { value: "discard-me" } })
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+
+		await waitFor(() => expect(screen.getByTestId("cached-ionet-key")).toHaveValue("saved-key"))
+		expect(onDone).toHaveBeenCalledOnce()
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+	})
 })

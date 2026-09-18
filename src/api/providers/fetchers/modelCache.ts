@@ -98,6 +98,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
+	providerIdentifiers.ioIntelligence, // Public catalog can still vary by API-key allowlist
 ])
 
 // Providers whose model lists are scoped to the signed-in user (e.g. per-account

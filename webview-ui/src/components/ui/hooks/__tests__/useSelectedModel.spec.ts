@@ -13,6 +13,8 @@ import {
 	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
+	ioIntelligenceDefaultModelId,
+	ioIntelligenceDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
 	nanoGptDefaultModelId,
@@ -1124,6 +1126,50 @@ describe("useSelectedModel", () => {
 
 			expect(result.current.id).toBe(nanoGptDefaultModelId)
 			expect(result.current.info).toEqual(nanoGptDefaultModelInfo)
+		})
+	})
+
+	describe("io-intelligence provider", () => {
+		it("uses dynamic metadata for the configured IO Intelligence model", () => {
+			const dynamicInfo: ModelInfo = {
+				maxTokens: 8_192,
+				contextWindow: 131_072,
+				supportsPromptCache: true,
+				description: "Dynamic IO Intelligence model",
+			}
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ "io-intelligence": { "zai-org/GLM-4.6": dynamicInfo } }),
+			)
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.ioIntelligence,
+						ioIntelligenceModelId: "zai-org/GLM-4.6",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("zai-org/GLM-4.6")
+			expect(result.current.info).toEqual(dynamicInfo)
+		})
+
+		it("uses IO Intelligence's shared fallback when its dynamic catalog is empty", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ "io-intelligence": {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.ioIntelligence,
+						ioIntelligenceModelId: "missing-model",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(ioIntelligenceDefaultModelId)
+			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
 		})
 	})
 

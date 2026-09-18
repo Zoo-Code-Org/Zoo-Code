@@ -24,9 +24,9 @@ import { extractReasoningFromDelta } from "./utils/extract-reasoning"
  * https://api.intelligence.io.solutions/api/v1/chat/completions
  *
  * Model ids are Hugging Face-style `org/name` identifiers and are resolved
- * dynamically from the public /models endpoint, with a static fallback
- * catalog. Supports text generation, reasoning content (DeepSeek/GLM style),
- * tool calls, and non-streaming prompt completion.
+ * dynamically from the public /models endpoint. Supports text generation,
+ * reasoning content (DeepSeek/GLM style), tool calls, and non-streaming
+ * prompt completion.
  */
 export class IOIntelligenceHandler extends RouterProvider implements SingleCompletionHandler {
 	/** Creates a new handler bound to the user's API key and selected model. */
@@ -83,48 +83,47 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 			body.temperature = this.options.modelTemperature
 		}
 
-		let completion: Awaited<ReturnType<typeof this.client.chat.completions.create>>
 		try {
-			completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
-		} catch (error) {
-			throw this.createSafeError("streaming", error)
-		}
+			const completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
 
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
 
-			// Reasoning models (DeepSeek R1, GLM) stream reasoning via
-			// reasoning_content with an OpenRouter-style `reasoning` fallback.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+				// Reasoning models (DeepSeek R1, GLM) stream reasoning via
+				// reasoning_content with an OpenRouter-style `reasoning` fallback.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: chunk.usage.prompt_tokens || 0,
+						outputTokens: chunk.usage.completion_tokens || 0,
+						cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
-				}
-			}
+		} catch (error) {
+			throw this.createSafeError("streaming", error)
 		}
 	}
 
@@ -146,7 +145,10 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 				stream: false,
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			const response = await this.client.chat.completions.create(requestOptions, {
+				signal: options?.abortSignal,
+				timeout: options?.timeoutMs,
+			})
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			throw this.createSafeError("completion", error)
