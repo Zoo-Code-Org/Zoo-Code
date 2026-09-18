@@ -64,10 +64,9 @@ suite("Roo Code use_mcp_tool Tool", function () {
 				{
 					mcpServers: {
 						[FILESYSTEM_SERVER_NAME]: {
-							command: process.execPath,
+							command: process.env.npm_node_execpath ?? "node",
 							args: [path.join(__dirname, "fixtures", "filesystem-mcp-server.js"), workspaceDir],
 							env: {
-								ELECTRON_RUN_AS_NODE: "1",
 								MCP_TEST_READY_FILE: mcpServerReadyPath,
 							},
 							alwaysAllow: [
