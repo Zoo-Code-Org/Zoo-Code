@@ -425,6 +425,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		getPullRequest,
 		listPullRequests: github.rest.pulls.list,
 		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
+		permissionFor,
 	}
 }
 
@@ -2195,6 +2196,24 @@ describe("PR review-state workflow", () => {
 			})
 
 			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		})
+
+		it("memoizes collaborator permission lookups across both review loops", async () => {
+			const result = await runWorkflow({
+				permissions: { maintainer: "write" },
+				reviews: [
+					coderabbitApproval,
+					{
+						login: "maintainer",
+						type: "User",
+						state: "CHANGES_REQUESTED",
+						submittedAt: REVIEWED_AT + 1_000,
+					},
+				],
+			})
+
+			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+			expect(result.permissionFor.mock.calls.filter(([args]) => args.username === "maintainer")).toHaveLength(1)
 		})
 
 		it("ignores blockers from non-collaborator reviewers", async () => {

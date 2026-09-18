@@ -316,14 +316,24 @@ jobs:
               return match?.[1] ?? null;
             }
 
+            // Collaborator permissions are repository-level, so memoize them for
+            // the whole run: a maintainer's current-head CHANGES_REQUESTED reaches
+            // both review loops, and scheduled sweeps reconcile every open PR.
+            const permissionCache = new Map();
             async function permissionFor(username) {
+              const key = username.toLowerCase();
+              if (permissionCache.has(key)) return permissionCache.get(key);
               try {
                 const result = await github.rest.repos.getCollaboratorPermissionLevel({
                   owner, repo, username,
                 });
+                permissionCache.set(key, result.data.permission);
                 return result.data.permission;
               } catch (error) {
-                if (error.status === 404) return 'none';
+                if (error.status === 404) {
+                  permissionCache.set(key, 'none');
+                  return 'none';
+                }
                 throw error;
               }
             }
