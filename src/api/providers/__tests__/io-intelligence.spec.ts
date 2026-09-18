@@ -174,4 +174,25 @@ describe("IOIntelligenceHandler", () => {
 			message: "IO Intelligence streaming error: upstream rejected [REDACTED]",
 		})
 	})
+
+	it("completePrompt without options forwards no request options", async () => {
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { role: "assistant", content: "ok" } }],
+		})
+		const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+		expect(await handler.completePrompt("ping")).toBe("ok")
+		// The OpenAI SDK rejects a present-but-undefined `timeout` key, so a bare
+		// call must not pass request options at all.
+		expect(mockCreate.mock.calls[0][1]).toBeUndefined()
+	})
+
+	it("completePrompt forwards abort and timeout options when provided", async () => {
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { role: "assistant", content: "ok" } }],
+		})
+		const signal = new AbortController().signal
+		const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+		await handler.completePrompt("ping", { abortSignal: signal, timeoutMs: 5_000 })
+		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: false }), { signal, timeout: 5_000 })
+	})
 })

@@ -145,10 +145,22 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 				stream: false,
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions, {
-				signal: options?.abortSignal,
-				timeout: options?.timeoutMs,
-			})
+			// The OpenAI SDK validates a present-but-undefined `timeout` key, so
+			// request options are only forwarded when they carry a real value.
+			const completionOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				completionOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs !== undefined) {
+				completionOptions.timeout = options.timeoutMs
+			}
+			const hasCompletionOptions =
+				completionOptions.signal !== undefined || completionOptions.timeout !== undefined
+
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				hasCompletionOptions ? completionOptions : undefined,
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			throw this.createSafeError("completion", error)
