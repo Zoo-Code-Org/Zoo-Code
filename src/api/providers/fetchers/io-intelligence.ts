@@ -11,7 +11,7 @@ import {
 const ioIntelligenceModelSchema = z.object({
 	id: z.string().min(1),
 	name: z.string().optional(),
-	max_model_len: z.number().nullable().optional(),
+	max_model_len: z.number().int().positive().nullish(),
 	context_window: z.number().int().positive().nullish(),
 	max_tokens: z.number().int().positive().nullish(),
 	supports_tools: z.boolean().optional(),

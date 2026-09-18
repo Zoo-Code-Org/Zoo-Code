@@ -79,7 +79,11 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		if (this.supportsTemperature(modelId)) {
+		if (
+			this.options.modelTemperature !== undefined &&
+			info.supportsTemperature !== false &&
+			this.supportsTemperature(modelId)
+		) {
 			body.temperature = this.options.modelTemperature
 		}
 
