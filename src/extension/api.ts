@@ -109,7 +109,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						break
 					case TaskCommandName.SendMessage:
 						this.log(`[API] SendMessage -> ${command.data.text}`)
-						await this.sendMessage(command.data.text, command.data.images)
+						try {
+							await this.sendMessage(command.data.text, command.data.images)
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error)
+							this.log(`[API] SendMessage failed: ${errorMessage}`)
+						}
 						break
 					case TaskCommandName.GetCommands:
 						try {
