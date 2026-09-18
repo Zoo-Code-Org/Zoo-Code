@@ -108,15 +108,19 @@ class QuotingScanState {
 			const fenceBeforeLine = this.openFence
 			this.sameLineBefore += line
 			// A wrapper opener shown as an example must not arm wrapped-only recovery for a later
-			// bare invoke, so tags are read in source order and only while outside quoted code.
-			if (fenceBeforeLine === null && !/^ {0,3}(?:`{3,}|~{3,})/.test(this.sameLineBefore)) {
-				// A wrapper tag admits only whitespace before its `>`, so it never straddles a span
-				// boundary, which always falls on the `<` of an `<invoke>` marker.
-				for (const wrapperTag of line.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
-					const textBeforeTag = this.sameLineBefore.slice(0, lineStart + wrapperTag.index)
-					if (!this.insideInlineSpanAt(textBeforeTag)) {
-						this.wrapperOpen = wrapperTag[1] === ""
-					}
+			// bare invoke, so tags are read in source order and openers are ignored in quoted code.
+			// A wrapper tag admits only whitespace before its `>`, so it never straddles a span
+			// boundary, which always falls on the `<` of an `<invoke>` marker.
+			for (const wrapperTag of line.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
+				const textBeforeTag = this.sameLineBefore.slice(0, lineStart + wrapperTag.index)
+				if (this.insideInlineSpanAt(textBeforeTag)) {
+					continue
+				}
+				// A closer can only ever suppress recovery, so honour it even inside a fence.
+				if (wrapperTag[1] !== "") {
+					this.wrapperOpen = false
+				} else if (fenceBeforeLine === null && !/^ {0,3}(?:`{3,}|~{3,})/.test(this.sameLineBefore)) {
+					this.wrapperOpen = true
 				}
 			}
 			if (index < lines.length - 1) {
@@ -403,6 +407,11 @@ function parseLeakedInvokeParams(
 		// A nested unclosed `<parameter` inside the captured value means the lazy pattern swallowed
 		// markup as data and dropped the inner parameter, so fail closed rather than dispatch it.
 		if (/<(?:antml:)?parameter\b/i.test(match[2])) {
+			return undefined
+		}
+		// A repeated name means injected markup split the block into adjacent well-formed matches,
+		// which would silently rebind an argument to an attacker-chosen value.
+		if (Object.hasOwn(input, name)) {
 			return undefined
 		}
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
