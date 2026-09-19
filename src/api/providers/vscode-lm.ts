@@ -426,6 +426,17 @@ function parseLeakedInvokeParams(
 	if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo))) {
 		return undefined
 	}
+	if (schema !== undefined) {
+		const props = schema.properties
+		if (props === null || props === undefined || typeof props !== "object" || Array.isArray(props)) {
+			return undefined
+		}
+		for (const k of Object.keys(input)) {
+			if (!Object.hasOwn(props as Record<string, unknown>, k)) {
+				return undefined
+			}
+		}
+	}
 	return input
 }
 
