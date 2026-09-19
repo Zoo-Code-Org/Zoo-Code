@@ -1152,6 +1152,10 @@
 		"configureModes": "模式可用性",
 		"modeAny": "任意模式",
 		"modeCount": "{{count}} 種模式",
+		"diagnostics": {
+			"title": "部分技能無法載入",
+			"description": "請修正所列 SKILL.md 檔案中的 YAML frontmatter，然後重新開啟或重新整理此頁面。"
+		},
 		"deleteDialog": {
 			"title": "刪除技能",
 			"description": "您確定要刪除技能「{{name}}」嗎？此動作無法復原。",

@@ -1152,6 +1152,10 @@
 		"configureModes": "मोड उपलब्धता",
 		"modeAny": "कोई भी मोड",
 		"modeCount": "{{count}} मोड",
+		"diagnostics": {
+			"title": "कुछ skills लोड नहीं हो सके",
+			"description": "सूचीबद्ध SKILL.md फ़ाइलों में YAML frontmatter को ठीक करें, फिर इस पृष्ठ को फिर से खोलें या रिफ़्रेश करें।"
+		},
 		"deleteDialog": {
 			"title": "Skill हटाएं",
 			"description": "क्या आप वाकई skill \"{{name}}\" को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",

@@ -252,6 +252,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	public getSkillsState() {
+		const skillsManager = this.sidebarProvider.getSkillsManager()
+		if (!skillsManager) {
+			return { skills: [], skillDiagnostics: [] }
+		}
+		return {
+			skills: skillsManager.getSkillsMetadata(),
+			skillDiagnostics: skillsManager.getSkillDiagnostics(),
+		}
+	}
+
 	/** Checks persisted turn ordering without exposing conversation contents to tests. */
 	public async hasTaskApiConversationHistorySequence(
 		taskId: string,

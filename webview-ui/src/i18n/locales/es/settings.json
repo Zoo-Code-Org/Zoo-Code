@@ -1152,6 +1152,10 @@
 		"configureModes": "Disponibilidad de modo",
 		"modeAny": "Cualquier modo",
 		"modeCount": "{{count}} modos",
+		"diagnostics": {
+			"title": "No se pudieron cargar algunas skills",
+			"description": "Corrige el frontmatter YAML en los archivos SKILL.md enumerados y luego vuelve a abrir o actualizar esta página."
+		},
 		"deleteDialog": {
 			"title": "Eliminar Skill",
 			"description": "¿Estás seguro de que quieres eliminar la skill \"{{name}}\"? Esta acción no se puede deshacer.",
