@@ -215,7 +215,7 @@ export class SembleProvider implements ISembleProvider {
 				location: "SembleProvider.searchIndex",
 			})
 
-			return []
+			throw new Error(`Semble search failed: ${errorMessage}`)
 		}
 	}
 
