@@ -3,8 +3,10 @@ import { ConversationRole, Message, ContentBlock } from "@aws-sdk/client-bedrock
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 interface BedrockMessageContent {
-	type: "text" | "image" | "video" | "tool_use" | "tool_result"
+	type: "text" | "image" | "video" | "tool_use" | "tool_result" | "reasoning" | "thinking"
 	text?: string
+	thinking?: string
+	signature?: string
 	source?: {
 		type: "base64"
 		data: string | Uint8Array // string for Anthropic, Uint8Array for Bedrock
@@ -55,6 +57,25 @@ export function convertToBedrockConverseMessages(anthropicMessages: Anthropic.Me
 			if (messageBlock.type === "text") {
 				return {
 					text: messageBlock.text || "",
+				} as ContentBlock
+			}
+
+			if (messageBlock.type === "reasoning" && typeof messageBlock.text === "string") {
+				return {
+					reasoningContent: {
+						reasoningText: { text: messageBlock.text },
+					},
+				} as ContentBlock
+			}
+
+			if (messageBlock.type === "thinking" && typeof messageBlock.thinking === "string") {
+				return {
+					reasoningContent: {
+						reasoningText: {
+							text: messageBlock.thinking,
+							...(messageBlock.signature ? { signature: messageBlock.signature } : {}),
+						},
+					},
 				} as ContentBlock
 			}
 
