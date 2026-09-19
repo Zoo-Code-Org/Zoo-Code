@@ -1390,6 +1390,13 @@ describe("Cline", () => {
 
 	describe("getEnvironmentDetails", () => {
 		describe("API conversation handling", () => {
+			// Several tests below layer vi.spyOn(await import("delay"), "default")
+			// on top of the module-level factory mock; without restoration the last
+			// mockImplementation leaks into every later test in the file.
+			afterEach(() => {
+				vi.restoreAllMocks()
+			})
+
 			it("should strip non-protocol fields from API conversation history before sending to the API", async () => {
 				const cline = new Task({
 					provider: mockProvider,
@@ -1946,6 +1953,69 @@ describe("Cline", () => {
 				expect(result).toBe(true)
 			})
 
+			it("keeps ApiRetryCapExceededError terminal when auto-approval is disabled mid-flight", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				// autoApprovalEnabled: false — the marker must stay terminal regardless.
+				// The instanceof check (Task.ts streaming_failed catch) sits OUTSIDE the
+				// autoApprovalEnabled condition by design: the cap error is only thrown
+				// with auto-approval on, so a mid-flight toggle off must not re-open the
+				// loop. If the check ever moved inside the condition, this test reddens
+				// while the autoApprovalEnabled: true twin above stays green.
+				const state = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...state,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: false,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				const capError = new ApiRetryCapExceededError(
+					"[Task#attemptApiRequest] task aborted — persistent API error after 3 auto-approval retries " +
+						"(last: API Error). Retry loop capped (roo-extensions#3195).",
+				)
+				let markerCalls = 0
+				const attemptSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					markerCalls++
+					// Same fail-fast valve as the twin test: bound the run if the
+					// terminal handling is mutated away.
+					if (markerCalls > 1) {
+						task.abort = true
+					}
+					return (
+						// eslint-disable-next-line require-yield
+						(async function* () {
+							throw capError
+						})() as AsyncGenerator<ApiStreamChunk>
+					)
+				})
+
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+				const saySpy = vi.spyOn(task, "say")
+				const abortTaskSpy = vi.spyOn(task, "abortTask").mockImplementation(async () => {
+					task.abort = true
+				})
+
+				const result = await task.recursivelyMakeClineRequests([
+					{ type: "text", text: "original user request" },
+				])
+
+				// Same terminal contract as the autoApprovalEnabled: true twin: the
+				// marker ends the loop on the spot — no re-push, no backoff, loud stop.
+				expect(attemptSpy).toHaveBeenCalledTimes(1)
+				expect(backoffSpy).not.toHaveBeenCalled()
+				expect(abortTaskSpy).toHaveBeenCalledTimes(1)
+				const errorCall = saySpy.mock.calls.find((call) => call[0] === "error")
+				expect(errorCall?.[1]).toContain("Retry loop capped")
+				expect(task.abortReason).toBe("streaming_failed")
+				expect(result).toBe(true)
+			})
+
 			it("re-pushes a mid-stream failure without crashing when the provider reference is gone (stateForBackoff undefined)", async () => {
 				const task = new Task({
 					provider: mockProvider,
@@ -1991,8 +2061,8 @@ describe("Cline", () => {
 				})
 
 				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
-				vi.spyOn(task, "say")
-				vi.spyOn(task, "abortTask").mockImplementation(async () => {
+				const saySpy = vi.spyOn(task, "say")
+				const abortTaskSpy = vi.spyOn(task, "abortTask").mockImplementation(async () => {
 					task.abort = true
 				})
 
@@ -2008,6 +2078,13 @@ describe("Cline", () => {
 				expect(attempts).toBe(2)
 				expect(backoffSpy).not.toHaveBeenCalled()
 				expect(result).toBe(true)
+				// The second failure is the terminal cap marker — pin the terminal contract,
+				// not just the loop shape: the stop must come from the cap path (say("error"),
+				// abortReason, abortTask), not from the outer catch swallowing something else.
+				expect(abortTaskSpy).toHaveBeenCalledTimes(1)
+				const errorCall = saySpy.mock.calls.find((call) => call[0] === "error")
+				expect(errorCall?.[1]).toContain("terminal after re-push")
+				expect(task.abortReason).toBe("streaming_failed")
 			})
 
 			it("uses the task rate limit in retry backoff when focused provider state differs", async () => {
