@@ -222,11 +222,16 @@ describe("getUnboundModels", () => {
 	it.each([{ data: null }, { data: { error: "Invalid request" } }])(
 		"returns no models when the API response is not an array: %j",
 		async (mockResponse) => {
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 			mockedAxios.get.mockResolvedValue(mockResponse)
 
 			const models = await getUnboundModels("test-key")
 
 			expect(models).toEqual({})
+			expect(consoleError).toHaveBeenCalledWith(
+				"[getUnboundModels] Unexpected response format:",
+				mockResponse.data,
+			)
 		},
 	)
 })
