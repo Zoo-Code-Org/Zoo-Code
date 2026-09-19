@@ -703,6 +703,10 @@
 		"enable": {
 			"label": "Habilitar puntos de control automáticos",
 			"description": "Cuando está habilitado, Zoo creará automáticamente puntos de control durante la ejecución de tareas, facilitando la revisión de cambios o la reversión a estados anteriores. <0>Más información</0>"
+		},
+		"perWrite": {
+			"label": "Punto de control después de cada escritura de archivo",
+			"description": "Registra una instantánea de punto de control después de cada escritura de archivo exitosa del agente"
 		}
 	},
 	"notifications": {
