@@ -142,7 +142,9 @@ describe("Task.ask queued message drain", () => {
 		task.approveAsk()
 		const result = await ask
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
-		expect(task.messageQueueService.messages[0]?.text).toBe("run it anyway")
+		// claimNextMessage only returns unclaimed messages: the queued message must
+		// still be present and unclaimed after the protected ask resolved.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("run it anyway")
 	})
 
 	it("does not auto-approve a protected command ask when a message is queued mid-wait", async () => {
@@ -163,7 +165,9 @@ describe("Task.ask queued message drain", () => {
 		task.approveAsk()
 		const result = await ask
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
-		expect(task.messageQueueService.messages[0]?.text).toBe("mid-wait message")
+		// claimNextMessage only returns unclaimed messages: the queued message must
+		// still be present and unclaimed after the protected ask resolved.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("mid-wait message")
 	})
 
 	it("claims lifecycle feedback that arrives while an ask is waiting", async () => {
