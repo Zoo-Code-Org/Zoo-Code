@@ -15,7 +15,7 @@ import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared
 import { normalizeToolSchema } from "../../utils/json-schema"
 
 import { ApiStream } from "../transform/stream"
-import { convertToVsCodeLmMessages, extractTextCountFromMessage } from "../transform/vscode-lm-format"
+import { convertToVsCodeLmMessages, extractTextCountFromMessage, sanitizeSurrogates } from "../transform/vscode-lm-format"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -391,7 +391,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(systemPrompt),
+			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
 			...convertToVsCodeLmMessages(cleanedMessages),
 		]
 

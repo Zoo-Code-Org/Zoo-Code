@@ -272,6 +272,27 @@ describe("VsCodeLmHandler", () => {
 			})
 		})
 
+		describe("system prompt sanitization", () => {
+			it("sanitizes lone surrogates in the system prompt", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
+				const stream = handler.createMessage("sys\uD800tem", [{ role: "user" as const, content: "hi" }])
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				expect(vscode.LanguageModelChatMessage.Assistant).toHaveBeenCalledWith("sys\uFFFDtem")
+			})
+		})
+
 		it("should handle native tool calls when tools are provided", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [
