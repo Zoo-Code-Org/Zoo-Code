@@ -219,7 +219,7 @@ describe("getUnboundModels", () => {
 		clearAllMocks()
 	})
 
-	it.each([{ data: null }, { data: { error: "Invalid request" } }])(
+	it.each([{ data: null }, { data: undefined }, { data: { error: "Invalid request" } }])(
 		"returns no models when the API response is not an array: %j",
 		async (mockResponse) => {
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -234,4 +234,41 @@ describe("getUnboundModels", () => {
 			)
 		},
 	)
+
+	it("returns mapped models when the API responds with an array", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockedAxios.get.mockResolvedValue({
+			data: [
+				{
+					id: "openai/gpt-4o",
+					max_output_tokens: 4096,
+					context_window: 128000,
+					supports_caching: true,
+					supports_vision: true,
+					input_price: 0.0000025,
+					output_price: 0.00001,
+					description: "GPT-4o",
+					caching_price: 0.0000005,
+					cached_price: 0.000001,
+				},
+			],
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models).toEqual({
+			"openai/gpt-4o": {
+				maxTokens: 4096,
+				contextWindow: 128000,
+				supportsPromptCache: true,
+				supportsImages: true,
+				inputPrice: 2.5,
+				outputPrice: 10,
+				description: "GPT-4o",
+				cacheWritesPrice: 0.5,
+				cacheReadsPrice: 1,
+			},
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
 })
