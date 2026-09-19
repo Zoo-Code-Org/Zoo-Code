@@ -770,6 +770,15 @@ describe("Cline", () => {
 			)
 			expect(nonPartialCalls).toHaveLength(0)
 
+			// Neither nativeArgs nor params should leak the truncated content into
+			// the recorded assistant turn - Task.ts builds that entry's `input` via
+			// `toolUse.nativeArgs || toolUse.params`, so clearing nativeArgs alone
+			// would just have shifted the leak to params instead of closing it.
+			const assistantEntry = task.apiConversationHistory.find(
+				(m) => m.role === "assistant" && Array.isArray(m.content) && m.content[0]?.type === "tool_use",
+			)
+			expect(JSON.stringify(assistantEntry)).not.toContain("sk-live-abc123")
+
 			// A structured, matching tool_result error must have been pushed for
 			// the truncated call's ID instead of letting it execute.
 			const truncatedCallResult = pushToolResultSpy.mock.calls.find(

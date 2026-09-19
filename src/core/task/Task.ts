@@ -3811,16 +3811,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						} else if (toolUseIndex !== undefined) {
 							// finalizeStreamingToolCall returned null (malformed JSON or missing args).
 							// existingToolUse is the same object the streaming phase was mutating in
-							// place, so it still carries nativeArgs built from the incomplete partial
-							// parse (e.g. a truncated write_to_file `content` string) - that value was
-							// only ever meant for live progress display, never for execution. Mark the
-							// tool as non-partial so it's presented as complete, and clear nativeArgs so
-							// presentAssistantMessage's `!block.nativeArgs` guard actually short-circuits
-							// it with a structured tool_result instead of executing the truncated value.
+							// place, so it still carries nativeArgs AND params built from the incomplete
+							// partial parse (e.g. a truncated write_to_file `content` string) - both were
+							// only ever meant for live progress display, never for execution or for
+							// ending up in conversation history. Mark the tool as non-partial so it's
+							// presented as complete, and clear both so presentAssistantMessage's
+							// `!block.nativeArgs` guard short-circuits with a structured tool_result
+							// instead of executing the truncated value, and so the toolUse.nativeArgs ||
+							// toolUse.params fallback used when recording history doesn't fall through to
+							// the same truncated data under a different name.
 							const existingToolUse = this.assistantMessageContent[toolUseIndex]
 							if (existingToolUse && existingToolUse.type === "tool_use") {
 								existingToolUse.partial = false
 								existingToolUse.nativeArgs = undefined
+								existingToolUse.params = {}
 								// Ensure it has the ID for native protocol
 								;(existingToolUse as any).id = event.id
 							}
