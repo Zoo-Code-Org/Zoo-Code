@@ -6,6 +6,7 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 // Mock vscode first to avoid import errors
 vi.mock("vscode", () => ({
@@ -1378,6 +1379,362 @@ describe("LiteLLMHandler", () => {
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+	})
+
+	describe("completePrompt", () => {
+		it("should pass abort signal through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should reject immediately with AbortError when the signal is pre-aborted, before model discovery", async () => {
+			const fetchModelSpy = vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: litellmDefaultModelId,
+				info: litellmDefaultModelInfo,
+			})
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			// The pre-abort fast-fail must run before provider model discovery:
+			// an already-aborted request must not trigger getModels/refreshModels.
+			expect(fetchModelSpy).not.toHaveBeenCalled()
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should pass timeout through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should merge signal and timeoutMs together", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+
+		it("should omit the timeout option for timeoutMs=0 (0 would abort immediately in the OpenAI SDK)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
+
+		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {
+			const controller = new AbortController()
+			// The request stays pending until the external signal aborts it; the
+			// mock rejects with a plain (non-abort) error once the signal has
+			// aborted, so the catch block must classify it via signal.aborted.
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				const signal = options?.signal
+				return new Promise<string>((_resolve, reject) => {
+					const fail = () => reject(new Error("LiteLLM API error"))
+					if (signal?.aborted) {
+						fail()
+						return
+					}
+					signal?.addEventListener("abort", fail, { once: true })
+				})
+			})
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Abort while the (pending) request is in flight — after entry, so the
+			// pre-abort fast-fail does not apply and the catch block handles it.
+			controller.abort()
+			const error = await promise.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("should surface a standard AbortError when the SDK throws an abort error before the signal flag propagates", async () => {
+			// The signal flag has not propagated yet, but the SDK rejects with its
+			// own abort error: isRequestAborted must catch the error-name branch.
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("Request was aborted."), { name: "AbortError" }))
+			const controller = new AbortController()
+
+			const error = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("should surface the wrapped provider error when the request fails without options", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await handler.completePrompt("test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("LiteLLM completion error: boom")
+		})
+
+		it("should surface the wrapped provider error when the request fails with options but no signal", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
+			expect((error as Error).message).toBe("LiteLLM completion error: boom")
+		})
+	})
+
+	describe("createMessage abort signal (bridging)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const fetchModelSpy = vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: litellmDefaultModelId,
+				info: litellmDefaultModelInfo,
+			})
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			// The pre-abort fast-fail must run before provider model discovery:
+			// an already-aborted request must not trigger getModels/refreshModels.
+			expect(fetchModelSpy).not.toHaveBeenCalled()
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight stream when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			let capturedSignal: AbortSignal | undefined
+			// Readiness barrier: resolves once the request-local signal is captured and
+			// the (mocked) request has started, instead of guessing a fixed delay.
+			let requestStartedResolve!: () => void
+			const requestStarted = new Promise<void>((resolve) => {
+				requestStartedResolve = resolve
+			})
+			// The stream is built inside the mock implementation so that capturedSignal
+			// is already set before the abort-aware chunk is created.
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				requestStartedResolve()
+				const pendingAbort = new Promise<never>((_resolve, reject) => {
+					const onAbort = () => reject(new DOMException("aborted", "AbortError"))
+					if (capturedSignal?.aborted) {
+						onAbort()
+						return
+					}
+					capturedSignal?.addEventListener("abort", onAbort, { once: true })
+				})
+				// A correctly aborted request stops pulling at the top-of-loop break
+				// and never reads this element, so its rejection must be handled
+				// here to keep it from being reported as an unhandled rejection.
+				void pendingAbort.catch(() => undefined)
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "partial" } }],
+						usage: undefined,
+					},
+					pendingAbort,
+				])
+				return { withResponse: vi.fn().mockResolvedValue({ data: mockStream }) }
+			})
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await requestStarted
+			controller.abort()
+
+			// Bound the wait so a broken abort bridge fails this test fast (and fails
+			// the Stryker mutant) instead of hanging until the runner timeout.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+			expect(capturedSignal).toBeDefined()
+			expect(capturedSignal?.aborted).toBe(true)
+			// The bridge (RequestConfigBuilder.addMergedSignal) uses AbortSignal.any,
+			// so the external signal must never be managed with manual listeners.
+			expect(addEventListenerSpy).not.toHaveBeenCalled()
+			expect(removeEventListenerSpy).not.toHaveBeenCalled()
+		})
+
+		it("should wrap a non-abort stream failure with the i18n-free provider message and no metadata", async () => {
+			// createMessage awaits create(...).withResponse(), so the failure must
+			// surface from the withResponse() call, not from create() itself.
+			mockCreate.mockReturnValueOnce({
+				withResponse: vi.fn().mockRejectedValue(new Error("boom")),
+			})
+
+			const error = await collectStream(handler.createMessage("system", messages)).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
+		})
+
+		it("should wrap a non-abort stream failure when metadata exists without an abort signal", async () => {
+			mockCreate.mockReturnValueOnce({
+				withResponse: vi.fn().mockRejectedValue(new Error("boom")),
+			})
+
+			const error = await collectStream(
+				handler.createMessage("system", messages, makeCreateMessageMetadata()),
+			).catch((e: unknown) => e)
+			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
+		})
+	})
+
+	describe("createMessage streaming loop abort defense", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		function chunkOf(delta: Record<string, unknown>) {
+			return { choices: [{ delta }] }
+		}
+
+		function startStream(signal: AbortSignal, generator: AsyncGenerator<unknown>) {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: generator }),
+			})
+			return handler.createMessage("system", messages, makeCreateMessageMetadata({ abortSignal: signal }))
+		}
+
+		it("rejects with AbortError instead of yielding text content after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([chunkOf({ reasoning_content: "reasoning", content: "content" })]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding a tool call after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([
+					chunkOf({
+						content: "content",
+						tool_calls: [
+							{
+								index: 0,
+								id: "1",
+								type: "function",
+								function: { name: "f", arguments: "{}" },
+							},
+						],
+					}),
+				]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("does not process or pull chunks beyond the aborted point and surfaces AbortError instead of completing the stream", async () => {
+			const controller = new AbortController()
+			let pulls = 0
+			const generator = (async function* () {
+				pulls++
+				yield chunkOf({ content: "first" })
+				pulls++
+				// Reasoning shape: its reasoning yield is the first yield of the
+				// iteration and carries no pre-yield guard, so only the top-of-loop
+				// break prevents it from leaking.
+				yield chunkOf({ reasoning_content: "buffered" })
+				pulls++
+				yield chunkOf({ content: "third" })
+			})()
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+			// The for-await mechanism pulls the already-buffered chunk before the
+			// top-of-loop check runs; the break must ensure it is not processed and
+			// that no chunk beyond it is pulled.
+			expect(pulls).toBe(2)
+		})
+
+		it("completes normally for a usage-only chunk with empty choices (delta is undefined)", async () => {
+			const controller = new AbortController()
+			// Real OpenAI-shaped streams end with a usage-only chunk whose choices
+			// array is empty: delta is undefined, so the chunk must be skipped
+			// without touching the optional-chained delta fields.
+			const generator = asyncStreamFrom([
+				chunkOf({ content: "content" }),
+				{ choices: [], usage: { prompt_tokens: 5, completion_tokens: 7 } },
+			])
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+
+			const chunks: unknown[] = []
+			for await (const c of stream) chunks.push(c)
+			expect(chunks).toHaveLength(1)
+			// Assert the mapped usage values, not just the type: this branch maps
+			// prompt_tokens/completion_tokens onto the usage chunk (L365-366).
+			expect(chunks[0]).toMatchObject({ type: "usage", inputTokens: 5, outputTokens: 7 })
 		})
 	})
 })

@@ -21,10 +21,19 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import type { GenerateContentResponse } from "@google/genai"
+
 import { ApiStreamChunk } from "../../transform/stream"
 
 import { t } from "i18next"
 import { VertexHandler } from "../vertex"
+import { collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
+
+// @google/genai's GenerateContentResponse exposes `text` via a getter backed by
+// `candidates`, so the stub only carries the field the provider reads; the double
+// cast is the least-friction way to satisfy the class type in mocks.
+const stubGenerateContentResponse = (text: string) => ({ text }) as unknown as GenerateContentResponse
 
 describe("VertexHandler", () => {
 	let handler: VertexHandler
@@ -136,6 +145,53 @@ describe("VertexHandler", () => {
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should pass abort signal through to client via config.abortSignal", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: expect.any(String),
+					contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+					config: expect.objectContaining({
+						abortSignal: controller.signal,
+						httpOptions: undefined,
+						temperature: 1,
+					}),
+				}),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+	})
+
+	describe("createMessage abort signal (inherited from GeminiHandler)", () => {
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(handler["client"].models.generateContentStream).not.toHaveBeenCalled()
 		})
 	})
 
