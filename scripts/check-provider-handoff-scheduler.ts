@@ -153,9 +153,9 @@ const downstreamConsumerWitness = selectHandoffExecutionContext(
 	"orchestrator",
 	false,
 )
-assert.notEqual(
+assert.equal(
 	downstreamConsumerWitness.mode,
-	"orchestrator",
+	"code",
 	"#921/#1623 witness requires task-local and shared provider modes to diverge",
 )
 
