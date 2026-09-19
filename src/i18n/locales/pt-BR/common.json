@@ -44,6 +44,7 @@
 		"update_support_prompt": "Falha ao atualizar o prompt de suporte",
 		"reset_support_prompt": "Falha ao redefinir o prompt de suporte",
 		"enhance_prompt": "Falha ao aprimorar o prompt",
+		"commit_message_empty_response": "O modelo retornou uma mensagem de commit vazia.",
 		"get_system_prompt": "Falha ao obter o prompt do sistema",
 		"search_commits": "Falha ao pesquisar commits",
 		"save_api_config": "Falha ao salvar a configuração da API",
