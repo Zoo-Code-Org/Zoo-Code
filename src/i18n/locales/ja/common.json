@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "メッセージを削除するアクティブなタスクがありません",
+			"no_active_task_to_roll_back": "ロールバックできるアクティブなタスクがありません",
+			"no_active_task_to_restore": "復元できるアクティブなタスクがありません",
 			"invalid_timestamp_for_deletion": "削除用のメッセージタイムスタンプが無効です",
 			"cannot_delete_missing_timestamp": "メッセージを削除できません：タイムスタンプがありません",
 			"cannot_delete_invalid_timestamp": "メッセージを削除できません：タイムスタンプが無効です",

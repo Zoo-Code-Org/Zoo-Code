@@ -100,6 +100,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "No active task to delete messages from",
+			"no_active_task_to_roll_back": "No active task to roll back from",
+			"no_active_task_to_restore": "No active task to restore from",
 			"invalid_timestamp_for_deletion": "Invalid message timestamp for deletion",
 			"cannot_delete_missing_timestamp": "Cannot delete message: missing timestamp",
 			"cannot_delete_invalid_timestamp": "Cannot delete message: invalid timestamp",
