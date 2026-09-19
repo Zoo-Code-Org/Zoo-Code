@@ -52,7 +52,6 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
-	ConsecutiveMistakeError,
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
@@ -2998,21 +2997,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			if (this.consecutiveMistakeLimit > 0 && this.consecutiveMistakeCount >= this.consecutiveMistakeLimit) {
-				// Track consecutive mistake errors in telemetry via event and PostHog exception tracking.
+				// Track consecutive mistake errors in telemetry via a named event.
 				// The reason is "no_tools_used" because this limit is reached via initiateTaskLoop
 				// which increments consecutiveMistakeCount when the model doesn't use any tools.
 				TelemetryService.instance.captureConsecutiveMistakeError(this.taskId)
-				TelemetryService.instance.captureException(
-					new ConsecutiveMistakeError(
-						`Task reached consecutive mistake limit (${this.consecutiveMistakeLimit})`,
-						this.taskId,
-						this.consecutiveMistakeCount,
-						this.consecutiveMistakeLimit,
-						"no_tools_used",
-						this.apiConfiguration.apiProvider,
-						getModelId(this.apiConfiguration),
-					),
-				)
 
 				const { response, text, images } = await this.ask(
 					"mistake_limit_reached",
