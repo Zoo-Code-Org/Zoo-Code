@@ -463,6 +463,45 @@ describe("ChatView - Tool Batching Tests", () => {
 			expect(toolRow?.text).toContain('"path":"b.ts"')
 		})
 	})
+
+	it("shows a repeated assistant preamble once while batching readFile asks", async () => {
+		renderChatView()
+		const preamble = "I'll read the files now."
+
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Read the relevant files." },
+				{ type: "say", say: "text", ts: 2, text: preamble },
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 3,
+					text: JSON.stringify({ tool: "readFile", path: "a.ts" }),
+				},
+				{ type: "say", say: "text", ts: 4, text: preamble },
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 5,
+					text: JSON.stringify({ tool: "readFile", path: "b.ts" }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			const textRows = mockVirtuosoState.lastData.filter(
+				(message) => message.type === "say" && message.say === "text" && message.text === preamble,
+			)
+			const toolRows = mockVirtuosoState.lastData.filter(
+				(message) => message.type === "ask" && message.ask === "tool",
+			)
+
+			expect(textRows).toHaveLength(1)
+			expect(toolRows).toHaveLength(1)
+			const toolPayload = JSON.parse(toolRows[0]?.text ?? "{}") as { batchFiles?: Array<{ path?: string }> }
+			expect(toolPayload.batchFiles?.map(({ path }) => path)).toEqual(["a.ts", "b.ts"])
+		})
+	})
 })
 
 describe("ChatView - Aggregated Costs Lifecycle", () => {
