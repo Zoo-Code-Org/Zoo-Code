@@ -28,6 +28,7 @@ import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
 import { Task, TaskOptions } from "../../task/Task"
+import { withTaskOwnershipReservation } from "../../task-persistence/TaskHistoryStore"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
@@ -646,8 +647,8 @@ describe("ClineProvider", () => {
 		test("does not log when the active task is aborted", async () => {
 			const task = new Task(defaultTaskOptions)
 			Object.defineProperty(task, "taskId", { value: "aborted-task", writable: true })
-			task.abort = true
 			await provider.addClineToStack(task)
+			task.abort = true
 			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
 			visibilityCallback()
 			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
@@ -1140,6 +1141,76 @@ describe("ClineProvider", () => {
 			([msg]) => typeof msg === "string" && msg.includes("Disposing ClineProvider..."),
 		)
 		expect(disposeCalls).toHaveLength(1)
+	})
+
+	test.each(["dispose", "abort", "abandon"])("rejects queued task registration after %s", async (cancellation) => {
+		await provider.taskHistoryStore.initialized
+		let release!: () => void
+		const reservation = withTaskOwnershipReservation(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
+		await vi.waitFor(() => expect(release).toBeDefined())
+		const task = new Task(defaultTaskOptions)
+		const cleanup = vi.fn()
+		provider["taskEventListeners"].set(task, [cleanup])
+		vi.mocked(Task).mockImplementationOnce(function () {
+			return task
+		})
+		const registrationSpy = vi.spyOn(provider, "addClineToStack")
+		const preparationSpy = vi.spyOn(provider, "performPreparationTasks")
+		const schedulingSpy = vi.spyOn(provider["taskScheduler"], "schedule")
+		const creation = provider.createTask("queued task")
+		const rejected = expect(creation).rejects.toThrow("registration was cancelled")
+		try {
+			await vi.waitFor(() => expect(registrationSpy).toHaveBeenCalledWith(task))
+			if (cancellation === "dispose") await provider.dispose()
+			else if (cancellation === "abort") task.abort = true
+			else task.abandoned = true
+		} finally {
+			release()
+		}
+		await reservation
+		await rejected
+		expect(provider["taskRegistry"].hasRunning(task.taskId)).toBe(false)
+		expect(cleanup).toHaveBeenCalledOnce()
+		expect(provider["taskEventListeners"].has(task)).toBe(false)
+		expect(task.dispose).toHaveBeenCalledOnce()
+		expect(preparationSpy).not.toHaveBeenCalled()
+		expect(schedulingSpy).not.toHaveBeenCalled()
+	})
+
+	test.each(["preparation", "state"])("rolls back registration when cancellation occurs during %s", async (phase) => {
+		const task = new Task(defaultTaskOptions)
+		const cleanup = vi.fn()
+		provider["taskEventListeners"].set(task, [cleanup])
+		let release!: () => void
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+
+		if (phase === "preparation") {
+			vi.spyOn(provider, "performPreparationTasks").mockReturnValue(pending)
+		} else {
+			const getState = provider.getState.bind(provider)
+			vi.spyOn(provider, "getState").mockImplementation(async (options) => {
+				await pending
+				return getState(options)
+			})
+		}
+
+		const registration = provider.addClineToStack(task)
+		await vi.waitFor(() => expect(provider["taskRegistry"].getById(task.taskId)).toBe(task))
+		task.abort = true
+		release()
+
+		await expect(registration).rejects.toThrow("registration was cancelled")
+		expect(provider["taskRegistry"].getById(task.taskId)).toBeUndefined()
+		expect(cleanup).toHaveBeenCalledOnce()
+		expect(provider["taskEventListeners"].has(task)).toBe(false)
+		expect(task.dispose).toHaveBeenCalledOnce()
 	})
 
 	test("dispose drains every task in abort-then-cleanup order", async () => {

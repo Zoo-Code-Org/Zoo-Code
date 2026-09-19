@@ -9,11 +9,29 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import {
+	assertValidTransition,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
+	recoverDelegationParent,
+	type HistoryItemStatus,
+} from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 export { DeltaRejectedError } from "./taskStoreConcurrency"
+
+let taskOwnershipReservation: Promise<void> = Promise.resolve()
+
+/** Serialize runtime task registration with dead-delegation recovery. */
+export function withTaskOwnershipReservation<T>(fn: () => Promise<T>): Promise<T> {
+	const result = taskOwnershipReservation.then(fn, fn)
+	taskOwnershipReservation = result.then(
+		() => undefined,
+		() => undefined,
+	)
+	return result
+}
 
 /**
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
@@ -47,7 +65,7 @@ interface DelegationRepairIntent {
 	}
 	target: {
 		childStatus: "interrupted"
-		parentStatus: "active"
+		parentStatus: "active" | "interrupted"
 	}
 }
 
@@ -75,11 +93,14 @@ export interface TaskHistoryStoreOptions {
 	 * globalState during the transition period.
 	 */
 	onWrite?: (items: HistoryItem[]) => Promise<void>
+	/** Return whether any provider currently owns a live runtime task. */
+	isTaskOwned?: (taskId: string) => boolean
 }
 
 export class TaskHistoryStore {
 	private readonly globalStoragePath: string
 	private readonly onWrite?: (items: HistoryItem[]) => Promise<void>
+	private readonly isTaskOwned: (taskId: string) => boolean
 	private cache: Map<string, HistoryItem> = new Map()
 	private taskFileMtimes: Map<string, number> = new Map()
 	private writeLock: Promise<void> = Promise.resolve()
@@ -100,6 +121,7 @@ export class TaskHistoryStore {
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
 		this.onWrite = options?.onWrite
+		this.isTaskOwned = options?.isTaskOwned ?? (() => false)
 		this.initialized = new Promise<void>((resolve) => {
 			this.resolveInitialized = resolve
 		})
@@ -122,15 +144,17 @@ export class TaskHistoryStore {
 			// as an orphaned active child in the same startup pass.
 			const persistedActiveIds = this.getPersistedActiveIds()
 
-			// 2. Complete any two-record repair interrupted after its intent was durable.
-			try {
-				await this.replayDelegationRepairIntent()
-			} catch (error) {
-				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
-			}
+			await withTaskOwnershipReservation(async () => {
+				// 2. Complete any two-record repair interrupted after its intent was durable.
+				try {
+					await this.replayDelegationRepairIntent()
+				} catch (error) {
+					console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
+				}
 
-			// 3. Repair delegation inconsistencies left by a previous crash
-			await this.reconcileDelegationState(persistedActiveIds)
+				// 3. Repair delegation inconsistencies left by a previous crash
+				await this.reconcileDelegationState(persistedActiveIds)
+			})
 
 			// 4. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
@@ -400,11 +424,12 @@ export class TaskHistoryStore {
 	 * - Parent `delegated` with no `awaitingChildId` → parent → `active` (invalid state)
 	 * - Parent `delegated`, child not found → parent → `active` (orphaned delegation)
 	 * - Parent `delegated`, child `completed` → parent → `active` (interrupted handoff)
-	 * - Parent `delegated`, child `active` → child → `interrupted`, parent → `active`
+	 * - Parent `delegated`, orphaned persisted `active` child → child → `interrupted`;
+	 *   parent → `interrupted` if its ancestor still awaits it, otherwise → `active`
+	 * - Parent `delegated`, dead nested delegated chain → child → `interrupted`
 	 *
-	 * A parent awaiting an `interrupted` or `delegated` child is left as-is — the child is
-	 * resumable. An `active` child is treated as orphaned during startup recovery because
-	 * no live task session exists to own it.
+	 * A parent awaiting an `interrupted` child retains its delegation link. Runtime
+	 * ownership prevents recovery even when the persisted chain appears dead.
 	 */
 	private async reconcileDelegationState(persistedActiveIds: ReadonlySet<string>): Promise<void> {
 		return this.withLock(() => this.reconcileDelegationStateCore(persistedActiveIds))
@@ -431,8 +456,9 @@ export class TaskHistoryStore {
 			// are visible when evaluating chained delegations.
 			const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
 
-			for (const [, item] of byId) {
-				if (item.status !== "delegated") {
+			for (const [, snapshotItem] of byId) {
+				const item = this.cache.get(snapshotItem.id)
+				if (item?.status !== "delegated") {
 					continue
 				}
 
@@ -465,14 +491,28 @@ export class TaskHistoryStore {
 							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
 						)
 						repairsInThisPass++
-					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
-						// An active child persisted across startup cannot have a live task session
-						// behind it. Mark it interrupted before releasing the parent's delegation
-						// link so the normal resume/re-delegate flow can take over. This is an
-						// administrative recovery, not a runtime delegation transition.
-						await this.repairActiveDelegation(item, child)
+					} else if (
+						child.status === "delegated" &&
+						isDeadDelegationChain(child, (id) => byId.get(id), this.isTaskOwned)
+					) {
+						const recoveredChild = recoverDeadDelegatedChild(item, child)
+						await this.upsertCore(recoveredChild)
 						console.warn(
-							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+							`[TaskHistoryStore] Reconciled dead nested delegation: child ${child.id} → interrupted, task ${item.id} remains delegated`,
+						)
+						repairsInThisPass++
+					} else if (
+						(child.status ?? "active") === "active" &&
+						persistedActiveIds.has(child.id) &&
+						!this.isTaskOwned(child.id) &&
+						!this.isTaskOwned(item.id)
+					) {
+						// Recover only persisted sessions without a runtime owner. Preserve any
+						// ancestor's delegation while clearing this parent's dead child link.
+						const ancestor = item.parentTaskId ? byId.get(item.parentTaskId) : undefined
+						await this.repairActiveDelegation(item, child, ancestor)
+						console.warn(
+							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → ${this.cache.get(item.id)?.status}`,
 						)
 						repairsInThisPass++
 					} else if (child.status === "completed") {
@@ -523,6 +563,9 @@ export class TaskHistoryStore {
 		return this.withLock(async () => {
 			const intent = await this.readDelegationRepairIntent()
 			if (!intent) {
+				return
+			}
+			if (this.isTaskOwned(intent.childTaskId) || this.isTaskOwned(intent.parentTaskId)) {
 				return
 			}
 
@@ -577,7 +620,12 @@ export class TaskHistoryStore {
 	 * Start and complete a guarded active-child repair while already holding the
 	 * store lock. The intent is durable before either task file is touched.
 	 */
-	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<void> {
+	private async repairActiveDelegation(
+		parent: HistoryItem,
+		child: HistoryItem,
+		ancestor?: HistoryItem,
+	): Promise<void> {
+		const repairedParent = recoverDelegationParent(parent, ancestor)
 		const intent: DelegationRepairIntent = {
 			version: 1,
 			operationId: crypto.randomUUID(),
@@ -595,7 +643,7 @@ export class TaskHistoryStore {
 					rootTaskId: child.rootTaskId,
 				},
 			},
-			target: { childStatus: "interrupted", parentStatus: "active" },
+			target: { childStatus: "interrupted", parentStatus: repairedParent.status },
 		}
 
 		await this.writeDelegationRepairIntent(intent)
@@ -697,7 +745,7 @@ export class TaskHistoryStore {
 			(expectedChild.rootTaskId === undefined || typeof expectedChild.rootTaskId === "string") &&
 			!!targetRecord &&
 			targetRecord.childStatus === "interrupted" &&
-			targetRecord.parentStatus === "active"
+			(targetRecord.parentStatus === "active" || targetRecord.parentStatus === "interrupted")
 		)
 	}
 
@@ -792,40 +840,42 @@ export class TaskHistoryStore {
 			return
 		}
 
-		await this.withLock(async () => {
-			const tasksDir = await this.getTasksDir()
+		await withTaskOwnershipReservation(() =>
+			this.withLock(async () => {
+				const tasksDir = await this.getTasksDir()
 
-			for (const item of taskHistoryEntries) {
-				if (!item.id) {
-					continue
+				for (const item of taskHistoryEntries) {
+					if (!item.id) {
+						continue
+					}
+
+					// Check if task directory exists on disk
+					const taskDir = path.join(tasksDir, item.id)
+
+					try {
+						await fs.access(taskDir)
+					} catch {
+						// Task directory doesn't exist; skip this entry as it's orphaned in globalState
+						continue
+					}
+
+					// Write history_item.json if it doesn't exist yet
+					const filePath = path.join(taskDir, GlobalFileNames.historyItem)
+					try {
+						await fs.access(filePath)
+						// File already exists, skip (don't overwrite existing per-task files)
+					} catch {
+						// File doesn't exist, write it
+						await safeWriteJson(filePath, item)
+						this.cache.set(item.id, item)
+					}
 				}
 
-				// Check if task directory exists on disk
-				const taskDir = path.join(tasksDir, item.id)
-
-				try {
-					await fs.access(taskDir)
-				} catch {
-					// Task directory doesn't exist; skip this entry as it's orphaned in globalState
-					continue
-				}
-
-				// Write history_item.json if it doesn't exist yet
-				const filePath = path.join(taskDir, GlobalFileNames.historyItem)
-				try {
-					await fs.access(filePath)
-					// File already exists, skip (don't overwrite existing per-task files)
-				} catch {
-					// File doesn't exist, write it
-					await safeWriteJson(filePath, item)
-					this.cache.set(item.id, item)
-				}
-			}
-
-			// Repair any delegation inconsistencies introduced by the migrated entries.
-			// Run the lock-free core because migration already holds the store lock.
-			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
-		})
+				// Repair any delegation inconsistencies introduced by the migrated entries.
+				// Run the lock-free core because migration already holds the store lock.
+				await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
+			}),
+		)
 	}
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
