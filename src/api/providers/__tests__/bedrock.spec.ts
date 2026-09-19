@@ -811,6 +811,42 @@ describe("AwsBedrockHandler", () => {
 			expect(typeof model.info.supportsPromptCache).toBe("boolean")
 		})
 
+		it("should return GPT-5.6 Sol model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-5.6-sol",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("openai.gpt-5.6-sol")
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.inputPrice).toBe(4.4)
+			expect(model.info.outputPrice).toBe(22)
+		})
+
+		it("should apply inference profile prefixes for GPT-5.6 Sol", () => {
+			const geoHandler = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-5.6-sol",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseCrossRegionInference: true,
+			})
+			const globalHandler = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-5.6-sol",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			expect(geoHandler.getModel().id).toBe("us.openai.gpt-5.6-sol")
+			expect(globalHandler.getModel().id).toBe("global.openai.gpt-5.6-sol")
+		})
+
 		it("should return Claude Fable 5 model info", () => {
 			const handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-fable-5",
