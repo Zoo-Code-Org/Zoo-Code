@@ -716,7 +716,7 @@ describe("Cline", () => {
 			})
 
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			// presentAssistantMessageSafe is intentionally left un-mocked here (unlike
 			// the other tests in this block) - the whole point is to exercise the real
 			// dispatch/guard logic, not just tool_use finalization.
