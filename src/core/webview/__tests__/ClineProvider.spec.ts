@@ -31,6 +31,7 @@ import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
+import { BrowserBridgeServer } from "../browserBridge"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
@@ -619,6 +620,194 @@ describe("ClineProvider", () => {
 
 		expect(mockWebviewView.webview.html).toContain("<!DOCTYPE html>")
 		expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
+	})
+
+	describe("browser bridge ownership (statics API)", () => {
+		// These exercise the provider against a real BrowserBridgeServer (the
+		// WeakMap registry in ../browserBridge), so no statics are mocked: the
+		// bridge is enabled with the static API and released in afterEach.
+		const waitForBridge = async () => {
+			const started = Date.now()
+			while (!BrowserBridgeServer.active(provider)) {
+				if (Date.now() - started > 5_000) {
+					throw new Error("Bridge did not become active")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 10))
+			}
+		}
+
+		afterEach(() => {
+			BrowserBridgeServer.disposeFor(provider)
+		})
+
+		test("webviewFor is undefined while no bridge is active", () => {
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
+			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+		})
+
+		test("resolveWebviewView renders the bridge placeholder and skips the real listener when active", async () => {
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Placeholder instead of the app HTML (no React, no scripts), and the
+			// real iframe's message listener is NOT registered (the virtual
+			// webview already owns the wiring — re-registering would
+			// double-handle messages).
+			expect(mockWebviewView.webview.html).toContain("browser mode")
+			expect(mockWebviewView.webview.html).not.toContain("<script")
+			expect(mockWebviewView.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+		})
+
+		test("postMessageToWebview targets the virtual webview while the bridge is active", async () => {
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const virtualWebview = BrowserBridgeServer.webviewFor(provider)!
+			const virtualPostSpy = vi.spyOn(virtualWebview, "postMessage")
+
+			const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+			await provider.postMessageToWebview(message)
+
+			expect(virtualPostSpy).toHaveBeenCalledWith(message)
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		test("dispose releases the provider-owned bridge", async () => {
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			await provider.dispose()
+
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
+			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+		})
+	})
+
+	describe("resolveWebviewView html source selection", () => {
+		const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+
+		function providerWithMode(extensionMode: number): ClineProvider {
+			const context = { ...mockContext, extensionMode } as unknown as vscode.ExtensionContext
+			return new ClineProvider(context, mockOutputChannel, "sidebar", new ContextProxy(context))
+		}
+
+		afterEach(() => {
+			if (originalProbeSetting === undefined) {
+				delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			} else {
+				process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalProbeSetting
+			}
+		})
+
+		test("development mode without the probe flag serves the HMR html", async () => {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			provider = providerWithMode(vscode.ExtensionMode.Development)
+			const hmrSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>hmr</title>")
+			const htmlSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>dist</title>")
+			provider["getHMRHtmlContent"] = hmrSpy
+			provider["getHtmlContent"] = htmlSpy
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(hmrSpy).toHaveBeenCalledWith(mockWebviewView.webview)
+			expect(htmlSpy).not.toHaveBeenCalled()
+			expect(mockWebviewView.webview.html).toContain("hmr")
+		})
+
+		test("development mode with the theme fixture probe serves the built html", async () => {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = "1"
+			provider = providerWithMode(vscode.ExtensionMode.Development)
+			const hmrSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>hmr</title>")
+			const htmlSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>dist</title>")
+			provider["getHMRHtmlContent"] = hmrSpy
+			provider["getHtmlContent"] = htmlSpy
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(htmlSpy).toHaveBeenCalledWith(mockWebviewView.webview)
+			expect(hmrSpy).not.toHaveBeenCalled()
+			expect(mockWebviewView.webview.html).toContain("dist")
+		})
+
+		test("production mode serves the built html even without the probe flag", async () => {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			provider = providerWithMode(vscode.ExtensionMode.Production)
+			const hmrSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>hmr</title>")
+			const htmlSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>dist</title>")
+			provider["getHMRHtmlContent"] = hmrSpy
+			provider["getHtmlContent"] = htmlSpy
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(htmlSpy).toHaveBeenCalledWith(mockWebviewView.webview)
+			expect(hmrSpy).not.toHaveBeenCalled()
+			expect(mockWebviewView.webview.html).toContain("dist")
+		})
+	})
+
+	describe("convertToWebviewUri", () => {
+		const waitForBridge = async () => {
+			const started = Date.now()
+			while (!BrowserBridgeServer.active(provider)) {
+				if (Date.now() - started > 5_000) {
+					throw new Error("Bridge did not become active")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 10))
+			}
+		}
+
+		const fakeFileUri = { toString: () => "file:///test/asset.png" }
+
+		afterEach(() => {
+			BrowserBridgeServer.disposeFor(provider)
+		})
+
+		test("uses the virtual webview when the browser bridge is active", async () => {
+			;(vscode.Uri.file as ReturnType<typeof vi.fn>).mockReturnValue(fakeFileUri)
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+			// No real view resolved: only the bridge's virtual webview is available.
+			provider["view"] = undefined
+			const webview = BrowserBridgeServer.webviewFor(provider)!
+			const uriSpy = vi.spyOn(webview, "asWebviewUri")
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			expect(provider.convertToWebviewUri("/test/asset.png")).toBe("file:///test/asset.png")
+
+			expect(uriSpy).toHaveBeenCalledWith(fakeFileUri)
+			expect(errorSpy).not.toHaveBeenCalled()
+			errorSpy.mockRestore()
+		})
+
+		test("uses the resolved real webview when no bridge is active", async () => {
+			;(vscode.Uri.file as ReturnType<typeof vi.fn>).mockReturnValue(fakeFileUri)
+			provider["view"] = mockWebviewView
+			const converted = { toString: () => "vscode-webview://converted" }
+			mockWebviewView.webview.asWebviewUri.mockReturnValue(converted)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			expect(provider.convertToWebviewUri("/test/asset.png")).toBe("vscode-webview://converted")
+
+			expect(mockWebviewView.webview.asWebviewUri).toHaveBeenCalledWith(fakeFileUri)
+			expect(errorSpy).not.toHaveBeenCalled()
+			errorSpy.mockRestore()
+		})
+
+		test("logs the no-webview error and falls back to the file URI", () => {
+			;(vscode.Uri.file as ReturnType<typeof vi.fn>).mockReturnValue(fakeFileUri)
+			provider["view"] = undefined
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			expect(provider.convertToWebviewUri("/test/asset.png")).toBe("file:///test/asset.png")
+
+			// The exact message proves the intended no-webview branch ran
+			// (any thrown-error path would log the generic conversion failure).
+			expect(errorSpy).toHaveBeenCalledWith("No webview available for URI conversion")
+			errorSpy.mockRestore()
+		})
 	})
 
 	describe("logWebviewHiddenDiagnostics", () => {

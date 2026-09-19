@@ -185,6 +185,13 @@
 		--radius: 0.5rem;
 	}
 
+	/*
+		* Standalone browser mode (browser bridge) styles live in
+		* src/browserBridge.css and are dynamically imported by
+		* BrowserBridgeClient only when the bridge is active, keeping them out
+		* of the production webview bundle.
+		*/
+
 	/* Higher specififty than VSCode's theme and root. */
 	/* Used for baseline theme overrides, but avoid using for styling. */
 
