@@ -501,6 +501,70 @@ describe("AnthropicHandler", () => {
 			expect(requestBody?.model).toBe("claude-sonnet-5-bf")
 			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
 		})
+
+		it("should attach cache breakpoints and the prompt-caching beta header for a custom model whose resolved info supports prompt caching", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+
+			// Not in the model registry; capabilities are guessed from the Sonnet 5 family.
+			expect(customHandler.getModel().info.supportsPromptCache).toBe(true)
+
+			const stream = customHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "First message" }],
+				},
+				{
+					role: "assistant",
+					content: [{ type: "text" as const, text: "Response" }],
+				},
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Second message" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.system?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestBody?.messages?.[0]?.content?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestBody?.messages?.[1]?.content?.[0]).not.toHaveProperty("cache_control")
+			expect(requestBody?.messages?.[2]?.content?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
+		it("should not attach cache breakpoints or the prompt-caching beta header when the model info does not support prompt caching", async () => {
+			const noCacheHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-5-sonnet-20241022",
+			})
+
+			// No registry model disables prompt caching, so override the resolved info.
+			const realModel = noCacheHandler.getModel()
+			vitest.spyOn(noCacheHandler, "getModel").mockReturnValue({
+				...realModel,
+				info: { ...realModel.info, supportsPromptCache: false },
+			})
+
+			const stream = noCacheHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.system).toEqual([{ text: systemPrompt, type: "text" }])
+			expect(requestBody?.messages?.[0]?.content?.[0]).not.toHaveProperty("cache_control")
+			expect(requestOptions).toBeUndefined()
+		})
 	})
 
 	describe("completePrompt", () => {
