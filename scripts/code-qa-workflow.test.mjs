@@ -14,19 +14,31 @@ const workflowStep = (name) => {
 	return match.groups.body
 }
 
+const parseWorkflowStep = (name) => {
+	const body = workflowStep(name)
+	const field = (key) => {
+		const line = body.split("\n").find((line) => line.trimStart().startsWith(`${key}:`))
+		assert.ok(line, `missing ${key} field in workflow step: ${name}`)
+		return line.slice(line.indexOf(":") + 1).trim()
+	}
+	return { if: field("if"), run: field("run") }
+}
+
 describe("platform unit-test workflow", () => {
 	it("keeps coverage authoritative on Ubuntu and runs equivalent uninstrumented Windows tests", () => {
 		assert.match(workflow, /name: ubuntu-latest[\s\S]*?collect-coverage: true/)
 		assert.match(workflow, /name: windows-latest[\s\S]*?collect-coverage: false/)
 		assert.ok(!workflow.includes("matrix.upload-coverage"))
 
-		const extensionCoverage = workflowStep("Run extension coverage lanes")
-		assert.match(extensionCoverage, /if: matrix\.collect-coverage/)
-		assert.ok(extensionCoverage.includes("test:coverage:api test:coverage:core"))
+		assert.deepEqual(parseWorkflowStep("Run extension coverage lanes"), {
+			if: "matrix.collect-coverage",
+			run: 'pnpm turbo run test:coverage:api test:coverage:core test:coverage:services test:coverage:misc test:coverage:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only',
+		})
 
-		const extensionTests = workflowStep("Run extension test lanes")
-		assert.match(extensionTests, /if: \$\{\{ !matrix\.collect-coverage \}\}/)
-		assert.ok(extensionTests.includes("test:api test:core test:services test:misc test:tree-sitter"))
+		assert.deepEqual(parseWorkflowStep("Run extension test lanes"), {
+			if: "${{ !matrix.collect-coverage }}",
+			run: 'pnpm turbo run test:api test:core test:services test:misc test:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only',
+		})
 
 		for (const [stepName, command] of [
 			["Run non-extension package coverage", 'test:coverage --filter="!@roo-code/core" --filter="!zoo-code"'],
