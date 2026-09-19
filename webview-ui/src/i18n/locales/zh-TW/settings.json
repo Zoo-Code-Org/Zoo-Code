@@ -1002,6 +1002,10 @@
 			"refreshSuccess": "工具重新整理成功",
 			"refreshError": "工具重新整理失敗",
 			"toolParameters": "參數"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "動態思考強度",
+			"description": "啟用 set_thinking_effort 工具，讓模型自行決定每一步的思考強度。對話中的手動調整隨時可用。（實驗性）"
 		}
 	},
 	"promptCaching": {
