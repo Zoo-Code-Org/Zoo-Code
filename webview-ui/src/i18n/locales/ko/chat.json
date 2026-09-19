@@ -167,6 +167,24 @@
 			"claudeCodeNotAuthenticated": "Claude Code를 사용하려면 로그인해야 합니다. 설정으로 이동하여 \"Claude Code에 로그인\"을 클릭하여 인증하세요."
 		}
 	},
+	"changeCard": {
+		"header": "이 단계에서 {{count}}개 파일이 변경됨",
+		"rollbackFile": "이 파일 되돌리기",
+		"rollbackFileWarning": "이 파일을 이 단계 실행 전 내용으로 복원합니다.",
+		"restoreLatest": "최신 버전 복원",
+		"restoreLatestWarning": "이 파일을 최신 기록 버전으로 복원합니다.",
+		"restored": "최신 버전이 복원됨",
+		"restoreFailed": "복원 실패",
+		"rollbackStep": "단계 되돌리기",
+		"rollbackWarning": "이 단계 파일의 이전 콘텐츠로 복원합니다.",
+		"confirm": "확인",
+		"cancel": "취소",
+		"rollingBack": "되돌리는 중...",
+		"rolledBack": "되돌림 완료",
+		"stepRolledBack": "단계 되돌림 완료",
+		"rollbackFailed": "되돌리기 실패",
+		"openFile": "파일 열기: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "체크포인트",
 		"initializingWarning": "체크포인트 초기화 중... 시간이 너무 오래 걸리면 <settingsLink>설정</settingsLink>에서 체크포인트를 비활성화하고 작업을 다시 시작할 수 있습니다.",
