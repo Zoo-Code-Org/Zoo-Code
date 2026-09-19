@@ -89,6 +89,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			getTaskMode: vi.fn().mockResolvedValue("code"),
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
+			finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 		}
 
 		// Add pushToolResultToUserContent method after mockTask is created so it can reference mockTask

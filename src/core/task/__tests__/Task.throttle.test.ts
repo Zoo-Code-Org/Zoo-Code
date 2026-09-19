@@ -69,6 +69,8 @@ describe("Task token usage throttling", () => {
 	beforeEach(() => {
 		// Reset all mocks
 		vi.clearAllMocks()
+		// console.log is intentionally not spied: the previous spy masked a Vitest
+		// worker-teardown race under --coverage, not a real task rejection.
 		vi.useFakeTimers()
 
 		// Mock provider
