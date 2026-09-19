@@ -2,6 +2,7 @@ import * as fsSyncActual from "fs"
 import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
+import * as lockfile from "proper-lockfile"
 
 import { safeWriteJson } from "../safeWriteJson"
 
@@ -290,6 +291,29 @@ describe("safeWriteJson", () => {
 		// Verify file was created with correct content
 		const content = await readFileContent(filePath)
 		expect(content).toEqual(data)
+	})
+
+	test("should not overwrite a file created while waiting for a create-only lock", async () => {
+		const filePath = path.join(tempDir, "create-only.json")
+		const releaseLock = await lockfile.lock(filePath, { realpath: false })
+
+		const initialization = safeWriteJson(filePath, { mcpServers: {} }, { createOnly: true })
+		const userSettings = { mcpServers: { existing: { command: "node" } } }
+		await fsPromisesActuals.writeFile!(filePath, JSON.stringify(userSettings))
+		await releaseLock()
+
+		await initialization
+
+		expect(await readFileContent(filePath)).toEqual(userSettings)
+	})
+
+	test("should create a missing file when createOnly is enabled", async () => {
+		const filePath = path.join(tempDir, "create-only.json")
+		const data = { mcpServers: {} }
+
+		await safeWriteJson(filePath, data, { createOnly: true })
+
+		expect(await readFileContent(filePath)).toEqual(data)
 	})
 
 	test("should handle failure when deleting tempBackupFilePath (filePath exists, all renames succeed)", async () => {
