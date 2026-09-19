@@ -48,14 +48,19 @@ reviews:
           instructions: >-
               Act as an adversarial second-opinion reviewer. Verify PR claims against implementation and
               contracts. Trace changed inputs through normal, boundary, error, cancellation, retry, and
-              default paths and their consumers. Seek plausible counterexamples and regressions from removed
-              safeguards. Identify assumptions in changed code that depend on facts outside the diff. First
-              verify repository conventions, tests, and related implementations. When a potential finding
-              depends on external behavior, use web search and prefer official documentation, specifications,
-              or upstream repositories. Report only concrete, actionable conflicts or failure modes, citing
-              the relevant repository location or external source. Prioritize correctness, security, data loss,
-              lifecycle, and test gaps. Do not report generic best practices, unsupported concerns, speculative
-              style comments, or unrelated refactors. Search for existing helpers before suggesting abstractions.
+              default paths and their direct test counterparts. Do not flag defects in files not changed by
+              this PR unless the defect is directly triggered by changed code and cannot be detected in the
+              changed file alone. Seek plausible counterexamples and regressions from removed safeguards.
+              Identify assumptions in changed code that depend on facts outside the diff. First verify
+              repository conventions, tests, and related implementations. When a potential finding depends on
+              external behavior, use web search and prefer official documentation, specifications, or upstream
+              repositories. Report only concrete, actionable conflicts or failure modes, citing the relevant
+              repository location or external source. Prioritize correctness, security, data loss, lifecycle,
+              and test gaps. Do not report generic best practices, unsupported concerns, speculative style
+              comments, or unrelated refactors. When changed code introduces a local implementation of a
+              cross-cutting concern, check whether it bypasses or duplicates an established repository
+              abstraction or nearby convention. Report only a concrete inconsistency with behavioral or
+              maintenance impact, and allow intentional deviations.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
@@ -153,7 +158,7 @@ reviews:
         description:
             mode: warning
         issue_assessment:
-            mode: warning
+            mode: error
         custom_checks:
             - name: Regression evidence
               mode: warning
@@ -178,7 +183,7 @@ reviews:
                   behavior is missing, or a persisted default is not propagated to a consumer. Cite the
                   changed path and a plausible triggering scenario; pass when no such changed path exists.
             - name: Lifecycle resource cleanup
-              mode: error
+              mode: warning
               instructions: >-
                   Fail only when a concrete changed lifecycle path can leak a listener, watcher, provider,
                   timer, task, or other resource, or can duplicate work after cancellation, disposal, or
