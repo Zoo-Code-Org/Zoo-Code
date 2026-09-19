@@ -4,7 +4,7 @@ import { vscode } from "@/utils/vscode"
 import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
 import { buildDocLink } from "@src/utils/docLinks"
-import { useEvent, useMount } from "react-use"
+import { useEvent } from "react-use"
 import { Terminal } from "lucide-react"
 
 import { type ExtensionMessage, type TerminalOutputPreviewSize } from "@roo-code/types"
@@ -70,12 +70,15 @@ export const TerminalSettings = ({
 	const [isProfilesLoaded, setIsProfilesLoaded] = useState(false)
 	const isVSCodeTerminalEnabled = terminalShellIntegrationDisabled === false
 
-	useMount(() => {
+	// Use useEffect instead of react-use's useMount: the Playwright CT ESM
+	// transform fails on `import { useMount } from "react-use"` (no named
+	// export in the module graph resolved under component tests).
+	useEffect(() => {
 		vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" })
 		// Request the terminal profile names through a dedicated, allowlisted message
 		// (the extension reads the profiles and returns only sanitized names).
 		vscode.postMessage({ type: "requestTerminalProfiles" })
-	})
+	}, [])
 
 	const onMessage = useCallback((event: MessageEvent) => {
 		const message: ExtensionMessage = event.data

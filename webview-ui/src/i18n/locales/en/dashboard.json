@@ -1,0 +1,96 @@
+{
+	"title": "Dashboard",
+	"done": "Back",
+	"range": {
+		"today": "Today",
+		"7d": "7 Days",
+		"30d": "30 Days",
+		"custom": "Custom",
+		"all": "All"
+	},
+	"summary": {
+		"totalTokens": "Total Tokens",
+		"inputTokens": "Input Tokens",
+		"outputTokens": "Output Tokens",
+		"cacheTokens": "Cache Tokens",
+		"cost": "Cost"
+	},
+	"states": {
+		"loading": "Loading...",
+		"error": "Failed to load statistics",
+		"empty": "No usage data yet",
+		"emptyHint": "Start a conversation to see statistics"
+	},
+	"actions": {
+		"refresh": "Refresh",
+		"exportJson": "Export JSON",
+		"exportCsv": "Export CSV",
+		"clear": "Clear Statistics"
+	},
+	"breakdown": {
+		"title": "Breakdown",
+		"model": "Model",
+		"provider": "Provider",
+		"mode": "Mode",
+		"events": "Events",
+		"inputTokens": "Input",
+		"outputTokens": "Output",
+		"cacheReadTokens": "Cache Read",
+		"cacheWriteTokens": "Cache Write",
+		"reasoningTokens": "Reasoning",
+		"totalTokens": "Total",
+		"costUsd": "Cost",
+		"unknown": "Unknown"
+	},
+	"coverage": {
+		"title": "Data Coverage",
+		"liveFrom": "Live from",
+		"lastUpdated": "Last Updated",
+		"backfilledEvents": "Backfilled events",
+		"paused": "Recording paused (storage limit reached)"
+	},
+	"clearDialog": {
+		"title": "Clear Statistics",
+		"description": "Are you sure you want to clear all usage statistics? This action cannot be undone.",
+		"cancel": "Cancel",
+		"confirm": "Clear"
+	},
+	"customRange": {
+		"from": "From",
+		"to": "To"
+	},
+	"cacheRatio": {
+		"label": "Cache ratio for estimation",
+		"hint": "Applied when provider doesn't report cache data"
+	},
+	"sessionDetail": {
+		"summary": "Session Summary",
+		"apiCalls": "API Calls",
+		"noApiCalls": "No API calls recorded",
+		"input": "Input",
+		"output": "Output",
+		"cost": "Cost",
+		"model": "Model",
+		"mode": "Mode",
+		"time": "Time",
+		"status": "Status"
+	},
+	"time": {
+		"justNow": "just now",
+		"minutesAgo": "{{count}} min ago",
+		"hoursAgo": "{{count}} hr ago",
+		"yesterday": "yesterday",
+		"daysAgo": "{{count}} days ago"
+	},
+	"tasks": {
+		"title": "Tasks",
+		"noTasks": "No tasks recorded",
+		"filterModel": "All Models",
+		"filterProvider": "All Providers",
+		"callCount": "{{count}} calls"
+	},
+	"taskAggregate": {
+		"modes": "Modes",
+		"models": "Models"
+	}
+}

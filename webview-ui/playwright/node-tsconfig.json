@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"allowJs": true,
+		"paths": {
+			"@/context/ExtensionStateContext": ["./ExtensionStateContext.mock.tsx"],
+			"@src/context/ExtensionStateContext": ["./ExtensionStateContext.mock.tsx"],
+			"@src/i18n/TranslationContext": ["./TranslationContext.ts"],
+			"@/*": ["../src/*"],
+			"@src/*": ["../src/*"],
+			"@roo/*": ["../../src/shared/*"],
+			"@roo-code/types": ["./roo-code-types-node.cjs"],
+			"@roo-code/types/model": ["./roo-code-types-node.cjs"],
+			"@roo-code/types/provider-identifiers": ["./roo-code-types-node.cjs"]
+		}
+	}
+}

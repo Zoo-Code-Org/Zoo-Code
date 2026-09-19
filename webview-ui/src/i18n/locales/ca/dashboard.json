@@ -1,0 +1,96 @@
+{
+	"title": "Tauler",
+	"done": "Enrere",
+	"range": {
+		"today": "Avui",
+		"7d": "7 dies",
+		"30d": "30 dies",
+		"custom": "Personalitzat",
+		"all": "Tot"
+	},
+	"summary": {
+		"totalTokens": "Tokens totals",
+		"inputTokens": "Tokens d'entrada",
+		"outputTokens": "Tokens de sortida",
+		"cacheTokens": "Tokens de memòria cau",
+		"cost": "Cost"
+	},
+	"states": {
+		"loading": "S'està carregant...",
+		"error": "No s'han pogut carregar les estadístiques",
+		"empty": "Encara no hi ha dades d'ús",
+		"emptyHint": "Inicieu una conversa per veure les estadístiques"
+	},
+	"actions": {
+		"refresh": "Actualitza",
+		"exportJson": "Exporta JSON",
+		"exportCsv": "Exporta CSV",
+		"clear": "Esborra les estadístiques"
+	},
+	"breakdown": {
+		"title": "Desglossament",
+		"model": "Model",
+		"provider": "Proveïdor",
+		"mode": "Mode",
+		"events": "Esdeveniments",
+		"inputTokens": "Entrada",
+		"outputTokens": "Sortida",
+		"cacheReadTokens": "Lectura cau",
+		"cacheWriteTokens": "Escriptura cau",
+		"reasoningTokens": "Raonament",
+		"totalTokens": "Total",
+		"costUsd": "Cost",
+		"unknown": "Desconegut"
+	},
+	"coverage": {
+		"title": "Cobertura de dades",
+		"liveFrom": "En directe des de",
+		"lastUpdated": "Última actualització",
+		"backfilledEvents": "Esdeveniments retroactius",
+		"paused": "Enregistrament en pausa (s'ha assolit el límit d'emmagatzematge)"
+	},
+	"clearDialog": {
+		"title": "Esborra les estadístiques",
+		"description": "Esteu segur que voleu esborrar totes les estadístiques d'ús? Aquesta acció no es pot desfer.",
+		"cancel": "Cancel·la",
+		"confirm": "Esborra"
+	},
+	"customRange": {
+		"from": "Des de",
+		"to": "Fins a"
+	},
+	"cacheRatio": {
+		"label": "Relació de memòria cau per a estimació",
+		"hint": "S'aplica quan el proveïdor no informa dades de memòria cau"
+	},
+	"sessionDetail": {
+		"summary": "Resum de la sessió",
+		"apiCalls": "Trucades API",
+		"noApiCalls": "No hi ha trucades API registrades",
+		"input": "Entrada",
+		"output": "Sortida",
+		"cost": "Cost",
+		"model": "Model",
+		"mode": "Mode",
+		"time": "Hora",
+		"status": "Estat"
+	},
+	"time": {
+		"justNow": "ara mateix",
+		"minutesAgo": "fa {{count}} min",
+		"hoursAgo": "fa {{count}} h",
+		"yesterday": "ahir",
+		"daysAgo": "fa {{count}} dies"
+	},
+	"tasks": {
+		"title": "Tasques",
+		"noTasks": "No s’han registrat tasques",
+		"filterModel": "Tots els models",
+		"filterProvider": "Tots els proveïdors",
+		"callCount": "{{count}} trucades"
+	},
+	"taskAggregate": {
+		"modes": "Modes",
+		"models": "Models"
+	}
+}
