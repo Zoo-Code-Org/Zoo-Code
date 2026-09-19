@@ -715,6 +715,8 @@ describe("ClineProvider flicker-free cancel", () => {
 		const createTaskWithHistoryItemSpy = vi
 			.spyOn(provider, "createTaskWithHistoryItem")
 			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
+		provider["cancelledDelegationChildIds"].add("child-1")
+		expect(provider["cancelledDelegationChildIds"].has("child-1")).toBe(true)
 
 		await provider.cancelTask()
 
