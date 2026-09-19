@@ -82,11 +82,11 @@ describe("IOIntelligenceHandler", () => {
 		)
 		const chunks = await collectStream(
 			new IOIntelligenceHandler({
-				ioIntelligenceModelId: "deepseek-ai/DeepSeek-V3.1",
+				ioIntelligenceModelId: "deepseek-ai/DeepSeek-V3.2",
 			}).createMessage("sys", messages),
 		)
 		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({ model: "deepseek-ai/DeepSeek-V3.1" }),
+			expect.objectContaining({ model: "deepseek-ai/DeepSeek-V3.2" }),
 			expect.objectContaining({ signal: undefined }),
 		)
 		expect(chunks).toEqual([
