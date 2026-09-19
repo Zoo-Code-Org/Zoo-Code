@@ -122,6 +122,50 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("does not auto-approve a protected command ask from a queued message", async () => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowExecute: true }),
+		})
+		task.messageQueueService.addMessage("run it anyway")
+
+		const ask = task.ask("command", "rm -rf build", false, undefined, true)
+
+		// The drain must not resolve the protected ask; only an explicit user
+		// approval may.
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages[0]?.text).toBe("run it anyway")
+	})
+
+	it("does not auto-approve a protected command ask when a message is queued mid-wait", async () => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowExecute: true }),
+		})
+
+		const ask = task.ask("command", "rm -rf build", false, undefined, true)
+		task.messageQueueService.addMessage("mid-wait message")
+
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages[0]?.text).toBe("mid-wait message")
+	})
+
 	it("claims lifecycle feedback that arrives while an ask is waiting", async () => {
 		const task = await createTask()
 		const ask = task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
