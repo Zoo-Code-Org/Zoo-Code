@@ -26,7 +26,7 @@ jobs:
                   DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
               run: |
                   set -euo pipefail
-                  owners=("Elliott" "Navad" "Toray")
+                  owners=("Elliott" "James" "Toray")
                   anchor_date="2026-07-17"
                   seconds_since_anchor=$(($(date -u +%s) - $(date -u -d "$anchor_date" +%s)))
                   weeks_since_anchor=$((seconds_since_anchor / 604800))
