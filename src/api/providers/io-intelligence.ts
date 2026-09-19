@@ -149,6 +149,14 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 				stream: false,
 			}
 
+			if (
+				this.options.modelTemperature !== undefined &&
+				info.supportsTemperature !== false &&
+				this.supportsTemperature(modelId)
+			) {
+				requestOptions.temperature = this.options.modelTemperature
+			}
+
 			// The OpenAI SDK validates a present-but-undefined `timeout` key, so
 			// request options are only forwarded when they carry a real value.
 			const completionOptions: OpenAI.RequestOptions = {}

@@ -195,4 +195,16 @@ describe("IOIntelligenceHandler", () => {
 		await handler.completePrompt("ping", { abortSignal: signal, timeoutMs: 5_000 })
 		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: false }), { signal, timeout: 5_000 })
 	})
+
+	it("completePrompt forwards the configured temperature", async () => {
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { role: "assistant", content: "ok" } }],
+		})
+		const handler = new IOIntelligenceHandler({
+			ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			modelTemperature: 0.7,
+		})
+		expect(await handler.completePrompt("ping")).toBe("ok")
+		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: false, temperature: 0.7 }), undefined)
+	})
 })
