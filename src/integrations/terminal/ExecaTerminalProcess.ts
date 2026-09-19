@@ -41,7 +41,7 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 			this.isHot = true
 
 			this.subprocess = execa({
-				shell: BaseTerminal.getExecaShellPath() ?? getShell(),
+				shell: BaseTerminal.getExecaShellPath() || getShell(),
 				cwd: this.terminal.getCurrentWorkingDirectory(),
 				all: true,
 				// Ignore stdin to ensure non-interactive mode and prevent hanging
