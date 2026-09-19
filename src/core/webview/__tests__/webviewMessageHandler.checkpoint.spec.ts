@@ -79,7 +79,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 	describe("delete operations with checkpoint restoration", () => {
 		it("should call handleCheckpointRestoreOperation for checkpoint deletes", async () => {
 			// Mock handleCheckpointRestoreOperation
-			;(handleCheckpointRestoreOperation as any).mockResolvedValue(undefined)
+			vi.mocked(handleCheckpointRestoreOperation).mockResolvedValue(undefined)
 
 			// Call the handler with delete confirmation
 			await webviewMessageHandler(mockProvider, {
@@ -99,7 +99,8 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 			})
 		})
 
-		it("should save messages for non-checkpoint deletes", async () => {
+		it("delegates persistence to the rewind for non-checkpoint deletes", async () => {
+			const retainedMessage = mockCline.clineMessages[0]
 			// Call the handler with delete confirmation (no checkpoint restoration)
 			await webviewMessageHandler(mockProvider, {
 				type: "deleteMessageConfirm",
@@ -107,12 +108,9 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 				restoreCheckpoint: false,
 			})
 
-			// Verify saveTaskMessages was called
-			expect(saveTaskMessages).toHaveBeenCalledWith({
-				messages: expect.any(Array),
-				taskId: "test-task-123",
-				globalStoragePath: "/test/storage",
-			})
+			// The task overwrite owns persistence; the handler must not save a second time.
+			expect(mockCline.overwriteClineMessages).toHaveBeenCalledExactlyOnceWith([retainedMessage])
+			expect(saveTaskMessages).not.toHaveBeenCalled()
 
 			// Verify checkpoint restore was NOT called
 			expect(mockCline.checkpointRestore).not.toHaveBeenCalled()
@@ -122,7 +120,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 	describe("edit operations with checkpoint restoration", () => {
 		it("should call handleCheckpointRestoreOperation for checkpoint edits", async () => {
 			// Mock handleCheckpointRestoreOperation
-			;(handleCheckpointRestoreOperation as any).mockResolvedValue(undefined)
+			vi.mocked(handleCheckpointRestoreOperation).mockResolvedValue(undefined)
 
 			// Call the handler with edit confirmation
 			await webviewMessageHandler(mockProvider, {
@@ -213,7 +211,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 		})
 
 		it("does not restore when task re-initialization times out", async () => {
-			;(pWaitFor as any).mockRejectedValueOnce(new Error("timed out"))
+			vi.mocked(pWaitFor).mockRejectedValueOnce(new Error("timed out"))
 
 			await webviewMessageHandler(mockProvider, { type: "completionCheckpointRestore" })
 

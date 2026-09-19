@@ -6,14 +6,15 @@ Zoo Code checks task lifecycle protocols through one compositional verification 
 pnpm lifecycle:model-check
 ```
 
-The command runs six independent bounded submodels in sequence:
+The command runs seven independent bounded submodels in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed provider handoff and scheduler ordering;
 4. the task cleanup protocol;
-5. request-stream parser scoping; and
-6. completion persistence.
+5. request-stream parser scoping;
+6. completion persistence; and
+7. production-backed transcript transport ownership and snapshot ordering.
 
 This umbrella command is the single model-check entry point in the `compile` CI job after type checking. Command-level composition does not merge the submodels' state spaces: each checker retains its own bounds, transitions, invariant ownership, reachability requirements, and counterexample format. In particular, parser state is not part of the persisted lifecycle graph. The focused parser checker remains directly runnable with `pnpm parser-scope:model-check` for debugging.
 
@@ -79,6 +80,10 @@ The known-unsafe witnesses currently compare exact shortest action sequences. Th
 ## Task cleanup protocol model
 
 The umbrella command also runs a separate bounded child model for in-memory abort, disposal, and provider-shutdown ordering. It models cleanup settlement and rejection as environment transitions and makes no filesystem, editor Promise, fairness, or timing-liveness claim. See [Task cleanup protocol model check](./task-cleanup-protocol-model.md).
+
+## Transcript transport model
+
+The umbrella command also runs **pnpm transcript-transport:model-check**, an exhaustive bounded explorer over the same production reducer used by the provider's transcript driver. It checks cancellable FIFO ownership, the single physical-send barrier across invalidations, task-scoped sequences, and atomic snapshot start/chunk/end ordering. Named landmarks require held posts, repeated resync, task switching/clear, queued deltas, and failure/recovery; injected legacy/mutant policies demonstrate invariant sensitivity. Its receiver oracle is not the React implementation, and an already-initiated physical send may complete after invalidation. See [Transcript transport ownership and bounded verification](./transcript-transport-model.md) for exact bounds, correspondence, counterexamples, and limitations. This independent protocol does not extend the persisted lifecycle state space.
 
 ## Provider handoff and scheduler model
 

@@ -36,7 +36,6 @@ import { CloudService } from "@roo-code/cloud"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
-import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -341,36 +340,9 @@ export const webviewMessageHandler = async (
 					vscode.window.showWarningMessage("No checkpoint found before this message")
 				}
 			} else {
-				// For non-checkpoint deletes, preserve checkpoint associations for remaining messages
-				// Store checkpoints from messages that will be preserved
-				const preservedCheckpoints = new Map<number, any>()
-				for (let i = 0; i < messageIndex; i++) {
-					const msg = currentCline.clineMessages[i]
-					if (msg?.checkpoint && msg.ts) {
-						preservedCheckpoints.set(msg.ts, msg.checkpoint)
-					}
-				}
-
-				// Delete this message and all subsequent messages using MessageManager
+				// Rewind preserves the complete retained messages, including checkpoints,
+				// and owns persistence and snapshot publication. Do not pre-mutate or re-save.
 				await currentCline.messageManager.rewindToTimestamp(targetMessage.ts!, { includeTargetMessage: false })
-
-				// Restore checkpoint associations for preserved messages
-				for (const [ts, checkpoint] of preservedCheckpoints) {
-					const msgIndex = currentCline.clineMessages.findIndex((msg) => msg.ts === ts)
-					if (msgIndex !== -1) {
-						currentCline.clineMessages[msgIndex].checkpoint = checkpoint
-					}
-				}
-
-				// Save the updated messages with restored checkpoints
-				await saveTaskMessages({
-					messages: currentCline.clineMessages,
-					taskId: currentCline.taskId,
-					globalStoragePath: provider.contextProxy.globalStorageUri.fsPath,
-				})
-
-				// Update the UI to reflect the deletion
-				await provider.postStateToWebview()
 			}
 		} catch (error) {
 			console.error("Error in delete message:", error)
@@ -509,38 +481,12 @@ export const webviewMessageHandler = async (
 				}
 			}
 
-			// Store checkpoints from messages that will be preserved
-			const preservedCheckpoints = new Map<number, any>()
-			for (let i = 0; i < deleteFromMessageIndex; i++) {
-				const msg = currentCline.clineMessages[i]
-				if (msg?.checkpoint && msg.ts) {
-					preservedCheckpoints.set(msg.ts, msg.checkpoint)
-				}
-			}
-
-			// Delete the original (user) message and all subsequent messages using MessageManager
+			// Rewind preserves checkpoint metadata and publishes only after persistence.
+			// A rejection must stop the edit before submitting a new user message.
 			const rewindTs = currentCline.clineMessages[deleteFromMessageIndex]?.ts
 			if (rewindTs) {
 				await currentCline.messageManager.rewindToTimestamp(rewindTs, { includeTargetMessage: false })
 			}
-
-			// Restore checkpoint associations for preserved messages
-			for (const [ts, checkpoint] of preservedCheckpoints) {
-				const msgIndex = currentCline.clineMessages.findIndex((msg) => msg.ts === ts)
-				if (msgIndex !== -1) {
-					currentCline.clineMessages[msgIndex].checkpoint = checkpoint
-				}
-			}
-
-			// Save the updated messages with restored checkpoints
-			await saveTaskMessages({
-				messages: currentCline.clineMessages,
-				taskId: currentCline.taskId,
-				globalStoragePath: provider.contextProxy.globalStorageUri.fsPath,
-			})
-
-			// Update the UI to reflect the deletion
-			await provider.postStateToWebview()
 
 			await currentCline.submitUserMessage(editedContent, images)
 		} catch (error) {
@@ -574,6 +520,9 @@ export const webviewMessageHandler = async (
 	}
 
 	switch (message.type) {
+		case "requestClineMessagesResync":
+			await provider.resyncClineMessagesToWebview(message.taskId, message.expectedSeq, message.receivedSeq)
+			break
 		case "themeFixtureProbeResponse":
 			if (process.env.ROO_CODE_THEME_FIXTURE_PROBE === "1" && message.requestId && message.themeFixture) {
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
@@ -584,7 +533,7 @@ export const webviewMessageHandler = async (
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
 
-			await provider.postStateToWebview()
+			await provider.syncFocusedTaskToWebview({ includeTaskHistory: true })
 			void provider.workspaceTracker
 				?.initializeFilePaths()
 				.catch((err) => provider.log(`Workspace initialization error: ${err}`)) // Don't await.
@@ -873,7 +822,7 @@ export const webviewMessageHandler = async (
 			// handled via metadata; parent resumption occurs through
 			// reopenParentFromDelegation, not via finishSubTask.
 			await provider.clearTask()
-			await provider.postStateToWebview()
+			await provider.syncFocusedTaskToWebview({ includeTaskHistory: true })
 			break
 		case "didShowAnnouncement":
 			await updateGlobalState("lastShownAnnouncementId", provider.latestAnnouncementId)
@@ -1932,13 +1881,7 @@ export const webviewMessageHandler = async (
 				const existingPrompts = getGlobalState("customModePrompts") ?? {}
 				const updatedPrompts = { ...existingPrompts, [message.promptMode]: message.customPrompt }
 				await updateGlobalState("customModePrompts", updatedPrompts)
-				const currentState = await provider.getStateToPostToWebview()
-				const stateWithPrompts = {
-					...currentState,
-					customModePrompts: updatedPrompts,
-					hasOpenedModeSelector: currentState.hasOpenedModeSelector ?? false,
-				}
-				await provider.postMessageToWebview({ type: "state", state: stateWithPrompts })
+				await provider.postStateToWebviewWithoutTaskHistory()
 
 				if (TelemetryService.hasInstance()) {
 					// Determine which setting was changed by comparing objects

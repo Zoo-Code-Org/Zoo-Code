@@ -4,6 +4,7 @@ import os from "os"
 import crypto from "crypto"
 import { v7 as uuidv7 } from "uuid"
 import EventEmitter from "events"
+import { isDeepStrictEqual } from "util"
 
 import { AskIgnoredError } from "./AskIgnoredError"
 import { RateLimitClock, createRateLimitClock } from "./RateLimitClock"
@@ -183,6 +184,7 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+const PARTIAL_MESSAGE_UPDATE_DEBOUNCE_MS = 500
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -214,6 +216,17 @@ type AssistantMessagePersistenceCancellation = {
 	cancelled: boolean
 	promise: Promise<void>
 	resolve: () => void
+}
+
+/** A transcript and its derived task history are separate, non-transactional writes. */
+export class ClineMessagesPersistenceError extends Error {
+	constructor(
+		cause: unknown,
+		public readonly transcriptPersisted: boolean,
+	) {
+		super(cause instanceof Error ? cause.message : String(cause), { cause })
+		this.name = "ClineMessagesPersistenceError"
+	}
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -364,6 +377,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// LLM Messages & Chat Messages
 	apiConversationHistory: ApiMessage[] = []
 	clineMessages: ClineMessage[] = []
+	private clineMessagesSaveVersion = 0
+	private pendingClineMessageReplacements = 0
 
 	// Ask
 	private askResponse?: ClineAskResponse
@@ -513,6 +528,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Token Usage Throttling - Debounced emit function
 	private readonly TOKEN_USAGE_EMIT_INTERVAL_MS = 2000 // 2 seconds
 	private debouncedEmitTokenUsage: ReturnType<typeof debounce>
+	private debouncedPostPartialMessageUpdate: ReturnType<typeof debounce>
 
 	// Historical cloud sync tracking retained only to avoid task resume churn.
 	private cloudSyncedMessageTimestamps: Set<number> = new Set()
@@ -683,6 +699,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			},
 			this.TOKEN_USAGE_EMIT_INTERVAL_MS,
 			{ leading: true, trailing: true, maxWait: this.TOKEN_USAGE_EMIT_INTERVAL_MS },
+		)
+		// Show the first revision immediately, then coalesce streaming updates without starving the webview.
+		this.debouncedPostPartialMessageUpdate = debounce(
+			(message: ClineMessage) => {
+				const provider = this.providerRef.deref()
+				if (!provider) {
+					return
+				}
+
+				void provider.postClineMessageUpdated(this.taskId, message, this.instanceId).catch((error) => {
+					console.error("[Task#updateClineMessage] incremental post failed:", error)
+				})
+			},
+			PARTIAL_MESSAGE_UPDATE_DEBOUNCE_MS,
+			{ leading: true, trailing: true, maxWait: PARTIAL_MESSAGE_UPDATE_DEBOUNCE_MS },
 		)
 
 		onCreated?.(this)
@@ -1290,20 +1321,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
-		// Unanswered asks must reach the webview before Message listeners can respond against its state.
-		const requiresImmediateState =
-			message.partial === true || (message.type === "ask" && message.isAnswered !== true)
 		try {
-			await provider?.postStateToWebviewThrottled()
+			await provider?.postClineMessageAppended(this.taskId, message, this.instanceId)
 		} catch (error) {
-			console.error("[Task#addToClineMessages] postStateToWebviewThrottled failed:", error)
-		}
-		if (requiresImmediateState) {
-			try {
-				await provider?.flushPostStateToWebviewThrottled()
-			} catch (error) {
-				console.error("[Task#addToClineMessages] flushPostStateToWebviewThrottled failed:", error)
-			}
+			console.error("[Task#addToClineMessages] incremental post failed:", error)
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()
@@ -1323,12 +1344,60 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Replaces the entire Cline message history, restores todo state, and persists.
 	 * Also resets cloud sync tracking to avoid re-syncing previously synced messages.
+	 * Rejects without publishing a snapshot on persistence failure. Only a failed
+	 * transcript write can restore the previous in-memory state, and only while no
+	 * newer save or mutation has superseded it. Metadata/history failures retain the
+	 * already-persisted replacement; these writes cannot be rolled back atomically.
 	 */
 	public async overwriteClineMessages(newMessages: ClineMessage[], persist = true) {
-		this.hydrateClineMessages(newMessages)
+		this.debouncedPostPartialMessageUpdate.cancel()
+		const previousMessages = this.clineMessages
+		const previousTodos = this.todoList
+		const previousCloudSyncedTimestamps = new Set(this.cloudSyncedMessageTimestamps)
+		// Give every replacement its own identity, even when a caller passes the live array.
+		this.hydrateClineMessages([...newMessages])
+		const replacement = this.clineMessages
 		if (persist) {
-			await this.saveClineMessages(false)
+			const replacementTodos = this.todoList
+			const snapshot = structuredClone({
+				messages: replacement,
+				todos: replacementTodos,
+				cloudSyncedTimestamps: this.cloudSyncedMessageTimestamps,
+			})
+			const saveVersion = this.clineMessagesSaveVersion + 1
+			// A previous pending replacement is not a safe rollback target: its own
+			// write may fail while this write is in flight. Keep live state in that case.
+			const canRestorePrevious = this.pendingClineMessageReplacements++ === 0
+			try {
+				await this.persistClineMessages(false)
+			} catch (error) {
+				if (
+					canRestorePrevious &&
+					error instanceof ClineMessagesPersistenceError &&
+					!error.transcriptPersisted &&
+					this.clineMessagesSaveVersion === saveVersion &&
+					this.clineMessages === replacement &&
+					this.todoList === replacementTodos &&
+					isDeepStrictEqual(this.clineMessages, snapshot.messages) &&
+					isDeepStrictEqual(this.todoList, snapshot.todos) &&
+					isDeepStrictEqual(this.cloudSyncedMessageTimestamps, snapshot.cloudSyncedTimestamps)
+				) {
+					this.clineMessages = previousMessages
+					this.todoList = previousTodos
+					this.cloudSyncedMessageTimestamps = previousCloudSyncedTimestamps
+				}
+				throw error
+			} finally {
+				this.pendingClineMessageReplacements--
+			}
 		}
+		// The provider snapshots live state. An older save must not publish a newer,
+		// still-pending replacement on its behalf (that replacement may fail).
+		if (this.clineMessages !== replacement) return
+		await this.providerRef.deref()?.postClineMessagesSnapshot(this.taskId, {
+			bumpSeq: true,
+			taskInstanceId: this.instanceId,
+		})
 	}
 
 	private hydrateClineMessages(messages: ClineMessage[]) {
@@ -1354,8 +1423,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Non-partial messages are synced to cloud telemetry if not already synced.
 	 */
 	private async updateClineMessage(message: ClineMessage) {
-		const provider = this.providerRef.deref()
-		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
+		if (message.partial === true) {
+			this.debouncedPostPartialMessageUpdate(message)
+		} else {
+			this.debouncedPostPartialMessageUpdate.cancel()
+			await this.providerRef.deref()?.postClineMessageUpdated(this.taskId, message, this.instanceId)
+		}
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 
 		// Check if we should sync to cloud and haven't already synced this message
@@ -1375,12 +1448,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** Persists Cline messages and updates task metadata in the history store. Returns false on failure. */
 	private async saveClineMessages(merge = true): Promise<boolean> {
 		try {
+			await this.persistClineMessages(merge)
+			return true
+		} catch (error) {
+			console.error("Failed to save Roo messages:", error)
+			return false
+		}
+	}
+
+	/** Strict persistence boundary for replacements; streaming saves keep their boolean contract. */
+	private async persistClineMessages(merge = true): Promise<void> {
+		this.clineMessagesSaveVersion++
+		let transcriptPersisted = false
+		try {
+			const messages = structuredClone(this.clineMessages)
 			await saveTaskMessages({
-				messages: structuredClone(this.clineMessages),
+				messages,
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
 				merge,
 			})
+			transcriptPersisted = true
 
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
@@ -1391,7 +1479,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				rootTaskId: this.rootTaskId,
 				parentTaskId: this.parentTaskId,
 				taskNumber: this.taskNumber,
-				messages: this.clineMessages,
+				messages,
 				globalStoragePath: this.globalStoragePath,
 				workspace: this.cwd,
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
@@ -1409,10 +1497,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
-			return true
 		} catch (error) {
-			console.error("Failed to save Roo messages:", error)
-			return false
+			throw new ClineMessagesPersistenceError(error, transcriptPersisted)
 		}
 	}
 
@@ -1450,7 +1536,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		let askTs: number
 
-		// Resolve auto-approval before adding the message so the state snapshot
+		// Resolve auto-approval before adding the message so the incremental append
 		// sent to the webview already carries isAnswered:true when the ask will
 		// be immediately resolved. This eliminates the race between the state
 		// update (which shows approval buttons) and the former separate
@@ -1484,10 +1570,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
 					lastMessage.isProtected = isProtected
-					// TODO: Be more efficient about saving and posting only new
-					// data or one whole message at a time so ignore partial for
-					// saves, and only post parts of partial message instead of
-					// whole array in new listener.
+					// Persist partial messages only when they become complete; the
+					// dedicated transport can still update one in-memory message at a time.
 					// Fire-and-forget: the webview post is internally guarded, but
 					// the `RooCodeEventName.Message` emit can synchronously throw
 					// if any consumer-attached listener does, which would surface
@@ -1740,6 +1824,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (lastFollowUpIndex !== -1) {
 				// Mark this follow-up as answered
 				this.clineMessages[lastFollowUpIndex].isAnswered = true
+				void this.updateClineMessage(this.clineMessages[lastFollowUpIndex]).catch((error) => {
+					console.error("[Task#handleWebviewAskResponse] follow-up delta failed:", error)
+				})
 				// Save the updated messages
 				this.saveClineMessages().catch((error) => {
 					console.error("Failed to save answered follow-up state:", error)
@@ -2242,7 +2329,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// The todo list is already set in the constructor if initialTodos were provided
 			// No need to add any messages - the todoList property is already set
 
-			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+			await this.providerRef.deref()?.postClineMessagesSnapshot(this.taskId, {
+				bumpSeq: true,
+				taskInstanceId: this.instanceId,
+			})
 
 			await this.say("text", task, images)
 
@@ -2387,13 +2477,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				await this.clearPendingActionAfterDurableResult(this.pendingAction.actionId)
 			}
 
-			if (this.pendingAction) {
-				this.isInitialized = true
-				await this.resumePendingTaskAction(this.pendingAction)
+			if (this.abort || this.abandoned) {
 				return
 			}
 
+			// Publish the transcript after both histories hydrate, before any resume prompt or pending-action replay.
+			await this.providerRef.deref()?.postClineMessagesSnapshot(this.taskId, {
+				bumpSeq: true,
+				taskInstanceId: this.instanceId,
+			})
+
 			if (this.abort || this.abandoned) {
+				return
+			}
+
+			if (this.pendingAction) {
+				this.isInitialized = true
+				await this.resumePendingTaskAction(this.pendingAction)
 				return
 			}
 
@@ -2411,7 +2511,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.isInitialized = true
 
-			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images } = await this.ask(askType)
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
@@ -2748,6 +2848,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+		this.debouncedPostPartialMessageUpdate.cancel()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -3141,7 +3242,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} satisfies ClineApiReqInfo)
 
 			await this.saveClineMessages()
-			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+			const apiRequestMessage = this.clineMessages[lastApiReqIndex]
+			if (apiRequestMessage) {
+				await this.updateClineMessage(apiRequestMessage)
+			}
 
 			try {
 				let cacheWriteTokens = 0
@@ -3212,12 +3316,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (lastMessage && lastMessage.partial) {
 						// lastMessage.ts = Date.now() DO NOT update ts since it is used as a key for virtuoso list
 						lastMessage.partial = false
-						// instead of streaming partialMessage events, we do a save and post like normal to persist to disk
+						await this.updateClineMessage(lastMessage)
 					}
 
 					// Update `api_req_started` to have cancelled and cost, so that
 					// we can display the cost of the partial stream and the cancellation reason
 					updateApiReqMsg(cancelReason, streamingFailedMessage)
+					const apiRequestMessage = this.clineMessages[lastApiReqIndex]
+					if (apiRequestMessage) {
+						await this.updateClineMessage(apiRequestMessage)
+					}
 					await this.saveClineMessages()
 
 					// Signals to provider that it can retrieve the saved messages
@@ -3862,7 +3970,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 
 				await this.saveClineMessages()
-				await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
 
 				// No legacy text-stream tool parser state to reset.
 
