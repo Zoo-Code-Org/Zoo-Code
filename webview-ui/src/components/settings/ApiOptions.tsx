@@ -682,8 +682,8 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === providerIdentifiers.ioIntelligence && (
-						<IOIntelligence
+					{selectedProvider === providerIdentifiers.kenari && (
+						<Kenari
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}
@@ -693,8 +693,8 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === providerIdentifiers.kenari && (
-						<Kenari
+					{selectedProvider === providerIdentifiers.ioIntelligence && (
+						<IOIntelligence
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}
