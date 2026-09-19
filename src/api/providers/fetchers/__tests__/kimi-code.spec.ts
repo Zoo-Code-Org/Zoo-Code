@@ -98,6 +98,20 @@ describe("Kimi Code model discovery", () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
+	it("rejects when the caller aborts a pending discovery request", async () => {
+		vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+			})
+		})
+		const controller = new AbortController()
+
+		const result = getKimiCodeModels("token", { signal: controller.signal })
+		controller.abort()
+
+		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+	})
+
 	it("overrides maxTokens from server max_tokens in mapKimiCodeModel", () => {
 		const mapped = mapKimiCodeModel({
 			id: "kimi-for-coding",

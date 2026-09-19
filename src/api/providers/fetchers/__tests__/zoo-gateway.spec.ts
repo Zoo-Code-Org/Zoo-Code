@@ -156,6 +156,46 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(consoleErrorSpy).toHaveBeenCalled()
 			consoleErrorSpy.mockRestore()
 		})
+
+		it("forwards the caller's abort signal alongside the retained timeout", async () => {
+			mockedAxios.get.mockResolvedValueOnce(mockResponse)
+			const controller = new AbortController()
+
+			await getZooGatewayModels(
+				{ zooGatewayBaseUrl: baseUrl, zooSessionToken: token },
+				{
+					signal: controller.signal,
+				},
+			)
+
+			expect(mockedAxios.get).toHaveBeenCalledWith(
+				`${baseUrl}/models`,
+				expect.objectContaining({
+					timeout: expect.any(Number),
+					signal: controller.signal,
+				}),
+			)
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation(function (_url: string, config?: { signal?: AbortSignal }) {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getZooGatewayModels(
+				{ zooGatewayBaseUrl: baseUrl, zooSessionToken: token },
+				{
+					signal: controller.signal,
+				},
+			)
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
 	})
 
 	describe("parseZooGatewayModel", () => {

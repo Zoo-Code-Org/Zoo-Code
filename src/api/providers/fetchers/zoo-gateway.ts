@@ -5,13 +5,17 @@ import type { ModelInfo } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 import {
 	type VercelAiGatewayModel,
 	parseVercelAiGatewayModel,
 	vercelAiGatewayModelsResponseSchema,
 } from "./vercel-ai-gateway"
 
-// Bound model discovery so a network stall can't hang provider initialization paths.
+// Bound model discovery so a network stall can't hang provider initialization
+// paths. Auth-scoped fetchers bypass the model-cache single-flight, so this
+// per-call timeout is the only bound on the request.
 const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
 
 /**
@@ -20,7 +24,10 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
  * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
  */
 
-export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export async function getZooGatewayModels(
+	options?: ApiHandlerOptions,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
@@ -37,6 +44,7 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 		const response = await axios.get(`${baseURL}/models`, {
 			headers,
 			timeout: MODEL_DISCOVERY_TIMEOUT_MS,
+			signal: opts?.signal,
 		})
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 
@@ -57,6 +65,10 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 			models[id] = parseZooGatewayModel({ id, model })
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		// Log only safe fields; never serialize the full error object because it
 		// includes request config/headers which carry the bearer session token.
 		const err = error as {

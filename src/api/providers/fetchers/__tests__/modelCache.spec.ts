@@ -61,7 +61,9 @@ vi.mock("../../../core/config/ContextProxy", () => ({
 }))
 
 // Then imports
+import { getEventListeners } from "events"
 import type { Mock, Mocked } from "vitest"
+import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
@@ -107,7 +109,10 @@ describe("getModels with new GetModelsOptions", () => {
 			baseUrl: "http://localhost:4000",
 		})
 
-		expect(mockGetLiteLLMModels).toHaveBeenCalledWith("test-api-key", "http://localhost:4000")
+		// Every single-flight fetch carries the flight's bound/abort signal.
+		expect(mockGetLiteLLMModels).toHaveBeenCalledWith("test-api-key", "http://localhost:4000", {
+			signal: expect.any(AbortSignal),
+		})
 		expect(result).toEqual(mockModels)
 	})
 
@@ -158,7 +163,9 @@ describe("getModels with new GetModelsOptions", () => {
 
 		const result = await getModels({ provider: providerIdentifiers.requesty, apiKey: DUMMY_REQUESTY_KEY })
 
-		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY)
+		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY, {
+			signal: expect.any(AbortSignal),
+		})
 		expect(result).toEqual(mockModels)
 	})
 
@@ -179,7 +186,9 @@ describe("getModels with new GetModelsOptions", () => {
 			baseUrl: "https://router.requesty.ai/v1",
 		})
 
-		expect(mockGetRequestyModels).toHaveBeenCalledWith("https://router.requesty.ai/v1", DUMMY_REQUESTY_KEY)
+		expect(mockGetRequestyModels).toHaveBeenCalledWith("https://router.requesty.ai/v1", DUMMY_REQUESTY_KEY, {
+			signal: expect.any(AbortSignal),
+		})
 		expect(result).toEqual(mockModels)
 	})
 
@@ -196,7 +205,9 @@ describe("getModels with new GetModelsOptions", () => {
 
 		const result = await getModels({ provider: providerIdentifiers.kenari, apiKey: "kenari-key-for-testing" })
 
-		expect(mockGetKenariModels).toHaveBeenCalledWith("kenari-key-for-testing")
+		expect(mockGetKenariModels).toHaveBeenCalledWith("kenari-key-for-testing", {
+			signal: expect.any(AbortSignal),
+		})
 		expect(result).toEqual(mockModels)
 	})
 
@@ -212,7 +223,7 @@ describe("getModels with new GetModelsOptions", () => {
 
 		const result = await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" })
 
-		expect(mockGetNanoGptModels).toHaveBeenCalledWith("nanogpt-key")
+		expect(mockGetNanoGptModels).toHaveBeenCalledWith("nanogpt-key", { signal: expect.any(AbortSignal) })
 		expect(result).toEqual(mockModels)
 	})
 
@@ -246,7 +257,9 @@ describe("getModels with new GetModelsOptions", () => {
 			baseUrl: "https://api.moonshot.ai/v1",
 		})
 
-		expect(mockGetMoonshotModels).toHaveBeenCalledWith("https://api.moonshot.ai/v1", "test-key")
+		expect(mockGetMoonshotModels).toHaveBeenCalledWith("https://api.moonshot.ai/v1", "test-key", {
+			signal: expect.any(AbortSignal),
+		})
 		expect(result).toEqual(mockModels)
 	})
 
@@ -1203,4 +1216,476 @@ describe("compound cache key derivation across scoping dimensions", () => {
 
 		expect(cacheKey).toBe("openrouter")
 	})
+})
+
+// Single-flight cancellation. Each test below exercises one interleaving of caller aborts,
+// the per-flight fetch bound, and settlement; the mocks hold the HTTP layer pending so a
+// rejection that only arrives at abort time (rather than at fetch settle time) is provable.
+
+const cancelledModels = {
+	"openrouter/model": {
+		maxTokens: 8192,
+		contextWindow: 128000,
+		supportsPromptCache: false,
+	},
+}
+
+const cancelledModelsB = {
+	"openrouter/other": {
+		maxTokens: 4096,
+		contextWindow: 64000,
+		supportsPromptCache: false,
+	},
+}
+
+// Drains the full microtask queue: a setImmediate callback runs only after every pending
+// promise reaction has settled, so all settle-path bookkeeping has definitively happened.
+const drainMicrotasks = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+// Standard per-test setup: clear call state, force a memory-cache miss, and force a disk miss.
+const setupCancellationMocks = () => {
+	vi.clearAllMocks()
+	const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+	mockCache.get.mockReturnValue(undefined)
+	vi.mocked(fsSync.existsSync).mockReturnValue(false)
+}
+
+// A fetcher double that never settles on its own and reports the signal the dispatcher gave it.
+const neverSettlingFetcher = (capture: (signal: AbortSignal | undefined) => void) =>
+	mockGetOpenRouterModels.mockImplementation((_options, opts) => {
+		capture(opts?.signal)
+		return new Promise<typeof cancelledModels>(() => {})
+	})
+
+it("threads a cancellation signal into the dispatched fetcher from both entry points", async () => {
+	setupCancellationMocks()
+	mockGetOpenRouterModels.mockResolvedValue(cancelledModels)
+
+	const controller = new AbortController()
+	await getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+
+	const getCall = mockGetOpenRouterModels.mock.calls[mockGetOpenRouterModels.mock.calls.length - 1]
+	expect(getCall[1]?.signal).toBeInstanceOf(AbortSignal)
+
+	const { refreshModels } = await import("../modelCache")
+	await refreshModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+
+	const refreshCall = mockGetOpenRouterModels.mock.calls[mockGetOpenRouterModels.mock.calls.length - 1]
+	expect(refreshCall[1]?.signal).toBeInstanceOf(AbortSignal)
+})
+
+it("rejects a pre-aborted caller without creating or starting any flight", async () => {
+	setupCancellationMocks()
+	const preAborted = AbortSignal.abort()
+
+	await expect(getModels({ provider: providerIdentifiers.openrouter, signal: preAborted })).rejects.toMatchObject({
+		name: "AbortError",
+	})
+	expect(mockGetOpenRouterModels).not.toHaveBeenCalled()
+
+	// refreshModels() keeps its graceful-degradation contract even for a pre-aborted caller.
+	const { refreshModels } = await import("../modelCache")
+	await expect(refreshModels({ provider: providerIdentifiers.openrouter, signal: preAborted })).resolves.toEqual({})
+	expect(mockGetOpenRouterModels).not.toHaveBeenCalled()
+})
+
+it("rejects the last waiter at the abort event and releases the entry synchronously", async () => {
+	setupCancellationMocks()
+	let flightSignal: AbortSignal | undefined
+	neverSettlingFetcher((signal) => {
+		flightSignal = signal
+	})
+
+	const controller = new AbortController()
+	const waitPromise = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+
+	controller.abort()
+
+	// The rejection was produced synchronously during abort(): the fetch has never settled,
+	// so if the wait only ended at fetch settle time this promise would hang until timeout.
+	await expect(waitPromise).rejects.toMatchObject({ name: "AbortError" })
+	expect(flightSignal?.aborted).toBe(true)
+
+	// Entry already gone at the very next synchronous observation: a fresh call starts a fresh
+	// fetch instead of joining the doomed one.
+	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+	await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
+	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+})
+
+it("serves a joiner that arrives after the last-waiter release with a fresh request", async () => {
+	setupCancellationMocks()
+	let resolveSecond: ((models: ModelRecord) => void) | undefined
+	let fetchCalls = 0
+	mockGetOpenRouterModels.mockImplementation((_options, _opts) => {
+		fetchCalls++
+		if (fetchCalls === 1) {
+			return new Promise<ModelRecord>(() => {})
+		}
+		return new Promise<ModelRecord>((resolve) => {
+			resolveSecond = resolve
+		})
+	})
+
+	const controller = new AbortController()
+	const aborted = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	controller.abort()
+	await expect(aborted).rejects.toMatchObject({ name: "AbortError" })
+
+	// Joined strictly after the release but while the doomed fetch's rejection is still
+	// outstanding: must be a fresh flight, not the doomed promise.
+	const fresh = getModels({ provider: providerIdentifiers.openrouter })
+	expect(fetchCalls).toBe(2)
+	resolveSecond!(cancelledModelsB)
+	await expect(fresh).resolves.toEqual(cancelledModelsB)
+})
+
+it("keeps entry bookkeeping consistent for both settle-vs-abort race orders", async () => {
+	const raceModels = {
+		"openrouter/raced": { maxTokens: 8192, contextWindow: 128000, supportsPromptCache: false },
+	}
+
+	// Order 1: the last-waiter abort wins and the doomed fetch settles only afterwards, while
+	// a NEWER flight already occupies the map slot. The settle-time identity-guarded delete
+	// must miss, leaving the newer flight's entry (and its joiners) intact.
+	setupCancellationMocks()
+	let resolveRaced: ((models: ModelRecord) => void) | undefined
+	let resolveSecond: ((models: ModelRecord) => void) | undefined
+	mockGetOpenRouterModels.mockImplementation(() => {
+		return new Promise<ModelRecord>((resolve) => {
+			resolveRaced = resolve
+		})
+	})
+
+	const controllerA = new AbortController()
+	const controllerB = new AbortController()
+	const racedA = getModels({ provider: providerIdentifiers.openrouter, signal: controllerA.signal })
+	const racedB = getModels({ provider: providerIdentifiers.openrouter, signal: controllerB.signal })
+
+	controllerA.abort()
+	controllerB.abort()
+	await expect(racedA).rejects.toMatchObject({ name: "AbortError" })
+	await expect(racedB).rejects.toMatchObject({ name: "AbortError" })
+
+	// A fresh flight takes the slot while the doomed fetch is still pending...
+	mockGetOpenRouterModels.mockImplementation(() => {
+		return new Promise<ModelRecord>((resolve) => {
+			resolveSecond = resolve
+		})
+	})
+	const successor = getModels({ provider: providerIdentifiers.openrouter })
+	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	// ...and only NOW the doomed fetch settles, queueing its guarded delete.
+	resolveRaced!(raceModels)
+	await drainMicrotasks()
+
+	// The newer flight survived the stale delete: another caller still joins it (no 3rd fetch).
+	const lateJoiner = getModels({ provider: providerIdentifiers.openrouter })
+	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	resolveSecond!(cancelledModelsB)
+	await expect(successor).resolves.toEqual(cancelledModelsB)
+	await expect(lateJoiner).resolves.toEqual(cancelledModelsB)
+
+	// Order 2: settlement wins. The waiter resolves through the fetch; an abort dispatched
+	// afterwards finds the waiter already detached and changes nothing.
+	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+	const lateController = new AbortController()
+	const settleFirst = getModels({ provider: providerIdentifiers.openrouter, signal: lateController.signal })
+	await drainMicrotasks()
+	lateController.abort()
+	await expect(settleFirst).resolves.toEqual(cancelledModelsB)
+})
+
+it("leaves the fetch and the entry intact when one of two waiters aborts", async () => {
+	setupCancellationMocks()
+	let flightSignal: AbortSignal | undefined
+	let resolvePending: ((models: typeof cancelledModels) => void) | undefined
+	mockGetOpenRouterModels.mockImplementation((_options, opts) => {
+		flightSignal = opts?.signal
+		return new Promise<typeof cancelledModels>((resolve) => {
+			resolvePending = resolve
+		})
+	})
+
+	const controller = new AbortController()
+	const aborting = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	const staying = getModels({ provider: providerIdentifiers.openrouter })
+
+	controller.abort()
+	await expect(aborting).rejects.toMatchObject({ name: "AbortError" })
+
+	// One waiter left: the shared fetch must neither be aborted nor evicted from the map.
+	expect(flightSignal?.aborted).toBe(false)
+
+	// A third concurrent caller joins the SAME flight (not a fresh one) while two waiters remain.
+	const joining = getModels({ provider: providerIdentifiers.openrouter })
+	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+
+	resolvePending!(cancelledModels)
+	await expect(staying).resolves.toEqual(cancelledModels)
+	await expect(joining).resolves.toEqual(cancelledModels)
+})
+
+it("aborts the shared fetch when the last waiter leaves", async () => {
+	setupCancellationMocks()
+	let flightSignal: AbortSignal | undefined
+	neverSettlingFetcher((signal) => {
+		flightSignal = signal
+	})
+
+	const first = new AbortController()
+	const second = new AbortController()
+	const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: first.signal })
+	const waitB = getModels({ provider: providerIdentifiers.openrouter, signal: second.signal })
+
+	first.abort()
+	expect(flightSignal?.aborted).toBe(false)
+	second.abort()
+	expect(flightSignal?.aborted).toBe(true)
+
+	await Promise.all([
+		expect(waitA).rejects.toMatchObject({ name: "AbortError" }),
+		expect(waitB).rejects.toMatchObject({ name: "AbortError" }),
+	])
+})
+
+it("keeps a sibling waiter running when a joiner aborts its own signal", async () => {
+	setupCancellationMocks()
+	let resolvePending: ((models: typeof cancelledModels) => void) | undefined
+	mockGetOpenRouterModels.mockReturnValue(
+		new Promise<typeof cancelledModels>((resolve) => {
+			resolvePending = resolve
+		}),
+	)
+
+	const joiningController = new AbortController()
+	const siblingController = new AbortController()
+	const joiner = getModels({ provider: providerIdentifiers.openrouter, signal: joiningController.signal })
+	const sibling = getModels({ provider: providerIdentifiers.openrouter, signal: siblingController.signal })
+
+	let siblingSettled = false
+	const tracked = sibling.then(
+		() => {
+			siblingSettled = true
+		},
+		() => {
+			siblingSettled = true
+		},
+	)
+
+	joiningController.abort()
+	await expect(joiner).rejects.toMatchObject({ name: "AbortError" })
+	await drainMicrotasks()
+	expect(siblingSettled).toBe(false)
+
+	resolvePending!(cancelledModels)
+	await tracked
+	expect(siblingSettled).toBe(true)
+})
+
+it("rejects every waiter and releases the entry when the flight timeout fires", async () => {
+	setupCancellationMocks()
+	const timeoutControllers: AbortController[] = []
+	const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+		const timeoutController = new AbortController()
+		timeoutControllers.push(timeoutController)
+		return timeoutController.signal
+	})
+	try {
+		let flightSignal: AbortSignal | undefined
+		neverSettlingFetcher((signal) => {
+			flightSignal = signal
+		})
+
+		const firstController = new AbortController()
+		const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: firstController.signal })
+		const waitB = getModels({ provider: providerIdentifiers.openrouter })
+
+		// The bound is owned by the single-flight entry, armed once at flight creation.
+		expect(timeoutSpy).toHaveBeenCalledTimes(1)
+		expect(timeoutSpy).toHaveBeenCalledWith(15_000)
+
+		timeoutControllers[0].abort()
+
+		await Promise.all([
+			expect(waitA).rejects.toMatchObject({ name: "AbortError" }),
+			expect(waitB).rejects.toMatchObject({ name: "AbortError" }),
+		])
+		expect(flightSignal?.aborted).toBe(true)
+
+		// Entry released on timeout: the next caller starts a fresh flight with its own timer.
+		mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+		await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
+		expect(timeoutSpy).toHaveBeenCalledTimes(2)
+		expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	} finally {
+		timeoutSpy.mockRestore()
+	}
+})
+
+it("detaches the timeout and waiter listeners when the flight settles", async () => {
+	setupCancellationMocks()
+	const timeoutSignals: AbortSignal[] = []
+	const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+		const timeoutController = new AbortController()
+		timeoutSignals.push(timeoutController.signal)
+		return timeoutController.signal
+	})
+	try {
+		mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModels)
+		// No caller signal: the waiter's abort view IS the timeout signal, so both the
+		// flight's timeout listener and the waiter's listener live on that one signal.
+		await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModels)
+		await drainMicrotasks()
+
+		// Nothing may keep observing the flight's bound after settlement: every abort listener
+		// registered on it was explicitly removed.
+		expect(getEventListeners(timeoutSignals[0], "abort")).toHaveLength(0)
+	} finally {
+		timeoutSpy.mockRestore()
+	}
+})
+
+it("treats a timeout and a caller abort firing back-to-back as idempotent detaches", async () => {
+	setupCancellationMocks()
+	const timeoutControllers: AbortController[] = []
+	const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+		const timeoutController = new AbortController()
+		timeoutControllers.push(timeoutController)
+		return timeoutController.signal
+	})
+	try {
+		neverSettlingFetcher(() => {})
+		let rejectionsA = 0
+		let rejectionsB = 0
+
+		const controllerA = new AbortController()
+		const controllerB = new AbortController()
+		const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: controllerA.signal })
+		const waitB = getModels({ provider: providerIdentifiers.openrouter, signal: controllerB.signal })
+		waitA.catch(() => {
+			rejectionsA++
+		})
+		waitB.catch(() => {
+			rejectionsB++
+		})
+
+		// Abort one waiter, then fire the flight's bound: the second event must find each
+		// waiter's detach already done (or idempotent) and never double-decrement the count.
+		controllerA.abort()
+		timeoutControllers[0].abort()
+		await drainMicrotasks()
+
+		expect(rejectionsA).toBe(1)
+		expect(rejectionsB).toBe(1)
+
+		// Entry state stayed consistent through both events: the next caller gets a fresh flight.
+		mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+		await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
+		expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	} finally {
+		timeoutSpy.mockRestore()
+	}
+})
+
+it("makes an abort that arrives after settlement inert", async () => {
+	setupCancellationMocks()
+	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModels)
+
+	const controller = new AbortController()
+	const waitPromise = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	const result = await waitPromise
+	expect(result).toEqual(cancelledModels)
+
+	controller.abort()
+	await drainMicrotasks()
+
+	// The settled flight already removed its entry; the late abort must not resurrect or abort
+	// anything, and a later caller still starts a fresh fetch.
+	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+	await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
+	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+})
+
+it("rejects getModels but degrades refreshModels promptly when their fetch is aborted", async () => {
+	setupCancellationMocks()
+	neverSettlingFetcher(() => {})
+
+	// getModels() surfaces the abort as a rejection at abort time even though the fetch never
+	// settles on its own.
+	const getController = new AbortController()
+	const getPromise = getModels({ provider: providerIdentifiers.openrouter, signal: getController.signal })
+	getController.abort()
+	await expect(getPromise).rejects.toMatchObject({ name: "AbortError" })
+
+	// refreshModels() keeps its graceful-degradation contract, but arrives at it promptly at
+	// abort time rather than waiting on the hung fetch.
+	const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+	mockCache.get.mockReturnValue(cancelledModels)
+	const { refreshModels } = await import("../modelCache")
+	const refreshController = new AbortController()
+	const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter, signal: refreshController.signal })
+	refreshController.abort()
+	await expect(refreshPromise).resolves.toEqual(cancelledModels)
+})
+
+it("releases the entry for a fetcher double that honors no cancellation at all", async () => {
+	setupCancellationMocks()
+	// Release-only double: ignores the forwarded signal entirely and never settles.
+	mockGetOpenRouterModels.mockImplementation(() => new Promise<typeof cancelledModels>(() => {}))
+
+	const controller = new AbortController()
+	const waiting = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	controller.abort()
+
+	// Waiter stopped and entry released despite the client exposing no cancellation surface.
+	await expect(waiting).rejects.toMatchObject({ name: "AbortError" })
+	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+	await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
+	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+})
+
+it("passes the caller signal straight through the auth-scoped bypass without entering the flight map", async () => {
+	setupCancellationMocks()
+	// The single-flight arms its per-flight fetch bound whenever it creates a flight; the
+	// auth-scoped bypass must never touch that machinery.
+	const boundSpy = vi.spyOn(AbortSignal, "timeout")
+	try {
+		mockGetZooGatewayModels
+			.mockImplementationOnce(
+				(_options, opts) =>
+					new Promise<typeof cancelledModels>((_resolve, reject) => {
+						opts?.signal?.addEventListener(
+							"abort",
+							() => {
+								const abortError = new Error("This operation was aborted")
+								abortError.name = "AbortError"
+								reject(abortError)
+							},
+							{ once: true },
+						)
+					}),
+			)
+			.mockResolvedValueOnce(cancelledModelsB)
+
+		const controller = new AbortController()
+		const first = getModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "token-a",
+			signal: controller.signal,
+		})
+		// Auth isolation requires no dedup even for an identical provider+token: each call fires
+		// its own fetch, so the bypass never shares (or poisons) a flight with anything.
+		const second = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "token-a" })
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels.mock.calls[0][1]?.signal).toBe(controller.signal)
+		expect(mockGetZooGatewayModels.mock.calls[1][1]).toBeUndefined()
+
+		controller.abort()
+		await expect(first).rejects.toMatchObject({ name: "AbortError" })
+		await expect(second).resolves.toEqual(cancelledModelsB)
+		expect(boundSpy).not.toHaveBeenCalled()
+	} finally {
+		boundSpy.mockRestore()
+	}
 })

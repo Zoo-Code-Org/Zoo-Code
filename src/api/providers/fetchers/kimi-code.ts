@@ -9,6 +9,8 @@ import {
 	type ModelRecord,
 } from "@roo-code/types"
 
+import { mergeAbortSignals } from "../utils/abort-signal"
+
 export const kimiCodeModelSchema = z.object({
 	id: z.string().min(1),
 	context_length: z.number().positive().optional(),
@@ -37,8 +39,13 @@ export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): Mo
 	}
 }
 
-export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
+export async function getKimiCodeModels(apiKey?: string, opts?: { signal?: AbortSignal }): Promise<ModelRecord> {
 	if (!apiKey) throw new Error("Kimi Code authentication is required to fetch models")
+	// This auth-scoped fetch bypasses the model-cache single-flight, so the
+	// entry-level timeout never covers it; the bound stays local. The deadline
+	// fires through an explicit controller (not AbortSignal.timeout) so the
+	// rejection keeps this exact Error identity; the caller's signal, when
+	// present, aborts alongside it via AbortSignal.any.
 	const controller = new AbortController()
 	const timeout = setTimeout(
 		() => controller.abort(new Error("Kimi Code models request timed out")),
@@ -47,7 +54,7 @@ export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
 	try {
 		const response = await fetch(`${KIMI_CODE_BASE_URL}/models`, {
 			headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
-			signal: controller.signal,
+			signal: mergeAbortSignals(controller.signal, opts?.signal),
 		})
 		if (!response.ok) {
 			const error = new Error(`Kimi Code models request failed: ${response.status} ${response.statusText}`)

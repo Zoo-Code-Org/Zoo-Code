@@ -17,6 +17,8 @@ import { getCacheDirectoryPath } from "../../../utils/storage"
 import type { RouterName } from "../../../shared/api"
 import { fileExistsAtPath } from "../../../utils/fs"
 
+import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
+
 import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
@@ -42,7 +44,34 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // Track in-flight refresh requests to prevent concurrent API calls for the same provider+url.
 // Keyed on the compound cache key (see getCacheKey) so that two different URL-scoped servers never
 // deduplicate each other's in-flight refreshes.
-const inFlightRefresh = new Map<string, Promise<ModelRecord>>()
+const inFlightRefresh = new Map<string, FlightRecord>()
+
+// Upper bound for any fetch started through the single-flight, so a hung endpoint can never keep
+// an in-flight entry pending indefinitely. The value is the maximum of the 5–15 s bounds the
+// individual fetchers it subsumes used to apply, relaxing rather than tightening endpoints that
+// already had a bound.
+const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000
+
+/**
+ * State of one shared (single-flight) provider fetch.
+ *
+ * Cancellation invariants this record upholds:
+ * - The internal AbortController is the only object that may cancel the flight's network
+ *   request; caller signals are only ever merged into a per-waiter abort view, so one waiter
+ *   aborting can never cancel the fetch out from under the others.
+ * - When the last waiter detaches while the fetch is still pending, the flight is aborted and
+ *   its map entry removed synchronously, so a caller arriving immediately afterwards starts a
+ *   fresh fetch instead of joining a doomed one.
+ * - Settlement never stores data in the map: it only removes the entry it created, guarded by
+ *   flight identity so a late-settling stale flight can never evict a newer one.
+ */
+type FlightRecord = {
+	promise: Promise<ModelRecord>
+	controller: AbortController
+	timeoutSignal: AbortSignal
+	waiters: number
+	pending: boolean
+}
 
 // Cache keys (see getCacheKey) for which we've already reported an empty model response this
 // session. A persistently-empty endpoint (e.g. misconfigured server) would otherwise re-fire this
@@ -219,59 +248,70 @@ async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
  * Extracted to avoid duplication between getModels() and refreshModels().
  *
  * @param options - Provider options for fetching models
+ * @param signal - Cancellation signal for this fetch: the shared flight's internal controller
+ * signal when routed through dedupedFetch(), or the caller's own signal on the auth-scoped
+ * direct path (which never enters the single-flight).
  * @returns Fresh models from the provider API
  */
-async function fetchModelsFromProvider(options: GetModelsOptions): Promise<ModelRecord> {
+async function fetchModelsFromProvider(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
 	const { provider } = options
+
+	// Fetchers read the carrier through `opts?.signal`. Spread (rather than passing a possibly
+	// undefined positional argument) so a signal-less call keeps exactly its old arity: fetchers
+	// and their tests can distinguish "no third argument" from "third argument undefined".
+	const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
 
 	let models: ModelRecord
 
 	switch (provider) {
 		case providerIdentifiers.openrouter:
-			models = await getOpenRouterModels()
+			models = await getOpenRouterModels(undefined, ...fetchOpts)
 			break
 		case providerIdentifiers.requesty:
 			// Requesty models endpoint requires an API key for per-user custom policies.
-			models = await getRequestyModels(options.baseUrl, options.apiKey)
+			models = await getRequestyModels(options.baseUrl, options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.unbound:
-			models = await getUnboundModels(options.apiKey)
+			models = await getUnboundModels(options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.litellm:
-			models = await getLiteLLMModels(options.apiKey ?? "", options.baseUrl)
+			models = await getLiteLLMModels(options.apiKey ?? "", options.baseUrl, ...fetchOpts)
 			break
 		case providerIdentifiers.ollama:
-			models = await getOllamaModels(options.baseUrl, options.apiKey)
+			models = await getOllamaModels(options.baseUrl, options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.lmstudio:
-			models = await getLMStudioModels(options.baseUrl)
+			models = await getLMStudioModels(options.baseUrl, ...fetchOpts)
 			break
 		case providerIdentifiers.vercelAiGateway:
-			models = await getVercelAiGatewayModels()
+			models = await getVercelAiGatewayModels(undefined, ...fetchOpts)
 			break
 		case providerIdentifiers.opencodeGo:
-			models = await getOpencodeGoModels(options.apiKey)
+			models = await getOpencodeGoModels(options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.kenari:
-			models = await getKenariModels(options.apiKey)
+			models = await getKenariModels(options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.nanogpt:
-			models = await getNanoGptModels(options.apiKey)
+			models = await getNanoGptModels(options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.poe:
-			models = await getPoeModels(options.apiKey, options.baseUrl)
+			models = await getPoeModels(options.apiKey, options.baseUrl, ...fetchOpts)
 			break
 		case providerIdentifiers.deepseek:
-			models = await getDeepSeekModels(options.baseUrl, options.apiKey)
+			models = await getDeepSeekModels(options.baseUrl, options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.moonshot:
-			models = await getMoonshotModels(options.baseUrl, options.apiKey)
+			models = await getMoonshotModels(options.baseUrl, options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.zooGateway:
-			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+			models = await getZooGatewayModels(
+				{ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl },
+				...fetchOpts,
+			)
 			break
 		case providerIdentifiers.kimiCode:
-			models = await getKimiCodeModels(options.apiKey)
+			models = await getKimiCodeModels(options.apiKey, ...fetchOpts)
 			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.
@@ -318,9 +358,11 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 	// refreshModels() degrades to cached data doesn't surface as a silent stale result to
 	// getModels(), and a fetch failure joined from refreshModels() still re-throws for
 	// getModels() callers.
-	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
-
 	try {
+		const sharedFetch = shouldSkipCache
+			? fetchModelsFromProvider(options, options.signal)
+			: dedupedFetch(cacheKey, options)
+
 		const fetched = await sharedFetch
 		const modelCount = Object.keys(fetched).length
 
@@ -361,22 +403,134 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
  * cache key at a time.
  */
 function dedupedFetch(cacheKey: string, options: GetModelsOptions): Promise<ModelRecord> {
-	const existingRequest = inFlightRefresh.get(cacheKey)
-	if (existingRequest) {
-		return existingRequest
+	// A pre-aborted caller fails fast before any flight is created or joined: an aborted call
+	// must never start (or extend) a shared fetch.
+	throwIfAborted(options.signal)
+
+	const existingRecord = inFlightRefresh.get(cacheKey)
+	if (existingRecord) {
+		return joinFlight(cacheKey, existingRecord, options.signal)
 	}
 
-	const fetchPromise = fetchModelsFromProvider(options).finally(() => {
-		inFlightRefresh.delete(cacheKey)
+	const controller = new AbortController()
+	const timeoutSignal = AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS)
+	const onTimeout = () => controller.abort(timeoutSignal.reason)
+	timeoutSignal.addEventListener("abort", onTimeout, { once: true })
+	const removeTimeoutListener = () => timeoutSignal.removeEventListener("abort", onTimeout)
+
+	// Settlement and a last-waiter abort may happen in either order; both paths are idempotent,
+	// and the identity guard makes the two interleavings equivalent.
+	let settled = false
+	const guardedDelete = () => {
+		// Identity guard: only remove this flight's own entry. A late-settling flight that lost
+		// its slot must never evict the fresh flight that replaced it.
+		if (inFlightRefresh.get(cacheKey) === record) {
+			inFlightRefresh.delete(cacheKey)
+		}
+	}
+
+	const promise: Promise<ModelRecord> = fetchModelsFromProvider(options, controller.signal)
+		.then((models) => {
+			// Settlement never writes data into the map -- fetched data reaches callers only
+			// through the promise they awaited -- it only removes this flight's entry.
+			settled = true
+			removeTimeoutListener()
+			guardedDelete()
+			return models
+		})
+		.catch((error: unknown) => {
+			settled = true
+			removeTimeoutListener()
+			guardedDelete()
+			// Re-throw so every still-joined waiter's awaited chain rejects. Waiters attach
+			// handlers to this promise at join time (and a settling flight detaches them), so a
+			// rejection here always has an observer and can never surface unhandled.
+			throw error
+		})
+
+	// A released flight (all waiters gone) can still reject later when its fetch observes the
+	// cancellation. This terminal observer keeps that rejection from surfacing as an unhandled
+	// rejection; joined waiters observe the identical rejection through their own race.
+	void promise.catch(() => {})
+
+	const record: FlightRecord = {
+		promise,
+		controller,
+		timeoutSignal,
+		waiters: 0,
+		get pending() {
+			return !settled
+		},
+	}
+
+	// The settle reactions above can only run after this function's current synchronous run --
+	// including the set() below -- completes, since that's the earliest a promise reaction can
+	// fire. So the entry is always registered before any settle handler can delete it, even if
+	// fetchModelsFromProvider() settles immediately.
+	inFlightRefresh.set(cacheKey, record)
+
+	return joinFlight(cacheKey, record, options.signal)
+}
+
+/**
+ * Attach one waiter to an existing flight. Each waiter counts itself in record.waiters and
+ * carries a view signal that fires at the earlier of the flight's bound or its own caller's
+ * abort -- the view governs only this waiter's wait, never the network. When the last waiter
+ * detaches while the fetch is still pending, the flight is aborted and released synchronously,
+ * so a caller arriving afterwards provably starts a fresh flight.
+ */
+function joinFlight(cacheKey: string, record: FlightRecord, callerSignal?: AbortSignal): Promise<ModelRecord> {
+	throwIfAborted(callerSignal)
+
+	record.waiters++
+	let detached = false
+	let removeViewListener: (() => void) | undefined
+
+	const detach = () => {
+		if (detached) {
+			return
+		}
+		detached = true
+		removeViewListener?.()
+		record.waiters--
+		if (record.waiters === 0 && record.pending) {
+			// Synchronous release: abort the shared fetch and drop the entry before any further
+			// await point runs, so a late joiner never sees a doomed flight.
+			record.controller.abort()
+			if (inFlightRefresh.get(cacheKey) === record) {
+				inFlightRefresh.delete(cacheKey)
+			}
+		}
+	}
+
+	// Per-waiter abort view: fires at the earlier of the flight's timeout bound and this
+	// caller's own signal. It governs only this waiter's detach — never the network — so one
+	// waiter aborting cannot cancel the shared fetch or its siblings' waits.
+	const view = mergeAbortSignals(record.timeoutSignal, callerSignal)
+
+	const cancelled = new Promise<never>((_resolve, reject) => {
+		const rejectAbort = () => {
+			// Detach inside the abort event itself, not in a later microtask: the last waiter's
+			// abort must release the entry synchronously, so a caller issuing a new fetch right
+			// after abort() provably observes a fresh flight, not the doomed one.
+			detach()
+			const abortError = new Error("This operation was aborted")
+			abortError.name = "AbortError"
+			reject(abortError)
+		}
+		if (view.aborted) {
+			rejectAbort()
+			return
+		}
+		view.addEventListener("abort", rejectAbort, { once: true })
+		removeViewListener = () => view.removeEventListener("abort", rejectAbort)
 	})
 
-	// The finally cleanup above can only run after this function's current synchronous run --
-	// including the set() below -- completes, since that's the earliest a promise reaction can
-	// fire. So the entry is always registered before finally can delete it, even if
-	// fetchModelsFromProvider() resolves immediately.
-	inFlightRefresh.set(cacheKey, fetchPromise)
+	// The settle hook detaches this waiter once the flight settles, so an abort arriving after
+	// settlement is inert and no listener survives the flight.
+	void record.promise.then(detach, detach)
 
-	return fetchPromise
+	return Promise.race([record.promise, cancelled]).finally(detach)
 }
 
 /**
@@ -402,9 +556,13 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 	// call racing a getModels() cache-miss for the same key converges on one provider fetch --
 	// but each function still applies its own success/failure contract on the result below
 	// rather than sharing that promise's resolution/rejection wholesale.
-	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
-
+	// The fetch call is created inside the try: a pre-aborted caller signal makes dedupedFetch()
+	// throw synchronously, and refreshModels() must still degrade to cache/{} rather than reject.
 	try {
+		const sharedFetch = shouldSkipCache
+			? fetchModelsFromProvider(options, options.signal)
+			: dedupedFetch(cacheKey, options)
+
 		// Force fresh API fetch - skip getModelsFromCache() check
 		const models = await sharedFetch
 		const modelCount = Object.keys(models).length
