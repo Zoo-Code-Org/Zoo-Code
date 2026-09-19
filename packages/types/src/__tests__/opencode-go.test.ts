@@ -33,6 +33,7 @@ describe("opencode-go registry", () => {
 		"mimo-v2.5-pro",
 		"deepseek-v4-pro",
 		"deepseek-v4-flash",
+		"deepseek-v4.1-flash",
 		"omen-alpha",
 		"grok-4.5",
 	]
@@ -222,6 +223,19 @@ describe("opencode-go registry", () => {
 					inputPrice: 0.95,
 					outputPrice: 4,
 					cacheReadsPrice: 0.19,
+				},
+			},
+			{
+				id: "deepseek-v4.1-flash",
+				expected: {
+					maxTokens: 384_000,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					inputPrice: 0.3,
+					outputPrice: 1.2,
+					cacheReadsPrice: 0.006,
 				},
 			},
 			{
@@ -444,6 +458,7 @@ describe("opencode-go registry", () => {
 		it("DeepSeek entries expose supportsMaxTokens so the max-output slider is available", () => {
 			expect(getOpencodeGoModelInfo("deepseek-v4-pro")?.supportsMaxTokens).toBe(true)
 			expect(getOpencodeGoModelInfo("deepseek-v4-flash")?.supportsMaxTokens).toBe(true)
+			expect(getOpencodeGoModelInfo("deepseek-v4.1-flash")?.supportsMaxTokens).toBe(true)
 		})
 	})
 
