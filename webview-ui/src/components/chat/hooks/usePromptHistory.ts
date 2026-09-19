@@ -1,5 +1,5 @@
 import { ClineMessage, HistoryItem } from "@roo-code/types"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 interface UsePromptHistoryProps {
 	clineMessages: ClineMessage[] | undefined
@@ -38,6 +38,8 @@ export const usePromptHistory = ({
 	const [historyIndex, setHistoryIndex] = useState(-1)
 	const [tempInput, setTempInput] = useState("")
 	const [promptHistory, setPromptHistory] = useState<string[]>([])
+	const historySource = clineMessages?.length ? "conversation" : "task"
+	const previousHistorySource = useRef(historySource)
 
 	// Initialize prompt history with hybrid approach: conversation messages if in task, otherwise task history
 	const filteredPromptHistory = useMemo(() => {
@@ -71,11 +73,21 @@ export const usePromptHistory = ({
 
 	// Update prompt history when filtered history changes and reset navigation
 	useEffect(() => {
-		setPromptHistory(filteredPromptHistory)
+		const historyChanged =
+			promptHistory.length !== filteredPromptHistory.length ||
+			promptHistory.some((prompt, index) => prompt !== filteredPromptHistory[index])
+		const historySourceChanged = previousHistorySource.current !== historySource
+		previousHistorySource.current = historySource
+
+		if (!historyChanged && !historySourceChanged) return
+
+		if (historyChanged) {
+			setPromptHistory(filteredPromptHistory)
+		}
 		// Reset navigation state when switching between history sources
 		setHistoryIndex(-1)
 		setTempInput("")
-	}, [filteredPromptHistory])
+	}, [filteredPromptHistory, historySource, promptHistory])
 
 	// Reset history navigation when user types (but not when we're setting it programmatically)
 	const resetOnInputChange = useCallback(() => {

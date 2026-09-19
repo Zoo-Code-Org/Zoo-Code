@@ -583,6 +583,38 @@ describe("ChatTextArea", () => {
 				expect(setInputValue).toHaveBeenCalledWith("Current input")
 			})
 
+			it("should preserve current input while assistant messages stream", () => {
+				const setInputValue = vi.fn()
+				const { container, rerender } = render(
+					<ChatTextArea {...defaultProps} setInputValue={setInputValue} inputValue="Current input" />,
+				)
+				const textarea = container.querySelector("textarea")!
+
+				textarea.setSelectionRange(0, 0)
+				fireEvent.keyDown(textarea, { key: "ArrowUp" })
+				expect(setInputValue).toHaveBeenCalledWith("Third prompt")
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+					filePaths: [],
+					openedTabs: [],
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+					},
+					taskHistory: [],
+					clineMessages: [
+						...mockClineMessages,
+						{ type: "say", say: "text", text: "Streaming assistant output", ts: 4000 },
+					],
+					cwd: "/test/workspace",
+				})
+				setInputValue.mockClear()
+				rerender(<ChatTextArea {...defaultProps} setInputValue={setInputValue} inputValue="Third prompt" />)
+				textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+
+				fireEvent.keyDown(textarea, { key: "ArrowDown" })
+
+				expect(setInputValue).toHaveBeenCalledWith("Current input")
+			})
+
 			it("should reset history navigation when user types", () => {
 				const setInputValue = vi.fn()
 				const { container } = render(
