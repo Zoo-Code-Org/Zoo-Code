@@ -221,7 +221,7 @@ describe("ExecaTerminalProcess", () => {
 			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue("C:\\Windows\\System32\\pwsh.exe")
 			await terminalProcess.run("echo test")
 			expect(getShellSpy).toHaveBeenCalledTimes(1)
-			expect(capturedShellOption().shell).toContain("pwsh.exe")
+			expect(capturedShellOption().shell).toBe("C:\\Windows\\System32\\pwsh.exe")
 		})
 
 		it("uses PowerShell when VS Code resolves PowerShell and execaShellPath is unset", async () => {
