@@ -35,7 +35,7 @@ const search_replace = {
 				old_string: {
 					type: "string",
 					description:
-						"The text to replace (must be unique within the file, and must match the file contents exactly, including all whitespace and indentation)",
+						"The text to replace (must be unique within the file, and must match the file contents exactly, including all whitespace and indentation). Do NOT include line-number prefixes (e.g. `137 | `) from `read_file` output — the file itself does not contain them.",
 				},
 				new_string: {
 					type: "string",
