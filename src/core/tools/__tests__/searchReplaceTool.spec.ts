@@ -59,6 +59,14 @@ vi.mock("../../diff/stats", () => ({
 	computeDiffStats: vi.fn(() => ({ additions: 1, deletions: 1 })),
 }))
 
+vi.mock("../../checkpoints", () => ({
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("../../auto-approval", () => ({
+	checkAutoApproval: vi.fn().mockResolvedValue({ decision: "ask" }),
+}))
+
 vi.mock("vscode", () => ({
 	window: {
 		showWarningMessage: vi.fn().mockResolvedValue(undefined),
