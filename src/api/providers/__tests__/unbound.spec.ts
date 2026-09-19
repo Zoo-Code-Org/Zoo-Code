@@ -1,9 +1,20 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import type { Mock } from "vitest"
+
+import axios from "axios"
+
 import { UnboundHandler } from "../unbound"
+import { getUnboundModels } from "../fetchers/unbound"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+
+vi.mock("axios")
+
+const mockedAxios = axios as typeof axios & {
+	get: Mock
+}
 
 vi.mock("openai", () => {
 	const createMock = vi.fn()
@@ -201,4 +212,21 @@ describe("UnboundHandler", () => {
 			}),
 		)
 	})
+})
+
+describe("getUnboundModels", () => {
+	beforeEach(() => {
+		clearAllMocks()
+	})
+
+	it.each([{ data: null }, { data: { error: "Invalid request" } }])(
+		"returns no models when the API response is not an array: %j",
+		async (mockResponse) => {
+			mockedAxios.get.mockResolvedValue(mockResponse)
+
+			const models = await getUnboundModels("test-key")
+
+			expect(models).toEqual({})
+		},
+	)
 })
