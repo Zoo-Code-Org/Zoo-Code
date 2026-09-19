@@ -52,15 +52,21 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 		task.consecutiveMistakeCount = 0
 
 		try {
-			const context = task.providerRef.deref()?.context
-			if (!context) {
+			const provider = task.providerRef.deref()
+			const context = provider?.context
+			if (!provider || !context) {
 				throw new Error("Extension context is not available.")
 			}
 
-			const manager = CodeIndexManagerRegistry.getOrCreate(context)
+			const manager = CodeIndexManagerRegistry.getOrCreate(context, workspacePath)
 
 			if (!manager) {
 				throw new Error("CodeIndexManager is not available.")
+			}
+
+			// Task paths outside the activation workspace list may have a newly created manager.
+			if (!manager.isInitialized) {
+				await manager.initialize(provider.contextProxy)
 			}
 
 			if (!manager.isFeatureEnabled) {
