@@ -38,6 +38,11 @@ export interface ExtensionMessage {
 		| "workspaceUpdated"
 		| "invoke"
 		| "messageUpdated"
+		| "clineMessageAppended"
+		| "clineMessageUpdated"
+		| "clineMessagesSnapshotStart"
+		| "clineMessagesSnapshotChunk"
+		| "clineMessagesSnapshotEnd"
 		| "mcpServers"
 		| "enhancedPrompt"
 		| "commitSearchResults"
@@ -138,7 +143,40 @@ export interface ExtensionMessage {
 		isActive: boolean
 		path?: string
 	}>
+	/**
+	 * Task scope for dedicated transcript deltas and snapshot frames. Omitted for
+	 * the no-task scope, whose snapshot is empty with sequence 0.
+	 */
+	taskId?: string
+	/**
+	 * Originating task instance for dedicated transcript frames. Both taskId and
+	 * taskInstanceId must match receiver focus; never retag an old instance's frame.
+	 * Omitted for no-task frames and legacy consumers without instance metadata.
+	 */
+	taskInstanceId?: string
 	clineMessage?: ClineMessage
+	/**
+	 * Nonempty, ordered slice for a snapshot chunk, beginning at snapshotStartIndex.
+	 * Buffer until the matching end frame; start/end frames carry no messages.
+	 * Legacy full transcripts remain in state.clineMessages.
+	 */
+	clineMessages?: ClineMessage[]
+	/**
+	 * Nonnegative safe-integer revision scoped to a task in retained transport state.
+	 * Accepted deltas and bumping snapshots increment it; resync snapshots reuse it.
+	 * Every frame of one snapshot shares a revision. No-task snapshots use 0.
+	 * This field does not change legacy state/messageUpdated delivery semantics.
+	 */
+	clineMessagesSeq?: number
+	/** Opaque, nonempty correlation ID shared by a snapshot's start, chunks, and end. */
+	snapshotId?: string
+	/** Contiguous zero-based chunk offset; omitted on start/end frames. */
+	snapshotStartIndex?: number
+	/**
+	 * Total message count declared by start and repeated by end. Apply only when
+	 * the complete buffered count matches. Zero means start/end without chunks.
+	 */
+	snapshotTotal?: number
 	routerModels?: RouterModels
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
