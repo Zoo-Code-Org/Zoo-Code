@@ -20,6 +20,7 @@ vi.mock("fs", () => ({
 }))
 
 vi.mock("../utils/safeWriteJson", () => ({
+	lockJsonFile: vi.fn().mockResolvedValue(async () => {}),
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 
