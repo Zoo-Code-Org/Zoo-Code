@@ -78,6 +78,21 @@ const KNOWN_BAD_STATES: Array<{ name: string; state: ModelState; expected: strin
 		state: { ...initialState(), permitOwners: ["a", "b", "a"] },
 		expected: "scheduler capacity exceeded",
 	},
+	{
+		name: "duplicate-permit-owner",
+		state: { ...initialState(), children: { a: "running", b: "idle" }, permitOwners: ["a", "a"] },
+		expected: "duplicate permit owner",
+	},
+	{
+		name: "active-without-permit",
+		state: { ...initialState(), children: { a: "running", b: "idle" }, permitOwners: [] },
+		expected: "a: active without permit ownership",
+	},
+	{
+		name: "idle-child-owns-permit",
+		state: { ...initialState(), permitOwners: ["a"] },
+		expected: "a: idle child owns a permit",
+	},
 ]
 
 for (const unsafe of KNOWN_BAD_STATES) {
@@ -144,6 +159,12 @@ function transitions(state: ModelState): Transition[] {
 				action(`deliver(${child}, parent)`, "deliver", state, (next) => {
 					next.children[child] = "delivered"
 					next.deliveries.push(child)
+					// Record the parent-liveness observed at delivery time so the "result routed
+					// after parent loss" invariant is coupled to the delivery mechanism, not a flag
+					// no transition writes. The guard above keeps this false in the correct spec, so
+					// the model still passes; if a future edit drops the guard, delivery fires with
+					// !parentLive, this sets the flag, and the invariant catches the regression.
+					next.deliveryAfterParentLoss ||= !state.parentLive
 				}),
 			)
 		}
@@ -214,7 +235,13 @@ function action(name: string, kind: string, state: ModelState, update: (next: Mo
 }
 
 function canonical(state: ModelState): string {
-	return JSON.stringify({ ...state, permitOwners: [...state.permitOwners].sort() })
+	// resultWriters is built incrementally in finish(), so key insertion order varies by
+	// interleaving; sort keys so logically identical states dedupe. deliveries stays ordered
+	// (the out-of-order-results landmark depends on it).
+	const resultWriters = Object.fromEntries(
+		(Object.keys(state.resultWriters) as Child[]).sort().map((child) => [child, state.resultWriters[child]]),
+	)
+	return JSON.stringify({ ...state, permitOwners: [...state.permitOwners].sort(), resultWriters })
 }
 
 function formatViolation(violations: string[], trace: TraceStep[]): string {

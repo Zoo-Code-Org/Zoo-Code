@@ -115,7 +115,7 @@ The delegated-mode reader checker remains proxy refinement evidence: it executes
 
 #### Formal-model decision
 
-No broad tool-state checker is added in this PR. A green model would have to invent a unified owner across parser, handler singleton, webview approval, task state, message files, lifecycle records, and replay. Initial child-state persistence has no production transition to import; approval correlation lacks task/action identity; canonical call identity spans multiple embedded I/O paths. Until those owners are extracted, stable gaps and deterministic witness criteria are stronger evidence than an abstract passing model. The existing parser, lifecycle, handoff, cleanup, completion, and fan-out checkers remain explicitly local.
+No broad tool-state checker is added in this PR. A green model would have to invent a unified owner across parser, handler singleton, webview approval, task state, message files, lifecycle records, and replay. Initial child-state persistence has no production transition to import; approval correlation lacks task/action identity; canonical call identity spans multiple embedded I/O paths. Until those owners are extracted, stable gaps and deterministic witness criteria are stronger evidence than an abstract passing model. The existing parser, lifecycle, store-concurrency, handoff, cleanup, completion, and delegated-mode-reader checkers remain explicitly local, as does the separate optional fan-out checker.
 
 ### Delegation, interruption, cancellation, completion, and abandonment
 
@@ -292,8 +292,8 @@ Four workstreams can proceed concurrently after foundation decisions:
 
 | Dependency                                     | Enables                                                       |
 | ---------------------------------------------- | ------------------------------------------------------------- |
-| Disk-authoritative ownership/generation design | LIFE-GAP-001, 002, 012                                        |
-| Durable operation intent/recovery design       | LIFE-GAP-004, 005, 006, 023                                   |
+| Disk-authoritative ownership/generation design | LIFE-GAP-001, 002, 012, 020                                   |
+| Durable operation intent/recovery design       | LIFE-GAP-004, 005, 006, 021, 023                              |
 | Task-local execution-context owner             | LIFE-GAP-007 and optional future fan-out                      |
 | Request generation and terminal cleanup owner  | LIFE-GAP-010, 024, 025, 026                                   |
 | Event notification/barrier contract            | LIFE-GAP-009, 011, 027, 028                                   |
@@ -327,7 +327,7 @@ Four workstreams can proceed concurrently after foundation decisions:
 
 ## Completeness statement
 
-At the audited commit, this report covers every tracked definition and directly discoverable caller matching the lifecycle domains in scope, including tool argument assembly, validation, approval, child initialization, partial presentation, result/pending-action identity, todo rehydration, all six baseline checkers and the separate optional fan-out checker, their documented bounds/properties, primary focused suites, lifecycle E2E files, root package scripts, and CI workflow invocations. It does not claim semantic completeness for dynamic calls, generated code, dependencies, ignored files, deployment settings, or production histories. A future code change can invalidate completeness; `LIFE-GAP-016` and `LIFE-GAP-034` exist specifically to make this inventory mechanically maintainable.
+At the audited commit, this report covers every tracked definition and directly discoverable caller matching the lifecycle domains in scope, including tool argument assembly, validation, approval, child initialization, partial presentation, result/pending-action identity, todo rehydration, all seven baseline checkers and the separate optional fan-out checker, their documented bounds/properties, primary focused suites, lifecycle E2E files, root package scripts, and CI workflow invocations. It does not claim semantic completeness for dynamic calls, generated code, dependencies, ignored files, deployment settings, or production histories. A future code change can invalidate completeness; `LIFE-GAP-016` and `LIFE-GAP-034` exist specifically to make this inventory mechanically maintainable.
 
 ## Historical provenance
 
