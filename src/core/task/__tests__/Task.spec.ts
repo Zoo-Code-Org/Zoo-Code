@@ -6295,10 +6295,11 @@ describe("pushToolResultToUserContent", () => {
 
 		expect(added).toBe(true)
 		expect(task.userMessageContent).toHaveLength(3)
-		// The image must not sit between two tool_results, so it moves after
-		// the new result; other blocks keep their relative order.
-		expect(task.userMessageContent[0].type).toBe("text")
-		expect(task.userMessageContent[1]).toEqual(toolResult)
+		// Results must lead the message (Anthropic rejects other content ahead
+		// of or between tool_results), so the pre-existing text and image move
+		// after the result; blocks keep their relative order within each group.
+		expect(task.userMessageContent[0]).toEqual(toolResult)
+		expect(task.userMessageContent[1].type).toBe("text")
 		expect(task.userMessageContent[2]).toEqual(image)
 	})
 

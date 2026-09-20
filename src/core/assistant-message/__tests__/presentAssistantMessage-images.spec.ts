@@ -74,13 +74,14 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 				return false
 			}
 			mockTask.userMessageContent.push(toolResult)
-			const images = mockTask.userMessageContent.filter((block: UserContentBlock) => block.type === "image")
-			if (images.length > 0) {
-				const withoutImages = mockTask.userMessageContent.filter(
-					(block: UserContentBlock) => block.type !== "image",
+			const results = mockTask.userMessageContent.filter(
+				(block: UserContentBlock) => block.type === "tool_result",
+			)
+			if (results.length !== mockTask.userMessageContent.length) {
+				const others = mockTask.userMessageContent.filter(
+					(block: UserContentBlock) => block.type !== "tool_result",
 				)
-				withoutImages.push(...images)
-				mockTask.userMessageContent.splice(0, mockTask.userMessageContent.length, ...withoutImages)
+				mockTask.userMessageContent.splice(0, mockTask.userMessageContent.length, ...results, ...others)
 			}
 			return true
 		})
