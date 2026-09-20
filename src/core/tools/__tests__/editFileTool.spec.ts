@@ -7,6 +7,8 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
+import { checkpointSave } from "../../checkpoints"
+import { computeDiffStats } from "../../diff/stats"
 import { editFileTool } from "../EditFileTool"
 
 vi.mock("fs/promises", () => ({
@@ -56,7 +58,16 @@ vi.mock("../../../utils/path", () => ({
 
 vi.mock("../../diff/stats", () => ({
 	sanitizeUnifiedDiff: vi.fn((diff) => diff),
-	computeDiffStats: vi.fn(() => ({ additions: 1, deletions: 1 })),
+	// The real computeDiffStats returns { added, removed } (DiffStats) —
+	// keep the mock faithful to the production shape.
+	computeDiffStats: vi.fn(() => ({ added: 1, removed: 1 })),
+}))
+
+vi.mock("../../checkpoints", () => ({
+	getCheckpointService: vi.fn(),
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
+	checkpointRestore: vi.fn(),
+	checkpointDiff: vi.fn(),
 }))
 
 vi.mock("vscode", () => ({
@@ -115,7 +126,9 @@ describe("editFileTool", () => {
 				getState: vi.fn().mockResolvedValue({
 					diagnosticsEnabled: true,
 					writeDelayMs: 1000,
-					experiments: {},
+					// Pin the legacy diff-editor path explicitly: the PREVENT_FOCUS_DISRUPTION default
+					// flipped to true (L2, plan #33), so these tests must opt out.
+					experiments: { preventFocusDisruption: false } as Record<string, boolean>,
 				}),
 			}),
 		}
@@ -168,6 +181,11 @@ describe("editFileTool", () => {
 			fileContent?: string
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// (perWriteCheckpoints, auto-approval settings, ...) so the helper's
+			// providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -178,6 +196,17 @@ describe("editFileTool", () => {
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockedFsReadFile.mockResolvedValue(fileContent)
 		mockTask.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockTask.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true. Tests exercising
+				// the chat-diff branch opt in via the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
+			}),
+		})
 
 		const nativeArgs: Record<string, unknown> = {
 			file_path: testFilePath,
@@ -576,6 +605,34 @@ describe("editFileTool", () => {
 		})
 	})
 
+	describe("focus disruption default (L2: chat-diff is the default approval path)", () => {
+		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// No stored experiment value: the default (flipped to true in L2) resolves
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeEditFileTool({}, { experiments: {} })
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+		})
+
+		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// Explicit stored true: same chat-diff routing as the default.
+			// Trial addendum: threaded through the helper's experiments option.
+			await executeEditFileTool({}, { experiments: { preventFocusDisruption: true } })
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+		})
+	})
+
 	describe("partial block handling", () => {
 		it("handles partial block without errors after path stabilizes", async () => {
 			// Path stabilization requires two consecutive calls with the same path
@@ -687,6 +744,93 @@ describe("editFileTool", () => {
 		})
 	})
 
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes an existing-file edit through saveDirectly with edit kind", async () => {
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"Line 1\nModified Line 2\nLine 3",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+			expect(result).toContain("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("publishes new-file creation through saveDirectly with create kind", async () => {
+			await executeEditFileTool(
+				{ old_string: "", new_string: "New file content" },
+				{ fileExists: false, experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"New file content",
+				true,
+				true,
+				1000,
+				"create",
+			)
+			expect(mockTask.didEditFile).toBe(true)
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the unobserved edit remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error("File not read yet -- read the file, then retry.")
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("surfaces the stale-version remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("still fails a literal mismatch with the existing message before the guard runs", async () => {
+			const result = await executeEditFileTool(
+				{ old_string: "NonExistent", new_string: "Whatever" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("No match found")
+			expect(result).toContain("<error_details>")
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("CRLF normalization", () => {
 		it("preserves CRLF line endings on output", async () => {
 			const contentWithCRLF = "Line 1\r\nLine 2\r\nLine 3"
@@ -772,6 +916,109 @@ describe("editFileTool", () => {
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockAskApproval).toHaveBeenCalled()
+		})
+	})
+
+	describe("per-write checkpoints (B1)", () => {
+		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+
+		it("records one suppressed checkpoint after a successful edit (default-on)", async () => {
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: the write info threads the path, operation, and the approval
+			// diff stats into the checkpoint hook. B3a: the approval diff itself is
+			// threaded verbatim for the per-step change card.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diffStats: { additions: 1, deletions: 1 },
+				diff: "mock-diff",
+			})
+		})
+
+		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
+			// Trial addendum: thread the state through the helper (its providerRef pin
+			// would otherwise clobber this test's extension state).
+			await executeEditFileTool({}, { state: { perWriteCheckpoints: false } })
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("does not record a checkpoint when the edit fails", async () => {
+			mockTask.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeEditFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("records the checkpoint with a create operation for a new file", async () => {
+			await executeEditFileTool({ old_string: "", new_string: "New file content" }, { fileExists: false })
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 1, deletions: 1 },
+				diff: "mock-diff",
+			})
+		})
+
+		it("omits diff stats from the checkpoint write when the diff has no stats", async () => {
+			// A null approval diff produces no diffStats on the journal write.
+			// The diff itself is still threaded for the change card (B3a).
+			vi.mocked(computeDiffStats).mockReturnValueOnce(null)
+
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diff: "mock-diff",
+			})
+		})
+
+		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {
+			// B3a: when the step is auto-approved the checkpoint write carries
+			// autoApproved so checkpointSave can force the compact change card.
+			// Trial addendum: thread the auto-approval state through the helper.
+			await executeEditFileTool({}, { state: { autoApprovalEnabled: true, alwaysAllowWrite: true } })
+
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diffStats: { additions: 1, deletions: 1 },
+				diff: "mock-diff",
+				autoApproved: true,
+			})
+		})
+
+		it("awaits the edit checkpoint before execute settles", async () => {
+			type SaveResult = Awaited<ReturnType<typeof checkpointSave>>
+			let resolveSave: (value: SaveResult | PromiseLike<SaveResult>) => void = () => {}
+			const saveDeferred = new Promise<SaveResult>((resolve) => (resolveSave = resolve))
+			mockedCheckpointSave.mockImplementationOnce(() => saveDeferred)
+
+			const executePromise = executeEditFileTool({})
+
+			// execute must not settle while the checkpoint is still in flight:
+			// a later tool block would otherwise interleave with this edit's staged work.
+			let settled = false
+			void executePromise.finally(() => (settled = true))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(settled).toBe(false)
+
+			resolveSave()
+			await executePromise
+			expect(settled).toBe(true)
 		})
 	})
 })

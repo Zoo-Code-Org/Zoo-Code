@@ -167,6 +167,24 @@
 			"claudeCodeNotAuthenticated": "Musisz się zalogować, aby korzystać z Claude Code. Przejdź do Ustawień i kliknij \"Zaloguj się do Claude Code\", aby się uwierzytelnić."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} plik(ów) zmienionych w tym kroku",
+		"rollbackFile": "Cofnij ten plik",
+		"rollbackFileWarning": "Przywraca ten plik do zawartości sprzed tego kroku.",
+		"restoreLatest": "Przywróć najnowszą wersję",
+		"restoreLatestWarning": "Przywraca ten plik do najnowszej zarejestrowanej wersji.",
+		"restored": "Przywrócono najnowszą wersję",
+		"restoreFailed": "Przywracanie nie powiodło się",
+		"rollbackStep": "Cofnij krok",
+		"rollbackWarning": "Przywraca poprzednią zawartość plików tego kroku.",
+		"confirm": "Potwierdź",
+		"cancel": "Anuluj",
+		"rollingBack": "Cofanie...",
+		"rolledBack": "Cofnięto",
+		"stepRolledBack": "Krok cofnięty",
+		"rollbackFailed": "Cofnięcie nie powiodło się",
+		"openFile": "Otwórz plik: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "Punkt kontrolny",
 		"initializingWarning": "Trwa inicjalizacja punktu kontrolnego... Jeśli to trwa zbyt długo, możesz wyłączyć punkty kontrolne w <settingsLink>ustawieniach</settingsLink> i uruchomić zadanie ponownie.",

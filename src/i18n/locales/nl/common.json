@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Geen actieve taak om berichten uit te verwijderen",
+			"no_active_task_to_roll_back": "Geen actieve taak om terug te draaien",
+			"no_active_task_to_restore": "Geen actieve taak om te herstellen",
 			"invalid_timestamp_for_deletion": "Ongeldig bericht tijdstempel voor verwijdering",
 			"cannot_delete_missing_timestamp": "Kan bericht niet verwijderen: tijdstempel ontbreekt",
 			"cannot_delete_invalid_timestamp": "Kan bericht niet verwijderen: ongeldig tijdstempel",
