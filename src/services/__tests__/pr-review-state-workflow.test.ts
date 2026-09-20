@@ -2819,3 +2819,236 @@ describe("PR review-state workflow", () => {
 		})
 	})
 })
+
+describe("PR review-state workflow concurrency group (#1707)", () => {
+	// Minimal evaluator for the exact GitHub expression subset used by
+	// workflow.concurrency.group: top-level `||` chains, `&&`, loose `==`,
+	// `github.` property paths, `[0]` indexing (null parent -> null),
+	// parenthesized operands, and string/number literals. GitHub expressions
+	// use loose truthiness, so `||`/`&&` return operand values rather than
+	// booleans and missing properties evaluate to null instead of throwing.
+	interface GithubExpressionContext {
+		event_name: string
+		run_id: number
+		event: {
+			pull_request?: { number: number }
+			issue?: { number: number }
+			workflow_run?: { pull_requests: Array<{ number: number }> }
+			inputs?: { pull_request_number: number }
+		}
+	}
+
+	function splitTopLevel(expression: string, operator: "||" | "&&" | "=="): string[] {
+		const parts: string[] = []
+		let depth = 0
+		let inString = false
+		let start = 0
+		for (let index = 0; index < expression.length; index++) {
+			const char = expression[index]
+			if (char === "'") {
+				inString = !inString
+			} else if (!inString && char === "(") {
+				depth++
+			} else if (!inString && char === ")") {
+				depth--
+			} else if (!inString && depth === 0 && expression.startsWith(operator, index)) {
+				parts.push(expression.slice(start, index))
+				index += operator.length - 1
+				start = index + 1
+			}
+		}
+		parts.push(expression.slice(start))
+		return parts
+	}
+
+	function isTruthy(value: unknown): boolean {
+		return value !== null && value !== undefined && value !== false && value !== 0 && value !== ""
+	}
+
+	function looseEquals(left: unknown, right: unknown): boolean {
+		if (left === null || left === undefined || right === null || right === undefined) {
+			return (left ?? null) === (right ?? null)
+		}
+		if (typeof left === "string" && typeof right === "string") {
+			return left.toLowerCase() === right.toLowerCase()
+		}
+		return left === right
+	}
+
+	function resolvePath(path: string, github: GithubExpressionContext): unknown {
+		let value: unknown = github
+		for (const segment of path.split(".")) {
+			if (value === null || value === undefined) {
+				return null
+			}
+			const match = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(\d+)\])?$/.exec(segment)
+			if (!match) {
+				throw new Error(`Unsupported path segment: ${segment}`)
+			}
+			value = (value as Record<string, unknown>)[match[1]]
+			if (match[2] !== undefined) {
+				if (!Array.isArray(value)) {
+					return null
+				}
+				value = value[Number(match[2])] ?? null
+			}
+		}
+		return value ?? null
+	}
+
+	function evaluatePrimary(expression: string, github: GithubExpressionContext): unknown {
+		const current = expression.trim()
+		if (current.startsWith("(")) {
+			// Strip the parentheses only when the first one wraps the whole expression.
+			let depth = 0
+			for (let index = 0; index < current.length; index++) {
+				if (current[index] === "(") {
+					depth++
+				} else if (current[index] === ")") {
+					depth--
+				}
+				if (depth === 0) {
+					if (index === current.length - 1) {
+						return evaluateExpression(current.slice(1, -1), github)
+					}
+					break
+				}
+			}
+		}
+		if (current.startsWith("'") && current.endsWith("'")) {
+			return current.slice(1, -1)
+		}
+		if (/^\d+$/.test(current)) {
+			return Number(current)
+		}
+		if (current.startsWith("github.")) {
+			return resolvePath(current.slice("github.".length), github)
+		}
+		return evaluateExpression(current, github)
+	}
+
+	function evaluateComparison(expression: string, github: GithubExpressionContext): unknown {
+		const parts = splitTopLevel(expression, "==")
+		if (parts.length === 1) {
+			return evaluatePrimary(parts[0], github)
+		}
+		return looseEquals(evaluatePrimary(parts[0], github), evaluatePrimary(parts[1], github))
+	}
+
+	function evaluateAndChain(expression: string, github: GithubExpressionContext): unknown {
+		let result: unknown = true
+		for (const part of splitTopLevel(expression, "&&")) {
+			result = evaluateComparison(part, github)
+			if (!isTruthy(result)) {
+				return result
+			}
+		}
+		return result
+	}
+
+	function evaluateExpression(expression: string, github: GithubExpressionContext): unknown {
+		let result: unknown = null
+		for (const part of splitTopLevel(expression, "||")) {
+			result = evaluateAndChain(part, github)
+			if (isTruthy(result)) {
+				return result
+			}
+		}
+		return result
+	}
+
+	function concurrencyGroupFor(github: GithubExpressionContext): string {
+		const groupTemplate = workflow.concurrency.group as string
+		return groupTemplate.replace(/\$\{\{(.+?)\}\}/s, (_match, expression: string) => {
+			const value = evaluateExpression(expression, github)
+			return isTruthy(value) ? String(value) : ""
+		})
+	}
+
+	function contextFor(overrides: {
+		event_name: string
+		run_id?: number
+		event?: GithubExpressionContext["event"]
+	}): GithubExpressionContext {
+		return {
+			event_name: overrides.event_name,
+			run_id: overrides.run_id ?? 21057,
+			event: overrides.event ?? {},
+		}
+	}
+
+	it("keeps cancel-in-progress disabled", () => {
+		expect(workflow.concurrency["cancel-in-progress"]).toBe(false)
+	})
+
+	it("keys every per-PR event type for the same PR to the same group", () => {
+		const contexts = [
+			contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1664 } } }),
+			contextFor({ event_name: "pull_request_review", event: { pull_request: { number: 1664 } } }),
+			// CodeRabbit status comments arrive as issue_comment events on the PR.
+			contextFor({ event_name: "issue_comment", event: { issue: { number: 1664 } } }),
+			contextFor({ event_name: "workflow_dispatch", event: { inputs: { pull_request_number: 1664 } } }),
+			contextFor({
+				event_name: "workflow_run",
+				event: { workflow_run: { pull_requests: [{ number: 1664 }] } },
+			}),
+		]
+
+		for (const context of contexts) {
+			expect(concurrencyGroupFor(context)).toBe("label-pr-review-state-1664")
+		}
+	})
+
+	it("keys different PRs to different groups so unrelated triggers cannot starve a pending run", () => {
+		// The #1707 regression: with one shared group, a trigger for PR B superseded
+		// PR A's pending reconcile. Per-PR keys make that supersession impossible.
+		const prA = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1664 } } })
+		const prB = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1707 } } })
+
+		const groupA = concurrencyGroupFor(prA)
+		const groupB = concurrencyGroupFor(prB)
+		expect(groupA).toBe("label-pr-review-state-1664")
+		expect(groupB).toBe("label-pr-review-state-1707")
+		expect(groupB).not.toBe(groupA)
+	})
+
+	it("keys issue comments by issue number, matching the PR group for the same numeric id", () => {
+		// Issues and PRs share one GitHub number sequence, so an issue-comment run
+		// can never collide with a different PR's group.
+		const issueComment = contextFor({ event_name: "issue_comment", event: { issue: { number: 1707 } } })
+		const prEvent = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1707 } } })
+
+		expect(concurrencyGroupFor(issueComment)).toBe(concurrencyGroupFor(prEvent))
+	})
+
+	it("falls back to unique per-run groups for workflow runs without an associated PR", () => {
+		// Fork workflow_run events leave pull_requests empty, as do branch runs with
+		// no open PR. They must never be superseded by (or supersede) another run.
+		const forkRunA = contextFor({
+			event_name: "workflow_run",
+			run_id: 35477088534,
+			event: { workflow_run: { pull_requests: [] } },
+		})
+		const forkRunB = contextFor({
+			event_name: "workflow_run",
+			run_id: 35477090001,
+			event: { workflow_run: { pull_requests: [] } },
+		})
+
+		const groupA = concurrencyGroupFor(forkRunA)
+		const groupB = concurrencyGroupFor(forkRunB)
+		expect(groupA).toBe("label-pr-review-state-35477088534")
+		expect(groupB).toBe("label-pr-review-state-35477090001")
+		expect(groupA).not.toBe(groupB)
+		expect(groupA).not.toBe("label-pr-review-state-1664")
+		expect(groupB).not.toBe("label-pr-review-state-1664")
+	})
+
+	it("shares a single sweep group for the hourly schedule and pushes to main", () => {
+		const scheduled = contextFor({ event_name: "schedule" })
+		const push = contextFor({ event_name: "push" })
+
+		expect(concurrencyGroupFor(scheduled)).toBe("label-pr-review-state-sweep")
+		expect(concurrencyGroupFor(push)).toBe("label-pr-review-state-sweep")
+	})
+})

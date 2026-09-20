@@ -45,8 +45,24 @@ permissions:
     checks: read
     statuses: write
 
+# One concurrency group per PR so bursts of activity on unrelated PRs cannot
+# starve an individual PR's reconciliation (issue #1707). GitHub keeps only the
+# newest pending run per group; keyed per PR that becomes freshest-state-wins
+# within a PR. Issue/PR numbers share one GitHub sequence, so issue-comment runs
+# can never collide with a different PR's group. Sweep triggers (hourly
+# schedule, pushes to main) share a single group, and events that cannot be
+# tied to a PR (fork workflow_run without backfilled pull_requests) fall back
+# to a unique per-run group so they are never superseded.
 concurrency:
-    group: label-pr-review-state
+    group: >-
+        label-pr-review-state-${{
+          github.event.pull_request.number ||
+          github.event.issue.number ||
+          github.event.workflow_run.pull_requests[0].number ||
+          github.event.inputs.pull_request_number ||
+          ((github.event_name == 'schedule' || github.event_name == 'push') && 'sweep') ||
+          github.run_id
+        }}
     cancel-in-progress: false
 
 jobs:
