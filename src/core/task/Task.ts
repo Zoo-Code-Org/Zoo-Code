@@ -2006,6 +2006,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.processQueuedMessages()
 	}
 
+	/**
+	 * Returns the index of a stranded in-flight partial "say" snapshot of the
+	 * same type whose text is a prefix (or extension) of `text`, or -1 if none
+	 * exists.
+	 *
+	 * A partial stream can be interrupted by other messages (tool use, api_req,
+	 * ...) being appended while it is in flight, which strands its partial
+	 * snapshot before the stream resumes or completes. Appending a fresh message
+	 * in that case would persist — and the webview would render — the same
+	 * content twice, so callers merge into the stranded snapshot instead.
+	 */
+	private findStalePartialSaySnapshotIndex(type: ClineSay, text: string | undefined): number {
+		if (typeof text !== "string") {
+			return -1
+		}
+		return findLastIndex(
+			this.clineMessages,
+			(m) =>
+				m.partial === true &&
+				m.type === "say" &&
+				m.say === type &&
+				typeof m.text === "string" &&
+				(text.startsWith(m.text) || m.text.startsWith(text)),
+		)
+	}
+
 	async say(
 		type: ClineSay,
 		text?: string,
@@ -2045,22 +2071,38 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					})
 				} else {
 					// This is a new partial message, so add it with partial state.
-					const sayTs = Date.now()
+					const staleSnapshotIndex = this.findStalePartialSaySnapshotIndex(type, text)
 
-					if (!options.isNonInteractive) {
-						this.lastMessageTs = sayTs
+					if (staleSnapshotIndex !== -1) {
+						// The in-flight partial snapshot of this stream was stranded
+						// by an intervening message; keep streaming into it instead of
+						// starting a duplicate entry that would render twice.
+						const staleSnapshot = this.clineMessages[staleSnapshotIndex]
+						staleSnapshot.text = text
+						staleSnapshot.images = images
+						staleSnapshot.partial = partial
+						staleSnapshot.progressStatus = progressStatus
+						this.updateClineMessage(staleSnapshot).catch((error) => {
+							console.error("[Task#say] updateClineMessage failed:", error)
+						})
+					} else {
+						const sayTs = Date.now()
+
+						if (!options.isNonInteractive) {
+							this.lastMessageTs = sayTs
+						}
+
+						await this.addToClineMessages({
+							ts: sayTs,
+							type: "say",
+							say: type,
+							text,
+							images,
+							partial,
+							contextCondense,
+							contextTruncation,
+						})
 					}
-
-					await this.addToClineMessages({
-						ts: sayTs,
-						type: "say",
-						say: type,
-						text,
-						images,
-						partial,
-						contextCondense,
-						contextTruncation,
-					})
 				}
 			} else {
 				// New now have a complete version of a previously partial message.
@@ -2088,21 +2130,47 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					})
 				} else {
 					// This is a new and complete message, so add it like normal.
-					const sayTs = Date.now()
+					const staleSnapshotIndex = this.findStalePartialSaySnapshotIndex(type, text)
 
-					if (!options.isNonInteractive) {
-						this.lastMessageTs = sayTs
+					if (staleSnapshotIndex !== -1) {
+						// The complete version of a stranded partial snapshot: replace
+						// it in place so the frozen snapshot is not persisted (and
+						// rendered) as a duplicate.
+						const staleSnapshot = this.clineMessages[staleSnapshotIndex]
+
+						if (!options.isNonInteractive) {
+							this.lastMessageTs = staleSnapshot.ts
+						}
+
+						staleSnapshot.text = text
+						staleSnapshot.images = images
+						staleSnapshot.partial = false
+						staleSnapshot.progressStatus = progressStatus
+
+						// Instead of streaming partialMessage events, we do a save
+						// and post like normal to persist to disk.
+						await this.saveClineMessages()
+
+						this.updateClineMessage(staleSnapshot).catch((error) => {
+							console.error("[Task#say] updateClineMessage failed:", error)
+						})
+					} else {
+						const sayTs = Date.now()
+
+						if (!options.isNonInteractive) {
+							this.lastMessageTs = sayTs
+						}
+
+						await this.addToClineMessages({
+							ts: sayTs,
+							type: "say",
+							say: type,
+							text,
+							images,
+							contextCondense,
+							contextTruncation,
+						})
 					}
-
-					await this.addToClineMessages({
-						ts: sayTs,
-						type: "say",
-						say: type,
-						text,
-						images,
-						contextCondense,
-						contextTruncation,
-					})
 				}
 			}
 		} else {
