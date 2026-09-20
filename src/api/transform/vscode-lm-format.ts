@@ -38,11 +38,25 @@ function asObjectSafe(value: unknown): object {
  * encoded as valid UTF-8"). Valid surrogate pairs are matched by the lookahead/lookbehind and left
  * untouched. The regex intentionally omits the `u` flag so it operates on UTF-16 code units.
  */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
 export function sanitizeSurrogates(text: string): string {
 	if (!text) {
 		return text
 	}
-	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD")
+	return text.replace(LONE_SURROGATE, "\uFFFD")
+}
+
+/**
+ * Sanitizes a tool call / tool result identifier without losing its distinctness.
+ *
+ * Plain {@link sanitizeSurrogates} maps every lone surrogate to the same U+FFFD, so ids differing
+ * only in that surrogate collapse into one; VS Code matches results to calls by `callId`, so the
+ * collision misroutes distinct tool calls. Appending the original code unit keeps the mapping
+ * injective, and being a pure function of the input it keeps a call and its result paired.
+ */
+export function sanitizeIdentifierSurrogates(identifier: string): string {
+	return identifier.replace(LONE_SURROGATE, (unit) => `\uFFFD${unit.charCodeAt(0).toString(16).toUpperCase()}`)
 }
 
 /**
@@ -129,7 +143,7 @@ export function convertToVsCodeLmMessages(
 									}) ?? [new vscode.LanguageModelTextPart("")])
 
 						return new vscode.LanguageModelToolResultPart(
-							sanitizeSurrogates(toolMessage.tool_use_id),
+							sanitizeIdentifierSurrogates(toolMessage.tool_use_id),
 							toolContentParts,
 						)
 					}),
@@ -187,7 +201,7 @@ export function convertToVsCodeLmMessages(
 						(toolMessage) =>
 							new vscode.LanguageModelToolCallPart(
 								// Deterministic, so a call id and its paired tool_use_id stay equal after sanitizing.
-								sanitizeSurrogates(toolMessage.id),
+								sanitizeIdentifierSurrogates(toolMessage.id),
 								sanitizeSurrogates(toolMessage.name),
 								sanitizeSurrogatesDeep(asObjectSafe(toolMessage.input)) as object,
 							),

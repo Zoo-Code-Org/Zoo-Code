@@ -628,7 +628,9 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 	// U+1F600 GRINNING FACE as an explicit, well-formed surrogate pair.
 	const VALID_PAIR = String.fromCharCode(0xd83d, 0xde00)
 
-	const codeUnits = (value: string): number[] => Array.from(value, (char) => char.charCodeAt(0))
+	// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+	const codeUnits = (value: string): number[] =>
+		Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
 
 	const expectNoLoneSurrogate = (value: string) => {
 		const surrogates = codeUnits(value).filter((unit) => unit >= 0xd800 && unit <= 0xdfff)
@@ -653,7 +655,7 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		const result = convertToVsCodeLmMessages(messages)
 		const toolCall = (result[0].content as unknown as MockLanguageModelToolCallPart[])[0]
 
-		expect(toolCall.callId).toBe("call\uFFFD1")
+		expect(toolCall.callId).toBe("call\uFFFDD8001")
 		expect(toolCall.name).toBe("tool\uFFFDx")
 		expect(codeUnits(toolCall.callId)).toContain(0xfffd)
 		expect(codeUnits(toolCall.name)).toContain(0xfffd)
@@ -678,7 +680,7 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		const result = convertToVsCodeLmMessages(messages)
 		const toolResult = (result[0].content as unknown as MockLanguageModelToolResultPart[])[0]
 
-		expect(toolResult.callId).toBe("result\uFFFD9")
+		expect(toolResult.callId).toBe("result\uFFFDD8009")
 		expect(codeUnits(toolResult.callId)).toContain(0xfffd)
 		expectNoLoneSurrogate(toolResult.callId)
 	})
@@ -720,5 +722,100 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		expect(codeUnits(toolCall.callId)).toEqual(codeUnits(pairedId))
 		expect(codeUnits(toolCall.name)).toEqual(codeUnits(`tool-${VALID_PAIR}`))
 		expect(codeUnits(toolCall.callId)).not.toContain(0xfffd)
+	})
+
+	it("keeps ids differing only in their lone surrogate distinct", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [
+					{ type: "tool_use", id: `call${LONE_HIGH}`, name: "tool", input: {} },
+					{ type: "tool_use", id: `call${String.fromCharCode(0xd801)}`, name: "tool", input: {} },
+					{ type: "tool_use", id: `call${LONE_LOW}`, name: "tool", input: {} },
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const calls = result[0].content as unknown as MockLanguageModelToolCallPart[]
+		const ids = calls.map((call) => call.callId)
+
+		expect(new Set(ids).size).toBe(3)
+		for (const id of ids) {
+			expectNoLoneSurrogate(id)
+			expect(codeUnits(id)).toContain(0xfffd)
+		}
+	})
+
+	it("keeps a call and its result paired when both ids carry the same lone surrogate", () => {
+		const sharedId = `dup${LONE_LOW}id`
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: sharedId, name: "tool", input: {} }],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: sharedId, content: [{ type: "text", text: "ok" }] }],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const callId = (result[0].content as unknown as MockLanguageModelToolCallPart[])[0].callId
+		const resultId = (result[1].content as unknown as MockLanguageModelToolResultPart[])[0].callId
+
+		expect(codeUnits(callId)).toEqual(codeUnits(resultId))
+		expectNoLoneSurrogate(callId)
+		expect(codeUnits(callId)).toContain(0xfffd)
+	})
+
+	it("keeps a result id distinct from another result differing only by its lone surrogate", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: `r${LONE_HIGH}`, content: [{ type: "text", text: "a" }] },
+					{ type: "tool_result", tool_use_id: `r${LONE_LOW}`, content: [{ type: "text", text: "b" }] },
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const results = result[0].content as unknown as MockLanguageModelToolResultPart[]
+
+		expect(results[0].callId).not.toBe(results[1].callId)
+		expectNoLoneSurrogate(results[0].callId)
+		expectNoLoneSurrogate(results[1].callId)
+	})
+
+	it("leaves a valid surrogate pair in a tool_result id untouched", () => {
+		const pairedId = `res-${VALID_PAIR}-ok`
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: pairedId, content: [{ type: "text", text: "ok" }] }],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const toolResult = (result[0].content as unknown as MockLanguageModelToolResultPart[])[0]
+
+		expect(codeUnits(toolResult.callId)).toEqual(codeUnits(pairedId))
+		expect(codeUnits(toolResult.callId)).not.toContain(0xfffd)
+	})
+
+	it("leaves an id with no surrogates byte-identical", () => {
+		const plainId = "toolu_01ABCDEF"
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: plainId, name: "tool", input: {} }],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const toolCall = (result[0].content as unknown as MockLanguageModelToolCallPart[])[0]
+
+		expect(toolCall.callId).toBe(plainId)
 	})
 })
