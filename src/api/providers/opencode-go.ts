@@ -126,6 +126,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
+				// completePrompt has no taskId metadata, so the per-handler
+				// session id provides operator-side session affinity here;
+				// streaming requests override it with taskId when available.
+				"x-opencode-session": this.sessionId,
 			},
 		})
 	}
@@ -708,23 +712,20 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		if (format === "anthropic") {
 			try {
-				const message = await this.anthropicClient.messages.create(
-					{
-						model: modelId,
-						// Honour the same includeMaxTokens/modelMaxTokens override
-						// logic as the streaming path so non-streaming completions
-						// respect the user's max-output slider instead of always
-						// falling back to the model default.
-						max_tokens:
-							this.options.includeMaxTokens === true
-								? this.options.modelMaxTokens || maxTokens || 16_384
-								: (maxTokens ?? 16_384),
-						temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
-						messages: [{ role: "user", content: prompt }],
-						stream: false,
-					},
-					{ headers: { "x-opencode-session": this.sessionId } },
-				)
+				const message = await this.anthropicClient.messages.create({
+					model: modelId,
+					// Honour the same includeMaxTokens/modelMaxTokens override
+					// logic as the streaming path so non-streaming completions
+					// respect the user's max-output slider instead of always
+					// falling back to the model default.
+					max_tokens:
+						this.options.includeMaxTokens === true
+							? this.options.modelMaxTokens || maxTokens || 16_384
+							: (maxTokens ?? 16_384),
+					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				})
 
 				const content = message.content.find(({ type }) => type === "text")
 				return content?.type === "text" ? content.text : ""

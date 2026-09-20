@@ -637,7 +637,19 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.max_tokens).toBe(2048)
 		})
 
-		it("completePrompt sends the per-instance session ID to the Anthropic endpoint", async () => {
+		it("completePrompt falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, includeMaxTokens: true })
+			await handler.completePrompt("ping")
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
+			expect(callArgs.max_tokens).toBe(65_536)
+		})
+
+		it("completePrompt sends the per-instance session ID via the Anthropic client default headers", async () => {
 			mockAnthropicCreate.mockResolvedValue({
 				content: [{ type: "text", text: "ok" }],
 			})
@@ -645,9 +657,15 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			await handler.completePrompt("ping")
 
-			expect(mockAnthropicCreate.mock.calls[0][1]?.headers).toMatchObject({
-				"x-opencode-session": expect.any(String),
-			})
+			// completePrompt passes no per-request options; the session header
+			// is a default header on the Anthropic client (streaming overrides
+			// it with taskId when available).
+			expect(mockAnthropicCreate.mock.calls[0][1]).toBeUndefined()
+			expect(Anthropic).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultHeaders: expect.objectContaining({ "x-opencode-session": expect.any(String) }),
+				}),
+			)
 		})
 
 		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
