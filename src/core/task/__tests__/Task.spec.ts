@@ -5814,7 +5814,7 @@ describe("Cline", () => {
 			expect(reasoningMessages[1].text).toBe("Another unrelated reasoning")
 		})
 
-		it("appends a complete message when only a completed same-type message exists", async () => {
+		it("appends a complete message when only a completed same-type message exists, even with prefix-related text", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -5823,14 +5823,44 @@ describe("Cline", () => {
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
 
-			// A finalized reasoning message is not a partial snapshot, so a new
-			// complete reasoning write is a distinct message.
+			// A finalized reasoning message is not a partial snapshot — the
+			// partial===true boundary must hold even when the new text extends
+			// the old one, so both remain distinct messages.
 			await task.say("reasoning", "First reasoning block.", undefined, false)
-			await task.say("reasoning", "Second reasoning block.", undefined, false)
+			await task.say("reasoning", "First reasoning block. Second reasoning block.", undefined, false)
 
 			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
 			expect(reasoningMessages).toHaveLength(2)
+			expect(reasoningMessages[0].text).toBe("First reasoning block.")
+			expect(reasoningMessages[1].text).toBe("First reasoning block. Second reasoning block.")
 			expect(reasoningMessages.every((m) => m.partial === undefined)).toBe(true)
+		})
+
+		it("does not replace a stranded partial snapshot when the new text belongs to a different say value", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// Stranded reasoning snapshot…
+			await task.say("reasoning", "Shared prefix text", undefined, true)
+			// …followed by a completion_result whose text happens to extend the
+			// same prefix. Different say value ⇒ no merge; the partial snapshot
+			// stays untouched.
+			await task.say("completion_result", "Shared prefix text, continued", undefined, false)
+
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(1)
+			expect(reasoningMessages[0].partial).toBe(true)
+			expect(reasoningMessages[0].text).toBe("Shared prefix text")
+			const completionMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "completion_result",
+			)
+			expect(completionMessages).toHaveLength(1)
+			expect(completionMessages[0].text).toBe("Shared prefix text, continued")
 		})
 	})
 })
