@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url"
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/code-qa.yml"), "utf8")
 const extensionTurbo = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "src/turbo.json"), "utf8"))
+const coreTurbo = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "packages/core/turbo.json"), "utf8"))
 
 const workflowStep = (name) => {
 	const match = workflow.match(new RegExp(`- name: ${name}\\n(?<body>(?:\\s{14,}.*\\n?)*)`))
@@ -40,15 +41,37 @@ describe("platform unit-test workflow", () => {
 			run: 'pnpm turbo run test:api test:core test:services test:misc test:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only',
 		})
 
-		for (const [stepName, command] of [
-			["Run non-extension package coverage", 'test:coverage --filter="!@roo-code/core" --filter="!zoo-code"'],
-			["Run core unit coverage", 'test:coverage:unit --filter="@roo-code/core"'],
-			["Run core integration coverage", 'test:coverage:integration --filter="@roo-code/core"'],
+		for (const [coverageStepName, plainStepName, coverageCommand, plainCommand] of [
+			[
+				"Run non-extension package coverage",
+				"Run non-extension package tests",
+				'test:coverage --filter="!@roo-code/core" --filter="!zoo-code"',
+				'test --filter="!@roo-code/core" --filter="!zoo-code"',
+			],
+			[
+				"Run core unit coverage",
+				"Run core unit tests",
+				'test:coverage:unit --filter="@roo-code/core"',
+				'test:unit --filter="@roo-code/core"',
+			],
+			[
+				"Run core integration coverage",
+				"Run core integration tests",
+				'test:coverage:integration --filter="@roo-code/core"',
+				'test:integration --filter="@roo-code/core"',
+			],
 		]) {
-			const body = workflowStep(stepName)
-			assert.ok(!body.includes("if:"), `${stepName} must retain its cache-compatible task on both platforms`)
-			assert.ok(body.includes(command), `missing command in step: ${stepName}`)
+			const coverageStep = parseWorkflowStep(coverageStepName)
+			assert.equal(coverageStep.if, "matrix.collect-coverage")
+			assert.ok(coverageStep.run.includes(coverageCommand), `missing command in step: ${coverageStepName}`)
+
+			const plainStep = parseWorkflowStep(plainStepName)
+			assert.equal(plainStep.if, "${{ !matrix.collect-coverage }}")
+			assert.ok(plainStep.run.includes(plainCommand), `missing command in step: ${plainStepName}`)
+			assert.ok(!plainStep.run.includes("--coverage"), `${plainStepName} must not collect coverage on Windows`)
 		}
+
+		assert.ok(!workflowStep("Run extension dist smoke test").includes("if:"))
 	})
 
 	it("does not run coverage verification or uploads on Windows", () => {
@@ -75,5 +98,21 @@ describe("platform unit-test workflow", () => {
 			assert.deepEqual(plainTask.dependsOn, coverageTask.dependsOn)
 			assert.deepEqual(plainTask.inputs, coverageTask.inputs)
 		}
+	})
+
+	it("keeps plain core tasks aligned with coverage cache boundaries", () => {
+		for (const lane of ["unit", "integration"]) {
+			const plainTask = coreTurbo.tasks[`test:${lane}`]
+			const coverageTask = coreTurbo.tasks[`test:coverage:${lane}`]
+
+			assert.deepEqual(plainTask.dependsOn, coverageTask.dependsOn)
+			assert.deepEqual(plainTask.inputs, coverageTask.inputs)
+		}
+	})
+
+	it("caps Windows CI extension lanes at two workers per lane to fill the runner vCPUs", () => {
+		const config = fs.readFileSync(path.join(repositoryRoot, "src/vitest.config.ts"), "utf8")
+
+		assert.match(config, /maxWorkers: isWindowsCI \? 2 : undefined/)
 	})
 })

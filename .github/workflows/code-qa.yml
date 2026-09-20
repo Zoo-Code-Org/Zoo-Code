@@ -156,8 +156,15 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
                       ${{ runner.os }}-turbo-
+            # Windows never uploads coverage, so Windows runs the same test
+            # suites through the uninstrumented Turbo tasks. Ubuntu stays the
+            # authoritative coverage lane.
             - name: Run non-extension package coverage
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
+            - name: Run non-extension package tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test --filter="!@roo-code/core" --filter="!zoo-code" --log-order grouped --output-logs new-only
             - name: Run extension coverage lanes
               if: matrix.collect-coverage
               run: pnpm turbo run test:coverage:api test:coverage:core test:coverage:services test:coverage:misc test:coverage:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only
@@ -170,9 +177,17 @@ jobs:
             - name: Run extension dist smoke test
               run: pnpm turbo run test:dist --filter="zoo-code" --log-order grouped --output-logs new-only
             - name: Run core unit coverage
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core unit tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Run core integration coverage
+              if: matrix.collect-coverage
               run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core integration tests
+              if: ${{ !matrix.collect-coverage }}
+              run: pnpm turbo run test:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
             - name: Verify extension coverage reports
               if: matrix.collect-coverage
               run: |
