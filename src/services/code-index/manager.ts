@@ -34,7 +34,7 @@ export class CodeIndexManager {
 	private readonly _folderUri: vscode.Uri
 	private readonly context: vscode.ExtensionContext
 
-	/** @internal — construct only via {@link CodeIndexManagerRegistry} */
+	/** @internal — construct only via CodeIndexWorkspaceScope */
 	public constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this.workspacePath = workspacePath
 		this._folderUri = folderUri

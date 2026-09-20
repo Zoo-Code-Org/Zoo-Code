@@ -1,13 +1,15 @@
 import type OpenAI from "openai"
 import { toolNamesSchema } from "@roo-code/types"
 import type { CodeIndexManager } from "../../../services/code-index/manager"
-import { CodeIndexManagerRegistry } from "../../../services/code-index/code-index-manager-registry"
+import type { CodeIndexWorkspaceScope } from "../../../services/code-index/code-index-workspace-scope"
+import { codeIndexWorkspaceScopeRegistry } from "../../../services/code-index/code-index-workspace-scope-registry"
+import type { ContextProxy } from "../../config/ContextProxy"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 import type { ClineProvider } from "../../webview/ClineProvider"
 import { buildNativeToolsArrayWithRestrictions } from "../build-tools"
 
-vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
-	CodeIndexManagerRegistry: { getOrCreate: vi.fn() },
+vi.mock("../../../services/code-index/code-index-workspace-scope-registry", () => ({
+	codeIndexWorkspaceScopeRegistry: { getScope: vi.fn() },
 }))
 
 const tools = toolNamesSchema.enum
@@ -26,12 +28,12 @@ describe.each([
 	{ strategy: "filtered definitions", includeAllToolsWithRestrictions: false },
 	{ strategy: "all definitions with an allowlist", includeAllToolsWithRestrictions: true },
 ])("task readiness with $strategy", ({ includeAllToolsWithRestrictions }) => {
-	beforeEach(() => vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReset())
+	beforeEach(() => vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReset())
 
 	function makeOptions() {
 		const context = makeExtensionContext()
 		// Only context and getMcpHub are needed; constructing a webview provider is unrelated to this test.
-		const provider = { context, getMcpHub: () => undefined } as ClineProvider
+		const provider = { context, contextProxy: {} as ContextProxy, getMcpHub: () => undefined } as ClineProvider
 		return {
 			provider,
 			cwd: "/tasks/ready",
@@ -47,22 +49,34 @@ describe.each([
 		return includeAllToolsWithRestrictions ? result.allowedFunctionNames : toolNames(result.tools)
 	}
 
+	function makeScope(manager: CodeIndexManager): CodeIndexWorkspaceScope {
+		return {
+			codeIndexManager: manager,
+			initialize: vi.fn().mockResolvedValue({ requiresRestart: false }),
+		} as unknown as CodeIndexWorkspaceScope
+	}
+
 	it("uses the task context and cwd without leaking readiness between workspaces", async () => {
 		const options = makeOptions()
 		const ready = makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
 		const unready = makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: false })
-		const managers = new Map([
-			["/tasks/ready", ready],
-			["/tasks/unready", unready],
+		const scopes = new Map([
+			["/tasks/ready", makeScope(ready)],
+			["/tasks/unready", makeScope(unready)],
 		])
-		vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockImplementation((_context, cwd) => managers.get(cwd ?? ""))
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockImplementation((_context, cwd) =>
+			typeof cwd === "string" ? scopes.get(cwd) : undefined,
+		)
 
 		const first = await buildNativeToolsArrayWithRestrictions(options)
-		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenLastCalledWith(options.provider.context, "/tasks/ready")
+		expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenLastCalledWith(
+			options.provider.context,
+			"/tasks/ready",
+		)
 		expect(callable(first)).toContain(tools.codebase_search)
 
 		const other = await buildNativeToolsArrayWithRestrictions({ ...options, cwd: "/tasks/unready" })
-		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenLastCalledWith(
+		expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenLastCalledWith(
 			options.provider.context,
 			"/tasks/unready",
 		)
@@ -80,13 +94,16 @@ describe.each([
 		}
 
 		const restored = await buildNativeToolsArrayWithRestrictions(options)
-		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenLastCalledWith(options.provider.context, "/tasks/ready")
+		expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenLastCalledWith(
+			options.provider.context,
+			"/tasks/ready",
+		)
 		expect(callable(restored)).toContain(tools.codebase_search)
-		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledTimes(3)
+		expect(codeIndexWorkspaceScopeRegistry.getScope).toHaveBeenCalledTimes(3)
 	})
 
 	it("omits search without a manager while retaining ordinary read tools", async () => {
-		vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReturnValue(undefined)
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue(undefined)
 		const result = await buildNativeToolsArrayWithRestrictions({ ...makeOptions(), cwd: "/tasks/missing" })
 
 		if (includeAllToolsWithRestrictions) {
@@ -102,12 +119,24 @@ describe.each([
 		}
 	})
 
+	it("isolates initialization failure while retaining ordinary read tools", async () => {
+		const scope = makeScope(makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }))
+		vi.mocked(scope.initialize).mockRejectedValueOnce(new Error("initialization failed"))
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue(scope)
+
+		const result = await buildNativeToolsArrayWithRestrictions(makeOptions())
+		expect(callable(result)).not.toContain(tools.codebase_search)
+		for (const tool of ordinaryReadTools) {
+			expect(callable(result)).toContain(tool)
+		}
+	})
+
 	it.each(["isFeatureEnabled", "isFeatureConfigured", "isInitialized"] as const)(
 		"rereads %s on subsequent builds with the same manager",
 		async (flag) => {
 			const options = makeOptions()
 			const flags = { isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }
-			vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReturnValue(makeManager(flags))
+			vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue(makeScope(makeManager(flags)))
 
 			const initial = await buildNativeToolsArrayWithRestrictions(options)
 			expect(callable(initial)).toContain(tools.codebase_search)
@@ -133,8 +162,8 @@ describe.each([
 	)
 
 	it("does not grant read tools to a command-only mode even with a ready manager", async () => {
-		vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReturnValue(
-			makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue(
+			makeScope(makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })),
 		)
 		const result = await buildNativeToolsArrayWithRestrictions({
 			...makeOptions(),
@@ -156,8 +185,8 @@ describe.each([
 	})
 
 	it("honors disabledTools with a ready manager without disabling ordinary read tools", async () => {
-		vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReturnValue(
-			makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+		vi.mocked(codeIndexWorkspaceScopeRegistry.getScope).mockReturnValue(
+			makeScope(makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })),
 		)
 		const result = await buildNativeToolsArrayWithRestrictions({
 			...makeOptions(),

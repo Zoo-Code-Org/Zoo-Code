@@ -141,11 +141,9 @@ vi.mock("p-wait-for", () => ({
 }))
 
 // Task tests do not exercise indexing; keep workspace resolution and its cache out of this suite.
-vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
-	CodeIndexManagerRegistry: {
-		getOrCreate: vi.fn().mockReturnValue(undefined),
-		getAllInstances: vi.fn().mockReturnValue([]),
-		disposeAll: vi.fn(),
+vi.mock("../../../services/code-index/code-index-workspace-scope-registry", () => ({
+	codeIndexWorkspaceScopeRegistry: {
+		getScope: vi.fn().mockReturnValue(undefined),
 	},
 }))
 
@@ -1149,7 +1147,7 @@ describe("Cline", () => {
 			// undefined and getSystemPrompt would re-read the divergent state and
 			// re-guard the model metadata. The second argument must be the handler's
 			// own settled snapshot, not just any object.
-			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, task.api.getModel().info)
+			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, task.api.getModel().info, undefined)
 		})
 
 		it("threads the captured state snapshot into the system prompt when the context window is exceeded", async () => {
@@ -1200,7 +1198,7 @@ describe("Cline", () => {
 			// undefined and getSystemPrompt would re-read the divergent state and
 			// the model info; the second argument must be the snapshot threaded
 			// into the handler, not a fresh re-read.
-			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo)
+			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo, undefined)
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {
@@ -1289,7 +1287,7 @@ describe("Cline", () => {
 
 			// The state snapshot stays undefined for a gone provider; the model-info
 			// snapshot is still captured from the task's own api handler.
-			expect(getSystemPromptSpy).toHaveBeenCalledWith(undefined, task.api.getModel().info)
+			expect(getSystemPromptSpy).toHaveBeenCalledWith(undefined, task.api.getModel().info, undefined)
 			expect(overwriteSpy).toHaveBeenCalledTimes(1)
 		})
 

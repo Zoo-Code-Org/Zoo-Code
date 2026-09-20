@@ -1,7 +1,7 @@
 import type OpenAI from "openai"
 import type { ModeConfig, ModelInfo } from "@roo-code/types"
 import { defaultModeSlug } from "../../../shared/modes"
-import type { CodeIndexManager } from "../../../services/code-index/manager"
+import type { CodeIndexWorkspaceScope } from "../../../services/code-index/code-index-workspace-scope"
 import type { McpHub } from "../../../services/mcp/McpHub"
 import { resolveEffectiveToolPolicy, resolveToolAlias, isToolDisabledOrExcluded } from "./effective-tool-policy"
 import { isToolAllowedForMode } from "../../../core/tools/validateToolUse"
@@ -58,7 +58,7 @@ function getOrCreateRenamedTool(
  * @param mode - Current mode slug
  * @param customModes - Custom mode configurations
  * @param experiments - Experiment flags
- * @param codeIndexManager - Code index manager for codebase_search feature check
+ * @param codeIndexWorkspaceScope - Workspace scope for codebase_search feature check
  * @param settings - Additional settings for tool filtering (includes modelInfo for model-specific customization)
  * @param mcpHub - MCP hub for checking available resources
  * @param allowedMcpServers - Optional allowlist of MCP server names for the current mode. When
@@ -71,7 +71,7 @@ export function filterNativeToolsForMode(
 	mode: string | undefined,
 	customModes: ModeConfig[] | undefined,
 	experiments: Record<string, boolean> | undefined,
-	codeIndexManager?: CodeIndexManager,
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 	settings?: Record<string, any>,
 	mcpHub?: McpHub,
 	allowedMcpServers?: string[],
@@ -91,7 +91,7 @@ export function filterNativeToolsForMode(
 		modelInfo,
 		experiments,
 		todoListEnabled: settings?.todoListEnabled,
-		codeIndexManager,
+		codeIndexManager: codeIndexWorkspaceScope?.codeIndexManager,
 		allowedMcpServers,
 	})
 

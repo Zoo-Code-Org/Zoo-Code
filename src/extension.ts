@@ -34,7 +34,7 @@ import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
-import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
+import { codeIndexWorkspaceScopeRegistry } from "./services/code-index/code-index-workspace-scope-registry"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -195,21 +195,34 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
-	// Initialize code index managers for all workspace folders.
+	// The registry owns all scopes, including those created lazily after activation.
+	const codeIndexInitializations: Promise<unknown>[] = []
+	context.subscriptions.push({
+		dispose: async () => {
+			await Promise.all(codeIndexInitializations)
+			try {
+				await codeIndexWorkspaceScopeRegistry.disposeAll()
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error)
+				outputChannel.appendLine(`[CodeIndexManager] Error during workspace scope cleanup: ${message}`)
+			}
+		},
+	})
+
+	// Initialize code index scopes for all workspace folders.
 	if (vscode.workspace.workspaceFolders) {
 		for (const folder of vscode.workspace.workspaceFolders) {
-			const manager = CodeIndexManagerRegistry.getOrCreate(context, folder.uri.fsPath)
+			const scope = codeIndexWorkspaceScopeRegistry.getScope(context, folder)
 
-			if (manager) {
+			if (scope) {
 				// Initialize in background; do not block extension activation
-				void manager.initialize(contextProxy).catch((error) => {
+				const initialization = scope.initialize(contextProxy).catch((error) => {
 					const message = error instanceof Error ? error.message : String(error)
 					outputChannel.appendLine(
 						`[CodeIndexManager] Error during background CodeIndexManager configuration/indexing for ${folder.uri.fsPath}: ${message}`,
 					)
 				})
-
-				context.subscriptions.push(manager)
+				codeIndexInitializations.push(initialization)
 			}
 		}
 	}
@@ -408,5 +421,5 @@ export async function deactivate() {
 
 	Terminal.setTerminalProfile(undefined)
 	TerminalRegistry.cleanup()
-	CodeIndexManagerRegistry.disposeAll()
+	await codeIndexWorkspaceScopeRegistry.disposeAll()
 }

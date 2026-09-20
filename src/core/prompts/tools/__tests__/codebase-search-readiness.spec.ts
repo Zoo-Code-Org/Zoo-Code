@@ -1,6 +1,7 @@
 import type OpenAI from "openai"
 import { toolNamesSchema, type ModeConfig } from "@roo-code/types"
 import type { CodeIndexManager } from "../../../../services/code-index/manager"
+import type { CodeIndexWorkspaceScope } from "../../../../services/code-index/code-index-workspace-scope"
 import { filterNativeToolsForMode } from "../filter-tools-for-mode"
 import { resolveEffectiveToolPolicy } from "../effective-tool-policy"
 import { getNativeTools } from "../native-tools"
@@ -12,6 +13,10 @@ type Readiness = Pick<CodeIndexManager, "isFeatureEnabled" | "isFeatureConfigure
 function makeManager(flags: Readiness): CodeIndexManager {
 	// These consumers only read the public readiness getters, not manager services.
 	return flags as CodeIndexManager
+}
+
+function makeScope(flags: Readiness): CodeIndexWorkspaceScope {
+	return { codeIndexManager: makeManager(flags) } as CodeIndexWorkspaceScope
 }
 
 function toolNames(definitions: OpenAI.Chat.ChatCompletionTool[]) {
@@ -44,7 +49,7 @@ describe("codebase_search readiness", () => {
 		(flags) => {
 			const manager = makeManager(flags)
 			const policy = resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager })
-			const filtered = filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager)
+			const filtered = filterNativeToolsForMode(getNativeTools(), "code", [], {}, makeScope(flags))
 
 			expect(policy.tools).not.toContain(tools.codebase_search)
 			expect(toolNames(filtered)).not.toContain(tools.codebase_search)
@@ -58,7 +63,13 @@ describe("codebase_search readiness", () => {
 	it("includes search when all three readiness conditions are met", () => {
 		const manager = makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
 		const policy = resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager })
-		const filtered = filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager)
+		const filtered = filterNativeToolsForMode(
+			getNativeTools(),
+			"code",
+			[],
+			{},
+			makeScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+		)
 
 		expect(policy.tools).toContain(tools.codebase_search)
 		expect(toolNames(filtered)).toContain(tools.codebase_search)
@@ -77,7 +88,7 @@ describe("codebase_search readiness", () => {
 			expect(resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager }).tools).toContain(
 				tools.codebase_search,
 			)
-			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager))).toContain(
+			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, makeScope(flags)))).toContain(
 				tools.codebase_search,
 			)
 
@@ -86,16 +97,16 @@ describe("codebase_search readiness", () => {
 			expect(resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager }).tools).not.toContain(
 				tools.codebase_search,
 			)
-			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager))).not.toContain(
-				tools.codebase_search,
-			)
+			expect(
+				toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, makeScope(flags))),
+			).not.toContain(tools.codebase_search)
 
 			flags[flag] = true
 
 			expect(resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager }).tools).toContain(
 				tools.codebase_search,
 			)
-			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager))).toContain(
+			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, makeScope(flags)))).toContain(
 				tools.codebase_search,
 			)
 		},
@@ -108,15 +119,24 @@ describe("codebase_search readiness", () => {
 		expect(resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: ready }).tools).toContain(
 			tools.codebase_search,
 		)
-		expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, ready))).toContain(
-			tools.codebase_search,
-		)
+		expect(
+			toolNames(
+				filterNativeToolsForMode(
+					getNativeTools(),
+					"code",
+					[],
+					{},
+					makeScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+				),
+			),
+		).toContain(tools.codebase_search)
 
 		for (const manager of [disabled, undefined]) {
 			expect(resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager }).tools).not.toContain(
 				tools.codebase_search,
 			)
-			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager))).not.toContain(
+			const scope = manager ? ({ codeIndexManager: manager } as CodeIndexWorkspaceScope) : undefined
+			expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, scope))).not.toContain(
 				tools.codebase_search,
 			)
 		}
@@ -124,16 +144,30 @@ describe("codebase_search readiness", () => {
 		expect(resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: ready }).tools).toContain(
 			tools.codebase_search,
 		)
-		expect(toolNames(filterNativeToolsForMode(getNativeTools(), "code", [], {}, ready))).toContain(
-			tools.codebase_search,
-		)
+		expect(
+			toolNames(
+				filterNativeToolsForMode(
+					getNativeTools(),
+					"code",
+					[],
+					{},
+					makeScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+				),
+			),
+		).toContain(tools.codebase_search)
 	})
 
 	it("does not grant read permissions merely because the manager is ready", () => {
 		const manager = makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
 		const mode: ModeConfig = { slug: "no-read", name: "No read", roleDefinition: "No reading", groups: ["command"] }
 		const policy = resolveEffectiveToolPolicy({ mode: mode.slug, customModes: [mode], codeIndexManager: manager })
-		const filtered = filterNativeToolsForMode(getNativeTools(), mode.slug, [mode], {}, manager)
+		const filtered = filterNativeToolsForMode(
+			getNativeTools(),
+			mode.slug,
+			[mode],
+			{},
+			makeScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+		)
 
 		for (const tool of [tools.codebase_search, ...ordinaryReadTools]) {
 			expect(policy.tools).not.toContain(tool)
@@ -148,7 +182,14 @@ describe("codebase_search readiness", () => {
 		const manager = makeManager({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true })
 		const disabledTools = [tools.codebase_search]
 		const policy = resolveEffectiveToolPolicy({ mode: "code", codeIndexManager: manager, disabledTools })
-		const filtered = filterNativeToolsForMode(getNativeTools(), "code", [], {}, manager, { disabledTools })
+		const filtered = filterNativeToolsForMode(
+			getNativeTools(),
+			"code",
+			[],
+			{},
+			makeScope({ isFeatureEnabled: true, isFeatureConfigured: true, isInitialized: true }),
+			{ disabledTools },
+		)
 
 		expect(policy.tools).not.toContain(tools.codebase_search)
 		expect(toolNames(filtered)).not.toContain(tools.codebase_search)

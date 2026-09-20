@@ -67,9 +67,9 @@ vi.mock("../../core/config/importExport", () => ({
 	importSettingsWithFeedback: vi.fn(),
 }))
 
-vi.mock("../../services/code-index/code-index-manager-registry", () => ({
-	CodeIndexManagerRegistry: {
-		getOrCreate: vi.fn(),
+vi.mock("../../services/code-index/code-index-workspace-scope-registry", () => ({
+	codeIndexWorkspaceScopeRegistry: {
+		getScope: vi.fn(),
 	},
 }))
 

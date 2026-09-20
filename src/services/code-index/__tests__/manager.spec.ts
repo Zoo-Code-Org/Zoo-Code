@@ -1,5 +1,5 @@
 import { CodeIndexManager } from "../manager"
-import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
+import { codeIndexWorkspaceScopeRegistry } from "../code-index-workspace-scope-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
 import type { MockedClass } from "vitest"
 import * as path from "path"
@@ -125,9 +125,9 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 	const testGlobalStoragePath = path.join(path.sep, "test", "global-storage")
 	const testLogPath = path.join(path.sep, "test", "log")
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		// Clear all instances before each test
-		CodeIndexManagerRegistry.disposeAll()
+		await codeIndexWorkspaceScopeRegistry.disposeAll()
 
 		const workspaceStateStore: Record<string, any> = {}
 		const globalStateStore: Record<string, any> = {}
@@ -161,11 +161,11 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			languageModelAccessInformation: {} as any,
 		}
 
-		manager = CodeIndexManagerRegistry.getOrCreate(mockContext)!
+		manager = codeIndexWorkspaceScopeRegistry.getScope(mockContext)!.codeIndexManager
 	})
 
-	afterEach(() => {
-		CodeIndexManagerRegistry.disposeAll()
+	afterEach(async () => {
+		await codeIndexWorkspaceScopeRegistry.disposeAll()
 	})
 
 	describe("handleSettingsChange", () => {
@@ -734,7 +734,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 		})
 
 		it("should store enablement per folder URI, not per window", async () => {
-			CodeIndexManagerRegistry.disposeAll()
+			await codeIndexWorkspaceScopeRegistry.disposeAll()
 
 			const vscode = await import("vscode")
 
@@ -765,8 +765,8 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				{ uri: folderBUri, name: "folderB", index: 1 },
 			]
 
-			const managerA = CodeIndexManagerRegistry.getOrCreate(sharedContext, folderAPath)!
-			const managerB = CodeIndexManagerRegistry.getOrCreate(sharedContext, folderBPath)!
+			const managerA = codeIndexWorkspaceScopeRegistry.getScope(sharedContext, folderAPath)!.codeIndexManager
+			const managerB = codeIndexWorkspaceScopeRegistry.getScope(sharedContext, folderBPath)!.codeIndexManager
 
 			// Both start disabled (autoEnableDefault is false via globalState mock)
 			expect(managerA.isWorkspaceEnabled).toBe(false)
@@ -785,7 +785,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			expect(managerA.isWorkspaceEnabled).toBe(false)
 			expect(managerB.isWorkspaceEnabled).toBe(true)
 
-			CodeIndexManagerRegistry.disposeAll()
+			await codeIndexWorkspaceScopeRegistry.disposeAll()
 		})
 	})
 

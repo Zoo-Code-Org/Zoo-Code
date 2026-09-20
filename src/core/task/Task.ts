@@ -80,6 +80,8 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
+import { codeIndexWorkspaceScopeRegistry } from "../../services/code-index/code-index-workspace-scope-registry"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -1875,6 +1877,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// from one snapshot.
 		const state = await this.providerRef.deref()?.getState()
 		const requestModelInfo = await this.safeEnsureModelFetched()
+		const codeIndexWorkspaceScope = await this.initializeCodeIndexWorkspaceScope()
 
 		// A cancellation landing during the bounded metadata wait must stop
 		// manual condensation before any prompt build or summarization request.
@@ -1882,7 +1885,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 
-		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo, codeIndexWorkspaceScope)
 
 		// A cancellation landing during the prompt build's bounded MCP wait must
 		// stop manual condensation before any summarization request is issued.
@@ -1911,6 +1914,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiConfiguration,
 				disabledTools: state?.disabledTools,
 				modelInfo: requestModelInfo,
+				codeIndexWorkspaceScope: codeIndexWorkspaceScope ?? null,
 				includeAllToolsWithRestrictions: false,
 			})
 			allTools = toolsResult.tools
@@ -4242,6 +4246,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async getSystemPrompt(
 		requestState: Awaited<ReturnType<ClineProvider["getState"]>> | undefined,
 		requestModelInfo?: ModelInfo,
+		codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 	): Promise<string> {
 		const { mcpEnabled } = requestState ?? {}
 		let mcpHub: McpHub | undefined
@@ -4313,6 +4318,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				provider.getSkillsManager(),
 				requestState?.disabledTools,
 				modelInfo,
+				codeIndexWorkspaceScope,
 			)
 		})()
 	}
@@ -4387,7 +4393,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this.api.getModel().info
 	}
 
-	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
+	private async initializeCodeIndexWorkspaceScope(): Promise<CodeIndexWorkspaceScope | undefined> {
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return undefined
+		}
+
+		const scope = codeIndexWorkspaceScopeRegistry.getScope(provider.context, this.cwd)
+		try {
+			await scope?.initialize(provider.contextProxy)
+			return scope
+		} catch (error) {
+			console.error(`[Task#${this.taskId}] Failed to initialize code index workspace scope:`, error)
+			return undefined
+		}
+	}
+
+	private async handleContextWindowExceededError(
+		requestModelInfo: ModelInfo,
+		codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
+	): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
@@ -4437,6 +4462,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiConfiguration,
 				disabledTools: state?.disabledTools,
 				modelInfo,
+				codeIndexWorkspaceScope: codeIndexWorkspaceScope ?? null,
 				includeAllToolsWithRestrictions: false,
 			})
 			allTools = toolsResult.tools
@@ -4473,7 +4499,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(state, modelInfo),
+				systemPrompt: await this.getSystemPrompt(state, modelInfo, codeIndexWorkspaceScope),
 				taskId: this.taskId,
 				profileThresholds,
 				currentProfileId,
@@ -4601,13 +4627,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// prompt and every tool array built below; prefer the caller's snapshot
 		// when one was threaded.
 		const requestModelInfo = options.requestModelInfo ?? (await this.safeEnsureModelFetched())
+		const codeIndexWorkspaceScope = await this.initializeCodeIndexWorkspaceScope()
 		// Retry recursions must reuse this snapshot instead of re-deriving it: a
 		// metadata fetch landing between attempts would otherwise move
 		// model-specific tool policy or `preserveReasoning` mid-request. When the
 		// caller threaded a snapshot its options object is forwarded unchanged —
 		// same reference, and never mutated.
 		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
-		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo, codeIndexWorkspaceScope)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata
 		// wait, or the MCP wait inside getSystemPrompt must stop this request before any
@@ -4686,6 +4713,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						apiConfiguration,
 						disabledTools: state?.disabledTools,
 						modelInfo: requestModelInfo,
+						codeIndexWorkspaceScope: codeIndexWorkspaceScope ?? null,
 						includeAllToolsWithRestrictions: false,
 					})
 					contextMgmtTools = toolsResult.tools
@@ -4860,6 +4888,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiConfiguration,
 				disabledTools: state?.disabledTools,
 				modelInfo,
+				codeIndexWorkspaceScope: codeIndexWorkspaceScope ?? null,
 				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
 			})
 			allTools = toolsResult.tools
@@ -4948,7 +4977,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						`Retry attempt ${retryAttempt + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +
 						`Attempting automatic truncation...`,
 				)
-				await this.handleContextWindowExceededError(requestModelInfo)
+				await this.handleContextWindowExceededError(requestModelInfo, codeIndexWorkspaceScope)
 				// Retry the request after handling the context window error
 				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
 				return

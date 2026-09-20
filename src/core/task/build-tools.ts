@@ -6,6 +6,7 @@ import type { ProviderSettings, ModeConfig, ModelInfo } from "@roo-code/types"
 import { customToolRegistry, formatNative } from "@roo-code/core"
 
 import type { ClineProvider } from "../webview/ClineProvider"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
 
@@ -25,6 +26,8 @@ interface BuildToolsOptions {
 	apiConfiguration: ProviderSettings | undefined
 	disabledTools?: string[]
 	modelInfo?: ModelInfo
+	/** A request-scoped, initialized scope. Null explicitly means initialization was unavailable. */
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope | null
 	/**
 	 * If true, returns all tools without mode filtering, but also includes
 	 * the list of allowed tool names for use with allowedFunctionNames.
@@ -93,14 +96,25 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		apiConfiguration,
 		disabledTools,
 		modelInfo,
+		codeIndexWorkspaceScope: suppliedCodeIndexWorkspaceScope,
 		includeAllToolsWithRestrictions,
 	} = options
 
 	const mcpHub = provider.getMcpHub()
 
-	// Get CodeIndexManager for feature checking.
-	const { CodeIndexManagerRegistry } = await import("../../services/code-index/code-index-manager-registry")
-	const codeIndexManager = CodeIndexManagerRegistry.getOrCreate(provider.context, cwd)
+	// Get the workspace scope for code-index feature checking.
+	const { codeIndexWorkspaceScopeRegistry } =
+		await import("../../services/code-index/code-index-workspace-scope-registry")
+	let codeIndexWorkspaceScope = suppliedCodeIndexWorkspaceScope ?? undefined
+	if (suppliedCodeIndexWorkspaceScope === undefined) {
+		codeIndexWorkspaceScope = codeIndexWorkspaceScopeRegistry.getScope(provider.context, cwd)
+		try {
+			await codeIndexWorkspaceScope?.initialize(provider.contextProxy)
+		} catch (error) {
+			console.error("Failed to initialize code index workspace scope while building tools:", error)
+			codeIndexWorkspaceScope = undefined
+		}
+	}
 
 	// Build settings object for tool filtering.
 	const filterSettings = {
@@ -129,7 +143,7 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		mode,
 		customModes,
 		experiments,
-		codeIndexManager,
+		codeIndexWorkspaceScope,
 		filterSettings,
 		mcpHub,
 		allowedMcpServers,

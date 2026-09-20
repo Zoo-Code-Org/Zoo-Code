@@ -14,7 +14,7 @@ import { formatLanguage } from "../../shared/language"
 import { isEmpty } from "../../utils/object"
 
 import { McpHub } from "../../services/mcp/McpHub"
-import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import type { SystemPromptSettings } from "./types"
@@ -65,6 +65,7 @@ async function generatePrompt(
 	skillsManager?: SkillsManager,
 	disabledTools?: string[],
 	modelInfo?: ModelInfo,
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 ): Promise<string> {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -73,8 +74,6 @@ async function generatePrompt(
 	// Get the full mode config to ensure we have the role definition (used for groups, etc.)
 	const modeConfig = getModeBySlug(mode, customModeConfigs) || modes.find((m) => m.slug === mode) || modes[0]
 	const { roleDefinition, baseInstructions } = getModeSelection(mode, promptComponent, customModeConfigs)
-
-	const codeIndexManager = CodeIndexManagerRegistry.getOrCreate(context, cwd)
 
 	// Resolve the single, request-scoped effective tool policy ONCE, then have every
 	// prompt section and the MCP short-circuit derive from it. This is the one source of
@@ -88,7 +87,7 @@ async function generatePrompt(
 		modelInfo,
 		experiments,
 		todoListEnabled: settings?.todoListEnabled,
-		codeIndexManager,
+		codeIndexManager: codeIndexWorkspaceScope?.codeIndexManager,
 	})
 
 	// Tool calling is native-only.
@@ -148,6 +147,7 @@ export const SYSTEM_PROMPT = async (
 	skillsManager?: SkillsManager,
 	disabledTools?: string[],
 	modelInfo?: ModelInfo,
+	codeIndexWorkspaceScope?: CodeIndexWorkspaceScope,
 ): Promise<string> => {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -178,5 +178,6 @@ export const SYSTEM_PROMPT = async (
 		skillsManager,
 		disabledTools,
 		modelInfo,
+		codeIndexWorkspaceScope,
 	)
 }

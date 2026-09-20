@@ -1,6 +1,7 @@
 // npx vitest run __tests__/extension.spec.ts
 
 import type * as vscode from "vscode"
+import { makeUri } from "../test-utils/vscode"
 
 vi.mock("vscode", () => ({
 	window: {
@@ -15,6 +16,7 @@ vi.mock("vscode", () => ({
 		onDidChangeActiveTextEditor: vi.fn(),
 	},
 	workspace: {
+		workspaceFolders: undefined,
 		registerTextDocumentContentProvider: vi.fn(),
 		getConfiguration: vi.fn().mockReturnValue({
 			get: vi.fn().mockReturnValue([]),
@@ -139,11 +141,10 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/code-index-manager-registry", () => ({
-	CodeIndexManagerRegistry: {
-		getOrCreate: vi.fn().mockReturnValue(null),
-		disposeAll: vi.fn(),
-	},
+vi.mock("../services/code-index/manager", () => ({
+	CodeIndexManager: vi.fn().mockImplementation(function () {
+		return { initialize: vi.fn().mockResolvedValue({ requiresRestart: false }), dispose: vi.fn() }
+	}),
 }))
 
 vi.mock("../services/mdm/MdmService", () => ({
@@ -266,6 +267,190 @@ describe("extension.ts", () => {
 		await activate(mockContext)
 
 		expect(dotenv.config).toHaveBeenCalledTimes(1)
+	})
+
+	describe("code index workspace activation", () => {
+		beforeEach(() => {
+			vi.resetModules()
+		})
+
+		afterEach(async () => {
+			const vscode = await import("vscode")
+			vi.mocked(vscode.workspace).workspaceFolders = undefined
+			const { codeIndexWorkspaceScopeRegistry } =
+				await import("../services/code-index/code-index-workspace-scope-registry")
+			codeIndexWorkspaceScopeRegistry.disposeAll()
+		})
+
+		test("initializes every workspace once with the shared context without blocking activation", async () => {
+			const vscode = await import("vscode")
+			const folders = ["/first", "/second"].map((name, index) => ({ name, index, uri: makeUri(name) }))
+			vi.mocked(vscode.workspace).workspaceFolders = folders
+			const { codeIndexWorkspaceScopeRegistry: registry } =
+				await import("../services/code-index/code-index-workspace-scope-registry")
+			const scopes = folders.map((folder) => registry.getScope(mockContext, folder.uri.fsPath)!)
+			let release!: () => void
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			for (const scope of scopes) {
+				vi.mocked(scope.codeIndexManager.initialize).mockImplementationOnce(async () => {
+					await pending
+					return { requiresRestart: false }
+				})
+			}
+			const { ContextProxy } = await import("../core/config/ContextProxy")
+			const { activate } = await import("../extension")
+			let activated = false
+			const activation = activate(mockContext).then(() => {
+				activated = true
+			})
+			try {
+				await vi.waitFor(() => expect(activated).toBe(true))
+				const contextProxy = await ContextProxy.getInstance(mockContext)
+				for (const scope of scopes) {
+					expect(scope.codeIndexManager.initialize).toHaveBeenCalledExactlyOnceWith(contextProxy)
+					expect(scope.codeIndexManager.dispose).not.toHaveBeenCalled()
+				}
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith("test-extension.activationCompleted")
+			} finally {
+				release()
+				await activation
+			}
+		})
+
+		test.each([new Error("configuration failed"), "configuration failed"])(
+			"logs background rejection %s with its workspace and continues other initialization and cleanup",
+			async (error) => {
+				const vscode = await import("vscode")
+				vi.mocked(vscode.workspace).workspaceFolders = ["/broken", "/healthy"].map((name, index) => ({
+					name,
+					index,
+					uri: makeUri(name),
+				}))
+				const { codeIndexWorkspaceScopeRegistry: registry } =
+					await import("../services/code-index/code-index-workspace-scope-registry")
+				const broken = registry.getScope(mockContext, "/broken")!
+				const healthy = registry.getScope(mockContext, "/healthy")!
+				vi.mocked(broken.codeIndexManager.initialize).mockRejectedValueOnce(error)
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).resolves.toBeDefined()
+
+				expect(healthy.codeIndexManager.initialize).toHaveBeenCalledTimes(1)
+				const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+				expect(channel.appendLine).toHaveBeenCalledWith(
+					"[CodeIndexManager] Error during background CodeIndexManager configuration/indexing for /broken: configuration failed",
+				)
+				await Promise.all(mockContext.subscriptions.map((subscription) => subscription?.dispose?.()))
+				expect(broken.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+				expect(healthy.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+				expect(registry.getAllScopes()).toEqual([])
+			},
+		)
+
+		test.each([undefined, []])(
+			"activation without workspace folders (%s) still owns lazy cleanup",
+			async (folders) => {
+				const vscode = await import("vscode")
+				vi.mocked(vscode.workspace).workspaceFolders = folders
+				const { CodeIndexManager } = await import("../services/code-index/manager")
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).resolves.toBeDefined()
+				expect(CodeIndexManager).not.toHaveBeenCalled()
+
+				vi.mocked(vscode.workspace).workspaceFolders = [{ name: "late", index: 0, uri: makeUri("/late") }]
+				const { codeIndexWorkspaceScopeRegistry: registry } =
+					await import("../services/code-index/code-index-workspace-scope-registry")
+				const lazy = registry.getScope(mockContext, "/late")!
+				await Promise.all(mockContext.subscriptions.map((subscription) => subscription?.dispose?.()))
+				expect(lazy.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+				expect(registry.getAllScopes()).toEqual([])
+			},
+		)
+
+		test("one registry cleanup owner disposes startup and lazy scopes exactly once", async () => {
+			const vscode = await import("vscode")
+			const first = { name: "first", index: 0, uri: makeUri("/first") }
+			const late = { name: "late", index: 1, uri: makeUri("/late") }
+			vi.mocked(vscode.workspace).workspaceFolders = [first]
+			const { codeIndexWorkspaceScopeRegistry: registry } =
+				await import("../services/code-index/code-index-workspace-scope-registry")
+			const { activate, deactivate } = await import("../extension")
+			await activate(mockContext)
+			const startup = registry.getScope(mockContext, first.uri.fsPath)!
+			vi.mocked(vscode.workspace).workspaceFolders = [first, late]
+			const lazy = registry.getScope(mockContext, late.uri.fsPath)!
+
+			await deactivate()
+			for (const subscription of mockContext.subscriptions) {
+				// Unrelated activation mocks do not all return a disposable.
+				await subscription?.dispose?.()
+			}
+
+			expect(startup.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+			expect(lazy.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+			expect(registry.getAllScopes()).toEqual([])
+			expect(mockContext.subscriptions).not.toContain(startup)
+			expect(mockContext.subscriptions).not.toContain(lazy)
+			registry.disposeAll()
+			expect(startup.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+			expect(lazy.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+		})
+
+		test.each([false, true])(
+			"cleanup waits for pending initialization (rejects=%s) before disposal",
+			async (rejects) => {
+				const vscode = await import("vscode")
+				vi.mocked(vscode.workspace).workspaceFolders = [{ name: "first", index: 0, uri: makeUri("/first") }]
+				const { codeIndexWorkspaceScopeRegistry: registry } =
+					await import("../services/code-index/code-index-workspace-scope-registry")
+				const scope = registry.getScope(mockContext, "/first")!
+				let release!: () => void
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				vi.mocked(scope.codeIndexManager.initialize).mockImplementationOnce(async () => {
+					await pending
+					if (rejects) throw new Error("late initialization failure")
+					return { requiresRestart: false }
+				})
+				const { activate, deactivate } = await import("../extension")
+				await activate(mockContext)
+				const cleanup = Promise.all(mockContext.subscriptions.map((subscription) => subscription?.dispose?.()))
+				const disposedBeforeInitialization = vi.mocked(scope.codeIndexManager.dispose).mock.calls.length
+				release()
+				await cleanup
+				await deactivate()
+
+				expect(disposedBeforeInitialization).toBe(0)
+				expect(scope.codeIndexManager.dispose).toHaveBeenCalledTimes(1)
+				expect(registry.getAllScopes()).toEqual([])
+			},
+		)
+
+		test("skips an unavailable scope without skipping later workspace initialization", async () => {
+			const vscode = await import("vscode")
+			const folders = ["/unavailable", "/healthy"].map((name, index) => ({
+				name,
+				index,
+				uri: makeUri(name),
+			}))
+			vi.mocked(vscode.workspace).workspaceFolders = folders
+			const { codeIndexWorkspaceScopeRegistry: registry } =
+				await import("../services/code-index/code-index-workspace-scope-registry")
+			const getScope = vi.spyOn(registry, "getScope").mockReturnValueOnce(undefined)
+			try {
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).resolves.toBeDefined()
+				expect(getScope).toHaveBeenCalledWith(mockContext, folders[0])
+				expect(getScope).toHaveBeenCalledWith(mockContext, folders[1])
+				const scopes = registry.getAllScopes()
+				expect(scopes).toHaveLength(1)
+				expect(scopes[0].codeIndexManager.initialize).toHaveBeenCalledTimes(1)
+			} finally {
+				getScope.mockRestore()
+			}
+		})
 	})
 
 	describe("cloud organization settings handling", () => {
@@ -464,7 +649,9 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
-			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
+			const { codeIndexWorkspaceScopeRegistry } =
+				await import("../services/code-index/code-index-workspace-scope-registry")
+			const disposeAll = vi.spyOn(codeIndexWorkspaceScopeRegistry, "disposeAll")
 
 			vi.mocked(TelemetryService.instance.shutdown).mockRejectedValue(new Error("shutdown failed"))
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
@@ -476,7 +663,7 @@ describe("extension.ts", () => {
 
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
-			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
+			expect(disposeAll).toHaveBeenCalledTimes(1)
 
 			setTerminalProfileSpy.mockRestore()
 		})
@@ -489,7 +676,9 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
-			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
+			const { codeIndexWorkspaceScopeRegistry } =
+				await import("../services/code-index/code-index-workspace-scope-registry")
+			const disposeAll = vi.spyOn(codeIndexWorkspaceScopeRegistry, "disposeAll")
 
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
 
@@ -513,7 +702,7 @@ describe("extension.ts", () => {
 			expect(mockTelemetryServiceInstance.shutdown).not.toHaveBeenCalled()
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
-			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
+			expect(disposeAll).toHaveBeenCalledTimes(1)
 
 			instanceGetterSpy.mockRestore()
 			setTerminalProfileSpy.mockRestore()

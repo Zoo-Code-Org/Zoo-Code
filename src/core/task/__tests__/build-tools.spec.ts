@@ -18,9 +18,9 @@ import type { McpHub } from "../../../services/mcp/McpHub"
 // real, getOrCreate would construct a live manager from the stubbed context.
 // The all-false flags keep codebase_search out of every filter result, matching
 // the disabled-index baseline the assertions below assume.
-vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
-	CodeIndexManagerRegistry: {
-		getOrCreate: () => ({ isFeatureEnabled: false, isFeatureConfigured: false, isInitialized: false }),
+vi.mock("../../../services/code-index/code-index-workspace-scope-registry", () => ({
+	codeIndexWorkspaceScopeRegistry: {
+		getScope: () => undefined,
 	},
 }))
 
