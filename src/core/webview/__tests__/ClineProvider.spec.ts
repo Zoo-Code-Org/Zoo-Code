@@ -5197,6 +5197,28 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			await initPromise
 		})
 
+		it("sets the migration marker on a first-attempt success without retrying", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			const migrateSpy = vi
+				.spyOn(provider.taskHistoryStore, "migrateFromGlobalState")
+				.mockImplementation(async (entries) => {
+					for (const entry of entries) {
+						provider.taskHistoryStore["cache"].set(entry.id, entry)
+					}
+				})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			await expect(provider.getTaskWithId("legacy-task-1")).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+			await initPromise
+
+			expect(migrateSpy).toHaveBeenCalledTimes(1)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		})
+
 		it("retries a failed migration once and only then settles the gate", async () => {
 			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
 			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
