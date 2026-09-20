@@ -1050,11 +1050,7 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
-			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
-				? await this.getHMRHtmlContent(webviewView.webview)
-				: await this.getHtmlContent(webviewView.webview)
+		webviewView.webview.html = await this.getWebviewHtml(webviewView.webview)
 
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
@@ -3421,14 +3417,33 @@ export class ClineProvider
 				return
 			}
 			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")
-			void Promise.resolve(vscode.commands.executeCommand("workbench.action.webview.reloadWebviewAction")).catch(
-				(error) => {
-					this.log(
-						`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`,
-					)
-				},
-			)
+			void this.reloadWebviewForRecovery()
 		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
+	}
+
+	/**
+	 * Reloads only this provider's own webview by regenerating its HTML (fresh
+	 * nonce) and reassigning `webview.html`, which forces VS Code to reload that
+	 * webview. Works for both sidebar (WebviewView) and tab (WebviewPanel) shapes.
+	 */
+	private async reloadWebviewForRecovery(): Promise<void> {
+		const view = this.view
+		if (!view?.webview) {
+			return
+		}
+		try {
+			view.webview.html = await this.getWebviewHtml(view.webview)
+		} catch (error) {
+			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	/** Builds the webview HTML using the same path as resolveWebviewView (HMR in development). */
+	private async getWebviewHtml(webview: vscode.Webview): Promise<string> {
+		return this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
+			? await this.getHMRHtmlContent(webview)
+			: await this.getHtmlContent(webview)
 	}
 
 	public getRecentTasks(): string[] {
