@@ -1446,15 +1446,20 @@ export const webviewMessageHandler = async (
 					lmStudioModels = await getModels(lmStudioOptions)
 				}
 
-				if (Object.keys(lmStudioModels).length > 0) {
-					await provider.postMessageToWebview({
-						type: LmStudioModelsMessageType.lmStudioModels,
-						lmStudioModels: lmStudioModels,
-					})
-				}
+				// Always post a response so the webview refresh status can
+				// transition out of "loading" — even when no models are found.
+				await provider.postMessageToWebview({
+					type: LmStudioModelsMessageType.lmStudioModels,
+					lmStudioModels: lmStudioModels,
+				})
 			} catch (error) {
-				// Silently fail - user hasn't configured LM Studio yet.
-				console.debug("LM Studio models fetch failed:", error)
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				provider.log(`[requestLmStudioModels] Failed to fetch models: ${errorMsg}`)
+				await provider.postMessageToWebview({
+					type: LmStudioModelsMessageType.lmStudioModels,
+					lmStudioModels: {},
+					error: errorMsg,
+				})
 			}
 			break
 		}
