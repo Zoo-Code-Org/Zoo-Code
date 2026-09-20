@@ -663,6 +663,96 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("webview heartbeat watchdog", () => {
+		let visibilityCallback: () => void
+
+		beforeEach(() => {
+			// Fake timers must be active before resolveWebviewView so the
+			// watchdog interval is registered on the fake clock.
+			vi.useFakeTimers()
+			mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
+				visibilityCallback = cb
+				return { dispose: vi.fn() }
+			})
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			vi.useRealTimers()
+		})
+
+		test("does not reload the webview while heartbeats are fresh", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+
+			await vi.advanceTimersByTimeAsync(110_000)
+			await webviewMessageHandler(provider, { type: "webviewHeartbeat", timestamp: Date.now() })
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+		})
+
+		test("reloads the webview when the heartbeat is stale and the view is visible", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(1)
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.webview.reloadWebviewAction")
+		})
+
+		test("does not reload while the view is hidden even when the heartbeat is stale", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+		})
+
+		test("resets the grace window when the view becomes visible", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+
+			Object.defineProperty(mockWebviewView, "visible", { value: true, configurable: true })
+			visibilityCallback()
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+
+			// Watchdog ticks every 60s; 120s after the flip the heartbeat is stale again.
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(1)
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.webview.reloadWebviewAction")
+		})
+
+		test("stops watching after the provider is disposed", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+
+			await provider.dispose()
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+		})
+
+		test("does not stack watchdog intervals when resolveWebviewView runs again", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(1)
+		})
+	})
+
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		provider = new ClineProvider(
 			{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },

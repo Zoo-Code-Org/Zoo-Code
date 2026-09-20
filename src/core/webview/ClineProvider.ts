@@ -223,6 +223,10 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private lastWebviewHeartbeatAt = 0
+	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
+	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
+	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -842,6 +846,10 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+			this.webviewWatchdogInterval = null
+		}
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1082,6 +1090,9 @@ export class ClineProvider
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView.webview)
 
+		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
+		this.startWebviewWatchdog()
+
 		// Initialize code index status subscription for the current workspace.
 		this.updateCodeIndexStatusSubscription()
 
@@ -1100,6 +1111,9 @@ export class ClineProvider
 			// for this visibility listener panel.
 			const viewStateDisposable = webviewView.onDidChangeViewState(() => {
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.updateWebviewHeartbeat()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
@@ -1111,6 +1125,9 @@ export class ClineProvider
 			// sidebar
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.updateWebviewHeartbeat()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
@@ -3379,6 +3396,39 @@ export class ClineProvider
 				`  timestamp:    ${new Date().toISOString()}\n` +
 				`If the panel appears gray after this, share this log with support@zoocode.dev`,
 		)
+	}
+
+	/** Records that the webview renderer is alive; called on every webviewHeartbeat message. */
+	public updateWebviewHeartbeat(): void {
+		this.lastWebviewHeartbeatAt = Date.now()
+	}
+
+	/**
+	 * Starts (or restarts) the watchdog that detects a dead webview renderer
+	 * process. Hidden webviews throttle timers, so becoming visible resets the
+	 * grace window instead of counting throttled heartbeats as a crash.
+	 */
+	private startWebviewWatchdog(): void {
+		this.updateWebviewHeartbeat()
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+		}
+		this.webviewWatchdogInterval = setInterval(() => {
+			if (this.view?.visible !== true) {
+				return
+			}
+			if (Date.now() - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) {
+				return
+			}
+			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")
+			void Promise.resolve(vscode.commands.executeCommand("workbench.action.webview.reloadWebviewAction")).catch(
+				(error) => {
+					this.log(
+						`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				},
+			)
+		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
 	}
 
 	public getRecentTasks(): string[] {

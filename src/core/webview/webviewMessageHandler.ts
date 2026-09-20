@@ -688,6 +688,10 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		case "webviewHeartbeat":
+			// Timestamp-only update for the dead-renderer watchdog; no other side effects.
+			provider.updateWebviewHeartbeat()
+			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
