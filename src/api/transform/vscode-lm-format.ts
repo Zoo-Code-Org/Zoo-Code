@@ -128,7 +128,10 @@ export function convertToVsCodeLmMessages(
 										return new vscode.LanguageModelTextPart("")
 									}) ?? [new vscode.LanguageModelTextPart("")])
 
-						return new vscode.LanguageModelToolResultPart(toolMessage.tool_use_id, toolContentParts)
+						return new vscode.LanguageModelToolResultPart(
+							sanitizeSurrogates(toolMessage.tool_use_id),
+							toolContentParts,
+						)
 					}),
 
 					// Convert non-tool messages to TextParts after tool messages
@@ -183,8 +186,9 @@ export function convertToVsCodeLmMessages(
 					...toolMessages.map(
 						(toolMessage) =>
 							new vscode.LanguageModelToolCallPart(
-								toolMessage.id,
-								toolMessage.name,
+								// Deterministic, so a call id and its paired tool_use_id stay equal after sanitizing.
+								sanitizeSurrogates(toolMessage.id),
+								sanitizeSurrogates(toolMessage.name),
 								sanitizeSurrogatesDeep(asObjectSafe(toolMessage.input)) as object,
 							),
 					),
