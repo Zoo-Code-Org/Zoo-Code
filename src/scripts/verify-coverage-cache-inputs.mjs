@@ -1,5 +1,6 @@
+import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import process from "node:process"
@@ -36,24 +37,45 @@ const laneOwnedSpecFiles = {
 	misc: "src/utils/__tests__/safeWriteJson.test.ts",
 	"tree-sitter": "src/services/tree-sitter/__tests__/wasm.spec.ts",
 }
+// Specs outside __tests__ directories. The lane vitest include globs fix the owner.
+const laneOwnedTopLevelSpecFiles = {
+	core: "src/core/message-manager/index.spec.ts",
+	misc: "src/scripts/verify-lcov.spec.mjs",
+}
 let probeRoot
 
-// Probe the working tree so local runs validate uncommitted task edits. CI
-// runs on a clean tree, where this falls back to HEAD.
-const worktreeCommit = () => {
-	const result = spawnSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" })
-	if (result.status !== 0) return "HEAD"
-	const sha = result.stdout.trim()
-	return sha || "HEAD"
+const gitError = (result) => {
+	const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
+	return new Error(details || `git exited with status ${result.status ?? "unknown"}`)
 }
 
 const git = (gitArgs) => {
 	const result = spawnSync("git", gitArgs, { cwd: root, encoding: "utf8" })
-	if (result.status !== 0) {
-		const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
-		throw new Error(details || `git exited with status ${result.status ?? "unknown"}`)
-	}
+	if (result.status !== 0) throw gitError(result)
 }
+
+const trackedTreeStatus = () =>
+	spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=no"], { cwd: root, encoding: "utf8" })
+
+// Probe the working tree so local runs validate uncommitted task edits. CI
+// runs on a clean tree, where stash create exits without a SHA and this
+// falls back to HEAD. git stash create can exit 1 with empty output when
+// stale index metadata refreshes to a clean tracked tree. Confirm a clean
+// tracked tree before trusting that exit.
+const stashCommit = (result, trackedTree = trackedTreeStatus) => {
+	if (result.status === 0) return result.stdout.trim() || "HEAD"
+	const quietExit = result.status === 1 && !result.error && !result.signal && !result.stdout && !result.stderr
+	if (!quietExit) throw gitError(result)
+	const status = trackedTree()
+	if (status.status !== 0) throw gitError(status)
+	if (status.stdout.trim() !== "") {
+		const changes = status.stdout.trim()
+		throw new Error(`git stash create found no changes, but git status reports tracked changes:\n${changes}`)
+	}
+	return "HEAD"
+}
+
+const worktreeCommit = () => stashCommit(spawnSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" }))
 
 const turboTasks = () => {
 	const result = spawnSync(
@@ -118,6 +140,36 @@ const expectInvalidatesExactly = (task, changed) => {
 		)
 }
 
+test("stash commit probe rejects git failures and keeps the clean-tree fallback", () => {
+	const cleanTree = () => ({ status: 0, stdout: "" })
+	const dirtyTree = () => ({ status: 0, stdout: " M src/utils/path.ts\n" })
+	const brokenTree = () => ({ status: 128, stdout: "", stderr: "fatal: unable to read the index" })
+	const failures = [
+		{ status: 128, stdout: "", stderr: "fatal: not a git repository" },
+		{ status: null, error: new Error("spawn git ENOENT") },
+		{ status: 1, signal: "SIGTERM", stdout: "", stderr: "" },
+		{ status: 1, stdout: "unexpected output", stderr: "" },
+	]
+
+	assert.equal(stashCommit({ status: 0, stdout: "0f53a1c\n" }, cleanTree), "0f53a1c")
+	assert.equal(stashCommit({ status: 0, stdout: "\n" }, cleanTree), "HEAD")
+	assert.equal(stashCommit({ status: 1, stdout: "", stderr: "" }, cleanTree), "HEAD")
+	for (const result of failures) {
+		assert.throws(
+			() => stashCommit(result, cleanTree),
+			(error) => error.message.length > 0,
+		)
+	}
+	assert.throws(
+		() => stashCommit({ status: 1, stdout: "", stderr: "" }, dirtyTree),
+		/git status reports tracked changes/,
+	)
+	assert.throws(
+		() => stashCommit({ status: 1, stdout: "", stderr: "" }, brokenTree),
+		/fatal: unable to read the index/,
+	)
+})
+
 test("coverage cache input contract", async (context) => {
 	probeRoot = mkdtempSync(resolve(tmpdir(), "zoo-code-coverage-cache-inputs-"))
 	let worktreeAdded = false
@@ -179,7 +231,11 @@ test("coverage cache input contract", async (context) => {
 						if (!Object.hasOwn(inputs, path))
 							throw new Error(`${taskName} does not hash required input ${path}`)
 					}
-					for (const [owner, file] of Object.entries(laneOwnedSpecFiles)) {
+					const ownedSpecEntries = [
+						...Object.entries(laneOwnedSpecFiles),
+						...Object.entries(laneOwnedTopLevelSpecFiles),
+					]
+					for (const [owner, file] of ownedSpecEntries) {
 						const packagePath = file.slice("src/".length)
 						if (owner === lane) {
 							if (!Object.hasOwn(inputs, packagePath))
@@ -235,6 +291,19 @@ test("coverage cache input contract", async (context) => {
 				const changed = changedTasks(before, after)
 				expectInvalidatesExactly(`test:${lane}`, changed)
 			}
+		})
+
+		await context.test("stat-only tracked changes fall back to HEAD and content changes emit a SHA", () => {
+			const trackedTree = () =>
+				spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+					cwd: probeRoot,
+					encoding: "utf8",
+				})
+			const stashResult = () => spawnSync("git", ["stash", "create"], { cwd: probeRoot, encoding: "utf8" })
+			utimesSync(resolve(probeRoot, "package.json"), new Date(), new Date())
+			assert.equal(stashCommit(stashResult(), trackedTree), "HEAD")
+			const sha = withChangedFiles(["package.json"], () => stashCommit(stashResult(), trackedTree))
+			assert.match(sha, /^[0-9a-f]+$/)
 		})
 	} finally {
 		process.off("SIGINT", onSigint)

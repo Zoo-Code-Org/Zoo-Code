@@ -38,7 +38,9 @@
 				"!scripts/**/__tests__/**",
 				"!shared/**/__tests__/**",
 				"!test-utils/**/__tests__/**",
-				"!utils/**/__tests__/**"
+				"!utils/**/__tests__/**",
+				"!core/message-manager/index.spec.ts",
+				"!scripts/verify-lcov.spec.mjs"
 			],
 			"outputs": ["coverage/api/**"]
 		},
@@ -60,7 +62,8 @@
 				"!scripts/**/__tests__/**",
 				"!shared/**/__tests__/**",
 				"!test-utils/**/__tests__/**",
-				"!utils/**/__tests__/**"
+				"!utils/**/__tests__/**",
+				"!scripts/verify-lcov.spec.mjs"
 			],
 			"outputs": ["coverage/core/**"]
 		},
@@ -83,7 +86,9 @@
 				"!scripts/**/__tests__/**",
 				"!shared/**/__tests__/**",
 				"!test-utils/**/__tests__/**",
-				"!utils/**/__tests__/**"
+				"!utils/**/__tests__/**",
+				"!core/message-manager/index.spec.ts",
+				"!scripts/verify-lcov.spec.mjs"
 			],
 			"outputs": ["coverage/services/**"]
 		},
@@ -98,7 +103,8 @@
 				"!api/**/__tests__/**",
 				"!core/**/__tests__/**",
 				"!services/**/__tests__/**",
-				"!__tests__/dist_assets.spec.ts"
+				"!__tests__/dist_assets.spec.ts",
+				"!core/message-manager/index.spec.ts"
 			],
 			"outputs": ["coverage/misc/**"]
 		},
@@ -138,7 +144,9 @@
 				"!scripts/**/__tests__/**",
 				"!shared/**/__tests__/**",
 				"!test-utils/**/__tests__/**",
-				"!utils/**/__tests__/**"
+				"!utils/**/__tests__/**",
+				"!core/message-manager/index.spec.ts",
+				"!scripts/verify-lcov.spec.mjs"
 			]
 		},
 		"test:core": {
@@ -159,7 +167,8 @@
 				"!scripts/**/__tests__/**",
 				"!shared/**/__tests__/**",
 				"!test-utils/**/__tests__/**",
-				"!utils/**/__tests__/**"
+				"!utils/**/__tests__/**",
+				"!scripts/verify-lcov.spec.mjs"
 			]
 		},
 		"test:services": {
@@ -181,7 +190,9 @@
 				"!scripts/**/__tests__/**",
 				"!shared/**/__tests__/**",
 				"!test-utils/**/__tests__/**",
-				"!utils/**/__tests__/**"
+				"!utils/**/__tests__/**",
+				"!core/message-manager/index.spec.ts",
+				"!scripts/verify-lcov.spec.mjs"
 			]
 		},
 		"test:misc": {
@@ -195,7 +206,8 @@
 				"!api/**/__tests__/**",
 				"!core/**/__tests__/**",
 				"!services/**/__tests__/**",
-				"!__tests__/dist_assets.spec.ts"
+				"!__tests__/dist_assets.spec.ts",
+				"!core/message-manager/index.spec.ts"
 			]
 		},
 		"test:tree-sitter": {
