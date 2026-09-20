@@ -38,8 +38,12 @@ import {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 describe("mutation testing workflow", () => {
+	const readWorkflow = () =>
+		fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+	const shouldRun = ({ eventName, draft }) => eventName === "merge_group" || draft === false
+
 	it("checks out the pull request merge result from the base repository", () => {
-		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+		const workflow = readWorkflow()
 
 		assert.ok(workflow.includes("    pull_request:"))
 		assert.ok(!workflow.includes("pull_request_target:"))
@@ -53,6 +57,8 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
 		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
+		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
 		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
@@ -60,6 +66,112 @@ describe("mutation testing workflow", () => {
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
 		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
+	})
+
+	it("waits until a draft pull request is ready before emitting mutation annotations", () => {
+		const workflow = readWorkflow()
+
+		assert.ok(workflow.includes("types: [edited, opened, reopened, ready_for_review, synchronize]"))
+		assert.ok(
+			workflow.includes("if: github.event_name == 'merge_group' || github.event.pull_request.draft == false"),
+		)
+
+		const draftToReadyRuns = [
+			{ eventName: "pull_request", action: "opened", draft: true },
+			{ eventName: "pull_request", action: "ready_for_review", draft: false },
+		].filter(shouldRun)
+
+		assert.deepEqual(
+			draftToReadyRuns.map(({ action }) => action),
+			["ready_for_review"],
+		)
+	})
+
+	it("retains mutation testing for reviewable pull request updates and the merge queue", () => {
+		for (const action of ["opened", "ready_for_review", "synchronize", "reopened"]) {
+			assert.equal(shouldRun({ eventName: "pull_request", draft: false }), true, action)
+		}
+		assert.equal(shouldRun({ eventName: "merge_group" }), true, "merge queue")
+	})
+})
+
+function createSyntheticPullRequestRepository() {
+	const repository = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-diff-revision-"))
+	const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+	const write = (filePath, contents) => {
+		fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+		fs.writeFileSync(path.join(repository, filePath), contents)
+	}
+
+	run("init", "--quiet", "--initial-branch", "main")
+	run("config", "user.email", "gate@example.com")
+	run("config", "user.name", "Gate")
+	run("config", "commit.gpgsign", "false")
+
+	write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
+	write("packages/core/src/feature.ts", "export const feature = () => 1\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "initial")
+	const eventBaseSha = run("rev-parse", "HEAD")
+
+	run("checkout", "--quiet", "-b", "pull-request")
+	write("packages/core/src/feature.ts", "export const feature = () => 2\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "pull request change")
+
+	// The upstream change lands after the pull_request event recorded its base SHA, which is what
+	// made the stale event base attribute unrelated main-only lines to the pull request.
+	run("checkout", "--quiet", "main")
+	write("packages/core/src/unrelated.ts", "export const unrelated = () => 99\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "unrelated upstream change")
+	const upstreamSha = run("rev-parse", "HEAD")
+
+	run("merge", "--quiet", "--no-ff", "-m", "merge pull request", "pull-request")
+	const mergeSha = run("rev-parse", "HEAD")
+
+	return { repository, eventBaseSha, upstreamSha, mergeSha }
+}
+
+describe("pull request revision selection", () => {
+	it("excludes unrelated upstream files by diffing from the merge commit's first parent", () => {
+		const { repository, eventBaseSha, upstreamSha, mergeSha } = createSyntheticPullRequestRepository()
+
+		// A failed assertion must still remove the temporary repository, or a failing run leaks it.
+		try {
+			const manifest = selectFromGit(repository, eventBaseSha, mergeSha)
+			const changedPaths = manifest.packages.flatMap((entry) => entry.files.map((file) => file.path))
+
+			assert.deepEqual(changedPaths, ["packages/core/src/feature.ts"])
+			assert.equal(manifest.baseSha, upstreamSha)
+			assert.equal(manifest.mergeBase, upstreamSha)
+
+			// Selectors must stay aligned with the checked-out head content.
+			assert.equal(manifest.headSha, mergeSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.selectors),
+				["src/feature.ts:1-1"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the supplied base for non-merge heads such as manual runs", () => {
+		const { repository, eventBaseSha, upstreamSha } = createSyntheticPullRequestRepository()
+
+		try {
+			const manifest = selectFromGit(repository, eventBaseSha, upstreamSha)
+
+			assert.equal(manifest.baseSha, eventBaseSha)
+			assert.equal(manifest.mergeBase, eventBaseSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unrelated.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
 	})
 })
 
@@ -409,6 +521,51 @@ describe("selectFromGit", () => {
 			assert.deepEqual(
 				manifest.packages.map(({ id, selectors }) => ({ id, selectors })),
 				[{ id: "core", selectors: ["src/value.ts:3-3"] }],
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("does not charge intervening base-branch changes to the pull request", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-stale-base-"))
+		const runGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim()
+
+		try {
+			runGit("init", "--initial-branch=main")
+			runGit("config", "user.name", "Mutation Test")
+			runGit("config", "user.email", "mutation@example.com")
+			fs.mkdirSync(path.join(repo, "packages/core/src"), { recursive: true })
+			fs.writeFileSync(path.join(repo, "packages/core/src/pr.ts"), "export const pr = false\n")
+			fs.writeFileSync(path.join(repo, "packages/core/src/base.ts"), "export const base = false\n")
+			runGit("add", ".")
+			runGit("commit", "-m", "initial")
+			const staleBaseSha = runGit("rev-parse", "HEAD")
+
+			runGit("checkout", "-b", "feature")
+			fs.writeFileSync(path.join(repo, "packages/core/src/pr.ts"), "export const pr = true\n")
+			runGit("commit", "-am", "change pull request")
+
+			runGit("checkout", "main")
+			fs.writeFileSync(path.join(repo, "packages/core/src/base.ts"), "export const base = true\n")
+			runGit("commit", "-am", "advance base branch")
+			const currentBaseSha = runGit("rev-parse", "HEAD")
+			runGit("merge", "--no-ff", "feature", "-m", "synthetic pull request merge")
+			const mergeSha = runGit("rev-parse", "HEAD")
+			const mergeResultBaseSha = runGit("rev-parse", `${mergeSha}^1`)
+			assert.equal(mergeResultBaseSha, currentBaseSha)
+
+			// A stale base is normalized to the merge's first parent, so the advanced base branch
+			// file is not charged to the pull request.
+			assert.deepEqual(
+				selectFromGit(repo, staleBaseSha, mergeSha).packages[0].files.map(({ path: filePath }) => filePath),
+				["packages/core/src/pr.ts"],
+			)
+			assert.deepEqual(
+				selectFromGit(repo, mergeResultBaseSha, mergeSha).packages[0].files.map(
+					({ path: filePath }) => filePath,
+				),
+				["packages/core/src/pr.ts"],
 			)
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })

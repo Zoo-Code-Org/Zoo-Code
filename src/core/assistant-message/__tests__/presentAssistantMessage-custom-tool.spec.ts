@@ -23,6 +23,15 @@ vi.mock("@roo-code/core", () => ({
 	},
 }))
 
+// Mock the tool handlers so the tests only exercise validation (toolRequirements)
+// and never the real tool execution logic.
+vi.mock("../../tools/AttemptCompletionTool", () => ({
+	attemptCompletionTool: { handle: vi.fn().mockResolvedValue(undefined) },
+}))
+vi.mock("../../tools/AskFollowupQuestionTool", () => ({
+	askFollowupQuestionTool: { handle: vi.fn().mockResolvedValue(undefined) },
+}))
+
 // presentAssistantMessage records tool usage through TelemetryService.instance.
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -77,6 +86,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 					}),
 				}),
 			},
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
@@ -119,6 +129,51 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 
 			// Should record as "custom_tool", not "my_custom_tool"
 			expect(mockTask.recordToolUsage).toHaveBeenCalledWith("custom_tool")
+		})
+	})
+
+	describe("Custom tool mode delegation regression", () => {
+		// Regression for issue #1623.
+		// Before the fix, customTool.execute received the shared provider mode
+		// instead of the task-local mode. A child delegated to "architect" would
+		// have its custom tool called with "orchestrator".
+		it("passes the task-local mode to customTool.execute, not the provider mode", async () => {
+			// Provider says "orchestrator"; task was delegated to "architect".
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "orchestrator",
+						customModes: [],
+						experiments: { customTools: true },
+					}),
+				}),
+			}
+			mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+
+			const executeMock = vi.fn().mockResolvedValue("result")
+			vi.mocked(customToolRegistry.has).mockReturnValue(true)
+			vi.mocked(customToolRegistry.get).mockReturnValue({
+				name: "my_custom_tool",
+				description: "A custom tool",
+				execute: executeMock,
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_delegation",
+					name: "my_custom_tool",
+					params: { value: "test" },
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask)
+
+			expect(executeMock).toHaveBeenCalledOnce()
+			const context = executeMock.mock.calls[0][1]
+			expect(context.mode).toBe("architect")
+			expect(context.task).toBe(mockTask)
 		})
 	})
 
@@ -331,6 +386,169 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			expect(toolRequirements).toMatchObject({
 				search_and_replace: false,
 				edit: false,
+			})
+		})
+
+		it("marks a disabled attempt_completion as blocked and answers it with an error tool_result", async () => {
+			// An explicit disabledTools entry outranks the always-available class,
+			// so a disabled attempt_completion reaches the validator like any
+			// other tool; its rejection must surface as the standard validation-
+			// error tool_result instead of completing the task.
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_protocol_123",
+					name: "attempt_completion",
+					params: {},
+					nativeArgs: {},
+					partial: false,
+				},
+			]
+
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+						experiments: {
+							customTools: false,
+						},
+						disabledTools: ["attempt_completion"],
+					}),
+				}),
+			}
+
+			// Mirror the real validator's rejection for a requirement that maps
+			// to false (validateToolUse.spec pins the predicate itself).
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "attempt_completion" is not allowed in code mode.')
+			})
+
+			await presentAssistantMessage(mockTask)
+
+			const validateToolUseMock = vi.mocked(validateToolUse)
+			expect(validateToolUseMock).toHaveBeenCalled()
+			const toolRequirements = validateToolUseMock.mock.calls[0][3]
+			expect(toolRequirements).toMatchObject({ attempt_completion: false })
+
+			const errorToolResults = mockTask.userMessageContent.filter((block: unknown) => {
+				const b = block as { type?: string; is_error?: boolean }
+				return b.type === "tool_result" && b.is_error
+			})
+			expect(errorToolResults).toHaveLength(1)
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+
+			// The completion handler must not run for the rejected call.
+			const { attemptCompletionTool } = await import("../../tools/AttemptCompletionTool")
+			expect(attemptCompletionTool.handle).not.toHaveBeenCalled()
+		})
+
+		it("treats a model-excluded attempt_completion as blocked and answers it with an error tool_result", async () => {
+			// A model excludedTools entry suppresses the protocol tool in the
+			// effective policy, so the execution gate must see the same
+			// restriction with disabledTools unset.
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_protocol_excluded_123",
+					name: "attempt_completion",
+					params: {},
+					nativeArgs: {},
+					partial: false,
+				},
+			]
+
+			mockTask.api.getModel = () => ({ id: "test-model", info: { excludedTools: ["attempt_completion"] } })
+
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+						experiments: {
+							customTools: false,
+						},
+					}),
+				}),
+			}
+
+			// Mirror the real validator's rejection for a requirement that maps
+			// to false (validateToolUse.spec pins the predicate itself).
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "attempt_completion" is not allowed in code mode.')
+			})
+
+			await presentAssistantMessage(mockTask)
+
+			const validateToolUseMock = vi.mocked(validateToolUse)
+			expect(validateToolUseMock).toHaveBeenCalled()
+			const toolRequirements = validateToolUseMock.mock.calls[0][3]
+			expect(toolRequirements).toMatchObject({ attempt_completion: false })
+
+			const errorToolResults = mockTask.userMessageContent.filter((block: unknown) => {
+				const b = block as { type?: string; is_error?: boolean }
+				return b.type === "tool_result" && b.is_error
+			})
+			expect(errorToolResults).toHaveLength(1)
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+
+			// The completion handler must not run for the rejected call.
+			const { attemptCompletionTool } = await import("../../tools/AttemptCompletionTool")
+			expect(attemptCompletionTool.handle).not.toHaveBeenCalled()
+
+			// Absent model metadata must not derail the requirements build: the
+			// protocol-tool leg simply sees no exclusions, and the call validates
+			// normally instead of erroring out.
+			mockTask.api.getModel = () => undefined
+			mockTask.currentStreamingContentIndex = 0
+			mockTask.userMessageContent = []
+			mockTask.consecutiveMistakeCount = 0
+			mockTask.didAlreadyUseTool = false
+			mockTask.didCompleteReadingStream = false
+
+			await presentAssistantMessage(mockTask)
+
+			expect(validateToolUseMock).toHaveBeenCalledTimes(2)
+			expect(validateToolUseMock.mock.calls[1][3]).toEqual({})
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			const phase2Errors = mockTask.userMessageContent.filter((block: { type?: string; is_error?: boolean }) => {
+				return block.type === "tool_result" && block.is_error
+			})
+			expect(phase2Errors).toHaveLength(0)
+		})
+
+		it("still marks ordinary tools (ask_followup_question) as blocked", async () => {
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_ordinary_123",
+					name: "ask_followup_question",
+					params: { question: "Which option?" },
+					nativeArgs: { question: "Which option?" },
+					partial: false,
+				},
+			]
+
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+						experiments: {
+							customTools: false,
+						},
+						disabledTools: ["ask_followup_question"],
+					}),
+				}),
+			}
+
+			await presentAssistantMessage(mockTask)
+
+			const validateToolUseMock = vi.mocked(validateToolUse)
+			expect(validateToolUseMock).toHaveBeenCalled()
+			const toolRequirements = validateToolUseMock.mock.calls[0][3]
+			expect(toolRequirements).toMatchObject({
+				ask_followup_question: false,
 			})
 		})
 	})
