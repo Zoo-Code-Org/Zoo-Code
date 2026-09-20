@@ -29,6 +29,8 @@ Completing one block does not close its `LIFE-GAP` unless the parent GAP closure
 | LIFE-BLK-P1-017 | 017 | Inventory mutable cache read consumers and define immutable read semantics.                                           | `TaskHistoryStore.get/getAll`; store tests.                                                                                  | None                        | Every direct caller is classified; clone/freeze test criteria and compatibility exclusions are recorded. |
 | LIFE-BLK-P1-020 | 020 | Define observable stale-cache and convergence histories.                                                              | watcher, `invalidate`, `reconcile`; shared-store landmarks and cross-instance tests.                                         | P1-001                      | Missed-watch and explicit-refresh histories have bounded properties and objective convergence evidence.  |
 
+The P1 block specifications live in [Task lifecycle persisted ownership and generation model](./task-lifecycle-persisted-ownership-model.md) (added under [#1689](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1689)): the shared ownership vocabulary, the lock-time awaited-child revalidation boundary, the lineage field-ownership table and monotonic-detachment invariant, the attempt-generation semantics and future checker shape, the immutable-read caller inventory, and the named stale-cache/convergence histories.
+
 ## P2: Durable operation and crash recovery
 
 | Block           | GAP | 1-SP increment                                                             | Production/model/test mapping                                           | Depends on                 | Acceptance                                                                                  |
