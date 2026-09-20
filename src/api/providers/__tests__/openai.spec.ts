@@ -1460,6 +1460,31 @@ describe("OpenAiHandler", () => {
 			})
 		})
 
+		it.each([
+			{ name: "standard", baseUrl: undefined },
+			{ name: "Azure AI Inference", baseUrl: "https://test.services.ai.azure.com" },
+		])("should forward the task abortSignal to non-streaming O3 requests ($name)", async ({ baseUrl }) => {
+			const o3Handler = new OpenAiHandler({
+				...o3Options,
+				openAiStreamingEnabled: false,
+				...(baseUrl ? { openAiBaseUrl: baseUrl, azureApiVersion: "2024-05-01-preview" } : {}),
+			})
+			const controller = new AbortController()
+
+			await collectStream(
+				o3Handler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini" }), {
+				signal: controller.signal,
+				...(baseUrl ? { path: "/models/chat/completions" } : {}),
+			})
+		})
+
 		it.each([true, false])("adds Extra Body fields to O3 requests when streaming is %s", async (streaming) => {
 			const o3Handler = new OpenAiHandler({
 				...o3Options,
