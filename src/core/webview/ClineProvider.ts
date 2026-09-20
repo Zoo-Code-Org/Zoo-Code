@@ -4444,7 +4444,16 @@ export class ClineProvider
 						schedulerAdmitted = true
 						admitContinuation()
 						const { runPromise } = await continuation
-						if (!runPromise) return
+						if (!runPromise) {
+							// Admitted, but the continuation declined to resume (the
+							// parent was cancelled/abandoned or its persisted state
+							// changed while queued). The eager claim from
+							// createTaskWithHistoryItem would otherwise linger on a
+							// task that never runs, excluding the id from orphan
+							// reconciliation for the life of this window.
+							this.taskHistoryStore.markLocallyInactive(parentTaskId)
+							return
+						}
 						try {
 							await runPromise
 							try {
@@ -4459,13 +4468,32 @@ export class ClineProvider
 							throw error
 						}
 					})
-					.then(admitContinuation, (error) => {
-						admitContinuation()
-						console.error(
-							`[${ClineProvider.prototype.reopenParentFromDelegation.name}] taskScheduler.schedule failed:`,
-							error,
-						)
-					})
+					.then(
+						() => {
+							admitContinuation()
+							if (!schedulerAdmitted) {
+								// schedule() resolved without ever invoking the callback
+								// (the parent was aborted/abandoned while waiting for the
+								// permit): no resume will run, so release the eager claim.
+								this.taskHistoryStore.markLocallyInactive(parentTaskId)
+							}
+						},
+						(error) => {
+							admitContinuation()
+							if (!schedulerAdmitted) {
+								// schedule() rejected before the callback ever ran (the
+								// permit wait was cancelled): no resume will run, so
+								// release the eager claim. An admitted resume that later
+								// fails keeps its claim — its session still lives in this
+								// window — and that error still reaches this handler.
+								this.taskHistoryStore.markLocallyInactive(parentTaskId)
+							}
+							console.error(
+								`[${ClineProvider.prototype.reopenParentFromDelegation.name}] taskScheduler.schedule failed:`,
+								error,
+							)
+						},
+					)
 			}
 
 			this.cancelledDelegationChildIds.delete(childTaskId)
