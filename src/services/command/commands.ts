@@ -328,18 +328,15 @@ async function scanCommandDirectory(
 					commandContent = content.trim()
 				}
 
-				// Project commands override global ones
-				if (source === "project" || !commands.has(commandName)) {
-					commands.set(commandName, {
-						name: commandName,
-						content: commandContent,
-						source,
-						filePath: resolvedPath,
-						description,
-						argumentHint,
-						mode,
-					})
-				}
+				commands.set(commandName, {
+					name: commandName,
+					content: commandContent,
+					source,
+					filePath: resolvedPath,
+					description,
+					argumentHint,
+					mode,
+				})
 			} catch (error) {
 				console.warn(`Failed to read command file ${resolvedPath}:`, error)
 			}
