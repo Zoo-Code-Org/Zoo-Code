@@ -1,6 +1,9 @@
 // Regression tests for the eager `markLocallyActive` claim in
 // ClineProvider.createTaskWithHistoryItemUnlocked and its rollback on every
-// path that does not reach a scheduled run (CodeRabbit round-3 Finding B/E).
+// path that does not reach a scheduled run (CodeRabbit round-3 Finding B/E),
+// plus the reopenParentFromDelegation continuation-scheduling paths where the
+// parent is claimed through createTaskWithHistoryItem(startTask:false) but the
+// scheduler never admits the resumed run (latest CodeRabbit review).
 //
 // npx vitest run core/webview/__tests__/ClineProvider.markLocallyActive.spec.ts
 //
@@ -11,6 +14,7 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
 
+import { RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../ClineProvider"
 import { TaskRegistry } from "../../task/TaskRegistry"
 import { type Task } from "../../task/Task"
@@ -31,6 +35,16 @@ type PrivateClineProviderMethods = {
 		parentTask?: Task,
 		options?: { startTask?: boolean },
 	) => Promise<Task>
+	runDelegationTransition: <T>(this: unknown, parentTaskId: string, fn: () => Promise<T>) => Promise<T>
+	reopenParentFromDelegation: (
+		this: unknown,
+		params: {
+			parentTaskId: string
+			childTaskId: string
+			completionResultSummary: string
+			pendingActionId?: string
+		},
+	) => Promise<boolean>
 }
 
 const privateClineProvider = ClineProvider.prototype as unknown as PrivateClineProviderMethods
@@ -65,6 +79,10 @@ const TaskStub = vi.hoisted(() => {
 		on() {}
 		off() {}
 		emit() {}
+		// Surfaces used by reopenParentFromDelegation's step 8 + continuation body.
+		public overwriteClineMessages = vi.fn().mockResolvedValue(undefined)
+		public overwriteApiConversationHistory = vi.fn().mockResolvedValue(undefined)
+		public resumeAfterDelegation = vi.fn().mockResolvedValue(undefined)
 		public static instanceCount = 0
 	}
 	return TaskStub
@@ -73,6 +91,27 @@ const TaskStub = vi.hoisted(() => {
 vi.mock("../../task/Task", () => ({
 	Task: TaskStub,
 }))
+
+// reopenParentFromDelegation reads/writes per-task message files through these
+// module functions. Echo the passed messages back (production returns the
+// saved array) so the continuation tests never touch the filesystem.
+vi.mock("../../task-persistence", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../../task-persistence")>()
+	return {
+		...mod,
+		readApiMessages: vi.fn().mockResolvedValue([]),
+		saveApiMessages: vi
+			.fn()
+			.mockImplementation(({ messages }: { messages: unknown[] }) => Promise.resolve(messages)),
+		saveTaskMessages: vi
+			.fn()
+			.mockImplementation(({ messages }: { messages: unknown[] }) => Promise.resolve(messages)),
+	}
+})
+vi.mock("../../task-persistence/taskMessages", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../../task-persistence/taskMessages")>()
+	return { ...mod, readTaskMessages: vi.fn().mockResolvedValue([]) }
+})
 
 type MockFn = ReturnType<typeof vi.fn>
 
@@ -86,11 +125,20 @@ type OwnershipStore = {
 	get: (id: string) => unknown
 	markLocallyActive: MockFn
 	markLocallyInactive: MockFn
+	invalidate: MockFn
+	atomicUpdatePair: MockFn
 }
 
 type ProviderStubObject = {
 	historyTaskCreationQueue: Promise<void>
 	getCurrentTask: MockFn
+	getTaskWithId: MockFn
+	cancelledDelegationChildIds: Set<string>
+	taskCreationCallback?: (task: unknown) => void
+	runDelegationTransition: <T>(parentTaskId: string, fn: () => Promise<T>) => Promise<T>
+	// Wired after the literal in makeProvider because the wrapper must be bound to
+	// the stub object itself; optional so the literal typechecks before wiring.
+	createTaskWithHistoryItem?: (historyItem: HistoryItemLike, options?: { startTask?: boolean }) => Promise<Task>
 	/** Satisfies the ClineProvider structural interface for `createTask` without being invoked by it. */
 	setValues?: MockFn
 	taskRegistry: TaskRegistry
@@ -102,6 +150,7 @@ type ProviderStubObject = {
 	taskScheduler: { schedule: MockFn }
 	taskEventListeners: Map<unknown, Array<() => void>>
 	log: MockFn
+	emit: MockFn
 	customModesManager: { getCustomModes: MockFn }
 	providerSettingsManager: { getModeConfigId: MockFn; listConfig: MockFn }
 	getState: MockFn
@@ -117,14 +166,33 @@ function makeStore(): OwnershipStore {
 		get: vi.fn(() => undefined),
 		markLocallyActive: vi.fn(),
 		markLocallyInactive: vi.fn(),
+		invalidate: vi.fn().mockResolvedValue(undefined),
+		atomicUpdatePair: vi.fn(),
 	}
 }
 
 function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObject> = {}): ProviderStubObject {
 	const registry = new TaskRegistry()
-	return {
+	const provider: ProviderStubObject = {
 		historyTaskCreationQueue: Promise.resolve(),
 		getCurrentTask: vi.fn((...args: unknown[]) => (registry.current as undefined | Task) && registry.current),
+		getTaskWithId: vi.fn((id: string) =>
+			Promise.resolve({
+				historyItem: {
+					id,
+					number: 1,
+					ts: Date.now(),
+					task: "test task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: "/tmp",
+				},
+			}),
+		),
+		cancelledDelegationChildIds: new Set<string>(),
+		runDelegationTransition: <T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> =>
+			privateClineProvider.runDelegationTransition<T>(parentTaskId, fn),
 		taskRegistry: registry,
 		taskHistoryStore: store,
 		evictCurrentTask: vi.fn().mockResolvedValue(undefined),
@@ -135,6 +203,7 @@ function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObje
 		taskScheduler: { schedule: vi.fn().mockResolvedValue(undefined) },
 		taskEventListeners: new Map(),
 		log: vi.fn(),
+		emit: vi.fn(),
 		customModesManager: { getCustomModes: vi.fn().mockResolvedValue([]) },
 		providerSettingsManager: {
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -152,9 +221,14 @@ function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObje
 		getPendingEditOperation: vi.fn().mockReturnValue(undefined),
 		clearPendingEditOperation: vi.fn(),
 		postStateToWebview: vi.fn().mockResolvedValue(undefined),
-		context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
+		context: {
+			extension: { packageJSON: {} },
+			globalStorageUri: { fsPath: "/tmp" },
+			workspaceState: { get: vi.fn().mockReturnValue(false) },
+		},
 		contextProxy: {
 			extensionUri: {},
+			globalStorageUri: { fsPath: "/tmp" },
 			getValue: vi.fn(),
 			setValue: vi.fn(),
 			setProviderSettings: vi.fn(),
@@ -162,6 +236,11 @@ function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObje
 		},
 		...overrides,
 	}
+	// The public wrapper reads this.historyTaskCreationQueue and routes to the
+	// Unlocked prototype method with `this`, so it must be bound to the stub object.
+	provider.createTaskWithHistoryItem = (historyItem, options) =>
+		privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem, options)
+	return provider
 }
 
 function makeHistoryItem(id: string, extra: Partial<HistoryItemLike> = {}): HistoryItemLike {
@@ -621,6 +700,253 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			"[createTask] taskScheduler.schedule failed:",
 			expect.objectContaining({ message: "permit failed" }),
+		)
+	})
+})
+
+describe("ClineProvider reopenParentFromDelegation continuation scheduling ownership release", () => {
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+
+	beforeEach(() => {
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+	})
+
+	afterEach(() => {
+		consoleErrorSpy.mockRestore()
+	})
+
+	// A store double whose atomicUpdatePair applies the updaters for real, so the
+	// production completeDelegatedChild reducer produces the parent's `active`
+	// record that the continuation body re-reads through get()/invalidate().
+	function makeDelegationStore(seed: { child: HistoryItemLike; parent: HistoryItemLike }): OwnershipStore {
+		const items = new Map<string, HistoryItemLike>([
+			[seed.child.id, structuredClone(seed.child)],
+			[seed.parent.id, structuredClone(seed.parent)],
+		])
+		return {
+			get: vi.fn((id: string) => items.get(id)),
+			markLocallyActive: vi.fn(),
+			markLocallyInactive: vi.fn(),
+			invalidate: vi.fn().mockResolvedValue(undefined),
+			atomicUpdatePair: vi.fn(
+				async (
+					firstId: string,
+					secondId: string,
+					firstUpdater: (current: HistoryItemLike) => HistoryItemLike,
+					secondUpdater: (current: HistoryItemLike) => HistoryItemLike,
+				) => {
+					const first = items.get(firstId)
+					const second = items.get(secondId)
+					if (!first || !second) {
+						throw new Error(`atomicUpdatePair: ${first ? secondId : firstId} not found`)
+					}
+					items.set(firstId, firstUpdater(structuredClone(first)))
+					items.set(secondId, secondUpdater(structuredClone(second)))
+					return []
+				},
+			),
+		}
+	}
+
+	function makeDelegationHistory(parentId: string, childId: string) {
+		const parent = makeHistoryItem(parentId, {
+			status: "delegated",
+			awaitingChildId: childId,
+			delegatedToId: childId,
+			childIds: [childId],
+		})
+		const child = makeHistoryItem(childId, {
+			status: "active",
+			parentTaskId: parentId,
+		})
+		return { parent, child }
+	}
+
+	// Captures the scheduled run callback and returns a promise the test settles
+	// manually, mirroring production where schedule() settles only after run().
+	function makeCapturingSchedule() {
+		let runTask: (() => Promise<void>) | undefined
+		let resolveSchedule!: (value?: unknown) => void
+		let rejectSchedule!: (reason?: unknown) => void
+		const settled = new Promise<unknown>((resolve, reject) => {
+			resolveSchedule = resolve
+			rejectSchedule = reject
+		})
+		const schedule = vi.fn((_task: unknown, run: () => Promise<void>) => {
+			runTask = run
+			return settled
+		})
+		return {
+			schedule,
+			getRunTask: () => runTask,
+			resolveSchedule: () => resolveSchedule(),
+			rejectSchedule: (reason: unknown) => rejectSchedule(reason),
+		}
+	}
+
+	function makeReopenFixture(schedule: MockFn) {
+		const ids = { parentId: "parent-1", childId: "child-1" }
+		const { parent, child } = makeDelegationHistory(ids.parentId, ids.childId)
+		const store = makeDelegationStore({ child, parent })
+		let created: InstanceType<typeof TaskStub> | undefined
+		const provider = makeProvider(store, {
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parent }),
+			taskCreationCallback: (task) => {
+				created = task as InstanceType<typeof TaskStub>
+			},
+		})
+		// The stack branch's addClineToStack must actually install the created task so
+		// the continuation body's `currentTask === parentInstance` check sees it.
+		provider.addClineToStack = vi.fn((task: unknown) => {
+			provider.taskRegistry.push(task as unknown as Task)
+			return Promise.resolve()
+		})
+		provider.taskScheduler.schedule = schedule
+		return {
+			ids,
+			store,
+			provider,
+			getCreated: () => {
+				if (!created) throw new Error("taskCreationCallback was never invoked")
+				return created
+			},
+		}
+	}
+
+	it("releases the parent's eager claim when the scheduler rejects before the continuation is ever admitted", async () => {
+		// permit wait cancelled while the continuation was queued: schedule() rejects
+		// without invoking its callback, so resumeAfterDelegation never runs and the
+		// eager claim from createTaskWithHistoryItem(startTask:false) must be rolled back.
+		const schedule = vi.fn().mockRejectedValue(new Error("permit wait cancelled"))
+		const { ids, store, provider, getCreated } = makeReopenFixture(schedule)
+
+		const result = await privateClineProvider.reopenParentFromDelegation.call(provider, {
+			parentTaskId: ids.parentId,
+			childTaskId: ids.childId,
+			completionResultSummary: "subtask done",
+		})
+
+		expect(result).toBe(true)
+		expect(schedule).toHaveBeenCalledTimes(1)
+		// Claimed once by step 7, released once by the rejection handler.
+		expect(store.markLocallyActive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(ids.parentId)
+		await vi.waitFor(() => expect(store.markLocallyInactive).toHaveBeenCalledWith(ids.parentId))
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(getCreated().resumeAfterDelegation).not.toHaveBeenCalled()
+		// The rejection still reaches the tagged console.error diagnostic.
+		await vi.waitFor(() =>
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[reopenParentFromDelegation] taskScheduler.schedule failed:",
+				expect.objectContaining({ message: "permit wait cancelled" }),
+			),
+		)
+	})
+
+	it("releases the parent's eager claim when the scheduler resolves without ever invoking the continuation (aborted/abandoned while waiting)", async () => {
+		// TaskScheduler.schedule returns early — permit acquired but task.abort/abandoned
+		// set while queued — resolving WITHOUT calling run(). The claim must still be
+		// released even though nothing rejected.
+		const schedule = vi.fn().mockResolvedValue(undefined)
+		const { ids, store, provider, getCreated } = makeReopenFixture(schedule)
+
+		const result = await privateClineProvider.reopenParentFromDelegation.call(provider, {
+			parentTaskId: ids.parentId,
+			childTaskId: ids.childId,
+			completionResultSummary: "subtask done",
+		})
+
+		expect(result).toBe(true)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(ids.parentId)
+		await vi.waitFor(() => expect(store.markLocallyInactive).toHaveBeenCalledWith(ids.parentId))
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(getCreated().resumeAfterDelegation).not.toHaveBeenCalled()
+		// Resolution-without-admission is not an error: the tagged console.error stays silent.
+		await flushMicrotasks()
+		expect(consoleErrorSpy).not.toHaveBeenCalled()
+	})
+
+	it("releases the parent's eager claim when the admitted continuation declines to resume (stale parent)", async () => {
+		// The scheduler admits the continuation, but the body's staleness guard fires
+		// (parent abandoned between scheduling and admission) and returns no runPromise.
+		const capture = makeCapturingSchedule()
+		const { ids, store, provider, getCreated } = makeReopenFixture(capture.schedule)
+
+		const result = await privateClineProvider.reopenParentFromDelegation.call(provider, {
+			parentTaskId: ids.parentId,
+			childTaskId: ids.childId,
+			completionResultSummary: "subtask done",
+		})
+		expect(result).toBe(true)
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+
+		// Make the parent stale BEFORE invoking the admitted run.
+		getCreated().abandoned = true
+		await capture.getRunTask()!()
+
+		expect(getCreated().resumeAfterDelegation).not.toHaveBeenCalled()
+		expect(provider.log).toHaveBeenCalledWith(
+			`[reopenParentFromDelegation] Skipping stale parent continuation for ${ids.parentId} after child ${ids.childId}`,
+		)
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyInactive).toHaveBeenCalledWith(ids.parentId)
+
+		// The schedule promise settling afterwards must not release a second time.
+		capture.resolveSchedule()
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps the claim when the admitted continuation resumes the parent to completion", async () => {
+		const capture = makeCapturingSchedule()
+		const { ids, store, provider, getCreated } = makeReopenFixture(capture.schedule)
+
+		const result = await privateClineProvider.reopenParentFromDelegation.call(provider, {
+			parentTaskId: ids.parentId,
+			childTaskId: ids.childId,
+			completionResultSummary: "subtask done",
+		})
+		expect(result).toBe(true)
+
+		await capture.getRunTask()!()
+		capture.resolveSchedule()
+		await flushMicrotasks()
+
+		expect(getCreated().resumeAfterDelegation).toHaveBeenCalledTimes(1)
+		expect(provider.emit).toHaveBeenCalledWith(
+			RooCodeEventName.TaskDelegationCompleted,
+			ids.parentId,
+			ids.childId,
+			"subtask done",
+		)
+		expect(provider.emit).toHaveBeenCalledWith(RooCodeEventName.TaskDelegationResumed, ids.parentId, ids.childId)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(ids.parentId)
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+	})
+
+	it("keeps the claim and still reports the error when the admitted resume itself fails", async () => {
+		// CodeRabbit: rejection propagation from an ADMITTED resume must be preserved —
+		// the error reaches the tagged console.error handler, but the claim is NOT
+		// released because the parent session still exists in this window.
+		const capture = makeCapturingSchedule()
+		const { ids, store, provider, getCreated } = makeReopenFixture(capture.schedule)
+
+		const result = await privateClineProvider.reopenParentFromDelegation.call(provider, {
+			parentTaskId: ids.parentId,
+			childTaskId: ids.childId,
+			completionResultSummary: "subtask done",
+		})
+		expect(result).toBe(true)
+
+		getCreated().resumeAfterDelegation.mockRejectedValue(new Error("resume blew up"))
+		await expect(capture.getRunTask()!()).rejects.toThrow("resume blew up")
+		capture.rejectSchedule(new Error("resume blew up"))
+		await flushMicrotasks()
+
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"[reopenParentFromDelegation] taskScheduler.schedule failed:",
+			expect.objectContaining({ message: "resume blew up" }),
 		)
 	})
 })
