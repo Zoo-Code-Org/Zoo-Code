@@ -73,6 +73,8 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			info,
 			reasoningBudget,
 		} = this.getModel()
+		// Read once so the cache breakpoints and the beta header always agree.
+		const supportsPromptCache = info.supportsPromptCache
 		const thinking = getAnthropicProviderReasoning({
 			model: info,
 			reasoningBudget,
@@ -113,7 +115,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			tool_choice: toolChoice,
 		}
 
-		if (info.supportsPromptCache) {
+		if (supportsPromptCache) {
 			/**
 			 * The latest message will be the new user message, one before
 			 * will be the assistant message from a previous request, and
@@ -165,13 +167,8 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						// prompt caching: https://x.com/alexalbert__/status/1823751995901272068
 						// https://github.com/anthropics/anthropic-sdk-typescript?tab=readme-ov-file#default-headers
 						// https://github.com/anthropics/anthropic-sdk-typescript/commit/c920b77fc67bd839bfeb6716ceab9d7c9bbe7393
-
-						// Then check for models that support prompt caching
-						if (info.supportsPromptCache) {
-							betas.push("prompt-caching-2024-07-31")
-							return { headers: { "anthropic-beta": betas.join(",") } }
-						}
-						return undefined
+						betas.push("prompt-caching-2024-07-31")
+						return { headers: { "anthropic-beta": betas.join(",") } }
 					})(),
 				)
 			} catch (error) {

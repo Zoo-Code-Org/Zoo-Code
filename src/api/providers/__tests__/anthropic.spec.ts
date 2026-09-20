@@ -570,26 +570,13 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions).toBeUndefined()
 		})
 
-		it("should attach cache breakpoints without the prompt-caching beta header when cache support is gone at header build time", async () => {
+		it("should send the prompt-caching beta header and fall back to default max tokens when maxTokens is undefined", async () => {
 			const customHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
 				apiModelId: "claude-3-5-sonnet-20241022",
 			})
 			const realModel = customHandler.getModel()
-
-			// The capability is consulted twice: when selecting the caching request
-			// branch and again inside the beta-header options. Model a model that
-			// reports no cache support on the second consult.
-			let cacheSupported = true
-			const info = { ...realModel.info }
-			Object.defineProperty(info, "supportsPromptCache", {
-				get: () => {
-					const current = cacheSupported
-					cacheSupported = false
-					return current
-				},
-			})
-			vitest.spyOn(customHandler, "getModel").mockReturnValue({ ...realModel, info, maxTokens: undefined })
+			vitest.spyOn(customHandler, "getModel").mockReturnValue({ ...realModel, maxTokens: undefined })
 
 			const stream = customHandler.createMessage(systemPrompt, [
 				{
@@ -604,7 +591,7 @@ describe("AnthropicHandler", () => {
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
 			expect(requestBody?.system?.[0]?.cache_control).toEqual({ type: "ephemeral" })
 			expect(requestBody?.max_tokens).toBe(8192)
-			expect(requestOptions).toBeUndefined()
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
 
 		it("should attach cache control only to the last content block of a cached user message", async () => {
@@ -658,7 +645,15 @@ describe("AnthropicHandler", () => {
 
 				await expect(collectStream(stream)).rejects.toBe(rejection)
 				expect(TelemetryService.instance.captureException).toHaveBeenCalledTimes(1)
-				expect(TelemetryService.instance.captureException).toHaveBeenCalledWith(expect.any(ApiProviderError))
+				const capturedError = vitest.mocked(TelemetryService.instance.captureException).mock.calls[0]?.[0]
+				expect(capturedError).toBeInstanceOf(ApiProviderError)
+				if (!(capturedError instanceof ApiProviderError)) {
+					throw new Error("expected captureException to receive an ApiProviderError")
+				}
+				expect(capturedError.message).toBe("Anthropic API error")
+				expect(capturedError.provider).toBe("Anthropic")
+				expect(capturedError.modelId).toBe("claude-3-5-sonnet-20241022")
+				expect(capturedError.operation).toBe("createMessage")
 			},
 		)
 
@@ -691,7 +686,15 @@ describe("AnthropicHandler", () => {
 
 				await expect(collectStream(stream)).rejects.toBe(rejection)
 				expect(TelemetryService.instance.captureException).toHaveBeenCalledTimes(1)
-				expect(TelemetryService.instance.captureException).toHaveBeenCalledWith(expect.any(ApiProviderError))
+				const capturedError = vitest.mocked(TelemetryService.instance.captureException).mock.calls[0]?.[0]
+				expect(capturedError).toBeInstanceOf(ApiProviderError)
+				if (!(capturedError instanceof ApiProviderError)) {
+					throw new Error("expected captureException to receive an ApiProviderError")
+				}
+				expect(capturedError.message).toBe("Anthropic API error")
+				expect(capturedError.provider).toBe("Anthropic")
+				expect(capturedError.modelId).toBe("claude-3-5-sonnet-20241022")
+				expect(capturedError.operation).toBe("createMessage")
 			},
 		)
 	})
