@@ -523,7 +523,17 @@ export class ClineProvider
 
 				if (legacyHistory.length > 0) {
 					this.log(`[initializeTaskHistoryStore] Migrating ${legacyHistory.length} entries from globalState`)
-					await this.taskHistoryStore.migrateFromGlobalState(legacyHistory)
+
+					if (!(await this.migrateFromGlobalStateWithRetry(legacyHistory))) {
+						// Leave the migration marker unset so the next launch
+						// re-runs migration against the still-idempotent store.
+						// Settle the gate below so waiting lookups cannot hang;
+						// they degrade to the (possibly incomplete) store.
+						this.log(
+							"[initializeTaskHistoryStore] Migration failed after retry; task history may be incomplete this session. Legacy entries remain in globalState and migration will be retried on next launch.",
+						)
+						return
+					}
 				}
 
 				await this.context.globalState.update(migrationKey, true)
@@ -536,6 +546,34 @@ export class ClineProvider
 		} finally {
 			// Settle the gate even on failure so awaiting lookups can never hang.
 			resolveReady()
+		}
+	}
+
+	/**
+	 * Run the legacy globalState → per-task-file migration, retrying once after
+	 * a failure. Migration writes per entry and skips files that already exist,
+	 * and the caller only sets the migration marker after this returns true, so
+	 * a retry is idempotent and cannot duplicate or skip work. Returns false if
+	 * both attempts fail.
+	 */
+	private async migrateFromGlobalStateWithRetry(taskHistoryEntries: HistoryItem[]): Promise<boolean> {
+		try {
+			await this.taskHistoryStore.migrateFromGlobalState(taskHistoryEntries)
+			return true
+		} catch (firstError) {
+			this.log(
+				`[initializeTaskHistoryStore] Migration failed (${firstError instanceof Error ? firstError.message : String(firstError)}); retrying once`,
+			)
+		}
+
+		try {
+			await this.taskHistoryStore.migrateFromGlobalState(taskHistoryEntries)
+			return true
+		} catch (retryError) {
+			this.log(
+				`[initializeTaskHistoryStore] Migration failed after retry (${retryError instanceof Error ? retryError.message : String(retryError)})`,
+			)
+			return false
 		}
 	}
 
