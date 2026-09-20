@@ -592,6 +592,35 @@ describe("executeCommandTool", () => {
 			)
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
+
+		it("does not drain when the execa fallback retry hits a working directory failure", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "/nonexistent/working/dir"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/nonexistent/working/dir" }
+			// First attempt passes validation but fails shell integration startup
+			// (retryable); the retry then fails the working directory check.
+			vitest.mocked(fs.access).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("ENOENT"))
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValueOnce({
+				runCommand: vitest.fn().mockReturnValue(failedProcess),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				"Working directory '/nonexistent/working/dir' does not exist.",
+			)
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("Command execution timeout configuration", () => {
