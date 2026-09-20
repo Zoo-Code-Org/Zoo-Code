@@ -203,6 +203,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				}
 
 				pushToolResult(result)
+				task.processQueuedMessages()
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
@@ -222,6 +223,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					}
 
 					pushToolResult(result)
+					task.processQueuedMessages()
 				} else {
 					// Command was submitted but shell integration lost track of it — show warning.
 					await task.say("shell_integration_warning")

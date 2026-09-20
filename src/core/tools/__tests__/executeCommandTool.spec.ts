@@ -88,6 +88,7 @@ describe("executeCommandTool", () => {
 			recordToolUsage: vitest.fn().mockReturnValue({} as ToolUsage),
 			recordToolError: vitest.fn(),
 			supersedePendingAsk: vitest.fn(),
+			processQueuedMessages: vitest.fn(),
 			providerRef: {
 				deref: vitest.fn().mockResolvedValue({
 					contextProxy: {
@@ -494,6 +495,74 @@ describe("executeCommandTool", () => {
 				terminalProvider: "execa",
 				isCmdExeFallback: true,
 			})
+		})
+	})
+
+	describe("Queued message processing", () => {
+		it("processes queued messages after the command completes", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+		})
+
+		it("processes queued messages after the execa fallback retry completes", async () => {
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulProcess = Object.assign(Promise.resolve(), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulTerminalProcess = successfulProcess as unknown as RooTerminalProcess
+
+			vitest
+				.mocked(TerminalRegistry.getOrCreateTerminal)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockReturnValue(failedProcess),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+						void callbacks.onCompleted?.("", successfulTerminalProcess)
+						callbacks.onShellExecutionComplete?.({ exitCode: 0 }, successfulTerminalProcess)
+						return successfulProcess
+					}),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not process queued messages when the user rejects the command", async () => {
+			mockAskApproval.mockResolvedValue(false)
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
 	})
 
