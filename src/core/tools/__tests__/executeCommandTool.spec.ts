@@ -2,6 +2,7 @@
 
 import type { ToolUsage } from "@roo-code/types"
 import * as vscode from "vscode"
+import fs from "fs/promises"
 
 import { Task } from "../../task/Task"
 import { formatResponse } from "../../prompts/responses"
@@ -73,7 +74,9 @@ describe("executeCommandTool", () => {
 		vitest.useRealTimers()
 
 		// Spy on executeCommandInTerminal and mock its return value
-		vitest.spyOn(executeCommandModule, "executeCommandInTerminal").mockResolvedValue([false, "Command executed"])
+		vitest
+			.spyOn(executeCommandModule, "executeCommandInTerminal")
+			.mockResolvedValue([false, "Command executed", true])
 
 		// Create mock implementations with eslint directives to handle the type issues
 		mockCline = {
@@ -511,6 +514,10 @@ describe("executeCommandTool", () => {
 
 			expect(mockPushToolResult).toHaveBeenCalled()
 			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			// The tool result must be published before queued messages are processed.
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
 		})
 
 		it("processes queued messages after the execa fallback retry completes", async () => {
@@ -548,6 +555,9 @@ describe("executeCommandTool", () => {
 
 			expect(mockPushToolResult).toHaveBeenCalled()
 			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
 		})
 
 		it("does not process queued messages when the user rejects the command", async () => {
@@ -562,6 +572,24 @@ describe("executeCommandTool", () => {
 			})
 
 			expect(mockPushToolResult).not.toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+		})
+
+		it("does not process queued messages when the working directory does not exist", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "/nonexistent/working/dir"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/nonexistent/working/dir" }
+			vitest.mocked(fs.access).mockRejectedValueOnce(new Error("ENOENT"))
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				"Working directory '/nonexistent/working/dir' does not exist.",
+			)
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
 	})
