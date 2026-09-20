@@ -1,7 +1,9 @@
 // npx vitest run src/api/providers/__tests__/anthropic.spec.ts
 
+import { type ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { AnthropicHandler } from "../anthropic"
 import { ApiHandlerOptions } from "../../../shared/api"
+import { calculateApiCostAnthropic } from "../../../shared/cost"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -185,6 +187,48 @@ describe("AnthropicHandler", () => {
 
 			// Verify API
 			expect(mockCreate).toHaveBeenCalled()
+		})
+
+		it("should adopt the cumulative message_delta output tokens for the final totalCost", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 1,
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						delta: { type: "stop_reason", stop_reason: "end_turn" },
+						usage: { output_tokens: 500 },
+					},
+					{
+						type: "message_stop",
+					},
+				]),
+			)
+
+			const stream = handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			const chunks = await collectStream(stream)
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.totalCost !== undefined,
+			)
+			expect(usageChunks).toHaveLength(1)
+
+			const { info } = handler.getModel()
+			expect(usageChunks[0]?.totalCost).toBe(calculateApiCostAnthropic(info, 100, 500).totalCost)
+			expect(usageChunks[0]?.totalCost).not.toBe(calculateApiCostAnthropic(info, 100, 1).totalCost)
 		})
 
 		it("should include 1M context beta header for Claude Sonnet 4.6 when enabled", async () => {
