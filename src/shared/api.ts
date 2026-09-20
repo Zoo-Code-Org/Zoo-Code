@@ -166,11 +166,13 @@ export const getModelMaxOutputTokens = ({
 
 // GetModelsOptions
 
-// Allow callers to always pass apiKey/baseUrl without excess property errors,
-// while still enforcing required fields per provider where applicable.
+// Allow callers to always pass apiKey/baseUrl (plus an optional cancellation signal for
+// signal-aware fetchers) without excess property errors, while still enforcing required
+// fields per provider where applicable.
 type CommonFetchParams = {
 	apiKey?: string
 	baseUrl?: string
+	signal?: AbortSignal
 }
 
 // Exhaustive, value-level map for all dynamic providers.

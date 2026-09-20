@@ -158,7 +158,29 @@ describe("getModels with new GetModelsOptions", () => {
 
 		const result = await getModels({ provider: providerIdentifiers.requesty, apiKey: DUMMY_REQUESTY_KEY })
 
-		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY)
+		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY, undefined)
+		expect(result).toEqual(mockModels)
+	})
+
+	it("forwards the caller's cancellation signal to Requesty model discovery", async () => {
+		const mockModels = {
+			"requesty/model": {
+				maxTokens: 4096,
+				contextWindow: 8192,
+				supportsPromptCache: false,
+				description: "Requesty model",
+			},
+		}
+		mockGetRequestyModels.mockResolvedValue(mockModels)
+
+		const controller = new AbortController()
+		const result = await getModels({
+			provider: providerIdentifiers.requesty,
+			apiKey: DUMMY_REQUESTY_KEY,
+			signal: controller.signal,
+		})
+
+		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY, controller.signal)
 		expect(result).toEqual(mockModels)
 	})
 
@@ -179,7 +201,11 @@ describe("getModels with new GetModelsOptions", () => {
 			baseUrl: "https://router.requesty.ai/v1",
 		})
 
-		expect(mockGetRequestyModels).toHaveBeenCalledWith("https://router.requesty.ai/v1", DUMMY_REQUESTY_KEY)
+		expect(mockGetRequestyModels).toHaveBeenCalledWith(
+			"https://router.requesty.ai/v1",
+			DUMMY_REQUESTY_KEY,
+			undefined,
+		)
 		expect(result).toEqual(mockModels)
 	})
 
