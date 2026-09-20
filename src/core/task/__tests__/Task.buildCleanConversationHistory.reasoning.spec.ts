@@ -28,9 +28,10 @@ import { Task } from "../Task"
 const asApiMessage = (message: Record<string, unknown>): ApiMessage => message as unknown as ApiMessage
 
 /**
- * `Task.buildCleanConversationHistory` only reaches `this.api.getModel().info.preserveReasoning`
- * in the plain-text branch. A minimal typed double is attached through `unknown` because
- * `ApiHandler` is a large class surface; this mirrors the bracket-notation seam used by
+ * `Task.buildCleanConversationHistory` reads `preserveReasoning` from the
+ * threaded `requestModelInfo` argument in the plain-text branch. A minimal
+ * typed double is attached through `unknown` because `ApiHandler` is a large
+ * class surface; this mirrors the bracket-notation seam used by
  * `ask-allowlist-cwd.spec.ts` without changing production visibility.
  */
 function buildTask(modelOverrides: Partial<ModelInfo> = {}): Task {
@@ -40,8 +41,14 @@ function buildTask(modelOverrides: Partial<ModelInfo> = {}): Task {
 	return task
 }
 
+/**
+ * `Task.buildCleanConversationHistory` resolves `preserveReasoning` from the
+ * request's threaded model snapshot — the same `info` object this double
+ * serves through `getModel()`, so passing it as the second argument preserves
+ * the exact semantics these fixtures were built against.
+ */
 function buildHistory(task: Task, messages: ApiMessage[]) {
-	return task["buildCleanConversationHistory"](messages)
+	return task["buildCleanConversationHistory"](messages, task.api.getModel().info)
 }
 
 describe("Task.buildCleanConversationHistory: encrypted reasoning first block", () => {
