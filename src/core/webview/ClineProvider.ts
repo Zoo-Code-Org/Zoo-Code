@@ -820,6 +820,7 @@ export class ClineProvider
 	*/
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+		this.stopWebviewWatchdog()
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -846,10 +847,7 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
-		if (this.webviewWatchdogInterval) {
-			clearInterval(this.webviewWatchdogInterval)
-			this.webviewWatchdogInterval = null
-		}
+		this.stopWebviewWatchdog()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1143,6 +1141,11 @@ export class ClineProvider
 				} else {
 					this.log("Clearing webview resources for sidebar view")
 					this.clearWebviewResources()
+					if (this.view === webviewView) {
+						// Drop the disposed view so nothing keeps polling it
+						// (e.g. the recovery watchdog) for the provider's lifetime.
+						this.view = undefined
+					}
 					// Reset current workspace manager reference when view is disposed
 					this.codeIndexManager = undefined
 				}
@@ -3419,6 +3422,14 @@ export class ClineProvider
 			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")
 			void this.reloadWebviewForRecovery()
 		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
+	}
+
+	/** Stops the renderer heartbeat watchdog; the webview it watches is gone. */
+	private stopWebviewWatchdog(): void {
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+			this.webviewWatchdogInterval = null
+		}
 	}
 
 	/**

@@ -527,10 +527,7 @@ describe("ClineProvider", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -665,6 +662,7 @@ describe("ClineProvider", () => {
 
 	describe("webview heartbeat watchdog", () => {
 		let visibilityCallback: () => void
+		let disposeCallback: () => void
 
 		beforeEach(() => {
 			// Fake timers must be active before resolveWebviewView so the
@@ -672,6 +670,10 @@ describe("ClineProvider", () => {
 			vi.useFakeTimers()
 			mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
 				visibilityCallback = cb
+				return { dispose: vi.fn() }
+			})
+			mockWebviewView.onDidDispose = vi.fn().mockImplementation((cb: () => void) => {
+				disposeCallback = cb
 				return { dispose: vi.fn() }
 			})
 		})
@@ -743,6 +745,23 @@ describe("ClineProvider", () => {
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
 		})
 
+		test("stops watching and clears the view when the sidebar webview is disposed", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// The provider outlives a disposed sidebar view; VS Code re-resolves
+			// a fresh view later. Disposal must stop the watchdog and drop the
+			// stale view reference so no recovery reload targets the dead view.
+			disposeCallback()
+			expect(provider["webviewWatchdogInterval"]).toBeNull()
+			// @ts-ignore - accessing private property for testing
+			expect(provider.view).toBeUndefined()
+
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
 		test("does not stack watchdog intervals when resolveWebviewView runs again", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			await provider.resolveWebviewView(mockWebviewView)
@@ -781,10 +800,7 @@ describe("ClineProvider", () => {
 					cspSource: "vscode-webview://test-csp-source",
 				},
 				visible: true,
-				onDidDispose: vi.fn().mockImplementation((callback: () => void) => {
-					callback()
-					return { dispose: vi.fn() }
-				}),
+				onDidDispose: vi.fn(),
 				onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
 			} as unknown as vscode.WebviewView
 			const providerB = new ClineProvider(
@@ -801,7 +817,8 @@ describe("ClineProvider", () => {
 				const htmlBeforeB = mockWebviewViewB.webview.html
 
 				await vi.advanceTimersByTimeAsync(119_000)
-				// Keep provider B's heartbeat fresh so only A's watchdog fires.
+				// B's view is still alive; refresh its heartbeat so a stale one
+				// would reload it too, leaving only A's watchdog to fire.
 				await webviewMessageHandler(providerB, { type: "webviewHeartbeat", timestamp: Date.now() })
 				await vi.advanceTimersByTimeAsync(1_000)
 
@@ -3867,10 +3884,7 @@ describe("ClineProvider - Router Models", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -4221,10 +4235,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
