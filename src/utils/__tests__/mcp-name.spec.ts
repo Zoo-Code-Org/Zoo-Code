@@ -239,6 +239,13 @@ describe("mcp-name utilities", () => {
 			})
 		})
 
+		it("should handle server names containing double underscores", () => {
+			expect(parseMcpToolName("mcp--my__server--do_thing")).toEqual({
+				serverName: "my__server",
+				toolName: "do_thing",
+			})
+		})
+
 		it("should handle tool names with hyphens", () => {
 			expect(parseMcpToolName("mcp--onellm--atlassian-jira_search")).toEqual({
 				serverName: "onellm",
@@ -277,6 +284,10 @@ describe("mcp-name utilities", () => {
 			// Model outputs: mcp__server__get_user_profile (hyphens converted to underscores)
 			// Normalized: mcp--server--get_user_profile
 			expect(normalizeMcpToolName("mcp__server__get_user_profile")).toBe("mcp--server--get_user_profile")
+		})
+
+		it("should preserve double underscores in server names", () => {
+			expect(normalizeMcpToolName("mcp--my__server--do_thing")).toBe("mcp--my__server--do_thing")
 		})
 	})
 
@@ -336,6 +347,17 @@ describe("mcp-name utilities", () => {
 			expect(parsed).toEqual({
 				serverName: "server",
 				toolName: "get-user-profile",
+			})
+		})
+
+		it("should roundtrip server names containing double underscores", () => {
+			const toolName = buildMcpToolName("my__server", "do_thing")
+			expect(toolName).toBe("mcp--my__server--do_thing")
+
+			const parsed = parseMcpToolName(toolName)
+			expect(parsed).toEqual({
+				serverName: "my__server",
+				toolName: "do_thing",
 			})
 		})
 	})
