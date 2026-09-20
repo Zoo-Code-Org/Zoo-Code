@@ -243,6 +243,13 @@ export class ClineProvider
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
+	/**
+	 * Resolves once `initializeTaskHistoryStore` has settled, i.e. after the
+	 * legacy globalState migration has completed (or failed). `taskHistoryStore.initialized`
+	 * resolves before migration runs, so lookups that must observe migrated
+	 * legacy tasks await this gate instead.
+	 */
+	private taskHistoryStoreReady: Promise<void> = Promise.resolve()
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
@@ -496,6 +503,14 @@ export class ClineProvider
 	 * Initialize the TaskHistoryStore and migrate from globalState if needed.
 	 */
 	private async initializeTaskHistoryStore(): Promise<void> {
+		// Re-arm the readiness gate synchronously so lookups that await it
+		// observe this init attempt, not a previous one. The resolver is
+		// captured per invocation so an overlapping earlier call's finally can
+		// never settle this invocation's gate (or leave its own unsettled).
+		let resolveReady!: () => void
+		this.taskHistoryStoreReady = new Promise<void>((resolve) => {
+			resolveReady = resolve
+		})
 		try {
 			await this.taskHistoryStore.initialize()
 
@@ -518,6 +533,9 @@ export class ClineProvider
 			this.taskHistoryStoreInitialized = true
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
+		} finally {
+			// Settle the gate even on failure so awaiting lookups can never hang.
+			resolveReady()
 		}
 	}
 
@@ -1743,6 +1761,9 @@ export class ClineProvider
 
 			try {
 				// Update the task history with the new mode first.
+				// Await the migration gate so a legacy task not yet migrated
+				// from globalState is still found.
+				await this.taskHistoryStoreReady
 				const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 				if (taskHistoryItem) {
@@ -1981,6 +2002,9 @@ export class ClineProvider
 			// been persisted into taskHistory (it will be captured on the next save).
 			task.setTaskApiConfigName(apiConfigName)
 
+			// Await the migration gate so a legacy task not yet migrated
+			// from globalState is still found.
+			await this.taskHistoryStoreReady
 			const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 			if (taskHistoryItem) {
@@ -2244,6 +2268,9 @@ export class ClineProvider
 		uiMessagesFilePath: string
 		apiConversationHistory: Anthropic.MessageParam[]
 	}> {
+		// Await the migration gate so a legacy task not yet migrated
+		// from globalState is still found.
+		await this.taskHistoryStoreReady
 		const historyItem = this.taskHistoryStore.get(id)
 
 		if (!historyItem) {

@@ -5014,6 +5014,68 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			// Restore the spy
 			vi.mocked(fsUtils.fileExistsAtPath).mockRestore()
 		})
+
+		it("waits for legacy globalState migration to complete before serving lookups", async () => {
+			const legacyItem = {
+				id: "legacy-task-1",
+				task: "legacy task",
+				ts: 12345,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Let the store-level initialize resolve so the migration branch runs,
+			// and expose a legacy taskHistory array from globalState.
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+
+			// Delay migration: the legacy entry only lands in the store once released.
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				// Mirror the effect migrateFromGlobalState has on the store cache
+				// once each legacy entry has been persisted.
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			// Relies on the constructor's background init having already settled:
+			// this spec mocks fs/promises but not readdir, so that init fails
+			// fast and its finally fires before this second invocation re-arms the gate.
+
+			let lookupSettled = false
+			const lookup = provider
+				.getTaskWithId("legacy-task-1")
+				.then((result) => {
+					lookupSettled = true
+					return result
+				})
+				.catch((error: unknown) => {
+					lookupSettled = true
+					throw error
+				})
+
+			// While migration is in flight, the lookup must stay gated instead of
+			// throwing "Task not found" for a task the migration has not landed yet.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(lookupSettled).toBe(false)
+
+			// Once migration completes, the gated lookup resolves with the legacy task.
+			releaseMigration()
+			await initPromise
+
+			await expect(lookup).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+		})
 	})
 
 	describe("Zoo Code auth profile sync", () => {
