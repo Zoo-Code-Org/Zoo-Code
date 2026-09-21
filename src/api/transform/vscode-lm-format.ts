@@ -56,7 +56,10 @@ export function sanitizeSurrogates(text: string): string {
  * injective, and being a pure function of the input it keeps a call and its result paired.
  */
 export function sanitizeIdentifierSurrogates(identifier: string): string {
-	return identifier.replace(LONE_SURROGATE, (unit) => `\uFFFD${unit.charCodeAt(0).toString(16).toUpperCase()}`)
+	// Escaping MUST precede encoding, or the encoding pass re-escapes its own markers.
+	return identifier
+		.replace(/\uFFFD/g, "\uFFFDFFFD")
+		.replace(LONE_SURROGATE, (unit) => `\uFFFD${unit.charCodeAt(0).toString(16).toUpperCase()}`)
 }
 
 /**

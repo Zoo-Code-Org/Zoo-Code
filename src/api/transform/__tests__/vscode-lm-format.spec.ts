@@ -8,6 +8,7 @@ import {
 	convertToAnthropicRole,
 	extractTextCountFromMessage,
 	sanitizeSurrogates,
+	sanitizeIdentifierSurrogates,
 } from "../vscode-lm-format"
 
 // Mock crypto using Vitest
@@ -802,6 +803,24 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 
 		expect(codeUnits(toolResult.callId)).toEqual(codeUnits(pairedId))
 		expect(codeUnits(toolResult.callId)).not.toContain(0xfffd)
+	})
+
+	it("keeps a lone surrogate id distinct from its literal U+FFFD encoding", () => {
+		const loneSurrogateId = `call${LONE_HIGH}`
+		const literalMarkerId = `call\uFFFDD800`
+
+		const plainId = `callD800`
+
+		const sanitizedLone = sanitizeIdentifierSurrogates(loneSurrogateId)
+		const sanitizedLiteral = sanitizeIdentifierSurrogates(literalMarkerId)
+		const sanitizedPlain = sanitizeIdentifierSurrogates(plainId)
+
+		const encoded = [sanitizedLone, sanitizedLiteral, sanitizedPlain].map((value) => codeUnits(value).join(","))
+		expect(new Set(encoded).size).toBe(3)
+		expectNoLoneSurrogate(sanitizedLone)
+		expectNoLoneSurrogate(sanitizedLiteral)
+		expect(codeUnits(sanitizeIdentifierSurrogates("toolu_01ABCDEF"))).toEqual(codeUnits("toolu_01ABCDEF"))
+		expect(codeUnits(sanitizeIdentifierSurrogates(`call-${VALID_PAIR}`))).toEqual(codeUnits(`call-${VALID_PAIR}`))
 	})
 
 	it("leaves an id with no surrogates byte-identical", () => {
