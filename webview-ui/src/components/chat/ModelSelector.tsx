@@ -72,18 +72,30 @@ export const ModelSelector = ({
 			: {}
 		const { "custom-arn": _customArn, ...modelsWithoutCustomArn } = staticModels
 
-		if (dynamicProvider) {
-			return (
-				filterModels(
+		const allowedModels = dynamicProvider
+			? filterModels(
 					{ ...modelsWithoutCustomArn, ...(routerModels.data?.[dynamicProvider] ?? {}) },
 					provider,
 					organizationAllowList,
-				) ?? {}
-			)
-		}
+				)
+			: filterModels(modelsWithoutCustomArn, provider, organizationAllowList)
 
-		return filterModels(modelsWithoutCustomArn, provider, organizationAllowList) ?? {}
-	}, [modelConfig, dynamicProvider, routerModels.data, provider, apiConfiguration, organizationAllowList])
+		// Exclude deprecated models from being newly selectable, but keep the currently
+		// selected model visible even if it's deprecated (mirrors ModelPicker.tsx).
+		return Object.fromEntries(
+			Object.entries(allowedModels ?? {}).filter(
+				([modelId, modelInfo]) => modelId === selectedModelId || !modelInfo.deprecated,
+			),
+		)
+	}, [
+		modelConfig,
+		dynamicProvider,
+		routerModels.data,
+		provider,
+		apiConfiguration,
+		organizationAllowList,
+		selectedModelId,
+	])
 
 	const modelIds = useMemo(() => Object.keys(models), [models])
 

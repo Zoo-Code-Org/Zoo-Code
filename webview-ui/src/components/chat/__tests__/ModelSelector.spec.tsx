@@ -1135,6 +1135,71 @@ describe("ModelSelector", () => {
 		expect(list.queryByText("openrouter/model-b")).not.toBeInTheDocument()
 	})
 
+	it("hides deprecated models but keeps a deprecated selected model visible", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: {
+				openrouter: {
+					"openrouter/model-a": makeModelInfo({ deprecated: true }),
+					"openrouter/model-b": makeModelInfo(),
+				},
+			},
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
+				}
+				onChange={onChangeMock}
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const list = within(screen.getByTestId("popover-content"))
+
+		// The currently selected model stays visible even though it's deprecated.
+		expect(list.getByText("openrouter/model-a")).toBeInTheDocument()
+		expect(list.getByText("openrouter/model-b")).toBeInTheDocument()
+	})
+
+	it("excludes a non-selected deprecated model from the list entirely", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: {
+				openrouter: {
+					"openrouter/model-a": makeModelInfo(),
+					"openrouter/model-deprecated": makeModelInfo({ deprecated: true }),
+				},
+			},
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-a",
+					} satisfies ProviderSettings
+				}
+				onChange={onChangeMock}
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const list = within(screen.getByTestId("popover-content"))
+
+		expect(list.getByText("openrouter/model-a")).toBeInTheDocument()
+		expect(list.queryByText("openrouter/model-deprecated")).not.toBeInTheDocument()
+	})
+
 	it("does not filter models when the organization allow list allows all", () => {
 		useRouterModelsMock.mockReturnValue({
 			data: { openrouter: { "openrouter/model-a": makeModelInfo(), "openrouter/model-b": makeModelInfo() } },
