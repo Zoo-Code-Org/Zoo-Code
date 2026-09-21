@@ -5089,32 +5089,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			totalCost: 0,
 		}
 
-		// Arms the gate for a second initializeTaskHistoryStore run: the
-		// store-level initialize resolves, globalState exposes a legacy
-		// taskHistory array with the migration marker unset, and migration
-		// stays blocked until the returned releaseMigration is called, at
-		// which point the legacy entry lands in the store cache (mirroring
-		// migrateFromGlobalState). Relies on the constructor's background init
-		// having already settled (see the test above).
-		const armDelayedMigration = () => {
-			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
-			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
-				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
-			let releaseMigration!: () => void
-			const migrationGate = new Promise<void>((resolve) => {
-				releaseMigration = resolve
-			})
-			const migrateSpy = vi
-				.spyOn(provider.taskHistoryStore, "migrateFromGlobalState")
-				.mockImplementation(async (entries) => {
-					await migrationGate
-					for (const entry of entries) {
-						provider.taskHistoryStore["cache"].set(entry.id, entry)
-					}
-				})
-			return { releaseMigration, migrateSpy }
-		}
-
 		it("handleModeSwitch waits for delayed migration before persisting the mode", async () => {
 			const task = new Task(defaultTaskOptions)
 			const taskLegacyItem = { ...legacyItem, id: task.taskId }
