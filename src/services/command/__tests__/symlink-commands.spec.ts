@@ -326,6 +326,79 @@ description: Symlinked command
 			)
 		})
 
+		it("should handle duplicate entries when two symlinks resolve to the same target", async () => {
+			const sharedContent = `# Shared Command`
+
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+
+			// Two directory symlinks pointing at the SAME target directory both
+			// contribute an entry for the same file, so the deterministic sort sees
+			// identical originalPaths (the comparator's equal branch).
+			mockFs.readdir = vi.fn().mockImplementation((dirPath: string) => {
+				const normalizedPath = dirPath.replace(/\\/g, "/")
+				if (normalizedPath.includes("shared-same")) {
+					return Promise.resolve([
+						{
+							name: "dup.md",
+							isFile: () => true,
+							isDirectory: () => false,
+							isSymbolicLink: () => false,
+							parentPath: "/mock/shared-same",
+						},
+					])
+				}
+				if (normalizedPath.includes("/global/")) {
+					return Promise.resolve([])
+				}
+				return Promise.resolve([
+					{
+						name: "alpha-link",
+						isFile: () => false,
+						isDirectory: () => false,
+						isSymbolicLink: () => true,
+						parentPath: "/mock/project/.roo/commands",
+					},
+					{
+						name: "twin-link",
+						isFile: () => false,
+						isDirectory: () => false,
+						isSymbolicLink: () => true,
+						parentPath: "/mock/project/.roo/commands",
+					},
+				])
+			})
+
+			mockFs.readlink = vi.fn().mockResolvedValue("/mock/shared-same")
+
+			mockFs.lstat = vi.fn().mockResolvedValue({
+				isDirectory: () => true,
+				isFile: () => false,
+				isSymbolicLink: () => false,
+			})
+
+			mockFs.readFile = vi.fn().mockImplementation((filePath: string) => {
+				const normalizedPath = filePath.toString().replace(/\\/g, "/")
+				if (normalizedPath.includes("shared-same")) {
+					return Promise.resolve(sharedContent)
+				}
+				return Promise.reject(new Error("File not found"))
+			})
+
+			const result = await getCommands("/test/cwd")
+
+			// Both symlinks contribute the same file; the command appears once with
+			// the shared target's content regardless of resolution order.
+			expect(result).toHaveLength(1)
+			expect(result[0]).toEqual(
+				expect.objectContaining({
+					name: "dup",
+					content: "# Shared Command",
+					source: "project",
+					filePath: path.resolve("/mock/shared-same", "dup.md"),
+				}),
+			)
+		})
+
 		it("should handle cyclic symlinks gracefully (MAX_DEPTH protection)", async () => {
 			// Create a cyclic symlink scenario
 			// Mock lstat to return symlink for all targets (creating infinite loop)
