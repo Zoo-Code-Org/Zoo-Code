@@ -263,7 +263,7 @@ export const ModelSelector = ({
 								value={searchValue}
 								onChange={(e) => setSearchValue(e.target.value)}
 								placeholder={t("common:ui.search_placeholder")}
-								className="w-full h-8 px-2 py-1 text-xs bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border rounded focus:outline-0"
+								className="w-full h-8 px-2 py-1 text-xs bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border rounded"
 								autoFocus
 							/>
 							{searchValue.length > 0 && (
@@ -280,7 +280,9 @@ export const ModelSelector = ({
 					)}
 
 					{filteredModelIds.length === 0 ? (
-						<div className="py-2 px-3 text-sm text-vscode-foreground/70">{t("common:ui.no_results")}</div>
+						<div role="status" className="py-2 px-3 text-sm text-vscode-foreground/70">
+							{t("common:ui.no_results")}
+						</div>
 					) : (
 						<div className="max-h-[300px] overflow-y-auto py-1">
 							{filteredModelIds.map(renderModelItem)}

@@ -755,6 +755,36 @@ describe("ModelSelector", () => {
 		expect(screen.getByLabelText("common:ui.search_placeholder")).toHaveValue("")
 	})
 
+	it("clears the search value when the popover closes without a selection", () => {
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/model-0",
+					} satisfies ProviderSettings
+				}
+				onChange={onChangeMock}
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
+		fireEvent.change(searchInput, { target: { value: "model-3" } })
+		expect(searchInput).toHaveValue("model-3")
+
+		// Close the popover via the trigger without selecting a model.
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(screen.getByLabelText("common:ui.search_placeholder")).toHaveValue("")
+	})
+
 	it("matches a model by its displayName, and by its raw id when it has no displayName", () => {
 		useRouterModelsMock.mockReturnValue({
 			data: {
