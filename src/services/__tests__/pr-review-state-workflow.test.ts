@@ -2676,10 +2676,47 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		]
 
 		for (const context of triggerContexts) {
-			expect(shardGroupFor(context, { pr_number: 1664 })).toBe("label-pr-review-state-1664")
+			expect(shardGroupFor(context, { pr_number: 1664 })).toBe("label-pr-review-state-reconcile-1664")
 		}
-		expect(shardGroupFor(triggerContexts[0], { pr_number: 1707 })).toBe("label-pr-review-state-1707")
-		expect(shardGroupFor(triggerContexts[0], { pr_number: 1707 })).not.toBe("label-pr-review-state-1664")
+		expect(shardGroupFor(triggerContexts[0], { pr_number: 1707 })).toBe("label-pr-review-state-reconcile-1707")
+		expect(shardGroupFor(triggerContexts[0], { pr_number: 1707 })).not.toBe("label-pr-review-state-reconcile-1664")
+	})
+
+	it("keeps workflow-level and job-level groups disjoint for every trigger path", () => {
+		// Live regression (run 35548066989): for direct single-PR triggers the
+		// shard group equaled the workflow-level group its own run held, and
+		// GitHub failed the job at startup with no logs — concurrency groups are
+		// one repo-wide namespace across workflow and job levels. The same
+		// collision would apply to a workflow_run.id that numerically matches a
+		// PR number. The `-reconcile-` infix makes the two levels disjoint.
+		const contexts = [
+			contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1664 } } }),
+			contextFor({ event_name: "pull_request_review", event: { pull_request: { number: 1664 } } }),
+			contextFor({ event_name: "issue_comment", event: { issue: { number: 1664 } } }),
+			contextFor({ event_name: "workflow_dispatch", event: { inputs: { pull_request_number: 1664 } } }),
+			// workflow_run.id numerically equal to the PR number: the exact
+			// overlap the distinct namespace also has to cover.
+			contextFor({
+				event_name: "workflow_run",
+				event: { workflow_run: { id: 1664, pull_requests: [{ number: 1664 }] } },
+			}),
+			contextFor({
+				event_name: "workflow_run",
+				event: { workflow_run: { id: 999, pull_requests: [{ number: 1664 }, { number: 1707 }] } },
+			}),
+			contextFor({ event_name: "schedule" }),
+			contextFor({ event_name: "push" }),
+		]
+
+		for (const context of contexts) {
+			const workflowGroup = workflowGroupFor(context)
+			// The disjointness is structural: workflow-level groups never carry
+			// the reconcile infix that every shard group carries.
+			expect(workflowGroup).not.toContain("-reconcile-")
+			for (const prNumber of [1664, 1707, 1437, 999]) {
+				expect(shardGroupFor(context, { pr_number: prNumber })).not.toBe(workflowGroup)
+			}
+		}
 	})
 
 	it("keeps the empty-resolution shard fallback unique per run", () => {
@@ -2696,10 +2733,10 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 
 		const groupA = shardGroupFor(runA, { pr_number: null })
 		const groupB = shardGroupFor(runB, { pr_number: null })
-		expect(groupA).toBe("label-pr-review-state-555000111")
-		expect(groupB).toBe("label-pr-review-state-555000222")
+		expect(groupA).toBe("label-pr-review-state-reconcile-555000111")
+		expect(groupB).toBe("label-pr-review-state-reconcile-555000222")
 		expect(groupA).not.toBe(groupB)
-		expect(groupA).not.toBe("label-pr-review-state-1664")
+		expect(groupA).not.toBe("label-pr-review-state-reconcile-1664")
 	})
 
 	it("fans out one serialized shard per resolved PR", () => {
@@ -2719,7 +2756,9 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		expect(resolution.prNumbers()).toEqual([1437])
 
 		const context = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1437 } } })
-		expect(shardGroupFor(context, { pr_number: resolution.prNumbers()?.[0] })).toBe("label-pr-review-state-1437")
+		expect(shardGroupFor(context, { pr_number: resolution.prNumbers()?.[0] })).toBe(
+			"label-pr-review-state-reconcile-1437",
+		)
 	})
 
 	it("resolves a sweep to one shard per open PR, each serializing with direct runs for that PR", async () => {
@@ -2732,9 +2771,9 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 			shardGroupFor(sweepContext, { pr_number: prNumber }),
 		)
 		expect(groups).toEqual([
-			"label-pr-review-state-1664",
-			"label-pr-review-state-1665",
-			"label-pr-review-state-1666",
+			"label-pr-review-state-reconcile-1664",
+			"label-pr-review-state-reconcile-1665",
+			"label-pr-review-state-reconcile-1666",
 		])
 
 		// A direct event for one of those PRs lands in the identical group, so the
@@ -2756,8 +2795,8 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 			event: { workflow_run: { id: 123456, pull_requests: [{ number: 1664 }, { number: 1707 }] } },
 		})
 		expect(workflowGroupFor(context)).toBe("label-pr-review-state-123456")
-		expect(shardGroupFor(context, { pr_number: 1664 })).toBe("label-pr-review-state-1664")
-		expect(shardGroupFor(context, { pr_number: 1707 })).toBe("label-pr-review-state-1707")
+		expect(shardGroupFor(context, { pr_number: 1664 })).toBe("label-pr-review-state-reconcile-1664")
+		expect(shardGroupFor(context, { pr_number: 1707 })).toBe("label-pr-review-state-reconcile-1707")
 	})
 
 	it("demonstrates the stale-overwrite race that per-PR shard serialization prevents", async () => {
@@ -2816,7 +2855,7 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 			event: { pull_request: { number: 1437 } },
 		})
 		const sweepContext = contextFor({ event_name: "schedule" })
-		expect(shardGroupFor(directContext, { pr_number: 1437 })).toBe("label-pr-review-state-1437")
+		expect(shardGroupFor(directContext, { pr_number: 1437 })).toBe("label-pr-review-state-reconcile-1437")
 		expect(shardGroupFor(sweepContext, { pr_number: 1437 })).toBe(shardGroupFor(directContext, { pr_number: 1437 }))
 	})
 

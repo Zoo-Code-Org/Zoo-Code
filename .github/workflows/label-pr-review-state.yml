@@ -159,9 +159,14 @@ jobs:
     # never interleave. cancel-in-progress stays false — within one PR,
     # newest-pending-wins is exactly freshest-state-wins. The run_id fallback
     # only applies to the skipped empty-resolution case so empty runs never
-    # contend.
+    # contend. The `-reconcile-` infix keeps job-level groups in their own
+    # namespace: concurrency groups are one repo-wide namespace across
+    # workflow and job levels, so a shard group equal to the workflow-level
+    # group its own run holds (e.g. label-pr-review-state-<pr> for direct
+    # triggers, or a workflow_run.id that numerically matches a PR number)
+    # fails the job at startup.
     concurrency:
-      group: label-pr-review-state-${{ matrix.pr_number || github.run_id }}
+      group: label-pr-review-state-reconcile-${{ matrix.pr_number || github.run_id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
