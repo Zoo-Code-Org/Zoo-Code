@@ -3,6 +3,11 @@ import { mimoModels } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 
+// The /models endpoint also lists ASR/TTS families, which are not text chat
+// models — they require modality-specific payloads this provider never
+// builds, so discovery excludes them from the catalog.
+const NON_TEXT_MODEL_ID = /-(asr|tts)(-|$)/i
+
 /**
  * Fetches available models from the Xiaomi MiMo API and merges them with known specs.
  *
@@ -22,7 +27,14 @@ export async function getMimoModels(
 	// The base URL from settings already includes /v1 (e.g. https://token-plan-sgp.xiaomimimo.com/v1),
 	// so we keep it as-is and append /models directly.
 	const base = (baseUrl || "https://token-plan-sgp.xiaomimimo.com/v1").replace(/\/+$/, "")
-	const url = `${base}/models`
+	const url = new URL(`${base}/models`)
+
+	// The settings schema only allows https:// endpoints, but this fetcher also
+	// receives unsaved webview values — enforce the contract at the boundary so
+	// the bearer key is never sent over plaintext HTTP.
+	if (url.protocol !== "https:") {
+		throw new Error(`MiMo model fetch requires an https:// base URL (received "${url.protocol}")`)
+	}
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
@@ -33,7 +45,7 @@ export async function getMimoModels(
 		headers["Authorization"] = `Bearer ${apiKey}`
 	}
 
-	const response = await fetch(url, {
+	const response = await fetch(url.toString(), {
 		headers,
 		signal: opts?.signal,
 	})
@@ -49,7 +61,7 @@ export async function getMimoModels(
 		console.error(`[getMimoModels] HTTP error:`, {
 			status: response.status,
 			statusText: response.statusText,
-			url,
+			url: url.toString(),
 			body: errorBody,
 		})
 
@@ -67,8 +79,12 @@ export async function getMimoModels(
 	const models: ModelRecord = Object.create(null)
 
 	for (const model of data.data) {
+		// Skip non-record elements so a single malformed entry cannot abort
+		// the whole catalog.
+		if (typeof model !== "object" || model === null) continue
+
 		const modelId = typeof model.id === "string" && model.id ? model.id : null
-		if (!modelId) continue
+		if (!modelId || NON_TEXT_MODEL_ID.test(modelId)) continue
 
 		const knownSpecs = mimoModels[modelId as keyof typeof mimoModels]
 

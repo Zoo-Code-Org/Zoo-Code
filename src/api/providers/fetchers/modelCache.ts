@@ -125,6 +125,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.poe, // Per-account model availability
 	providerIdentifiers.requesty, // Per-account custom model policies
 	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+	providerIdentifiers.mimo, // Token-plan and PAYG catalogs are authenticated per key
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist

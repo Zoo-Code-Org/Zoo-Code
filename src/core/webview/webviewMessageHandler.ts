@@ -1276,20 +1276,34 @@ export const webviewMessageHandler = async (
 			const mimoBaseUrl = message?.values?.mimoBaseUrl ?? apiConfiguration.mimoBaseUrl
 
 			if (mimoApiKey) {
+				const mimoOptions = {
+					provider: providerIdentifiers.mimo,
+					apiKey: mimoApiKey,
+					baseUrl: mimoBaseUrl,
+				}
+
 				if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
-					await flushModels(
-						{ provider: providerIdentifiers.mimo, apiKey: mimoApiKey, baseUrl: mimoBaseUrl },
-						true,
-					)
+					// A refresh failure (bad key/endpoint) must not abort the
+					// aggregate fetch — surface the normal MiMo failure response
+					// and continue so routerModels is still posted.
+					try {
+						await flushModels(mimoOptions, true)
+					} catch (error) {
+						const errorMessage = error instanceof Error ? error.message : String(error)
+						console.error(`Error refreshing models for ${providerIdentifiers.mimo}:`, error)
+
+						await provider.postMessageToWebview({
+							type: RouterModelsMessageType.singleRouterModelFetchResponse,
+							success: false,
+							error: errorMessage,
+							values: { provider: providerIdentifiers.mimo },
+						})
+					}
 				}
 
 				candidates.push({
 					key: providerIdentifiers.mimo,
-					options: {
-						provider: providerIdentifiers.mimo,
-						apiKey: mimoApiKey,
-						baseUrl: mimoBaseUrl,
-					},
+					options: mimoOptions,
 				})
 			}
 

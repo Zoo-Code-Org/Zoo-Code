@@ -153,6 +153,62 @@ describe("getMimoModels", () => {
 		})
 	})
 
+	it("throws when the base URL is not https and never sends the request", async () => {
+		const fetchSpy = vi.fn()
+		globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+		await expect(getMimoModels("http://token-plan-sgp.xiaomimimo.com/v1", "my-secret-key")).rejects.toThrow(
+			"requires an https:// base URL",
+		)
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
+	it("skips null and non-object entries in the model list", async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				data: [null, "mimo-v2.6-pro", 42, { id: "mimo-v2.6-pro" }],
+			}),
+		}) as unknown as typeof fetch
+
+		const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+		expect(Object.keys(models)).toEqual(["mimo-v2.6-pro"])
+	})
+
+	it("excludes ASR and TTS model families from the catalog", async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				data: [
+					{ id: "mimo-v2.6-pro" },
+					{ id: "mimo-v2.5-asr" },
+					{ id: "mimo-v2.5-tts" },
+					{ id: "mimo-v2.5-tts-voiceclone" },
+					{ id: "mimo-v2.5-tts-voicedesign" },
+				],
+			}),
+		}) as unknown as typeof fetch
+
+		const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+		expect(Object.keys(models)).toEqual(["mimo-v2.6-pro"])
+	})
+
+	it("strips multiple trailing slashes from the base URL", async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: [] }),
+		}) as unknown as typeof fetch
+
+		await getMimoModels("https://token-plan-cn.xiaomimimo.com/v1///", "mock-key")
+
+		expect(globalThis.fetch).toHaveBeenCalledWith(
+			"https://token-plan-cn.xiaomimimo.com/v1/models",
+			expect.any(Object),
+		)
+	})
+
 	it("passes the caller's abort signal to the request", async () => {
 		const fetchSpy = vi
 			.spyOn(globalThis, "fetch")

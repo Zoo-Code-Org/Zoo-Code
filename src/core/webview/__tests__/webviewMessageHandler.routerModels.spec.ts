@@ -709,6 +709,34 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
+	it("posts a MiMo failure response and still posts routerModels when the refresh rejects", async () => {
+		flushModelsMock.mockRejectedValue(new Error("MiMo refresh failed"))
+		getModelsMock.mockResolvedValue({})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: {
+				mimoApiKey: "new-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeDefined()
+		if (!errorCall) throw new Error("Expected MiMo failure response")
+		expect(errorCall[0].success).toBe(false)
+		expect(errorCall[0].error).toBe("MiMo refresh failed")
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+	})
+
 	it("posts a Moonshot provider error and keeps an empty aggregate entry when fetch fails", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
