@@ -43,9 +43,8 @@ export class SkillTool extends BaseTool<"skill"> {
 				return
 			}
 
-			// Get current mode for skill resolution
-			const state = await provider?.getState()
-			const currentMode = state?.mode ?? "code"
+			// Resolve skills against the task's mode, not shared provider state.
+			const currentMode = await task.getTaskMode()
 
 			// Fetch skill content
 			const skillContent = await resolveSkillContentForMode(skillsManager, skillName, currentMode)

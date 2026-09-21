@@ -25,6 +25,7 @@ vitest.mock("ps-tree", () => ({
 
 import { execa } from "execa"
 import { ExecaTerminalProcess } from "../ExecaTerminalProcess"
+import * as shellUtils from "../../../utils/shell"
 import { BaseTerminal } from "../BaseTerminal"
 import type { RooTerminal } from "../types"
 
@@ -63,11 +64,13 @@ describe("ExecaTerminalProcess", () => {
 
 	describe("UTF-8 encoding fix", () => {
 		it("should set LANG and LC_ALL to en_US.UTF-8", async () => {
+			// Deterministic shell so the assertion focuses solely on LANG/LC_ALL.
+			vi.spyOn(shellUtils, "getShell").mockReturnValue("/bin/zsh")
 			await terminalProcess.run("echo test")
 			const execaMock = vitest.mocked(execa)
 			expect(execaMock).toHaveBeenCalledWith(
 				expect.objectContaining({
-					shell: true,
+					shell: "/bin/zsh",
 					cwd: "/test/cwd",
 					all: true,
 					env: expect.objectContaining({
@@ -109,15 +112,19 @@ describe("ExecaTerminalProcess", () => {
 			)
 		})
 
-		it("should fall back to shell=true when execaShellPath is undefined", async () => {
+		it("when execaShellPath is unset, Execa resolves through getShell() (never shell:true)", async () => {
 			BaseTerminal.setExecaShellPath(undefined)
+			const resolved = "/resolved/pwsh.exe"
+			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue(resolved)
 			await terminalProcess.run("echo test")
 			const execaMock = vitest.mocked(execa)
+			expect(getShellSpy).toHaveBeenCalledTimes(1)
 			expect(execaMock).toHaveBeenCalledWith(
 				expect.objectContaining({
-					shell: true,
+					shell: resolved,
 				}),
 			)
+			expect(execaMock).not.toHaveBeenCalledWith(expect.objectContaining({ shell: true }))
 		})
 	})
 
@@ -189,6 +196,54 @@ describe("ExecaTerminalProcess", () => {
 
 			expect(terminalProcess["fullOutput"]).toBe("")
 			expect(terminalProcess["lastRetrievedIndex"]).toBe(0)
+		})
+	})
+
+	describe("cross-path shell invariant (#705 regression)", () => {
+		// Bridge through unknown: the mock records the raw options object, whose
+		// declared type under execa's overloads is string|URL, not a plain record.
+		const capturedShellOption = (): Record<string, string | boolean> =>
+			vitest.mocked(execa).mock.calls[0][0] as unknown as Record<string, string | boolean>
+
+		beforeEach(() => {
+			BaseTerminal.setExecaShellPath(undefined)
+		})
+
+		it("system-prompt resolved shell == Execa execution shell when no explicit execaShellPath", async () => {
+			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue("/bin/zsh")
+			await terminalProcess.run("echo test")
+			expect(getShellSpy).toHaveBeenCalledTimes(1)
+			expect(capturedShellOption().shell).toBe("/bin/zsh")
+		})
+
+		it("keeps the Execa shell equal to getShell() when a Zoo profile override is set", async () => {
+			BaseTerminal.setExecaShellPath(undefined)
+			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue("C:\\Windows\\System32\\pwsh.exe")
+			await terminalProcess.run("echo test")
+			expect(getShellSpy).toHaveBeenCalledTimes(1)
+			expect(capturedShellOption().shell).toBe("C:\\Windows\\System32\\pwsh.exe")
+		})
+
+		it("uses PowerShell when VS Code resolves PowerShell and execaShellPath is unset", async () => {
+			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue("powershell.exe")
+			await terminalProcess.run("echo test")
+			expect(getShellSpy).toHaveBeenCalledTimes(1)
+			expect(capturedShellOption().shell).toBe("powershell.exe")
+		})
+
+		it("preserves a deliberately selected Command Prompt profile when execaShellPath is unset", async () => {
+			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue("cmd.exe")
+			await terminalProcess.run("echo test")
+			expect(getShellSpy).toHaveBeenCalledTimes(1)
+			expect(capturedShellOption().shell).toBe("cmd.exe")
+		})
+
+		it("does NOT delegate to shell:true even when getShell() returns an unusual path", async () => {
+			const getShellSpy = vi.spyOn(shellUtils, "getShell").mockReturnValue("/opt/custom/fish")
+			await terminalProcess.run("echo test")
+			expect(getShellSpy).toHaveBeenCalledTimes(1)
+			expect(capturedShellOption().shell).not.toBe(true)
+			expect(capturedShellOption().shell).toBe("/opt/custom/fish")
 		})
 	})
 })
