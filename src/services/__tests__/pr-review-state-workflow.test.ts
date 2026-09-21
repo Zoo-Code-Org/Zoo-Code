@@ -2404,7 +2404,11 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		event_name: string
 		run_id: number
 		event: {
-			pull_request?: { number: number }
+			pull_request?: {
+				number: number
+				head?: { repo?: { full_name?: string } | null }
+				base?: { repo?: { full_name?: string } | null }
+			}
 			issue?: { number: number }
 			workflow_run?: { id?: number; pull_requests?: Array<{ number: number }> }
 			inputs?: { pull_request_number: number }
@@ -2420,7 +2424,7 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		matrix?: MatrixContext
 	}
 
-	function splitTopLevel(expression: string, operator: "||" | "&&" | "=="): string[] {
+	function splitTopLevel(expression: string, operator: "||" | "&&" | "==" | "!="): string[] {
 		const parts: string[] = []
 		let depth = 0
 		let inString = false
@@ -2510,6 +2514,10 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 	}
 
 	function evaluateComparison(expression: string, roots: ExpressionRoots): unknown {
+		const notEquals = splitTopLevel(expression, "!=")
+		if (notEquals.length > 1) {
+			return !looseEquals(evaluatePrimary(notEquals[0], roots), evaluatePrimary(notEquals[1], roots))
+		}
 		const parts = splitTopLevel(expression, "==")
 		if (parts.length === 1) {
 			return evaluatePrimary(parts[0], roots)
@@ -2540,7 +2548,7 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 	}
 
 	function evaluateTemplate(template: string, roots: ExpressionRoots): string {
-		return template.replace(/\$\{\{(.+?)\}\}/s, (_match, expression: string) => {
+		return template.replace(/\$\{\{(.+?)\}\}/gs, (_match, expression: string) => {
 			const value = evaluateExpression(expression, roots)
 			return isTruthy(value) ? String(value) : ""
 		})
@@ -2717,6 +2725,69 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 				expect(shardGroupFor(context, { pr_number: prNumber })).not.toBe(workflowGroup)
 			}
 		}
+	})
+
+	it("keys read-only fork review runs per-run at both levels so they cannot starve mutating runs", () => {
+		// Fork pull_request_review runs get a read-only token (see isReadOnlyRun
+		// in the reconcile script) and write nothing, so they must not hold the
+		// PR-keyed groups whose newest-pending-wins could supersede a queued
+		// mutating run for the same PR.
+		const forkReview = contextFor({
+			event_name: "pull_request_review",
+			run_id: 606000111,
+			event: {
+				pull_request: {
+					number: 1664,
+					head: { repo: { full_name: "contributor/Zoo-Code" } },
+					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				},
+			},
+		})
+		const mutating = contextFor({ event_name: "issue_comment", event: { issue: { number: 1664 } } })
+
+		expect(workflowGroupFor(forkReview)).toBe("label-pr-review-state-606000111")
+		expect(workflowGroupFor(mutating)).toBe("label-pr-review-state-1664")
+		expect(workflowGroupFor(forkReview)).not.toBe(workflowGroupFor(mutating))
+
+		// The `-ro-` infix keeps the read-only shard group from ever numerically
+		// colliding with a mutating shard group for the same PR.
+		expect(shardGroupFor(forkReview, { pr_number: 1664 })).toBe("label-pr-review-state-reconcile-ro-606000111")
+		expect(shardGroupFor(mutating, { pr_number: 1664 })).toBe("label-pr-review-state-reconcile-1664")
+		expect(shardGroupFor(forkReview, { pr_number: 1664 })).not.toBe(shardGroupFor(mutating, { pr_number: 1664 }))
+	})
+
+	it("keeps same-repo review events PR-keyed at both levels", () => {
+		const sameRepoReview = contextFor({
+			event_name: "pull_request_review",
+			event: {
+				pull_request: {
+					number: 1664,
+					head: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				},
+			},
+		})
+
+		expect(workflowGroupFor(sameRepoReview)).toBe("label-pr-review-state-1664")
+		expect(shardGroupFor(sameRepoReview, { pr_number: 1664 })).toBe("label-pr-review-state-reconcile-1664")
+	})
+
+	it("fails toward run-scoped groups when review head repository metadata is missing", () => {
+		// A missing head.repo cannot be proven same-repo, so the guard treats the
+		// run as read-only-safe (run-scoped) rather than PR-keyed.
+		const missingHead = contextFor({
+			event_name: "pull_request_review",
+			run_id: 606000222,
+			event: {
+				pull_request: {
+					number: 1664,
+					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				},
+			},
+		})
+
+		expect(workflowGroupFor(missingHead)).toBe("label-pr-review-state-606000222")
+		expect(shardGroupFor(missingHead, { pr_number: 1664 })).toBe("label-pr-review-state-reconcile-ro-606000222")
 	})
 
 	it("keeps the empty-resolution shard fallback unique per run", () => {

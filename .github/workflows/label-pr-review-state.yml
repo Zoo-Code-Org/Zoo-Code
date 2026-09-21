@@ -44,9 +44,12 @@ permissions:
 # workflow_run events key by the triggering run's id instead of a PR number: a
 # single run can reconcile several associated PRs (and fork runs backfill
 # none), so a PR-number key would let an unrelated event for the first PR
-# supersede reconciliation of the rest. Sweep triggers (hourly schedule,
-# pushes to main) share one group, and anything unresolved falls back to a
-# unique per-run group.
+# supersede reconciliation of the rest. Fork pull_request_review runs are
+# read-only (see isReadOnlyRun in the reconcile script) and write nothing, so
+# they take a unique per-run group rather than a PR-keyed group whose
+# newest-pending-wins could supersede a queued mutating run for that PR.
+# Sweep triggers (hourly schedule, pushes to main) share one group, and
+# anything unresolved falls back to a unique per-run group.
 #
 # Job level (on the reconcile job): every mutating shard keys per PR in one
 # shared group namespace, so direct-event shards, sweep-resolved shards, and
@@ -57,6 +60,8 @@ permissions:
 concurrency:
   group: >-
     label-pr-review-state-${{
+      ((github.event_name == 'pull_request_review' &&
+        github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name) && github.run_id) ||
       github.event.pull_request.number ||
       github.event.issue.number ||
       github.event.inputs.pull_request_number ||
@@ -164,9 +169,21 @@ jobs:
     # workflow and job levels, so a shard group equal to the workflow-level
     # group its own run holds (e.g. label-pr-review-state-<pr> for direct
     # triggers, or a workflow_run.id that numerically matches a PR number)
-    # fails the job at startup.
+    # fails the job at startup. Read-only fork pull_request_review shards
+    # write nothing, so they take a run-scoped `-ro-<run_id>` group instead of
+    # the PR-keyed group: the non-numeric `-ro-` infix keeps them from ever
+    # colliding with (or superseding) a mutating shard for the same PR.
     concurrency:
-      group: label-pr-review-state-reconcile-${{ matrix.pr_number || github.run_id }}
+      group: >-
+        label-pr-review-state-reconcile-${{
+          ((github.event_name == 'pull_request_review' &&
+            github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name) && 'ro-') || ''
+        }}${{
+          ((github.event_name == 'pull_request_review' &&
+            github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name) && github.run_id) ||
+          matrix.pr_number ||
+          github.run_id
+        }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
