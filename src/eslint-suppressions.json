@@ -966,7 +966,7 @@
 	},
 	"core/tools/__tests__/mcpServerRestriction.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 6
 		}
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
