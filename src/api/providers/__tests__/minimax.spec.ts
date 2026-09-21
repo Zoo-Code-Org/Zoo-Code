@@ -301,6 +301,13 @@ describe("MiniMaxHandler", () => {
 						usage: { output_tokens: 20 },
 					},
 					{
+						// A delta without a usable count (e.g. 0) must keep the
+						// previously adopted cumulative value.
+						type: "message_delta",
+						delta: { type: "stop_reason", stop_reason: "end_turn" },
+						usage: { output_tokens: 0 },
+					},
+					{
 						type: "message_stop",
 					},
 				]),
