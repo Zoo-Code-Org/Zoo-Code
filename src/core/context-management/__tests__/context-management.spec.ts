@@ -2580,6 +2580,46 @@ describe("Context Management", () => {
 			expect(result.messages).toBe(messages)
 		}, 60000)
 
+		it("accepts truncation that fits the budget even when the recount is not below the persisted count", async () => {
+			// Truncation is non-destructive: it keeps the existing messages and appends a marker, so
+			// for a short history the recount can come out *above* the pre-recovery count it replaced.
+			// Both figures are far under `allowedTokens` (100000 * 0.9 - 30000 = 60000), so the
+			// request is safe to send and recovery must report success rather than a terminal error.
+			// Comparing the recount against `prevContextTokens` — a locally composed persisted figure
+			// rather than a measured one — would reject this.
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "First message", ts: 1000 },
+				{ role: "assistant", content: "Second message", ts: 1100 },
+				{ role: "user", content: "Third message", ts: 1200 },
+				{ role: "assistant", content: "Fourth message", ts: 1300 },
+				{ role: "user", content: "Fifth message", ts: 1400 },
+			]
+
+			const result = await manageContext({
+				messages,
+				// A persisted total well above the real content, which is what makes the two
+				// measurements disagree: the persisted side counts content the model never sees.
+				totalTokens: 70001,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.recoveryFailed).toBeUndefined()
+			expect(result.error).toBeUndefined()
+			expect(result.truncationId).toBeDefined()
+			expect(result.messagesRemoved).toBe(2)
+			expect(result.newContextTokensAfterTruncation).toBeLessThanOrEqual(
+				100000 * (1 - TOKEN_BUFFER_PERCENTAGE) - 30000,
+			)
+		}, 60000)
+
 		it("returns a controlled error when nothing can be removed and no tool result can shrink", async () => {
 			const messages: ApiMessage[] = [
 				{ role: "user", content: "First message", ts: 1000 },

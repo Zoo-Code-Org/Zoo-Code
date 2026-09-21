@@ -604,19 +604,19 @@ export async function manageContext({
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
 		const newContextTokensAfterTruncation = await countModelFacingTokens(truncationResult.messages)
 
-		// Recovery only counts as successful when the recalculated context actually decreased:
-		// for short histories the fraction-based message calculation can round down to zero
-		// removable messages, and reporting that as a successful truncation retriggers the same
-		// over-budget request forever.
-		// It must also land inside the budget. Removing low-token messages while protected
-		// content stays oversized would otherwise return success for a history that is still
-		// over budget, which the caller persists and sends — and the next context-window error
-		// retries the same recovery.
-		if (
-			truncationResult.messagesRemoved > 0 &&
-			newContextTokensAfterTruncation < prevContextTokens &&
-			newContextTokensAfterTruncation <= allowedTokens
-		) {
+		// Recovery counts as successful when the truncation lands inside the budget and actually
+		// removed messages. Budget fit is the load-bearing check: removing low-token messages while
+		// protected content stays oversized would otherwise return success for a history that is
+		// still over budget, which the caller persists and sends — and the next context-window error
+		// retries the same recovery. It is also sufficient for "did it decrease", because
+		// `allowedTokens < prevContextTokens` holds on entry to this branch, so landing under the
+		// budget already implies the result is below the count that triggered recovery. Comparing
+		// against `prevContextTokens` as well would mix two different measurements — a locally
+		// composed figure against a freshly counted one — and comparing against
+		// `modelFacingTokensBeforeRecovery` instead would reject a result that fits: truncation is
+		// non-destructive, so for a short history the appended marker can make the recount larger
+		// than the history it replaced while both remain far under budget.
+		if (truncationResult.messagesRemoved > 0 && newContextTokensAfterTruncation <= allowedTokens) {
 			// Include system prompt tokens so this value matches what we send to the API.
 			// Note: `prevContextTokens` is computed locally here (totalTokens + lastMessageTokens).
 			return {
