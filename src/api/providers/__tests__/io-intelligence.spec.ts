@@ -164,6 +164,36 @@ describe("IOIntelligenceHandler", () => {
 		])
 	})
 
+	it("preserves a zero cache-read count instead of coercing it away", async () => {
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{
+					choices: [],
+					usage: {
+						prompt_tokens: 20,
+						completion_tokens: 10,
+						prompt_tokens_details: { cached_tokens: 0 },
+					},
+				},
+			]),
+		)
+		expect(
+			await collectStream(
+				new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" }).createMessage(
+					"sys",
+					messages,
+				),
+			),
+		).toEqual([
+			{
+				type: "usage",
+				inputTokens: 20,
+				outputTokens: 10,
+				cacheReadTokens: 0,
+			},
+		])
+	})
+
 	it("redacts the API key from streaming errors", async () => {
 		mockCreate.mockRejectedValue(new Error("upstream rejected secret-key"))
 		const handler = new IOIntelligenceHandler({
