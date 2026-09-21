@@ -1,5 +1,24 @@
 import { z } from "zod"
 
+// ── Shared datetime validators ─────────────────────────────────────────────
+
+/**
+ * Strict UTC ISO 8601 datetime string (e.g. "2026-07-18T12:00:00.000Z").
+ * Unlike Date.parse-based checks, impossible calendar dates (e.g.
+ * "2026-02-30T00:00:00Z") are rejected instead of silently normalized into
+ * neighboring dates. Shared by all host-emitted UTC timestamp fields.
+ */
+export const IsoUtcDateTime = z.string().datetime()
+export type IsoUtcDateTime = z.infer<typeof IsoUtcDateTime>
+
+/**
+ * Offset-aware variant of IsoUtcDateTime: also accepts a numeric UTC offset
+ * suffix (e.g. "2026-07-18T12:00:00+05:30"). Used for webview-originated
+ * range bounds where a local-offset form is allowed.
+ */
+export const IsoOffsetDateTime = z.string().datetime({ offset: true })
+export type IsoOffsetDateTime = z.infer<typeof IsoOffsetDateTime>
+
 // ── Enums ──────────────────────────────────────────────────────────────────
 
 /** Final status of an LLM API call */
@@ -36,7 +55,7 @@ export const UsageEventV1 = z.object({
 	schemaVersion: z.literal(1),
 	eventId: z.string(),
 	idempotencyKey: z.string(),
-	occurredAt: z.string(), // ISO 8601 UTC
+	occurredAt: IsoUtcDateTime, // ISO 8601 UTC
 	timezoneOffsetMinutes: z.number(),
 	status: UsageEventStatus,
 	attempt: z.number(),
@@ -98,16 +117,10 @@ export type UsageEventV1 = z.infer<typeof UsageEventV1>
 
 /** Statistics query */
 export const StatsQuery = z.object({
-	// ISO 8601 datetimes; unparseable values are rejected so downstream
-	// range math never sees NaN epoch bounds.
-	from: z
-		.string()
-		.refine((v) => !Number.isNaN(new Date(v).getTime()), { message: "from must be a parseable datetime" })
-		.optional(),
-	to: z
-		.string()
-		.refine((v) => !Number.isNaN(new Date(v).getTime()), { message: "to must be a parseable datetime" })
-		.optional(),
+	// ISO 8601 datetimes; unparseable values and impossible calendar dates are
+	// rejected so downstream range math never sees NaN epoch bounds.
+	from: IsoOffsetDateTime.optional(),
+	to: IsoOffsetDateTime.optional(),
 	preset: z.enum(["today", "7d", "30d", "all"]).optional(),
 	timezone: z.string(), // IANA
 	groupBy: z.array(z.enum(["day", "week", "month", "provider", "model", "mode", "status", "source"])).max(3),
@@ -146,12 +159,12 @@ export type StatsBucket = z.infer<typeof StatsBucket>
 /** Statistics query result snapshot */
 export const StatsSnapshot = z.object({
 	query: StatsQuery,
-	generatedAt: z.string(),
+	generatedAt: IsoUtcDateTime,
 	buckets: z.array(StatsBucket),
 	totals: StatsBucket,
 	coverage: z.object({
-		firstEventAt: z.string().optional(),
-		lastEventAt: z.string().optional(),
+		firstEventAt: IsoUtcDateTime.optional(),
+		lastEventAt: IsoUtcDateTime.optional(),
 		recordingPaused: z.boolean(),
 		backfilledEventCount: z.number(),
 	}),
@@ -392,12 +405,16 @@ export type DashboardTaskDetail = z.infer<typeof DashboardTaskDetail>
 /**
  * Daily heatmap values snapshot.
  */
-export const HeatmapSnapshot = z.object({
-	/** Number of days the values array covers. */
-	rangeDays: z.number().int().min(1),
-	/** Daily cost values, one per day, oldest first. */
-	values: z.array(z.number()),
-})
+export const HeatmapSnapshot = z
+	.object({
+		/** Number of days the values array covers. */
+		rangeDays: z.number().int().min(1),
+		/** Daily cost values, one per day, oldest first. */
+		values: z.array(z.number()),
+	})
+	.refine((heatmap) => heatmap.values.length === heatmap.rangeDays, {
+		message: "values must contain exactly rangeDays entries",
+	})
 export type HeatmapSnapshot = z.infer<typeof HeatmapSnapshot>
 
 /**
@@ -497,46 +514,66 @@ export type DashboardSessionUpsert = z.infer<typeof DashboardSessionUpsert>
  * The reducer accepts it only when generation matches and afterSequence
  * equals the local through-sequence.
  */
-export const DashboardStatsDelta = z.object({
-	/** Correlation ID matching the subscription request. */
-	requestId: z.string(),
-	/** Store generation at the time of delta. */
-	generation: z.number().int(),
-	/** Monotonic sequence of the last committed event included. */
-	sequence: z.number().int(),
-	/** Signed delta for totals. */
-	totalDelta: StatsBucketDelta,
-	/** Signed deltas for breakdown buckets. */
-	breakdownDelta: z.array(StatsBucketDelta),
-	/** Signed delta for a single heatmap day. */
-	heatmapDayDelta: z
-		.object({
-			/** Day index within the heatmap range (0-based). */
-			dayIndex: z.number().int().min(0),
-			/** Signed delta for that day's cost. */
-			delta: z.number(),
-		})
-		.optional(),
-	/** Session upserts for changed sessions. */
-	sessionUpsert: z.array(DashboardSessionUpsert),
-})
+export const DashboardStatsDelta = z
+	.object({
+		/** Correlation ID matching the subscription request. */
+		requestId: z.string(),
+		/** Store generation at the time of delta. */
+		generation: z.number().int(),
+		/** Monotonic sequence of the last committed event included. */
+		sequence: z.number().int(),
+		/**
+		 * Reducer's local through-sequence before this delta. Must be less
+		 * than `sequence`: a delta carries at least one event (equal sequences
+		 * are snapshots' job).
+		 */
+		afterSequence: z.number().int(),
+		/** Signed delta for totals. */
+		totalDelta: StatsBucketDelta,
+		/** Signed deltas for breakdown buckets. */
+		breakdownDelta: z.array(StatsBucketDelta),
+		/** Signed delta for a single heatmap day. */
+		heatmapDayDelta: z
+			.object({
+				/** Day index within the heatmap range (0-based). */
+				dayIndex: z.number().int().min(0),
+				/** Signed delta for that day's cost. */
+				delta: z.number(),
+			})
+			.optional(),
+		/** Session upserts for changed sessions. */
+		sessionUpsert: z.array(DashboardSessionUpsert),
+	})
+	.refine((delta) => delta.afterSequence < delta.sequence, {
+		message: "afterSequence must be less than sequence (a delta carries at least one event)",
+	})
 export type DashboardStatsDelta = z.infer<typeof DashboardStatsDelta>
 
 /** Task-based stream delta with complete subtree summaries for changed rows. */
-export const DashboardTaskStatsDelta = z.object({
-	requestId: z.string(),
-	generation: z.number().int(),
-	sequence: z.number().int(),
-	totalDelta: StatsBucketDelta,
-	breakdownDelta: z.array(StatsBucketDelta),
-	heatmapDayDelta: z
-		.object({
-			dayIndex: z.number().int().min(0),
-			delta: z.number(),
-		})
-		.optional(),
-	taskUpsert: z.array(DashboardTaskUpsert),
-})
+export const DashboardTaskStatsDelta = z
+	.object({
+		requestId: z.string(),
+		generation: z.number().int(),
+		sequence: z.number().int(),
+		/**
+		 * Reducer's local through-sequence before this delta. Must be less
+		 * than `sequence`: a delta carries at least one event (equal sequences
+		 * are snapshots' job).
+		 */
+		afterSequence: z.number().int(),
+		totalDelta: StatsBucketDelta,
+		breakdownDelta: z.array(StatsBucketDelta),
+		heatmapDayDelta: z
+			.object({
+				dayIndex: z.number().int().min(0),
+				delta: z.number(),
+			})
+			.optional(),
+		taskUpsert: z.array(DashboardTaskUpsert),
+	})
+	.refine((delta) => delta.afterSequence < delta.sequence, {
+		message: "afterSequence must be less than sequence (a delta carries at least one event)",
+	})
 export type DashboardTaskStatsDelta = z.infer<typeof DashboardTaskStatsDelta>
 
 /**

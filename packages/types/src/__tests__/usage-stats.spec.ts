@@ -3,6 +3,8 @@ import {
 	UsageValueSource,
 	InclusionRule,
 	SourcedNumber,
+	IsoUtcDateTime,
+	IsoOffsetDateTime,
 	UsageEventV1,
 	StatsQuery,
 	StatsBucket,
@@ -60,6 +62,45 @@ describe("usage-stats schemas", () => {
 
 		it("should reject missing value", () => {
 			expect(() => SourcedNumber.parse({ source: "estimated" })).toThrow()
+		})
+	})
+
+	// ── Shared datetime validators ───────────────────────────────────────
+
+	describe("IsoUtcDateTime", () => {
+		it("should accept valid Z datetimes", () => {
+			expect(IsoUtcDateTime.parse("2026-07-18T12:00:00Z")).toBe("2026-07-18T12:00:00Z")
+			expect(IsoUtcDateTime.parse("2026-07-18T12:00:00.000Z")).toBe("2026-07-18T12:00:00.000Z")
+		})
+
+		it("should reject arbitrary strings", () => {
+			expect(() => IsoUtcDateTime.parse("not-a-date")).toThrow()
+		})
+
+		it("should reject impossible calendar dates instead of normalizing them", () => {
+			expect(() => IsoUtcDateTime.parse("2026-02-30T00:00:00Z")).toThrow()
+			expect(() => IsoUtcDateTime.parse("2026-13-01T00:00:00Z")).toThrow()
+			// Date.parse would normalize this to 2026-03-02; the strict validator must not.
+			expect(Number.isNaN(new Date("2026-02-30T00:00:00Z").getTime())).toBe(false)
+		})
+
+		it("should reject offset forms", () => {
+			expect(() => IsoUtcDateTime.parse("2026-07-18T12:00:00+05:30")).toThrow()
+		})
+	})
+
+	describe("IsoOffsetDateTime", () => {
+		it("should accept valid Z and offset datetimes", () => {
+			expect(IsoOffsetDateTime.parse("2026-07-18T12:00:00Z")).toBe("2026-07-18T12:00:00Z")
+			expect(IsoOffsetDateTime.parse("2026-07-18T12:00:00+05:30")).toBe("2026-07-18T12:00:00+05:30")
+			expect(IsoOffsetDateTime.parse("2026-07-18T12:00:00-07:00")).toBe("2026-07-18T12:00:00-07:00")
+		})
+
+		it("should reject arbitrary strings and impossible calendar dates", () => {
+			expect(() => IsoOffsetDateTime.parse("not-a-date")).toThrow()
+			expect(() => IsoOffsetDateTime.parse("2026-02-30T00:00:00Z")).toThrow()
+			expect(() => IsoOffsetDateTime.parse("2026-13-01T00:00:00Z")).toThrow()
+			expect(() => IsoOffsetDateTime.parse("2026-02-30T00:00:00+05:30")).toThrow()
 		})
 	})
 
@@ -125,6 +166,14 @@ describe("usage-stats schemas", () => {
 
 		it("should reject invalid provenance", () => {
 			expect(() => UsageEventV1.parse({ ...validEvent, provenance: "imported" })).toThrow()
+		})
+
+		it("should reject a non-UTC or impossible occurredAt", () => {
+			expect(() => UsageEventV1.parse({ ...validEvent, occurredAt: "not-a-date" })).toThrow()
+			expect(() => UsageEventV1.parse({ ...validEvent, occurredAt: "2026-02-30T00:00:00Z" })).toThrow()
+			expect(() => UsageEventV1.parse({ ...validEvent, occurredAt: "2026-13-01T00:00:00Z" })).toThrow()
+			// Offset form is reserved for query range bounds, not event timestamps.
+			expect(() => UsageEventV1.parse({ ...validEvent, occurredAt: "2026-07-18T12:00:00+05:30" })).toThrow()
 		})
 
 		it("should reject missing required fields (eventId)", () => {
@@ -233,6 +282,41 @@ describe("usage-stats schemas", () => {
 					groupBy: [],
 				}),
 			).toThrow()
+		})
+
+		it("should reject impossible calendar dates in from/to", () => {
+			expect(() =>
+				StatsQuery.parse({
+					from: "2026-02-30T00:00:00Z",
+					timezone: "UTC",
+					groupBy: [],
+				}),
+			).toThrow()
+			expect(() =>
+				StatsQuery.parse({
+					to: "2026-13-01T00:00:00Z",
+					timezone: "UTC",
+					groupBy: [],
+				}),
+			).toThrow()
+			expect(() =>
+				StatsQuery.parse({
+					from: "2026-02-30T00:00:00+05:30",
+					timezone: "UTC",
+					groupBy: [],
+				}),
+			).toThrow()
+		})
+
+		it("should accept offset-aware from/to datetimes", () => {
+			const result = StatsQuery.parse({
+				from: "2026-07-01T00:00:00+05:30",
+				to: "2026-07-18T00:00:00-07:00",
+				timezone: "UTC",
+				groupBy: [],
+			})
+			expect(result.from).toBe("2026-07-01T00:00:00+05:30")
+			expect(result.to).toBe("2026-07-18T00:00:00-07:00")
 		})
 
 		it("should reject invalid groupBy dimension", () => {
@@ -347,6 +431,22 @@ describe("usage-stats schemas", () => {
 		it("should reject missing totals", () => {
 			const { totals: _totals, ...withoutTotals } = validSnapshot
 			expect(() => StatsSnapshot.parse(withoutTotals)).toThrow()
+		})
+
+		it("should reject impossible generatedAt / coverage datetimes", () => {
+			expect(() => StatsSnapshot.parse({ ...validSnapshot, generatedAt: "not-a-date" })).toThrow()
+			expect(() =>
+				StatsSnapshot.parse({
+					...validSnapshot,
+					coverage: { ...validSnapshot.coverage, firstEventAt: "2026-02-30T00:00:00Z" },
+				}),
+			).toThrow()
+			expect(() =>
+				StatsSnapshot.parse({
+					...validSnapshot,
+					coverage: { ...validSnapshot.coverage, lastEventAt: "2026-13-01T00:00:00Z" },
+				}),
+			).toThrow()
 		})
 	})
 

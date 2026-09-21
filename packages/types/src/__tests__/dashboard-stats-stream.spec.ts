@@ -357,18 +357,25 @@ describe("DashboardTaskDetail", () => {
 
 describe("HeatmapSnapshot", () => {
 	it("should parse a valid heatmap", () => {
-		const result = HeatmapSnapshot.parse({ rangeDays: 30, values: [0.1, 0.2, 0.3] })
-		expect(result.rangeDays).toBe(30)
+		const result = HeatmapSnapshot.parse({ rangeDays: 3, values: [0.1, 0.2, 0.3] })
+		expect(result.rangeDays).toBe(3)
 		expect(result.values).toHaveLength(3)
 	})
 
-	it("should accept empty values array", () => {
-		const result = HeatmapSnapshot.parse({ rangeDays: 30, values: [] })
-		expect(result.values).toHaveLength(0)
+	it("should reject values shorter than rangeDays", () => {
+		expect(() => HeatmapSnapshot.parse({ rangeDays: 30, values: [0.1, 0.2, 0.3] })).toThrow()
+	})
+
+	it("should reject values longer than rangeDays", () => {
+		expect(() => HeatmapSnapshot.parse({ rangeDays: 2, values: [0.1, 0.2, 0.3] })).toThrow()
 	})
 
 	it("should reject rangeDays of 0", () => {
 		expect(() => HeatmapSnapshot.parse({ rangeDays: 0, values: [] })).toThrow()
+	})
+
+	it("should reject non-integer rangeDays", () => {
+		expect(() => HeatmapSnapshot.parse({ rangeDays: 3.5, values: [0.1, 0.2, 0.3] })).toThrow()
 	})
 
 	it("should reject missing values", () => {
@@ -465,7 +472,7 @@ describe("DashboardStatsSnapshot", () => {
 	}
 
 	const validHeatmap = {
-		rangeDays: 30,
+		rangeDays: 3,
 		values: [0.1, 0.2, 0.3],
 	}
 
@@ -552,6 +559,7 @@ describe("DashboardStatsDelta", () => {
 		requestId: "sub-001",
 		generation: 1,
 		sequence: 101,
+		afterSequence: 100,
 		totalDelta: validBucketDelta,
 		breakdownDelta: [validBucketDelta],
 		heatmapDayDelta: {
@@ -566,6 +574,7 @@ describe("DashboardStatsDelta", () => {
 		expect(result.requestId).toBe("sub-001")
 		expect(result.generation).toBe(1)
 		expect(result.sequence).toBe(101)
+		expect(result.afterSequence).toBe(100)
 		expect(result.totalDelta.events).toBe(1)
 		expect(result.breakdownDelta).toHaveLength(1)
 		expect(result.heatmapDayDelta?.dayIndex).toBe(28)
@@ -607,6 +616,29 @@ describe("DashboardStatsDelta", () => {
 		expect(() => DashboardStatsDelta.parse(withoutSeq)).toThrow()
 	})
 
+	it("should reject missing afterSequence", () => {
+		const { afterSequence: _after, ...withoutAfter } = validDelta
+		expect(() => DashboardStatsDelta.parse(withoutAfter)).toThrow()
+	})
+
+	it("should reject non-integer afterSequence", () => {
+		expect(() => DashboardStatsDelta.parse({ ...validDelta, afterSequence: 100.5 })).toThrow()
+	})
+
+	it("should reject afterSequence equal to sequence (empty delta is a snapshot's job)", () => {
+		expect(() => DashboardStatsDelta.parse({ ...validDelta, afterSequence: 101 })).toThrow()
+	})
+
+	it("should reject afterSequence greater than sequence", () => {
+		expect(() => DashboardStatsDelta.parse({ ...validDelta, afterSequence: 102 })).toThrow()
+	})
+
+	it("should accept a multi-event delta spanning several sequences", () => {
+		const result = DashboardStatsDelta.parse({ ...validDelta, afterSequence: 98, sequence: 101 })
+		expect(result.afterSequence).toBe(98)
+		expect(result.sequence).toBe(101)
+	})
+
 	it("should reject non-integer generation", () => {
 		expect(() => DashboardStatsDelta.parse({ ...validDelta, generation: 1.5 })).toThrow()
 	})
@@ -646,6 +678,63 @@ describe("DashboardStatsDelta", () => {
 				heatmapDayDelta: { dayIndex: 1.5, delta: 0.01 },
 			}),
 		).toThrow()
+	})
+})
+
+// ── DashboardTaskStatsDelta ─────────────────────────────────────────────────
+
+describe("DashboardTaskStatsDelta", () => {
+	const validBucketDelta = {
+		key: { day: "2026-07-29" },
+		events: 1,
+		completedCalls: 1,
+		failedCalls: 0,
+		cancelledCalls: 0,
+		inputTokens: 500,
+		outputTokens: 200,
+		cacheReadTokens: 100,
+		cacheWriteTokens: 50,
+		reasoningTokens: 0,
+		totalTokens: 700,
+		costUsd: 0.01,
+		unknownEventCount: 0,
+	}
+
+	const validTaskDelta = {
+		requestId: "sub-001",
+		generation: 1,
+		sequence: 101,
+		afterSequence: 100,
+		totalDelta: validBucketDelta,
+		breakdownDelta: [validBucketDelta],
+		taskUpsert: [validTaskSummary],
+	}
+
+	it("should parse a valid task delta", () => {
+		const result = DashboardTaskStatsDelta.parse(validTaskDelta)
+		expect(result.sequence).toBe(101)
+		expect(result.afterSequence).toBe(100)
+		expect(result.taskUpsert).toHaveLength(1)
+	})
+
+	it("should reject missing afterSequence", () => {
+		const { afterSequence: _after, ...withoutAfter } = validTaskDelta
+		expect(() => DashboardTaskStatsDelta.parse(withoutAfter)).toThrow()
+	})
+
+	it("should reject non-integer afterSequence", () => {
+		expect(() => DashboardTaskStatsDelta.parse({ ...validTaskDelta, afterSequence: 100.5 })).toThrow()
+	})
+
+	it("should reject afterSequence equal to or greater than sequence", () => {
+		expect(() => DashboardTaskStatsDelta.parse({ ...validTaskDelta, afterSequence: 101 })).toThrow()
+		expect(() => DashboardTaskStatsDelta.parse({ ...validTaskDelta, afterSequence: 102 })).toThrow()
+	})
+
+	it("should accept a multi-event delta spanning several sequences", () => {
+		const result = DashboardTaskStatsDelta.parse({ ...validTaskDelta, afterSequence: 97, sequence: 101 })
+		expect(result.afterSequence).toBe(97)
+		expect(result.sequence).toBe(101)
 	})
 })
 
@@ -697,7 +786,7 @@ describe("serialization round trips", () => {
 			stats: validStatsSnapshot,
 			sessions: validSessionPage,
 			cursor: "next-cursor",
-			heatmap: { rangeDays: 30, values: [0.1, 0.2] },
+			heatmap: { rangeDays: 2, values: [0.1, 0.2] },
 		}
 		const json = JSON.stringify(snapshot)
 		const parsed = JSON.parse(json)
@@ -726,6 +815,7 @@ describe("serialization round trips", () => {
 			requestId: "sub-001",
 			generation: 1,
 			sequence: 101,
+			afterSequence: 100,
 			totalDelta: bucketDelta,
 			breakdownDelta: [bucketDelta],
 			heatmapDayDelta: { dayIndex: 28, delta: 0.01 },
@@ -794,12 +884,13 @@ describe("serialization round trips", () => {
 			stats: validStatsSnapshot,
 			tasks: taskPage,
 			cursor: taskPage.cursor,
-			heatmap: { rangeDays: 30, values: [0.1, 0.2] },
+			heatmap: { rangeDays: 2, values: [0.1, 0.2] },
 		}
 		const delta = {
 			requestId: "sub-001",
 			generation: 1,
 			sequence: 101,
+			afterSequence: 100,
 			totalDelta: bucketDelta,
 			breakdownDelta: [bucketDelta],
 			taskUpsert: [validTaskSummary],
