@@ -102,6 +102,21 @@ describe("usage-stats schemas", () => {
 			expect(() => IsoOffsetDateTime.parse("2026-13-01T00:00:00Z")).toThrow()
 			expect(() => IsoOffsetDateTime.parse("2026-02-30T00:00:00+05:30")).toThrow()
 		})
+
+		it("should reject out-of-range UTC offsets", () => {
+			// zod's offset check validates only the [+-]HH:MM shape; these are
+			// numerically invalid and rejected by the Date.parse refine.
+			expect(() => IsoOffsetDateTime.parse("2026-07-18T12:00:00+24:00")).toThrow()
+			expect(() => IsoOffsetDateTime.parse("2026-07-18T12:00:00+99:99")).toThrow()
+			expect(() => IsoOffsetDateTime.parse("2026-07-18T12:00:00+05:99")).toThrow()
+		})
+
+		it("should accept valid UTC offset extremes", () => {
+			expect(IsoOffsetDateTime.parse("2026-07-18T12:00:00+23:59")).toBe("2026-07-18T12:00:00+23:59")
+			expect(IsoOffsetDateTime.parse("2026-07-18T12:00:00-12:00")).toBe("2026-07-18T12:00:00-12:00")
+			// ISO 8601 allows -00:00 ("unknown offset"); Date.parse treats it as UTC.
+			expect(IsoOffsetDateTime.parse("2026-07-18T12:00:00-00:00")).toBe("2026-07-18T12:00:00-00:00")
+		})
 	})
 
 	// ── UsageEventV1 ────────────────────────────────────────────────────────
@@ -317,6 +332,41 @@ describe("usage-stats schemas", () => {
 			})
 			expect(result.from).toBe("2026-07-01T00:00:00+05:30")
 			expect(result.to).toBe("2026-07-18T00:00:00-07:00")
+		})
+
+		it("should reject out-of-range UTC offsets in from/to", () => {
+			expect(() =>
+				StatsQuery.parse({
+					from: "2026-07-01T00:00:00+24:00",
+					timezone: "UTC",
+					groupBy: [],
+				}),
+			).toThrow()
+			expect(() =>
+				StatsQuery.parse({
+					to: "2026-07-18T00:00:00+99:99",
+					timezone: "UTC",
+					groupBy: [],
+				}),
+			).toThrow()
+			expect(() =>
+				StatsQuery.parse({
+					from: "2026-07-01T00:00:00+05:99",
+					timezone: "UTC",
+					groupBy: [],
+				}),
+			).toThrow()
+		})
+
+		it("should accept valid UTC offset extremes in from/to", () => {
+			const result = StatsQuery.parse({
+				from: "2026-07-01T00:00:00+23:59",
+				to: "2026-07-18T00:00:00-12:00",
+				timezone: "UTC",
+				groupBy: [],
+			})
+			expect(result.from).toBe("2026-07-01T00:00:00+23:59")
+			expect(result.to).toBe("2026-07-18T00:00:00-12:00")
 		})
 
 		it("should reject invalid groupBy dimension", () => {

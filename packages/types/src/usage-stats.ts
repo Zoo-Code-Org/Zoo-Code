@@ -15,8 +15,15 @@ export type IsoUtcDateTime = z.infer<typeof IsoUtcDateTime>
  * Offset-aware variant of IsoUtcDateTime: also accepts a numeric UTC offset
  * suffix (e.g. "2026-07-18T12:00:00+05:30"). Used for webview-originated
  * range bounds where a local-offset form is allowed.
+ *
+ * zod's offset check validates only the shape ([+-]HH:MM), not the numeric
+ * range; Date.parse rejects out-of-range offsets (e.g. "+24:00", "+99:99")
+ * with NaN, which the refine turns into a validation error.
  */
-export const IsoOffsetDateTime = z.string().datetime({ offset: true })
+export const IsoOffsetDateTime = z
+	.string()
+	.datetime({ offset: true })
+	.refine((value) => Number.isFinite(Date.parse(value)), { message: "Invalid UTC offset" })
 export type IsoOffsetDateTime = z.infer<typeof IsoOffsetDateTime>
 
 // ── Enums ──────────────────────────────────────────────────────────────────
