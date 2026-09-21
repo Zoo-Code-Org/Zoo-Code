@@ -608,7 +608,15 @@ export async function manageContext({
 		// for short histories the fraction-based message calculation can round down to zero
 		// removable messages, and reporting that as a successful truncation retriggers the same
 		// over-budget request forever.
-		if (truncationResult.messagesRemoved > 0 && newContextTokensAfterTruncation < prevContextTokens) {
+		// It must also land inside the budget. Removing low-token messages while protected
+		// content stays oversized would otherwise return success for a history that is still
+		// over budget, which the caller persists and sends — and the next context-window error
+		// retries the same recovery.
+		if (
+			truncationResult.messagesRemoved > 0 &&
+			newContextTokensAfterTruncation < prevContextTokens &&
+			newContextTokensAfterTruncation <= allowedTokens
+		) {
 			// Include system prompt tokens so this value matches what we send to the API.
 			// Note: `prevContextTokens` is computed locally here (totalTokens + lastMessageTokens).
 			return {
@@ -671,9 +679,11 @@ export async function manageContext({
 				newContextTokensAfterDegradation !== undefined &&
 				newContextTokensAfterDegradation < modelFacingTokensBeforeRecovery
 					? `Fallback degradation reduced the model-facing context to ${Math.round(newContextTokensAfterDegradation)} tokens, but it still exceeds the ${Math.round(allowedTokens)}-token budget.`
-					: truncationResult.messagesRemoved > 0
-						? `Fallback truncation selected ${truncationResult.messagesRemoved} messages but did not reduce the model-facing context, and no eligible textual tool_result could be shrunk.`
-						: `Fallback truncation removed 0 messages and no eligible textual tool_result could be shrunk below its floor.`,
+					: truncationResult.messagesRemoved > 0 && newContextTokensAfterTruncation < prevContextTokens
+						? `Fallback truncation reduced the model-facing context to ${Math.round(newContextTokensAfterTruncation)} tokens, but it still exceeds the ${Math.round(allowedTokens)}-token budget, and no eligible textual tool_result could be shrunk further.`
+						: truncationResult.messagesRemoved > 0
+							? `Fallback truncation selected ${truncationResult.messagesRemoved} messages but did not reduce the model-facing context, and no eligible textual tool_result could be shrunk.`
+							: `Fallback truncation removed 0 messages and no eligible textual tool_result could be shrunk below its floor.`,
 		}
 	}
 	// No truncation or condensation needed

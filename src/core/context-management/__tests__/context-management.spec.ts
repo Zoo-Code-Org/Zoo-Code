@@ -2515,6 +2515,52 @@ describe("Context Management", () => {
 
 			const result = await manageContext({
 				messages,
+				// Nonzero and larger than the model-facing count: the persisted accounting
+				// charges the hidden pre-summary content, so the decrease check passes on the
+				// removal alone. Only the budget fit can reject this result, which is the
+				// false-success path this guard exists for.
+				totalTokens: 150000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.recoveryFailed).toBe(true)
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.errorDetails).toContain("still exceeds the 60000-token budget")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages)
+		}, 60000)
+
+		it("rejects truncation when the persisted accounting undercounts the model-facing context", async () => {
+			const condenseId = "condense-1"
+			const oversizedSummary =
+				"## Conversation Summary\nProtected summary content that remains API-visible.\n".repeat(5000)
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Initial task", ts: 1000, condenseParent: condenseId },
+				{ role: "assistant", content: "First answer", ts: 1100, condenseParent: condenseId },
+				{ role: "user", content: "Follow-up", ts: 1200, condenseParent: condenseId },
+				{ role: "assistant", content: "Second answer", ts: 1300, condenseParent: condenseId },
+				{
+					role: "user",
+					content: oversizedSummary,
+					ts: 1400,
+					isSummary: true,
+					condenseId,
+				},
+			]
+
+			const result = await manageContext({
+				messages,
+				// No persisted count at all: `prevContextTokens` is only the summary, so the
+				// recount (system prompt included) is not below it. Nothing was actually
+				// removed from the effective history, so this must not report success either.
 				totalTokens: 0,
 				contextWindow: 100000,
 				maxTokens: 30000,
@@ -2563,5 +2609,49 @@ describe("Context Management", () => {
 			expect(result.truncationId).toBeUndefined()
 			expect(result.messages).toBe(messages) // unchanged history, no fake truncation event
 		})
+
+		it("returns a terminal recovery error when truncation reduces tokens but cannot meet the budget", async () => {
+			// Messages truncation can remove are cheap; the content it must keep is what pushes the
+			// request over the budget. Removing the cheap messages therefore lowers the model-facing
+			// count without ever reaching `allowedTokens`.
+			const protectedText = 'PROTECTED_CONTEXT {"kind":"instruction","value":"must remain visible"}\n'.repeat(
+				5000,
+			)
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Removable turn one", ts: 1000 },
+				{ role: "assistant", content: "Removable answer one", ts: 1100 },
+				{ role: "user", content: "Removable turn two", ts: 1200 },
+				{ role: "assistant", content: "Removable answer two", ts: 1300 },
+				{ role: "user", content: "Removable turn three", ts: 1400 },
+				{ role: "assistant", content: "Removable answer three", ts: 1500 },
+				{ role: "user", content: protectedText, ts: 1600 },
+			]
+
+			// Truncation does make progress: it removes messages and the model-facing count drops.
+			expect(truncateConversation(messages, 0.5, taskId).messagesRemoved).toBeGreaterThan(0)
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 90000,
+				contextWindow: 100000,
+				maxTokens: 30000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// Reducing tokens is not enough on its own: returning success here would hand the caller
+			// an over-budget history to persist and send, and the next context-window error would
+			// retry the same recovery.
+			expect(result.recoveryFailed).toBe(true)
+			expect(result.error).toContain("Context window recovery failed")
+			expect(result.errorDetails).toContain("still exceeds the 60000-token budget")
+			expect(result.truncationId).toBeUndefined()
+			expect(result.messages).toBe(messages)
+		}, 60000)
 	})
 })
