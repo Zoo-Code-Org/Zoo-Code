@@ -1,5 +1,32 @@
 # Zoo Code Changelog
 
+## [3.82.2]
+
+### Patch Changes
+
+- Prevent unavailable tools from appearing in system prompts (#505 by @DScoNOIZ, #1240 by @JunyongParkDev, PR #1505 by @DaubnerF)
+- Fix DeepSeek Flash image input by adding the new deepseek-flash model ID (PR #1618 by @app/zoomote)
+- Fix token usage tracking for Grok and xAI-compatible endpoints whose domains contain "x.ai" (#1483 by @BambinoSK, PR #1484 by @BambinoSK)
+- Apply the configured reasoning effort consistently across OpenAI-compatible requests (#993 by @Gringo675, PR #1604 by @JunyongParkDev)
+- Preserve the configured LiteLLM model ID in the model picker (#1367 by @easonLiangWorldedtech, PR #1368 by @easonLiangWorldedtech)
+- Fix delegated subtasks reading the parent mode in environment details and tool validation (#1623 by @edelauna, PR #1625 by @edelauna)
+- Add a file version token to the guarded-write path to prevent stale overwrites (PR #1383 by @easonLiangWorldedtech)
+- Extract the code-index manager registry for clearer ownership (PR #1622 by @WebMad)
+- Route Roomote pull requests through the CodeRabbit review path (PR #1598 by @app/zoomote)
+- Make mutation-testing findings advisory instead of blocking (PR #1610 by @app/zoomote)
+- Group mutation warnings by source location to remove duplicate warnings (PR #1619 by @app/zoomote)
+- Skip mutation testing while pull requests are in draft (PR #1645 by @app/zoomote)
+- Scope the mutation diff against the exact merge base so unrelated changes on main stop inflating the scope (PR #1655 by @app/zoomote)
+- Model test bundle dependencies in Turbo so caching stays correct (#114 by @edelauna, PR #1611 by @app/zoomote)
+- Separate extension unit tests from bundle smoke tests (PR #1614 by @app/zoomote)
+- Move extension source coverage to cacheable test lanes (#118 by @edelauna, PR #1620 by @app/zoomote)
+- Cache extension coverage by ownership lanes (#115 by @edelauna, PR #1631 by @app/zoomote)
+- Keep coverage caches valid when only verification scripts change (PR #1649 by @app/zoomote)
+- Union ownership-lane coverage reports before uploading to Codecov (#1647 by @DaubnerF, PR #1650 by @app/zoomote)
+- Validate coverage lanes dynamically in the merge queue (PR #1644 by @app/zoomote)
+- Stabilize the accessibility contrast audit during theme changes (#1612 by @edelauna, PR #1613 by @app/zoomote)
+- Make CodeRabbit completeness checks advisory (PR #1621 by @app/zoomote)
+
 ## [3.82.1]
 
 ### Patch Changes

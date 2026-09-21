@@ -238,7 +238,16 @@ for (const scenario of scenarios) {
 
 			const sidebar = running.page.locator(".part.sidebar")
 			await expect(sidebar).toBeVisible()
-			await expect(sidebar).toHaveScreenshot(`electron-${scenario.name}-sidebar.png`)
+
+			// Mask the dynamic token counter so system-prompt changes that alter
+			// token counts do not cause pixel diffs when layout is unchanged.
+			const webviewFrame = running.page.frameLocator('iframe[src*="extensionId=ZooCodeOrganization.zoo-code"]')
+			const tokenCountMask = webviewFrame
+				.frameLocator("iframe")
+				.locator('[data-testid="context-tokens-count"],[data-testid="context-window-size"]')
+			await expect(sidebar).toHaveScreenshot(`electron-${scenario.name}-sidebar.png`, {
+				mask: [tokenCountMask],
+			})
 
 			if (scenario.webviewSnapshot) {
 				const webview = running.page.locator('iframe[src*="extensionId=ZooCodeOrganization.zoo-code"]')

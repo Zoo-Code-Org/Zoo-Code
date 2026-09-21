@@ -1,6 +1,6 @@
 // npx vitest run src/core/tools/__tests__/validateToolUse.spec.ts
 
-import type { ModeConfig } from "@roo-code/types"
+import { toolNamesSchema, type ModeConfig } from "@roo-code/types"
 
 import { modes } from "../../../shared/modes"
 import { TOOL_GROUPS } from "../../../shared/tools"
@@ -49,6 +49,28 @@ describe("mode-validator", () => {
 		})
 
 		describe("custom modes", () => {
+			it("allows codebase search in a read-only mode without manager readiness input", () => {
+				const mode: ModeConfig = {
+					slug: "read-only",
+					name: "Read only",
+					roleDefinition: "Read the codebase",
+					groups: ["read"],
+				}
+
+				expect(isToolAllowedForMode(toolNamesSchema.enum.codebase_search, mode.slug, [mode])).toBe(true)
+			})
+
+			it("rejects codebase search in a command-only mode", () => {
+				const mode: ModeConfig = {
+					slug: "command-only",
+					name: "Command only",
+					roleDefinition: "Run commands without read tools",
+					groups: ["command"],
+				}
+
+				expect(isToolAllowedForMode(toolNamesSchema.enum.codebase_search, mode.slug, [mode])).toBe(false)
+			})
+
 			it("allows tools from custom mode configuration", () => {
 				const customModes: ModeConfig[] = [
 					{
