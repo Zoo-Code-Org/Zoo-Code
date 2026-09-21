@@ -63,6 +63,7 @@ describe("Model Validation Functions", () => {
 		"zoo-gateway": {},
 		"kimi-code": {},
 		moonshot: {},
+		mimo: {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {

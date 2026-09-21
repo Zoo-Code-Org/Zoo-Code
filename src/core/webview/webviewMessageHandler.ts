@@ -1130,6 +1130,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.mimo]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.nanogpt]: {},
@@ -1264,6 +1265,30 @@ export const webviewMessageHandler = async (
 						provider: providerIdentifiers.moonshot,
 						apiKey: moonshotApiKey,
 						baseUrl: moonshotBaseUrl,
+					},
+				})
+			}
+
+			// MiMo is conditional on apiKey. The baseUrl selects the cluster
+			// (cn/sgp/ams token-plan or pay-as-you-go), so unsaved form values are
+			// honored the same way as DeepSeek/Moonshot above.
+			const mimoApiKey = message?.values?.mimoApiKey ?? apiConfiguration.mimoApiKey
+			const mimoBaseUrl = message?.values?.mimoBaseUrl ?? apiConfiguration.mimoBaseUrl
+
+			if (mimoApiKey) {
+				if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.mimo, apiKey: mimoApiKey, baseUrl: mimoBaseUrl },
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.mimo,
+					options: {
+						provider: providerIdentifiers.mimo,
+						apiKey: mimoApiKey,
+						baseUrl: mimoBaseUrl,
 					},
 				})
 			}

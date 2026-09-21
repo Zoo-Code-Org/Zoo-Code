@@ -192,6 +192,7 @@ const dynamicProviderExtras = {
 	[providerIdentifiers.poe]: {} as { apiKey?: string; baseUrl?: string },
 	[providerIdentifiers.deepseek]: {} as { apiKey?: string; baseUrl?: string },
 	[providerIdentifiers.moonshot]: {} as { apiKey?: string; baseUrl?: string },
+	[providerIdentifiers.mimo]: {} as { apiKey?: string; baseUrl?: string },
 	[providerIdentifiers.opencodeGo]: {} as { apiKey?: string },
 	[providerIdentifiers.kenari]: {} as { apiKey?: string },
 	[providerIdentifiers.nanogpt]: {} as { apiKey?: string },

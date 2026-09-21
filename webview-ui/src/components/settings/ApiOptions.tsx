@@ -745,11 +745,26 @@ const ApiOptions = ({
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
 								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
-								models={getStaticModelsForProvider(
-									activeSelectedProvider,
-									t("settings:labels.useCustomArn"),
-									apiConfiguration,
-								)}
+								models={
+									// MiMo is a dynamic provider: merge the host-fetched model
+									// catalog into the static fallback so models newer than the
+									// shipped catalog (e.g. post-V2.6 releases) are selectable
+									// without an extension update.
+									activeSelectedProvider === providerIdentifiers.mimo
+										? {
+												...getStaticModelsForProvider(
+													activeSelectedProvider,
+													t("settings:labels.useCustomArn"),
+													apiConfiguration,
+												),
+												...routerModels?.[providerIdentifiers.mimo],
+											}
+										: getStaticModelsForProvider(
+												activeSelectedProvider,
+												t("settings:labels.useCustomArn"),
+												apiConfiguration,
+											)
+								}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
 								serviceUrl={getProviderServiceConfig(activeSelectedProvider).serviceUrl}

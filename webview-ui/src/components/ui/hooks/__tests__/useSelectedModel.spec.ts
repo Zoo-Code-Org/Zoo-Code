@@ -31,6 +31,8 @@ import {
 	vscodeLlmDefaultModelId,
 	moonshotDefaultModelId,
 	moonshotModels,
+	mimoDefaultModelId,
+	mimoModels,
 	kimiCodeDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
@@ -234,11 +236,18 @@ describe("useSelectedModel", () => {
 		expect(result.current.info).toEqual(opencodeGoDefaultModelInfo)
 	})
 
-	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot])(
+	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot, providerIdentifiers.mimo])(
 		"prefers router data over static data for %s",
 		(provider) => {
 			const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
-			const modelId = provider === providerIdentifiers.deepseek ? "deepseek-v4-pro" : moonshotDefaultModelId
+			let modelId: string
+			if (provider === providerIdentifiers.deepseek) {
+				modelId = "deepseek-v4-pro"
+			} else if (provider === providerIdentifiers.moonshot) {
+				modelId = moonshotDefaultModelId
+			} else {
+				modelId = mimoDefaultModelId
+			}
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [provider]: { [modelId]: modelInfo } }))
 			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 
@@ -266,10 +275,17 @@ describe("useSelectedModel", () => {
 		expect(result.current.info?.supportsImages).toBe(true)
 	})
 
-	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot])(
+	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot, providerIdentifiers.mimo])(
 		"falls back to static data when the %s router catalog is null",
 		(provider) => {
-			const modelId = provider === providerIdentifiers.deepseek ? deepSeekDefaultModelId : moonshotDefaultModelId
+			let modelId: string
+			if (provider === providerIdentifiers.deepseek) {
+				modelId = deepSeekDefaultModelId
+			} else if (provider === providerIdentifiers.moonshot) {
+				modelId = moonshotDefaultModelId
+			} else {
+				modelId = mimoDefaultModelId
+			}
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [provider]: null }))
 			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 
@@ -280,8 +296,10 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe(modelId)
 			if (provider === providerIdentifiers.deepseek) {
 				expect(result.current.info).toEqual(deepSeekModels[deepSeekDefaultModelId])
-			} else {
+			} else if (provider === providerIdentifiers.moonshot) {
 				expect(result.current.info).toEqual(moonshotModels[modelId as keyof typeof moonshotModels])
+			} else {
+				expect(result.current.info).toEqual(mimoModels[modelId as keyof typeof mimoModels])
 			}
 		},
 	)

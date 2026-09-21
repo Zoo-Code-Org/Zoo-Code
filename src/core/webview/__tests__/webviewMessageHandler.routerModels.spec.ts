@@ -132,14 +132,17 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels).toHaveProperty(providerIdentifiers.requesty)
 		expect(routerModels).toHaveProperty(providerIdentifiers.deepseek)
 		expect(routerModels).toHaveProperty(providerIdentifiers.moonshot)
+		expect(routerModels).toHaveProperty(providerIdentifiers.mimo)
 		expect(routerModels.deepseek).toEqual({})
 		expect(routerModels.moonshot).toEqual({})
+		expect(routerModels.mimo).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.deepseek }),
 		)
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.moonshot }),
 		)
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.mimo }))
 	})
 
 	it("fetches DeepSeek models when stored DeepSeek credentials exist", async () => {
@@ -582,6 +585,126 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(moonshotCalls[0][0]).toEqual({
 			provider: providerIdentifiers.moonshot,
 			apiKey: "stored-moonshot-key",
+			baseUrl: undefined,
+		})
+	})
+
+	it("fetches MiMo models when stored MiMo credentials exist", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options) => {
+			if (options?.provider === providerIdentifiers.mimo) {
+				return { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+			}
+
+			switch (options?.provider) {
+				case providerIdentifiers.openrouter:
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case providerIdentifiers.requesty:
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.vercelAiGateway:
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.litellm:
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	it("flushes MiMo cache when explicit credentials are provided via message values", async () => {
+		getModelsMock.mockResolvedValue({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: {
+				mimoApiKey: "new-mimo-key",
+				mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+			},
+		})
+
+		const mimoOptions = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "new-mimo-key",
+			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+		}
+		expect(flushModelsMock).toHaveBeenCalledWith(mimoOptions, true)
+		expect(getModelsMock).toHaveBeenCalledWith(mimoOptions)
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	it("does not flush MiMo cache when using stored credentials", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options) => {
+			if (options?.provider === providerIdentifiers.mimo) {
+				return { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+			}
+
+			switch (options?.provider) {
+				case providerIdentifiers.openrouter:
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case providerIdentifiers.requesty:
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.vercelAiGateway:
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.litellm:
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls.length).toBe(1)
+		expect(mimoCalls[0][0]).toEqual({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
 			baseUrl: undefined,
 		})
 	})

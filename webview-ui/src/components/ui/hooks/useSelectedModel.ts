@@ -317,9 +317,13 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.mimo: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = mimoModels[id as keyof typeof mimoModels] ?? mimoModels["mimo-v2.5-pro"]
-			return { id, info }
+			const availableModels = routerModels[providerIdentifiers.mimo]
+				? { ...mimoModels, ...routerModels[providerIdentifiers.mimo] }
+				: mimoModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels[providerIdentifiers.mimo]?.[id]
+			const staticInfo = mimoModels[id as keyof typeof mimoModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
