@@ -356,6 +356,20 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			error: "connection refused",
 		})
 	})
+
+	it("stringifies non-Error rejection values in the posted error", async () => {
+		mockFlushModels.mockRejectedValue("network unreachable")
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "lmStudioModels",
+			lmStudioModels: {},
+			error: "network unreachable",
+		})
+	})
 })
 
 describe("webviewMessageHandler - image mentions", () => {
