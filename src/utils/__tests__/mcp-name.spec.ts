@@ -257,6 +257,13 @@ describe("mcp-name utilities", () => {
 			expect(parseMcpToolName("mcp--")).toBeNull()
 			expect(parseMcpToolName("mcp--server")).toBeNull()
 		})
+
+		it("should return null for names with mixed separators", () => {
+			// normalizeMcpToolName picks a single separator for the whole split,
+			// so mixed-separator names are left unnormalized and cannot be parsed
+			expect(parseMcpToolName("mcp__server--tool")).toBeNull()
+			expect(parseMcpToolName("mcp--server__tool")).toBeNull()
+		})
 	})
 
 	describe("normalizeMcpToolName", () => {
@@ -288,6 +295,13 @@ describe("mcp-name utilities", () => {
 
 		it("should preserve double underscores in server names", () => {
 			expect(normalizeMcpToolName("mcp--my__server--do_thing")).toBe("mcp--my__server--do_thing")
+		})
+
+		it("should return names with mixed separators unchanged (unsupported)", () => {
+			// A single separator style is chosen for the entire split, so names
+			// mixing "--" and "__" separators cannot be normalized
+			expect(normalizeMcpToolName("mcp__server--tool")).toBe("mcp__server--tool")
+			expect(normalizeMcpToolName("mcp--server__tool")).toBe("mcp--server__tool")
 		})
 	})
 
