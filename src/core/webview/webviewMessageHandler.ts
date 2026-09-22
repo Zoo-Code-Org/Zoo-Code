@@ -1149,6 +1149,15 @@ export const webviewMessageHandler = async (
 				}
 			}
 
+			// Unbound's catalog is only needed while the user is configuring Unbound, so unlike the
+			// public no-auth routers below it is gated behind the active provider or an explicit
+			// per-provider request instead of being fetched on every aggregate refresh.
+			const isUnboundActive = apiConfiguration.apiProvider === providerIdentifiers.unbound
+			const isUnboundRequested = providerFilter === providerIdentifiers.unbound
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const unboundApiKey = message?.values?.unboundApiKey ?? apiConfiguration.unboundApiKey
+
 			// Base candidates (only those handled by this aggregate fetcher)
 			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
 				{
@@ -1163,13 +1172,14 @@ export const webviewMessageHandler = async (
 						baseUrl: apiConfiguration.requestyBaseUrl,
 					},
 				},
-				{
-					key: providerIdentifiers.unbound,
-					options: {
-						provider: providerIdentifiers.unbound,
-						apiKey: apiConfiguration.unboundApiKey,
-					},
-				},
+				...(isUnboundActive || isUnboundRequested
+					? [
+							{
+								key: providerIdentifiers.unbound,
+								options: { provider: providerIdentifiers.unbound, apiKey: unboundApiKey },
+							},
+						]
+					: []),
 				{
 					key: providerIdentifiers.vercelAiGateway,
 					options: { provider: providerIdentifiers.vercelAiGateway },
