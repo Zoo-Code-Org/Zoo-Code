@@ -5738,6 +5738,7 @@ describe("Cline", () => {
 
 			// Frozen streaming snapshot, then another message lands mid-stream.
 			await task.say("reasoning", "Let me list the .ps1 files", undefined, true)
+			const originalSnapshotTs = task.clineMessages[0].ts
 			task.clineMessages.push({
 				ts: Date.now(),
 				type: "say",
@@ -5752,6 +5753,11 @@ describe("Cline", () => {
 			expect(reasoningMessages).toHaveLength(1)
 			expect(reasoningMessages[0].partial).toBe(false)
 			expect(reasoningMessages[0].text).toBe("Let me list the .ps1 files.")
+			// The merge preserves the snapshot's original timestamp instead of
+			// minting a fresh one, and the interactive call stamps lastMessageTs
+			// with that preserved timestamp.
+			expect(reasoningMessages[0].ts).toBe(originalSnapshotTs)
+			expect(task.lastMessageTs).toBe(originalSnapshotTs)
 			// No duplicate entry was appended next to the interleaved message.
 			expect(task.clineMessages).toHaveLength(2)
 			// The completed message is persisted like a normal completion.
@@ -5768,6 +5774,7 @@ describe("Cline", () => {
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
 
 			await task.say("reasoning", "Thinking ab", undefined, true)
+			const originalSnapshotTs = task.clineMessages[0].ts
 			// A tool approval ask interrupts the reasoning stream.
 			task.clineMessages.push({
 				ts: Date.now(),
@@ -5784,6 +5791,10 @@ describe("Cline", () => {
 			expect(reasoningMessages).toHaveLength(1)
 			expect(reasoningMessages[0].partial).toBe(true)
 			expect(reasoningMessages[0].text).toBe("Thinking about it")
+			// Streaming into the stranded snapshot keeps its original timestamp
+			// and leaves the interactive lastMessageTs pointing at it.
+			expect(reasoningMessages[0].ts).toBe(originalSnapshotTs)
+			expect(task.lastMessageTs).toBe(originalSnapshotTs)
 			expect(task.clineMessages).toHaveLength(2)
 		})
 
@@ -5861,6 +5872,47 @@ describe("Cline", () => {
 			)
 			expect(completionMessages).toHaveLength(1)
 			expect(completionMessages[0].text).toBe("Shared prefix text, continued")
+		})
+
+		it("treats undefined completing text as a no-match append instead of throwing (rate-limit finalize)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// Mirrors the production rate-limit countdown: partial delay
+			// snapshots stream with partial=true…
+			await task.say("api_req_rate_limit_wait", JSON.stringify({ seconds: 2 }), undefined, true)
+			const strandedSnapshotTs = task.clineMessages[0].ts
+			// …another message lands mid-stream…
+			task.clineMessages.push({
+				ts: Date.now(),
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			// …then the stream finalizes with text === undefined, exactly like
+			// say("api_req_rate_limit_wait", undefined, undefined, false). The
+			// typeof text !== "string" guard must turn the stale-snapshot lookup
+			// into a no-match instead of throwing on startsWith, leaving the
+			// stranded snapshot untouched and appending the completion.
+			await expect(task.say("api_req_rate_limit_wait", undefined, undefined, false)).resolves.toBeUndefined()
+
+			const rateLimitMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "api_req_rate_limit_wait",
+			)
+			expect(rateLimitMessages).toHaveLength(2)
+			expect(rateLimitMessages[0].partial).toBe(true)
+			expect(rateLimitMessages[0].text).toBe(JSON.stringify({ seconds: 2 }))
+			expect(rateLimitMessages[0].ts).toBe(strandedSnapshotTs)
+			expect(rateLimitMessages[1].partial).toBeUndefined()
+			expect(rateLimitMessages[1].text).toBeUndefined()
+			expect(task.clineMessages).toHaveLength(3)
+			expect(saveSpy).toHaveBeenCalled()
 		})
 	})
 })
