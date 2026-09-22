@@ -290,5 +290,21 @@ describe("VertexHandler", () => {
 			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
 			expect(modelInfo.info.tiers).toBeUndefined()
 		})
+
+		it("should match a mixed-case unknown gemini-* id case-insensitively and keep the configured casing", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "Gemini-9.9-flash-exp",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("Gemini-9.9-flash-exp")
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
+		})
 	})
 })
