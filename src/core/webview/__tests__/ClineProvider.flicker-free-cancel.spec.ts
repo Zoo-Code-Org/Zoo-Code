@@ -794,11 +794,21 @@ describe("ClineProvider flicker-free cancel", () => {
 		}) as unknown as ClineProvider["getTaskWithId"]
 
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
-		vi.spyOn(provider, "createTaskWithHistoryItem").mockResolvedValue(undefined as unknown as CreatedHistoryTask)
+		const createTaskWithHistoryItemSpy = vi
+			.spyOn(provider, "createTaskWithHistoryItem")
+			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
 
 		await provider.cancelTask()
 
 		expect(childReads).toBe(2)
+		expect(createTaskWithHistoryItemSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "child-race",
+				status: "interrupted",
+				parentTaskId: "parent-race",
+				rootTaskId: "root-race",
+			}),
+		)
 		expect(updateTaskHistorySpy).not.toHaveBeenCalled()
 	})
 
