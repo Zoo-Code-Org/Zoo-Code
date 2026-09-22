@@ -144,6 +144,34 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
+	it("preserves a matching create_subtask action on a completed record", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-completed-settlement-"))
+		const store = new TaskHistoryStore(storagePath)
+		const pendingAction = createAction("action-a", "action A")
+		const completed: HistoryItem = { ...item("shared-task"), status: "completed", pendingAction }
+		const filePath = path.join(storagePath, "tasks", completed.id, "history_item.json")
+
+		try {
+			await store.initialize()
+			await store.upsert(completed)
+
+			const beforeDisk = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+			expect({ cache: store.get(completed.id), disk: beforeDisk }).toEqual({ cache: completed, disk: completed })
+
+			const returned = await store.clearPendingActionIfMatching(completed.id, pendingAction.actionId)
+			const afterDisk = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+
+			expect({ returned, disk: afterDisk, cache: store.get(completed.id) }).toEqual({
+				returned: completed,
+				disk: completed,
+				cache: completed,
+			})
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("clears a matching action from disk even when the calling store cache is stale", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-disk-compare-clear-"))
 		const storeA = new TaskHistoryStore(storagePath)

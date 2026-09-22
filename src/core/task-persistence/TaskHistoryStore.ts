@@ -9,7 +9,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -1064,10 +1064,12 @@ export class TaskHistoryStore {
 	 * Disk-authoritative compare-and-clear for a rejected `create_subtask`
 	 * pending action (#1714). The comparison runs inside the per-file
 	 * advisory lock's merge callback, so the decision reads the persisted
-	 * record rather than this store's possibly stale cache. A missing,
-	 * different-kind, or replacement pending action is preserved unchanged.
-	 * The authoritative record is written back, the store cache is refreshed
-	 * with it, and it is returned to the caller.
+	 * record rather than this store's possibly stale cache. Settlement goes
+	 * through the shared `settleRejectedCreateSubtaskAction` reducer, so a
+	 * completed record is never mutated and a missing, different-kind, or
+	 * replacement pending action is preserved unchanged. The authoritative
+	 * record is written back, the store cache is refreshed with it, and it
+	 * is returned to the caller.
 	 *
 	 * Deletion by another host is authoritative (#1726): when no persisted
 	 * record exists, the merge callback removes the stale cache entry and
@@ -1095,11 +1097,7 @@ export class TaskHistoryStore {
 						)
 					}
 					const disk = existing as HistoryItem
-					const pendingAction = disk.pendingAction
-					authoritative =
-						pendingAction?.kind === "create_subtask" && pendingAction.actionId === expectedActionId
-							? { ...disk, pendingAction: undefined }
-							: disk
+					authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
 					return authoritative
 				},
 			})
