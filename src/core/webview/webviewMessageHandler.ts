@@ -1121,10 +1121,32 @@ export const webviewMessageHandler = async (
 			// Optional refresh flag to flush cache before fetching (useful for providers requiring credentials)
 			const shouldRefresh = message?.values?.refresh === true
 
+			const routerModels: Record<RouterName, ModelRecord> = providerFilter
+				? ({} as Record<RouterName, ModelRecord>)
+				: {
+						[providerIdentifiers.openrouter]: {},
+						[providerIdentifiers.vercelAiGateway]: {},
+						[providerIdentifiers.zooGateway]: {},
+						[providerIdentifiers.litellm]: {},
+						[providerIdentifiers.requesty]: {},
+						[providerIdentifiers.unbound]: {},
+						[providerIdentifiers.ollama]: {},
+						[providerIdentifiers.lmstudio]: {},
+						[providerIdentifiers.poe]: {},
+						[providerIdentifiers.deepseek]: {},
+						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.gemini]: {},
+						[providerIdentifiers.vertex]: {},
+						[providerIdentifiers.opencodeGo]: {},
+						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.nanogpt]: {},
+						[providerIdentifiers.kimiCode]: {},
+					}
+
 			// Optional request identity: when present, the fetch is cancellable from the webview
 			// via cancelRouterModelsRequest. Registered BEFORE the first await so a cancellation
-			// arriving while setup is still in flight (e.g. during getState) still finds the
-			// controller instead of racing a not-yet-created registration.
+			// arriving while setup is in flight (e.g. during getState) still finds the controller
+			// instead of racing a not-yet-created registration.
 			const requestId = message?.values?.requestId
 			let requestController: AbortController | undefined
 			if (typeof requestId === "string" && requestId.length > 0) {
@@ -1132,405 +1154,364 @@ export const webviewMessageHandler = async (
 				routerModelsRequestControllers.set(requestId, requestController)
 			}
 
-			try {
-				const routerModels: Record<RouterName, ModelRecord> = providerFilter
-					? ({} as Record<RouterName, ModelRecord>)
-					: {
-							[providerIdentifiers.openrouter]: {},
-							[providerIdentifiers.vercelAiGateway]: {},
-							[providerIdentifiers.zooGateway]: {},
-							[providerIdentifiers.litellm]: {},
-							[providerIdentifiers.requesty]: {},
-							[providerIdentifiers.unbound]: {},
-							[providerIdentifiers.ollama]: {},
-							[providerIdentifiers.lmstudio]: {},
-							[providerIdentifiers.poe]: {},
-							[providerIdentifiers.deepseek]: {},
-							[providerIdentifiers.moonshot]: {},
-							[providerIdentifiers.gemini]: {},
-							[providerIdentifiers.vertex]: {},
-							[providerIdentifiers.opencodeGo]: {},
-							[providerIdentifiers.kenari]: {},
-							[providerIdentifiers.nanogpt]: {},
-							[providerIdentifiers.kimiCode]: {},
-						}
-
-				// Consistent answer for an aborted request: the same aggregate shape the normal
-				// flow posts, with every provider entry left {} (no fetch was attempted, so no
-				// per-provider error events are emitted). A filtered response still carries the
-				// requested provider's entry, mirroring the normal flow's invariant. The signal
-				// is checked at each setup boundary so a cancellation landing during any await
-				// skips the remaining work.
-				const postAbortedAggregate = () => {
-					if (providerFilter && !(providerFilter in routerModels)) {
-						routerModels[providerFilter] = {}
-					}
-					return provider.postMessageToWebview({
-						type: RouterModelsMessageType.routerModels,
-						routerModels,
-						values: providerFilter ? { provider: requestedProvider } : undefined,
-					})
+			// Consistent answer for an aborted request: the same aggregate shape the normal flow
+			// posts, with every entry {} (no fetch was attempted, so no per-provider error events
+			// are emitted); a filtered response still carries the requested provider's entry.
+			const postAbortedAggregate = () => {
+				if (providerFilter && !(providerFilter in routerModels)) {
+					routerModels[providerFilter] = {}
 				}
+				return provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: providerFilter ? { provider: requestedProvider } : undefined,
+				})
+			}
 
-				// Cancelled before or during getState: skip setup entirely.
-				if (requestController?.signal.aborted) {
-					await postAbortedAggregate()
-					break
+			// Cancelled before or during getState: skip setup entirely, still answering with
+			// the empty aggregate so the webview-side request count stays consistent.
+			if (requestController?.signal.aborted) {
+				await postAbortedAggregate()
+				routerModelsRequestControllers.delete(requestId)
+				break
+			}
+
+			// A rejecting getState() would otherwise strand the cancellation registration.
+			const { apiConfiguration } = await provider.getState().catch((error: unknown) => {
+				routerModelsRequestControllers.delete(requestId)
+				throw error
+			})
+
+			// Cancelled during getState: skip the flush/refresh work and candidate building.
+			if (requestController?.signal.aborted) {
+				await postAbortedAggregate()
+				routerModelsRequestControllers.delete(requestId)
+				break
+			}
+
+			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
+				try {
+					return await getModels(options)
+				} catch (error) {
+					console.error(
+						`Failed to fetch models in webviewMessageHandler requestRouterModels for ${options.provider}:`,
+						error,
+					)
+
+					throw error // Re-throw to be caught by Promise.allSettled.
 				}
+			}
 
-				const { apiConfiguration } = await provider.getState()
-
-				// Cancelled during getState: skip the flush/refresh work and candidate building.
-				if (requestController?.signal.aborted) {
-					await postAbortedAggregate()
-					break
-				}
-
-				const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
-					try {
-						return await getModels(options)
-					} catch (error) {
-						console.error(
-							`Failed to fetch models in webviewMessageHandler requestRouterModels for ${options.provider}:`,
-							error,
-						)
-
-						throw error // Re-throw to be caught by Promise.allSettled.
-					}
-				}
-
-				// Base candidates (only those handled by this aggregate fetcher)
-				const candidates: { key: RouterName; options: GetModelsOptions }[] = [
-					{
-						key: providerIdentifiers.openrouter,
-						options: { provider: providerIdentifiers.openrouter },
+			// Base candidates (only those handled by this aggregate fetcher)
+			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
+				{
+					key: providerIdentifiers.openrouter,
+					options: { provider: providerIdentifiers.openrouter },
+				},
+				{
+					key: providerIdentifiers.requesty,
+					options: {
+						provider: providerIdentifiers.requesty,
+						apiKey: apiConfiguration.requestyApiKey,
+						baseUrl: apiConfiguration.requestyBaseUrl,
 					},
-					{
-						key: providerIdentifiers.requesty,
-						options: {
-							provider: providerIdentifiers.requesty,
-							apiKey: apiConfiguration.requestyApiKey,
-							baseUrl: apiConfiguration.requestyBaseUrl,
-						},
+				},
+				{
+					key: providerIdentifiers.unbound,
+					options: {
+						provider: providerIdentifiers.unbound,
+						apiKey: apiConfiguration.unboundApiKey,
 					},
-					{
-						key: providerIdentifiers.unbound,
-						options: {
-							provider: providerIdentifiers.unbound,
-							apiKey: apiConfiguration.unboundApiKey,
-						},
+				},
+				{
+					key: providerIdentifiers.vercelAiGateway,
+					options: { provider: providerIdentifiers.vercelAiGateway },
+				},
+				{
+					key: providerIdentifiers.zooGateway,
+					options: {
+						provider: providerIdentifiers.zooGateway,
+						apiKey: apiConfiguration.zooSessionToken,
+						baseUrl: apiConfiguration.zooGatewayBaseUrl,
 					},
-					{
-						key: providerIdentifiers.vercelAiGateway,
-						options: { provider: providerIdentifiers.vercelAiGateway },
+				},
+			]
+
+			// LiteLLM is conditional on baseUrl+apiKey.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const litellmApiKey = message?.values?.litellmApiKey ?? apiConfiguration.litellmApiKey
+			const litellmBaseUrl = message?.values?.litellmBaseUrl ?? apiConfiguration.litellmBaseUrl
+
+			if (litellmApiKey && litellmBaseUrl) {
+				// If explicit credentials are provided in message.values (from Refresh Models button),
+				// flush the cache first to ensure we fetch fresh data with the new credentials
+				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.litellm,
+					options: { provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+				})
+			}
+
+			// Poe is conditional on apiKey
+			const poeApiKey = apiConfiguration.poeApiKey || message?.values?.poeApiKey
+			const poeBaseUrl = apiConfiguration.poeBaseUrl || message?.values?.poeBaseUrl
+
+			if (poeApiKey) {
+				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.poe,
+					options: { provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+				})
+			}
+
+			// DeepSeek is conditional on apiKey
+			const deepSeekApiKey = message?.values?.deepSeekApiKey ?? apiConfiguration.deepSeekApiKey
+			const deepSeekBaseUrl = message?.values?.deepSeekBaseUrl ?? apiConfiguration.deepSeekBaseUrl
+
+			if (deepSeekApiKey) {
+				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.deepseek,
+					options: {
+						provider: providerIdentifiers.deepseek,
+						apiKey: deepSeekApiKey,
+						baseUrl: deepSeekBaseUrl,
 					},
-					{
-						key: providerIdentifiers.zooGateway,
-						options: {
-							provider: providerIdentifiers.zooGateway,
-							apiKey: apiConfiguration.zooSessionToken,
-							baseUrl: apiConfiguration.zooGatewayBaseUrl,
-						},
+				})
+			}
+
+			// Moonshot is conditional on apiKey
+			const moonshotApiKey = message?.values?.moonshotApiKey ?? apiConfiguration.moonshotApiKey
+			const moonshotBaseUrl = message?.values?.moonshotBaseUrl ?? apiConfiguration.moonshotBaseUrl
+
+			if (moonshotApiKey) {
+				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.moonshot,
+					options: {
+						provider: providerIdentifiers.moonshot,
+						apiKey: moonshotApiKey,
+						baseUrl: moonshotBaseUrl,
 					},
-				]
+				})
+			}
 
-				// LiteLLM is conditional on baseUrl+apiKey.
-				// Prefer explicit values from message (current unsaved field state) over saved config,
-				// matching the pattern used for DeepSeek and other credential-carrying providers.
-				const litellmApiKey = message?.values?.litellmApiKey ?? apiConfiguration.litellmApiKey
-				const litellmBaseUrl = message?.values?.litellmBaseUrl ?? apiConfiguration.litellmBaseUrl
+			// Gemini is conditional on apiKey.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const geminiApiKey = message?.values?.geminiApiKey ?? apiConfiguration.geminiApiKey
+			const googleGeminiBaseUrl = message?.values?.googleGeminiBaseUrl ?? apiConfiguration.googleGeminiBaseUrl
 
-				if (litellmApiKey && litellmBaseUrl) {
-					// If explicit credentials are provided in message.values (from Refresh Models button),
-					// flush the cache first to ensure we fetch fresh data with the new credentials
-					if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
-						await flushModels(
-							{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
-							true,
-						)
-					}
-
-					candidates.push({
-						key: providerIdentifiers.litellm,
-						options: {
-							provider: providerIdentifiers.litellm,
-							apiKey: litellmApiKey,
-							baseUrl: litellmBaseUrl,
-						},
-					})
+			if (geminiApiKey) {
+				if (message?.values?.geminiApiKey || message?.values?.googleGeminiBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.gemini, apiKey: geminiApiKey, baseUrl: googleGeminiBaseUrl },
+						true,
+					)
 				}
 
-				// Poe is conditional on apiKey
-				const poeApiKey = apiConfiguration.poeApiKey || message?.values?.poeApiKey
-				const poeBaseUrl = apiConfiguration.poeBaseUrl || message?.values?.poeBaseUrl
+				candidates.push({
+					key: providerIdentifiers.gemini,
+					options: {
+						provider: providerIdentifiers.gemini,
+						apiKey: geminiApiKey,
+						baseUrl: googleGeminiBaseUrl,
+					},
+				})
+			}
 
-				if (poeApiKey) {
-					if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
-						await flushModels(
-							{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
-							true,
-						)
-					}
+			// Vertex is conditional on at least one credential signal (projectId, keyFile, or
+			// jsonCredentials — region alone is not a signal).
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const vertexProjectId = message?.values?.vertexProjectId ?? apiConfiguration.vertexProjectId
+			const vertexRegion = message?.values?.vertexRegion ?? apiConfiguration.vertexRegion
+			const vertexKeyFile = message?.values?.vertexKeyFile ?? apiConfiguration.vertexKeyFile
+			const vertexJsonCredentials =
+				message?.values?.vertexJsonCredentials ?? apiConfiguration.vertexJsonCredentials
 
-					candidates.push({
-						key: providerIdentifiers.poe,
-						options: { provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
-					})
-				}
-
-				// DeepSeek is conditional on apiKey
-				const deepSeekApiKey = message?.values?.deepSeekApiKey ?? apiConfiguration.deepSeekApiKey
-				const deepSeekBaseUrl = message?.values?.deepSeekBaseUrl ?? apiConfiguration.deepSeekBaseUrl
-
-				if (deepSeekApiKey) {
-					if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
-						await flushModels(
-							{
-								provider: providerIdentifiers.deepseek,
-								apiKey: deepSeekApiKey,
-								baseUrl: deepSeekBaseUrl,
-							},
-							true,
-						)
-					}
-
-					candidates.push({
-						key: providerIdentifiers.deepseek,
-						options: {
-							provider: providerIdentifiers.deepseek,
-							apiKey: deepSeekApiKey,
-							baseUrl: deepSeekBaseUrl,
-						},
-					})
-				}
-
-				// Moonshot is conditional on apiKey
-				const moonshotApiKey = message?.values?.moonshotApiKey ?? apiConfiguration.moonshotApiKey
-				const moonshotBaseUrl = message?.values?.moonshotBaseUrl ?? apiConfiguration.moonshotBaseUrl
-
-				if (moonshotApiKey) {
-					if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
-						await flushModels(
-							{
-								provider: providerIdentifiers.moonshot,
-								apiKey: moonshotApiKey,
-								baseUrl: moonshotBaseUrl,
-							},
-							true,
-						)
-					}
-
-					candidates.push({
-						key: providerIdentifiers.moonshot,
-						options: {
-							provider: providerIdentifiers.moonshot,
-							apiKey: moonshotApiKey,
-							baseUrl: moonshotBaseUrl,
-						},
-					})
-				}
-
-				// Gemini is conditional on apiKey.
-				// Prefer explicit values from message (current unsaved field state) over saved config,
-				// matching the pattern used for DeepSeek and other credential-carrying providers.
-				const geminiApiKey = message?.values?.geminiApiKey ?? apiConfiguration.geminiApiKey
-				const googleGeminiBaseUrl = message?.values?.googleGeminiBaseUrl ?? apiConfiguration.googleGeminiBaseUrl
-
-				if (geminiApiKey) {
-					if (message?.values?.geminiApiKey || message?.values?.googleGeminiBaseUrl) {
-						await flushModels(
-							{
-								provider: providerIdentifiers.gemini,
-								apiKey: geminiApiKey,
-								baseUrl: googleGeminiBaseUrl,
-							},
-							true,
-						)
-					}
-
-					candidates.push({
-						key: providerIdentifiers.gemini,
-						options: {
-							provider: providerIdentifiers.gemini,
-							apiKey: geminiApiKey,
-							baseUrl: googleGeminiBaseUrl,
-						},
-					})
-				}
-
-				// Vertex is conditional on at least one credential signal (projectId, keyFile, or
-				// jsonCredentials — region alone is not a signal).
-				// Prefer explicit values from message (current unsaved field state) over saved config,
-				// matching the pattern used for DeepSeek and other credential-carrying providers.
-				const vertexProjectId = message?.values?.vertexProjectId ?? apiConfiguration.vertexProjectId
-				const vertexRegion = message?.values?.vertexRegion ?? apiConfiguration.vertexRegion
-				const vertexKeyFile = message?.values?.vertexKeyFile ?? apiConfiguration.vertexKeyFile
-				const vertexJsonCredentials =
-					message?.values?.vertexJsonCredentials ?? apiConfiguration.vertexJsonCredentials
-
-				if (vertexProjectId || vertexKeyFile || vertexJsonCredentials) {
-					if (
-						message?.values?.vertexProjectId ||
-						message?.values?.vertexRegion ||
-						message?.values?.vertexKeyFile ||
-						message?.values?.vertexJsonCredentials
-					) {
-						await flushModels(
-							{
-								provider: providerIdentifiers.vertex,
-								projectId: vertexProjectId,
-								region: vertexRegion,
-								keyFile: vertexKeyFile,
-								jsonCredentials: vertexJsonCredentials,
-							},
-							true,
-						)
-					}
-
-					candidates.push({
-						key: providerIdentifiers.vertex,
-						options: {
+			if (vertexProjectId || vertexKeyFile || vertexJsonCredentials) {
+				if (
+					message?.values?.vertexProjectId ||
+					message?.values?.vertexRegion ||
+					message?.values?.vertexKeyFile ||
+					message?.values?.vertexJsonCredentials
+				) {
+					await flushModels(
+						{
 							provider: providerIdentifiers.vertex,
 							projectId: vertexProjectId,
 							region: vertexRegion,
 							keyFile: vertexKeyFile,
 							jsonCredentials: vertexJsonCredentials,
 						},
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.vertex,
+					options: {
+						provider: providerIdentifiers.vertex,
+						projectId: vertexProjectId,
+						region: vertexRegion,
+						keyFile: vertexKeyFile,
+						jsonCredentials: vertexJsonCredentials,
+					},
+				})
+			}
+
+			// Opencode Go's /models endpoint is public — it returns the full model list with no
+			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
+			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
+			// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
+			// forwarded when present.
+			const opencodeGoApiKey = message?.values?.opencodeGoApiKey ?? apiConfiguration.opencodeGoApiKey
+
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.opencodeGoApiKey) {
+				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.opencodeGo,
+				options: { provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey },
+			})
+
+			// Kenari's /models endpoint is public — it returns the full model list with no
+			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
+			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
+			// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
+			// forwarded when present.
+			const kenariApiKey = message?.values?.kenariApiKey ?? apiConfiguration.kenariApiKey
+
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.kenariApiKey) {
+				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.kenari,
+				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
+			})
+
+			// NanoGPT's detailed catalog is public, while an optional key can expose a
+			// different allowlist. Prefer an explicitly supplied unsaved key and use the
+			// same key-scoped options for refresh and retrieval.
+			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
+			if (message?.values?.nanoGptApiKey !== undefined) {
+				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.nanogpt,
+				options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
+			})
+
+			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				const kimiCodeAuthMethod =
+					message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
+				const kimiCodeApiKey =
+					kimiCodeAuthMethod === "api-key"
+						? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
+						: await kimiCodeOAuthManager.getAccessToken()
+				if (kimiCodeApiKey) {
+					candidates.push({
+						key: providerIdentifiers.kimiCode,
+						options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
 					})
 				}
-
-				// Opencode Go's /models endpoint is public — it returns the full model list with no
-				// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
-				// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
-				// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
-				// forwarded when present.
-				const opencodeGoApiKey = message?.values?.opencodeGoApiKey ?? apiConfiguration.opencodeGoApiKey
-
-				// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
-				if (message?.values?.opencodeGoApiKey) {
-					await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
-				}
-
-				candidates.push({
-					key: providerIdentifiers.opencodeGo,
-					options: { provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey },
-				})
-
-				// Kenari's /models endpoint is public — it returns the full model list with no
-				// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
-				// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
-				// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
-				// forwarded when present.
-				const kenariApiKey = message?.values?.kenariApiKey ?? apiConfiguration.kenariApiKey
-
-				// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
-				if (message?.values?.kenariApiKey) {
-					await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
-				}
-
-				candidates.push({
-					key: providerIdentifiers.kenari,
-					options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
-				})
-
-				// NanoGPT's detailed catalog is public, while an optional key can expose a
-				// different allowlist. Prefer an explicitly supplied unsaved key and use the
-				// same key-scoped options for refresh and retrieval.
-				const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
-				if (message?.values?.nanoGptApiKey !== undefined) {
-					await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
-				}
-
-				candidates.push({
-					key: providerIdentifiers.nanogpt,
-					options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
-				})
-
-				if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
-					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-					const kimiCodeAuthMethod =
-						message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
-					const kimiCodeApiKey =
-						kimiCodeAuthMethod === "api-key"
-							? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
-							: await kimiCodeOAuthManager.getAccessToken()
-					if (kimiCodeApiKey) {
-						candidates.push({
-							key: providerIdentifiers.kimiCode,
-							options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
-						})
-					}
-				}
-
-				// Apply single provider filter if specified
-				const modelFetchPromises = providerFilter
-					? candidates.filter(({ key }) => key === providerFilter)
-					: candidates
-
-				// If refresh flag is set and we have a specific provider, flush its cache first
-				if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
-					const targetCandidate = modelFetchPromises[0]
-					await flushModels(targetCandidate.options, true)
-				}
-
-				// Cancelled during the flush/refresh awaits (credential flushes, OAuth token
-				// lookup, explicit refresh): skip starting the candidate fetches.
-				if (requestController?.signal.aborted) {
-					await postAbortedAggregate()
-					break
-				}
-
-				const results = await Promise.allSettled(
-					modelFetchPromises.map(async ({ key, options }) => {
-						// Thread the per-request cancellation signal (when the webview sent a
-						// requestId) into the modelCache fetch options so cancelRouterModelsRequest
-						// stops this request's catalog fetches. Requests without a requestId keep
-						// exactly their old options shape.
-						const fetchOptions = requestController
-							? { ...options, signal: requestController.signal }
-							: options
-						const models = await safeGetModels(fetchOptions)
-						return { key, models } // The key is `ProviderName` here.
-					}),
-				)
-
-				results.forEach((result, index) => {
-					const routerName = modelFetchPromises[index].key
-
-					if (result.status === "fulfilled") {
-						routerModels[routerName] = result.value.models
-
-						// Ollama and LM Studio settings pages still need these events. They are not fetched here.
-					} else {
-						// Handle rejection: Post a specific error message for this provider.
-						const errorMessage =
-							result.reason instanceof Error ? result.reason.message : String(result.reason)
-						console.error(`Error fetching models for ${routerName}:`, result.reason)
-
-						routerModels[routerName] = {} // Ensure it's an empty object in the main routerModels message.
-
-						void provider.postMessageToWebview({
-							type: RouterModelsMessageType.singleRouterModelFetchResponse,
-							success: false,
-							error: errorMessage,
-							values: { provider: routerName },
-						})
-					}
-				})
-
-				await provider.postMessageToWebview({
-					type: RouterModelsMessageType.routerModels,
-					routerModels,
-					values: providerFilter ? { provider: requestedProvider } : undefined,
-				})
-			} finally {
-				// The request has settled (aggregate posted, per-candidate failures handled, or an
-				// unexpected throw): release the cancellation registration. A cancellation that
-				// arrives afterwards must find no controller and no-op.
-				if (requestController) {
-					routerModelsRequestControllers.delete(requestId)
-				}
 			}
+
+			// Apply single provider filter if specified
+			const modelFetchPromises = providerFilter
+				? candidates.filter(({ key }) => key === providerFilter)
+				: candidates
+
+			// If refresh flag is set and we have a specific provider, flush its cache first
+			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
+				const targetCandidate = modelFetchPromises[0]
+				await flushModels(targetCandidate.options, true)
+			}
+
+			// Cancelled during the flush/refresh awaits (credential flushes, OAuth token lookup,
+			// explicit refresh): skip starting the candidate fetches.
+			if (requestController?.signal.aborted) {
+				await postAbortedAggregate()
+				routerModelsRequestControllers.delete(requestId)
+				break
+			}
+
+			const results = await Promise.allSettled(
+				modelFetchPromises.map(async ({ key, options }) => {
+					// Thread the per-request cancellation signal (when the webview sent a requestId)
+					// into the modelCache fetch options so cancelRouterModelsRequest stops this
+					// request's catalog fetches. Requests without a requestId keep their old options.
+					const fetchOptions = requestController ? { ...options, signal: requestController.signal } : options
+					const models = await safeGetModels(fetchOptions)
+					return { key, models } // The key is `ProviderName` here.
+				}),
+			)
+
+			results.forEach((result, index) => {
+				const routerName = modelFetchPromises[index].key
+
+				if (result.status === "fulfilled") {
+					routerModels[routerName] = result.value.models
+
+					// Ollama and LM Studio settings pages still need these events. They are not fetched here.
+				} else {
+					// Handle rejection: Post a specific error message for this provider.
+					const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason)
+					console.error(`Error fetching models for ${routerName}:`, result.reason)
+
+					routerModels[routerName] = {} // Ensure it's an empty object in the main routerModels message.
+
+					void provider.postMessageToWebview({
+						type: RouterModelsMessageType.singleRouterModelFetchResponse,
+						success: false,
+						error: errorMessage,
+						values: { provider: routerName },
+					})
+				}
+			})
+
+			await provider.postMessageToWebview({
+				type: RouterModelsMessageType.routerModels,
+				routerModels,
+				values: providerFilter ? { provider: requestedProvider } : undefined,
+			})
+
+			// The request has settled (aggregate posted, per-candidate failures handled):
+			// release the cancellation registration. A cancellation arriving afterwards
+			// finds no entry and no-ops, so an aborted-then-refetched id starts fresh.
+			routerModelsRequestControllers.delete(requestId)
 			break
 		}
 		case RouterModelsMessageType.cancelRouterModelsRequest: {
