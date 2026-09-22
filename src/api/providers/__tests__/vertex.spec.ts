@@ -21,6 +21,8 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import { vertexDefaultModelId, vertexModels } from "@roo-code/types"
+
 import { ApiStreamChunk } from "../../transform/stream"
 
 import { t } from "i18next"
@@ -180,6 +182,54 @@ describe("VertexHandler", () => {
 			const includedCount = modelInfo.info.includedTools!.filter((t: string) => t === "edit").length
 			expect(excludedCount).toBe(1)
 			expect(includedCount).toBe(1)
+		})
+
+		it("honors a known model id with a :thinking suffix and strips the suffix from the returned id", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-3.7-flash:thinking",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-3.7-flash")
+			expect(modelInfo.info.maxTokens).toBe(vertexModels["gemini-3.7-flash"].maxTokens)
+			expect(modelInfo.info.contextWindow).toBe(vertexModels["gemini-3.7-flash"].contextWindow)
+			expect(modelInfo.reasoning).toBeDefined()
+		})
+
+		it("preserves an unlisted gemini-* id with Gemini-family fallback metadata and no pricing fields", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-9.9-flash-exp",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-9.9-flash-exp")
+			expect(modelInfo.info.contextWindow).toBe(1_048_576)
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
+		})
+
+		it("resolves to the vertex default model with its static info when apiModelId is absent", () => {
+			const testHandler = new VertexHandler({
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe(vertexDefaultModelId)
+			expect(modelInfo.info).toEqual(
+				expect.objectContaining({
+					...vertexModels[vertexDefaultModelId],
+					excludedTools: expect.arrayContaining(["apply_diff"]),
+					includedTools: expect.arrayContaining(["edit"]),
+				}),
+			)
 		})
 	})
 })
