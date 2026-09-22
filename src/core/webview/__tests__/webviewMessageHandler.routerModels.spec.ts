@@ -773,7 +773,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
-	it("fetches Vertex models when an explicit keyFile is provided via message values", async () => {
+	it("does not fetch Vertex models when only a keyFile is provided (no project ID)", async () => {
 		getModelsMock.mockResolvedValue({})
 
 		await webviewMessageHandler(mockProvider, {
@@ -781,16 +781,25 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			values: { vertexKeyFile: "/secrets/vertex-key.json" },
 		})
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.vertex,
-			projectId: undefined,
-			region: undefined,
-			keyFile: "/secrets/vertex-key.json",
-			jsonCredentials: undefined,
-		})
+		// Listing requires a project: a key file alone would fail at fetch time and leave the
+		// picker silently empty, so no vertex fetch or refresh is dispatched.
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.vertex }),
+		)
+		expect(flushModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.vertex }),
+			expect.anything(),
+		)
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.vertex).toEqual({})
 	})
 
-	it("fetches Vertex models when explicit JSON credentials are provided via message values", async () => {
+	it("does not fetch Vertex models when only JSON credentials are provided (no project ID)", async () => {
 		getModelsMock.mockResolvedValue({})
 
 		await webviewMessageHandler(mockProvider, {
@@ -798,13 +807,13 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			values: { vertexJsonCredentials: '{"type":"service_account"}' },
 		})
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.vertex,
-			projectId: undefined,
-			region: undefined,
-			keyFile: undefined,
-			jsonCredentials: '{"type":"service_account"}',
-		})
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.vertex }),
+		)
+		expect(flushModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.vertex }),
+			expect.anything(),
+		)
 	})
 
 	it("prefers unsaved Vertex values over stored config", async () => {
@@ -1074,5 +1083,41 @@ describe("webviewMessageHandler - requestRouterModels cancellation", () => {
 			error: "openrouter down",
 			values: { provider: providerIdentifiers.openrouter },
 		})
+	})
+
+	it("threads the abort signal into the credential flush so an abort during refresh detaches it", async () => {
+		let flushOptions: { signal?: AbortSignal } | undefined
+		let resolveFlush: (() => void) | undefined
+		flushModelsMock.mockImplementation((options: { signal?: AbortSignal }) => {
+			flushOptions = options
+			return new Promise<void>((resolve) => {
+				resolveFlush = resolve
+			})
+		})
+
+		// Explicit gemini credentials take the flush-then-fetch path; the flush stays pending
+		// so the cancel lands while the refresh await is in flight.
+		const requestPromise = webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { geminiApiKey: "new-gemini-key", requestId: "req-flush" },
+		})
+
+		await vi.waitFor(() => expect(flushModelsMock).toHaveBeenCalled())
+		const flushSignal = flushOptions?.signal
+		expect(flushSignal).toBeInstanceOf(AbortSignal)
+		expect(flushSignal?.aborted).toBe(false)
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-flush" },
+		})
+		expect(flushSignal?.aborted).toBe(true)
+
+		resolveFlush!()
+		await requestPromise
+
+		// The refresh completed, but the abort that landed during it won: no candidate fetch
+		// was ever started for this request.
+		expect(getModelsMock).not.toHaveBeenCalled()
 	})
 })

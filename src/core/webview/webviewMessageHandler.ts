@@ -1168,6 +1168,12 @@ export const webviewMessageHandler = async (
 				return Object.keys(values).length > 0 ? values : undefined
 			}
 
+			// Refresh (flushModels) calls accept the same GetModelsOptions signal as getModels(),
+			// so spreading this overlay onto every flush option threads cancellation into the
+			// refresh waiters too. Empty for requestId-less requests: the spread is a no-op and
+			// the flush options keep their exact legacy shape.
+			const requestSignal = requestController ? { signal: requestController.signal } : {}
+
 			// Consistent answer for an aborted request: the same aggregate shape the normal flow
 			// posts, with every entry {} (no fetch was attempted, so no per-provider error events
 			// are emitted); a filtered response still carries the requested provider's entry.
@@ -1262,7 +1268,12 @@ export const webviewMessageHandler = async (
 				// flush the cache first to ensure we fetch fresh data with the new credentials
 				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+						{
+							provider: providerIdentifiers.litellm,
+							apiKey: litellmApiKey,
+							baseUrl: litellmBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1280,7 +1291,7 @@ export const webviewMessageHandler = async (
 			if (poeApiKey) {
 				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl, ...requestSignal },
 						true,
 					)
 				}
@@ -1298,7 +1309,12 @@ export const webviewMessageHandler = async (
 			if (deepSeekApiKey) {
 				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+						{
+							provider: providerIdentifiers.deepseek,
+							apiKey: deepSeekApiKey,
+							baseUrl: deepSeekBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1320,7 +1336,12 @@ export const webviewMessageHandler = async (
 			if (moonshotApiKey) {
 				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+						{
+							provider: providerIdentifiers.moonshot,
+							apiKey: moonshotApiKey,
+							baseUrl: moonshotBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1344,7 +1365,12 @@ export const webviewMessageHandler = async (
 			if (geminiApiKey) {
 				if (message?.values?.geminiApiKey || message?.values?.googleGeminiBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.gemini, apiKey: geminiApiKey, baseUrl: googleGeminiBaseUrl },
+						{
+							provider: providerIdentifiers.gemini,
+							apiKey: geminiApiKey,
+							baseUrl: googleGeminiBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1359,8 +1385,10 @@ export const webviewMessageHandler = async (
 				})
 			}
 
-			// Vertex is conditional on at least one credential signal (projectId, keyFile, or
-			// jsonCredentials — region alone is not a signal).
+			// Vertex is conditional on a project ID: the catalog list requires a project, so a
+			// key file or JSON credentials without one would fail at fetch time and leave the
+			// picker silently empty. keyFile/jsonCredentials stay optional credential routes
+			// for the project that IS set.
 			// Prefer explicit values from message (current unsaved field state) over saved config,
 			// matching the pattern used for DeepSeek and other credential-carrying providers.
 			const vertexProjectId = message?.values?.vertexProjectId ?? apiConfiguration.vertexProjectId
@@ -1369,7 +1397,7 @@ export const webviewMessageHandler = async (
 			const vertexJsonCredentials =
 				message?.values?.vertexJsonCredentials ?? apiConfiguration.vertexJsonCredentials
 
-			if (vertexProjectId || vertexKeyFile || vertexJsonCredentials) {
+			if (vertexProjectId) {
 				if (
 					message?.values?.vertexProjectId ||
 					message?.values?.vertexRegion ||
@@ -1383,6 +1411,7 @@ export const webviewMessageHandler = async (
 							region: vertexRegion,
 							keyFile: vertexKeyFile,
 							jsonCredentials: vertexJsonCredentials,
+							...requestSignal,
 						},
 						true,
 					)
@@ -1409,7 +1438,10 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.opencodeGoApiKey) {
-				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey, ...requestSignal },
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1426,7 +1458,10 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.kenariApiKey) {
-				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.kenari, apiKey: kenariApiKey, ...requestSignal },
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1439,7 +1474,10 @@ export const webviewMessageHandler = async (
 			// same key-scoped options for refresh and retrieval.
 			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
 			if (message?.values?.nanoGptApiKey !== undefined) {
-				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey, ...requestSignal },
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1471,7 +1509,7 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, true)
+				await flushModels({ ...targetCandidate.options, ...requestSignal }, true)
 			}
 
 			// Cancelled during the flush/refresh awaits (credential flushes, OAuth token lookup,
