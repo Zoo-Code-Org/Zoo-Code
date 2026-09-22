@@ -193,4 +193,14 @@ describe("getVertexModels", () => {
 			}),
 		})
 	})
+
+	it("requests the maximum page size so the catalog arrives in one page", async () => {
+		await getVertexModels(PROJECT, REGION)
+
+		expect(mockList).toHaveBeenCalledWith({
+			config: expect.objectContaining({
+				pageSize: 1000,
+			}),
+		})
+	})
 })
