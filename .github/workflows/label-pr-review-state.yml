@@ -80,6 +80,20 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
+    env:
+      # Mirrors the workflow-level concurrency group so the run's queueing
+      # identity is visible in the logs (kept in sync by the workflow tests).
+      CONCURRENCY_GROUP: >-
+        label-pr-review-state-${{
+          ((github.event_name == 'pull_request_review' &&
+            github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name) && github.run_id) ||
+          github.event.pull_request.number ||
+          github.event.issue.number ||
+          github.event.inputs.pull_request_number ||
+          github.event.workflow_run.id ||
+          ((github.event_name == 'schedule' || github.event_name == 'push') && 'sweep') ||
+          github.run_id
+        }}
     steps:
       - name: Resolve target PR numbers
         id: resolve
@@ -88,6 +102,9 @@ jobs:
           retries: 3
           script: |
             const { owner, repo } = context.repo;
+
+            // A queue-superseded run leaves no other trace in the logs.
+            core.info(`Concurrency group: ${process.env.CONCURRENCY_GROUP}`);
 
             if (context.eventName === 'issue_comment' &&
                 (!context.payload.issue?.pull_request ||
@@ -138,7 +155,21 @@ jobs:
               const openPrs = await github.paginate(github.rest.pulls.list, {
                 owner, repo, state: 'open', per_page: 100,
               });
-              prNumbers = openPrs.map(pr => pr.number);
+              // GitHub rejects matrices over 256 jobs, so the sweep pages the
+              // sorted open-PR list: consecutive runs rotate through
+              // fixed-size windows by run number, covering every open PR on a
+              // bounded cadence without ever exceeding the limit.
+              const allNumbers = openPrs.map(pr => pr.number).sort((a, b) => a - b);
+              const sweepPageSize = 200;
+              const pageCount = Math.max(1, Math.ceil(allNumbers.length / sweepPageSize));
+              const page = context.runNumber % pageCount;
+              prNumbers = allNumbers.slice(page * sweepPageSize, (page + 1) * sweepPageSize);
+              if (allNumbers.length > sweepPageSize) {
+                core.info(
+                  `Sweep page ${page + 1}/${pageCount}: reconciling ` +
+                  `${prNumbers.length} of ${allNumbers.length} open PRs`
+                );
+              }
             }
 
             core.info(
@@ -188,6 +219,18 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PR_NUMBER: ${{ matrix.pr_number }}
+      # Mirrors this job's concurrency group so a superseded shard's queueing
+      # identity is visible in the logs (kept in sync by the workflow tests).
+      CONCURRENCY_GROUP: >-
+        label-pr-review-state-reconcile-${{
+          ((github.event_name == 'pull_request_review' &&
+            github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name) && 'ro-') || ''
+        }}${{
+          ((github.event_name == 'pull_request_review' &&
+            github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name) && github.run_id) ||
+          matrix.pr_number ||
+          github.run_id
+        }}
     steps:
       - name: Reconcile PR review state labels
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
@@ -195,6 +238,9 @@ jobs:
           retries: 3
           script: |
             const { owner, repo } = context.repo;
+
+            // A queue-superseded shard leaves no other trace in the logs.
+            core.info(`Concurrency group: ${process.env.CONCURRENCY_GROUP}`);
             const stateLabels = [
               'awaiting-author',
               'awaiting-coderabbit',
@@ -265,17 +311,26 @@ jobs:
             }
 
             if (!isReadOnlyRun) {
+              // One paginated list keeps the per-shard API budget flat no matter
+              // how many labels are managed; per-label getLabel calls would
+              // multiply across a full sweep against the Actions token pool.
+              const repoLabels = await github.paginate(github.rest.issues.listLabelsForRepo, {
+                owner, repo, per_page: 100,
+              });
+              const existingLabelNames = new Set(repoLabels.map(label => label.name));
               for (const label of labelDefinitions) {
+                if (existingLabelNames.has(label.name)) continue;
                 try {
-                  await github.rest.issues.getLabel({ owner, repo, name: label.name });
-                } catch (error) {
-                  if (error.status !== 404) throw error;
-                  try {
-                    await github.rest.issues.createLabel({ owner, repo, ...label });
-                  } catch (createError) {
-                    // Concurrent shards for other PRs can win the creation race.
-                    if (createError.status !== 422) throw createError;
-                  }
+                  await github.rest.issues.createLabel({ owner, repo, ...label });
+                } catch (createError) {
+                  // Concurrent shards for other PRs can win the creation race.
+                  // Tolerate only the duplicate-label payload; any other 422
+                  // must fail the shard.
+                  const isDuplicateRace = createError.status === 422 &&
+                    (createError.response?.data?.errors ?? []).some(
+                      error => error.code === 'already_exists' && error.field === 'name'
+                    );
+                  if (!isDuplicateRace) throw createError;
                 }
               }
             }
@@ -834,8 +889,10 @@ jobs:
                       if (!blocker) continue;
                       const requestedAt = Date.parse(event.created_at ?? '');
                       const blockedAt = Date.parse(blocker.submitted_at ?? '');
-                      // A re-request only clears blockers it follows; missing or
-                      // unparsable timestamps fail closed and keep the blocker.
+                      // A re-request clears a blocker only when it was created
+                      // at the same time as or after the blocking review;
+                      // missing or unparsable timestamps fail closed and keep
+                      // the blocker.
                       if (!Number.isNaN(requestedAt) && !Number.isNaN(blockedAt) && requestedAt >= blockedAt) {
                         maintainerBlockers.delete(requested);
                       }

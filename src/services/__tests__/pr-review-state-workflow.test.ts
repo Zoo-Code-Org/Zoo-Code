@@ -35,6 +35,8 @@ interface HarnessOptions {
 	workflowRunHeadBranch?: string
 	workflowRunMissing?: "repository" | "branch" | "sha"
 	workflowDispatchPrNumber?: number
+	prNumber?: number
+	runNumber?: number
 	openPrNumbers?: number[]
 	workflowRunPrNumbers?: number[]
 	sharedState?: SharedState
@@ -47,6 +49,8 @@ interface HarnessOptions {
 	addLabelsFailOnceName?: string
 	labelLookupStatus?: number
 	createLabelStatus?: number
+	createLabelErrors?: Array<{ code: string; field: string }>
+	existingRepoLabels?: string[]
 	listCommentsErrorStatus?: number
 	createCommentErrorStatus?: number
 	updateCommentErrorStatus?: number
@@ -110,11 +114,12 @@ interface SharedState {
 
 function buildHarnessPr(options: HarnessOptions) {
 	const headRepository = options.fork ? "contributor/Zoo-Code" : "Zoo-Code-Org/Zoo-Code"
+	const number = options.prNumber ?? 1437
 	return {
-		number: 1437,
+		number,
 		state: options.prState ?? "open",
 		draft: options.draft ?? false,
-		html_url: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
+		html_url: `https://github.com/Zoo-Code-Org/Zoo-Code/pull/${number}`,
 		user: options.prAuthor ?? { login: "contributor", type: "User" },
 		head: { sha: SHA, repo: { full_name: headRepository } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
@@ -342,7 +347,10 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	)
 	const createLabel = vi.fn(async (_args: unknown) => {
 		if (options.createLabelStatus) {
-			throw Object.assign(new Error("Create label failed"), { status: options.createLabelStatus })
+			throw Object.assign(new Error("Create label failed"), {
+				status: options.createLabelStatus,
+				response: { data: { errors: options.createLabelErrors ?? [] } },
+			})
 		}
 	})
 	const setFailed = vi.fn()
@@ -393,11 +401,18 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			},
 			issues: {
 				get: vi.fn(async () => ({ data: { labels: [...remoteLabels].map((name) => ({ name })) } })),
-				getLabel: vi.fn(async () => {
+				listLabelsForRepo: vi.fn(async () => {
 					if (options.labelLookupStatus) {
-						throw Object.assign(new Error("Label lookup failed"), { status: options.labelLookupStatus })
+						throw Object.assign(new Error("List labels failed"), { status: options.labelLookupStatus })
 					}
-					return { data: {} }
+					// The four label definitions from the workflow script, present by default.
+					const defaultLabels = [
+						"awaiting-coderabbit",
+						"awaiting-ready",
+						"awaiting-maintainer",
+						"coderabbit-review-active",
+					]
+					return (options.existingRepoLabels ?? defaultLabels).map((name) => ({ name }))
 				}),
 				createLabel,
 				removeLabel,
@@ -448,6 +463,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
 		payload,
+		runNumber: options.runNumber ?? 1,
 	}
 	const core = {
 		info: vi.fn(),
@@ -458,16 +474,23 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	}
 
 	// The reconcile job runs one matrix shard per PR and receives the target
-	// through the job's PR_NUMBER env mapping.
-	const previousPrNumber = process.env.PR_NUMBER
+	// through the job's PR_NUMBER env mapping, plus the job's concurrency group
+	// through CONCURRENCY_GROUP.
+	const previousEnv = { prNumber: process.env.PR_NUMBER, group: process.env.CONCURRENCY_GROUP }
 	process.env.PR_NUMBER = String(pr.number)
+	process.env.CONCURRENCY_GROUP = `label-pr-review-state-reconcile-${pr.number}`
 	try {
 		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
 	} finally {
-		if (previousPrNumber === undefined) {
-			delete process.env.PR_NUMBER
-		} else {
-			process.env.PR_NUMBER = previousPrNumber
+		for (const [key, value] of [
+			["PR_NUMBER", previousEnv.prNumber],
+			["CONCURRENCY_GROUP", previousEnv.group],
+		] as const) {
+			if (value === undefined) {
+				delete process.env[key]
+			} else {
+				process.env[key] = value
+			}
 		}
 	}
 
@@ -480,6 +503,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		listEventsForTimeline,
 		createCommitStatus,
 		createLabel,
+		listLabelsForRepo: github.rest.issues.listLabelsForRepo,
 		setFailed,
 		info: core.info,
 		warning: core.warning,
@@ -513,6 +537,7 @@ async function runResolve(options: HarnessOptions = {}) {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
 		payload,
+		runNumber: options.runNumber ?? 1,
 	}
 	const setOutput = vi.fn()
 	const core = {
@@ -524,7 +549,17 @@ async function runResolve(options: HarnessOptions = {}) {
 		setOutput,
 	}
 
-	await new AsyncFunction("github", "context", "core", resolveScript)(github, context, core)
+	const previousGroup = process.env.CONCURRENCY_GROUP
+	process.env.CONCURRENCY_GROUP = `label-pr-review-state-${pr.number}`
+	try {
+		await new AsyncFunction("github", "context", "core", resolveScript)(github, context, core)
+	} finally {
+		if (previousGroup === undefined) {
+			delete process.env.CONCURRENCY_GROUP
+		} else {
+			process.env.CONCURRENCY_GROUP = previousGroup
+		}
+	}
 
 	const prNumbersOutput = setOutput.mock.calls.find(([name]) => name === "pr_numbers")?.[1] as string | undefined
 	return {
@@ -647,19 +682,20 @@ describe("PR review-state workflow", () => {
 	})
 
 	it("creates missing workflow labels", async () => {
-		const result = await runWorkflow({ labelLookupStatus: 404 })
+		const result = await runWorkflow({ existingRepoLabels: [] })
 
+		expect(result.listLabelsForRepo).toHaveBeenCalledTimes(1)
 		expect(result.createLabel).toHaveBeenCalledTimes(4)
 	})
 
 	it("fails closed when a managed label cannot be created", async () => {
-		await expect(runWorkflow({ labelLookupStatus: 404, createLabelStatus: 500 })).rejects.toThrow(
+		await expect(runWorkflow({ existingRepoLabels: [], createLabelStatus: 500 })).rejects.toThrow(
 			"Create label failed",
 		)
 	})
 
-	it("propagates non-404 label lookup failures", async () => {
-		await expect(runWorkflow({ labelLookupStatus: 500 })).rejects.toThrow("Label lookup failed")
+	it("propagates label listing failures", async () => {
+		await expect(runWorkflow({ labelLookupStatus: 500 })).rejects.toThrow("List labels failed")
 	})
 
 	it("does not start automatic review for drafts", async () => {
@@ -1685,6 +1721,23 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)?.description).toContain("must not require")
 	})
 
+	it("treats a matrix-suffixed reconcile check requirement as a self-referential configuration error", async () => {
+		// The fan-out matrix reports one check per shard named
+		// "Zoo Code / reconcile PR review state (<pr_number>"; a ruleset requiring
+		// that per-shard name is just as self-referential as the bare job name.
+		const result = await runWorkflow({
+			requiredContexts: ["Zoo Code / reconcile PR review state (1437)"],
+			labels: ["coderabbit-review-active"],
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("self-referential required check"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
+	})
+
 	it("fails closed when repository rules require the advisory review gate", async () => {
 		const result = await runWorkflow({
 			requiredContexts: ["Zoo Code / PR review gate"],
@@ -1822,6 +1875,34 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
+	it("caps sweep shards below the matrix job limit and rotates coverage across runs", async () => {
+		// GitHub rejects matrices over 256 jobs; the sweep pages the sorted open-PR
+		// list by run number so no run exceeds the limit and consecutive hourly
+		// runs rotate through every open PR.
+		const openPrNumbers = Array.from({ length: 450 }, (_, index) => index + 1)
+		const pages = await Promise.all([
+			runResolve({ eventName: "schedule", openPrNumbers, runNumber: 1 }),
+			runResolve({ eventName: "schedule", openPrNumbers, runNumber: 2 }),
+			runResolve({ eventName: "schedule", openPrNumbers, runNumber: 3 }),
+		])
+
+		for (const page of pages) {
+			const numbers = page.prNumbers() ?? []
+			expect(numbers.length).toBeLessThanOrEqual(200)
+			expect(numbers.length).toBeGreaterThan(0)
+		}
+		const covered = pages.flatMap((page) => page.prNumbers() ?? []).sort((a, b) => a - b)
+		expect(covered).toEqual(openPrNumbers)
+
+		// Rotation wraps: the fourth run revisits the first window.
+		const wrapped = await runResolve({ eventName: "schedule", openPrNumbers, runNumber: 4 })
+		expect(wrapped.prNumbers()).toEqual(pages[0].prNumbers())
+
+		// Truncation is logged so a partial sweep is visible in the run logs.
+		expect(pages[0].info).toHaveBeenCalledWith(expect.stringContaining("Sweep page"))
+		expect(pages[0].info).toHaveBeenCalledWith(expect.stringContaining("450"))
+	})
+
 	it("reconciles only the requested PR during manual dispatch", async () => {
 		const resolution = await runResolve({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
@@ -1831,6 +1912,30 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("chains the resolve output through the matrix wiring into shard runs", async () => {
+		// End to end: the resolve output name/shape feeds the matrix expression,
+		// which feeds the shard's PR_NUMBER env. A wiring rename or shape change
+		// (e.g. objects instead of numbers) breaks this chain.
+		expect(String(workflow.jobs.reconcile.strategy.matrix.pr_number)).toContain(
+			"fromJSON(needs.resolve.outputs.pr_numbers)",
+		)
+		expect(String(workflow.jobs.reconcile.env.PR_NUMBER)).toContain("matrix.pr_number")
+
+		const resolution = await runResolve({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
+		const output = resolution.setOutput.mock.calls.find(([name]) => name === "pr_numbers")?.[1]
+		expect(output).toBe("[1437]")
+
+		// From here the shard receives exactly what the matrix env wiring provides.
+		for (const prNumber of JSON.parse(output as string) as number[]) {
+			const result = await runWorkflow({ eventName: "workflow_dispatch", prNumber })
+
+			expect(result.addLabels).toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+			)
+			expect(result.setFailed).not.toHaveBeenCalled()
+		}
 	})
 
 	it("reconciles the PR associated with a workflow run", async () => {
@@ -2336,6 +2441,20 @@ describe("PR review-state workflow", () => {
 			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 		})
 
+		it("clears the blocker when the re-request matches the blocking review timestamp", async () => {
+			// Pins the >= comparison: a re-request in the same second as the blocking
+			// review is new enough to clear the blocker.
+			const result = await runWorkflow({
+				labels: ["awaiting-author"],
+				permissions: { maintainer: "write" },
+				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
+				timelineEvents: [{ ...authorReRequest, createdAt: REVIEWED_AT + 1_000 }],
+			})
+
+			expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		})
+
 		it("does not clear the blocker for a re-request naming a different reviewer", async () => {
 			const result = await runWorkflow({
 				permissions: { maintainer: "write", "other-maintainer": "write" },
@@ -2821,6 +2940,22 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		expect(String(workflow.jobs.reconcile.if)).toContain("needs.resolve.outputs.pr_numbers != '[]'")
 	})
 
+	it("logs the resolved concurrency group once per job", async () => {
+		// A queue-superseded run leaves no other trace; both jobs log their group.
+		// Drift guard: the logged env expressions mirror the group expressions.
+		const normalize = (value: unknown) => String(value).replace(/\s+/g, " ").trim()
+		expect(normalize(workflow.jobs.resolve.env.CONCURRENCY_GROUP)).toBe(normalize(workflow.concurrency.group))
+		expect(normalize(workflow.jobs.reconcile.env.CONCURRENCY_GROUP)).toBe(
+			normalize(workflow.jobs.reconcile.concurrency.group),
+		)
+
+		const resolution = await runResolve({ eventName: "pull_request_target" })
+		expect(resolution.info).toHaveBeenCalledWith("Concurrency group: label-pr-review-state-1437")
+
+		const result = await runWorkflow()
+		expect(result.info).toHaveBeenCalledWith("Concurrency group: label-pr-review-state-reconcile-1437")
+	})
+
 	it("resolves a direct single-PR event to one shard carrying the shared per-PR group", async () => {
 		const resolution = await runResolve({ eventName: "pull_request_target" })
 
@@ -2930,11 +3065,30 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		expect(shardGroupFor(sweepContext, { pr_number: 1437 })).toBe(shardGroupFor(directContext, { pr_number: 1437 }))
 	})
 
-	it("tolerates label-bootstrap creation races between concurrent shards", async () => {
-		const result = await runWorkflow({ labelLookupStatus: 404, createLabelStatus: 422 })
+	it("tolerates duplicate-payload label-creation races between concurrent shards", async () => {
+		const result = await runWorkflow({
+			existingRepoLabels: [],
+			createLabelStatus: 422,
+			createLabelErrors: [{ code: "already_exists", field: "name" }],
+		})
 
-		expect(result.createLabel).toHaveBeenCalled()
+		expect(result.listLabelsForRepo).toHaveBeenCalledTimes(1)
+		// All four definitions race; every duplicate payload is tolerated.
+		expect(result.createLabel).toHaveBeenCalledTimes(4)
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	it("fails the shard for non-duplicate label creation errors", async () => {
+		await expect(
+			runWorkflow({
+				existingRepoLabels: [],
+				createLabelStatus: 422,
+				createLabelErrors: [{ code: "invalid", field: "color" }],
+			}),
+		).rejects.toThrow("Create label failed")
+		await expect(runWorkflow({ existingRepoLabels: [], createLabelStatus: 422 })).rejects.toThrow(
+			"Create label failed",
+		)
 	})
 })
