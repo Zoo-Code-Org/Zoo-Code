@@ -1024,4 +1024,55 @@ describe("webviewMessageHandler - requestRouterModels cancellation", () => {
 			values: { requestId: "req-race" },
 		})
 	})
+
+	it("echoes the requestId in the aggregate response and per-candidate failure posts", async () => {
+		getModelsMock.mockImplementation(async (options: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.openrouter) {
+				throw new Error("openrouter down")
+			}
+			return {}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId: "req-echo" },
+		})
+
+		const aggregate = mockProvider.postMessageToWebview.mock.calls.find(
+			(c: unknown[]) => (c[0] as { type?: string } | undefined)?.type === RouterModelsMessageType.routerModels,
+		)
+		if (!aggregate) throw new Error("Expected routerModels response")
+		expect((aggregate[0] as { values?: Record<string, unknown> }).values).toEqual({ requestId: "req-echo" })
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.singleRouterModelFetchResponse,
+			success: false,
+			error: "openrouter down",
+			values: { provider: providerIdentifiers.openrouter, requestId: "req-echo" },
+		})
+	})
+
+	it("keeps the legacy values shape when the request carries no requestId", async () => {
+		getModelsMock.mockRejectedValue(new Error("openrouter down"))
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter },
+		})
+
+		const aggregate = mockProvider.postMessageToWebview.mock.calls.find(
+			(c: unknown[]) => (c[0] as { type?: string } | undefined)?.type === RouterModelsMessageType.routerModels,
+		)
+		if (!aggregate) throw new Error("Expected routerModels response")
+		expect((aggregate[0] as { values?: Record<string, unknown> }).values).toEqual({
+			provider: providerIdentifiers.openrouter,
+		})
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.singleRouterModelFetchResponse,
+			success: false,
+			error: "openrouter down",
+			values: { provider: providerIdentifiers.openrouter },
+		})
+	})
 })

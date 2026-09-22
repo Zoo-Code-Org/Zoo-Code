@@ -59,10 +59,16 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 
 			if (message.type === RouterModelsMessageType.routerModels) {
 				const msgProvider = message?.values?.provider as string | undefined
+				const msgRequestId = message?.values?.requestId as string | undefined
 
-				// Verify response matches request
+				// Verify response matches request. Responses stamped with a requestId must match
+				// this in-flight request's id (the extension host echoes it); responses without
+				// one come from other producers and keep the legacy provider-only matching.
 				if (provider !== msgProvider) {
 					// Not our response; ignore and wait for the matching one
+					return
+				}
+				if (msgRequestId !== undefined && msgRequestId !== requestId) {
 					return
 				}
 

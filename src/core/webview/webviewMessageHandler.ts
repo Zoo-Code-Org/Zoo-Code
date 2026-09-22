@@ -1154,6 +1154,20 @@ export const webviewMessageHandler = async (
 				routerModelsRequestControllers.set(requestId, requestController)
 			}
 
+			// Responses echo the requestId so the webview can correlate them with the in-flight
+			// request; requests without one keep the legacy values shape.
+			const responseRequestId = typeof requestId === "string" && requestId.length > 0 ? requestId : undefined
+			const aggregateValues = () => {
+				const values: Record<string, unknown> = {}
+				if (providerFilter) {
+					values.provider = requestedProvider
+				}
+				if (responseRequestId) {
+					values.requestId = responseRequestId
+				}
+				return Object.keys(values).length > 0 ? values : undefined
+			}
+
 			// Consistent answer for an aborted request: the same aggregate shape the normal flow
 			// posts, with every entry {} (no fetch was attempted, so no per-provider error events
 			// are emitted); a filtered response still carries the requested provider's entry.
@@ -1164,7 +1178,7 @@ export const webviewMessageHandler = async (
 				return provider.postMessageToWebview({
 					type: RouterModelsMessageType.routerModels,
 					routerModels,
-					values: providerFilter ? { provider: requestedProvider } : undefined,
+					values: aggregateValues(),
 				})
 			}
 
@@ -1497,7 +1511,9 @@ export const webviewMessageHandler = async (
 						type: RouterModelsMessageType.singleRouterModelFetchResponse,
 						success: false,
 						error: errorMessage,
-						values: { provider: routerName },
+						values: responseRequestId
+							? { provider: routerName, requestId: responseRequestId }
+							: { provider: routerName },
 					})
 				}
 			})
@@ -1505,7 +1521,7 @@ export const webviewMessageHandler = async (
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
+				values: aggregateValues(),
 			})
 
 			// The request has settled (aggregate posted, per-candidate failures handled):

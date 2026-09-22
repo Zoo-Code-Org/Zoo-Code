@@ -27,13 +27,20 @@ const modelInfo = {
 // every provider key, so cast through unknown for these partial literals.
 const asRouterModels = (value: Record<string, Record<string, typeof modelInfo>>) => value as unknown as RouterModels
 
-const respondWithRouterModels = (routerModels: RouterModels, provider?: string) => {
+const respondWithRouterModels = (routerModels: RouterModels, provider?: string, requestId?: string) => {
+	const values: Record<string, string> = {}
+	if (provider) {
+		values.provider = provider
+	}
+	if (requestId) {
+		values.requestId = requestId
+	}
 	window.dispatchEvent(
 		new MessageEvent("message", {
 			data: {
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: provider ? { provider } : undefined,
+				values: Object.keys(values).length > 0 ? values : undefined,
 			},
 		}),
 	)
@@ -93,6 +100,29 @@ describe("fetchRouterModels", () => {
 		const promise = fetchRouterModels(providerIdentifiers.openrouter)
 
 		respondWithRouterModels(asRouterModels({ requesty: { "model-b": modelInfo } }), "requesty")
+		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
+
+		await expect(promise).resolves.toEqual(routerModels)
+	})
+
+	it("ignores a response whose requestId does not match the in-flight request", async () => {
+		const wrongModels = asRouterModels({ openrouter: { "model-wrong": modelInfo } })
+		const rightModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
+		const requestId = (vi.mocked(vscode.postMessage).mock.calls[0][0].values as { requestId: string }).requestId
+
+		// A stale or foreign requestId must not resolve the fetch even with a matching provider.
+		respondWithRouterModels(wrongModels, providerIdentifiers.openrouter, "someone-elses-request")
+		respondWithRouterModels(rightModels, providerIdentifiers.openrouter, requestId)
+
+		await expect(promise).resolves.toEqual(rightModels)
+	})
+
+	it("still resolves a response without a requestId (legacy producers)", async () => {
+		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
 		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
 
 		await expect(promise).resolves.toEqual(routerModels)
