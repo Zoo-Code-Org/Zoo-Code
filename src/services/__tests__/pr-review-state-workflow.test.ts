@@ -2081,6 +2081,46 @@ describe("PR review-state workflow", () => {
 			expect(latestGateStatus(result)?.state).toBe("success")
 		})
 
+		it("clears the blocker when the blocking maintainer re-requests their own review", async () => {
+			const result = await runWorkflow({
+				labels: ["awaiting-author"],
+				permissions: { maintainer: "write" },
+				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
+				timelineEvents: [
+					{
+						event: "review_requested",
+						actor: "maintainer",
+						requestedReviewer: "maintainer",
+						createdAt: REVIEWED_AT + 2_000,
+					},
+				],
+			})
+
+			expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+			expect(latestGateStatus(result)?.state).toBe("success")
+		})
+
+		it("keeps the blocker when the maintainer self-re-request predates the blocking review", async () => {
+			const result = await runWorkflow({
+				permissions: { maintainer: "write" },
+				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
+				timelineEvents: [
+					{
+						event: "review_requested",
+						actor: "maintainer",
+						requestedReviewer: "maintainer",
+						createdAt: REVIEWED_AT + 500,
+					},
+				],
+			})
+
+			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+			expect(result.addLabels).not.toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["awaiting-maintainer"] }),
+			)
+		})
+
 		it("clears the blocker when the blocking maintainer submits a newer approval", async () => {
 			const result = await runWorkflow({
 				permissions: { maintainer: "write" },

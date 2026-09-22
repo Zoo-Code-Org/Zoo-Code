@@ -744,8 +744,10 @@ jobs:
                 // merges, CI runs, and CodeRabbit reviews until that same
                 // maintainer's blocker is cleared by one of:
                 //   1. the PR author explicitly re-requesting review from them,
-                //   2. a newer review from that maintainer (its state decides), or
-                //   3. GitHub dismissing the blocking review.
+                //   2. the blocking maintainer re-requesting review from themselves
+                //      (signaling intent to re-review),
+                //   3. a newer review from that maintainer (its state decides), or
+                //   4. GitHub dismissing the blocking review.
                 // Latest state per reviewer is keyed by review id (monotonically
                 // increasing) so reordered or duplicate history cannot change the
                 // result. COMMENTED reviews are neutral and never clear a blocker;
@@ -799,9 +801,13 @@ jobs:
                     const authorLogin = pr.user?.login?.toLowerCase();
                     for (const event of timelineEvents) {
                       if (event.event !== 'review_requested') continue;
-                      if (event.actor?.login?.toLowerCase() !== authorLogin) continue;
+                      const actorLogin = event.actor?.login?.toLowerCase();
                       const requested = event.requested_reviewer?.login?.toLowerCase();
                       if (!requested) continue;
+                      // Clear if the PR author re-requested this maintainer, OR if the
+                      // blocking maintainer re-requested themselves (signaling intent
+                      // to re-review).
+                      if (actorLogin !== authorLogin && actorLogin !== requested) continue;
                       const blocker = maintainerBlockers.get(requested);
                       if (!blocker) continue;
                       const requestedAt = Date.parse(event.created_at ?? '');
