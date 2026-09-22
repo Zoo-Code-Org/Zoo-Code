@@ -53,6 +53,25 @@ const makeWrapper = (queryClient: QueryClient) => {
 		React.createElement(QueryClientProvider, { client: queryClient }, children)
 }
 
+// Spies on addEventListener so a test can capture the exact "message" callback a fetch
+// registers and later assert removeEventListener received THAT reference — not just any
+// function. Spies call through, so real dispatch behavior is unaffected.
+const captureMessageListener = () => {
+	const addSpy = vi.spyOn(window, "addEventListener")
+	const removeSpy = vi.spyOn(window, "removeEventListener")
+	return {
+		removeSpy,
+		lastAdded: () => {
+			const call = addSpy.mock.calls.filter((args) => args[0] === "message").at(-1)
+			return call?.[1] as EventListener
+		},
+		restore: () => {
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		},
+	}
+}
+
 describe("fetchRouterModels", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -63,10 +82,12 @@ describe("fetchRouterModels", () => {
 	})
 
 	it("posts a provider request and resolves with the matching response", async () => {
-		const removeSpy = vi.spyOn(window, "removeEventListener")
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
 		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+		const listener = lastAdded()
+		expect(listener).toBeInstanceOf(Function)
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({
 			type: RouterModelsMessageType.requestRouterModels,
@@ -76,9 +97,9 @@ describe("fetchRouterModels", () => {
 		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
 
 		await expect(promise).resolves.toEqual(routerModels)
-		// Success must not leave the window listener or the abort listener attached.
-		expect(removeSpy).toHaveBeenCalledWith("message", expect.any(Function))
-		removeSpy.mockRestore()
+		// Success must remove the exact listener the fetch registered.
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
+		restore()
 	})
 
 	it("requests the full catalog when no provider is given", async () => {
@@ -130,31 +151,33 @@ describe("fetchRouterModels", () => {
 
 	it("rejects after the 10s timeout and removes the listener", async () => {
 		vi.useFakeTimers()
-		const removeSpy = vi.spyOn(window, "removeEventListener")
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+		const listener = lastAdded()
 		vi.advanceTimersByTime(10_000)
 
 		await expect(promise).rejects.toThrow("Router models request timed out")
-		expect(removeSpy).toHaveBeenCalledWith("message", expect.any(Function))
-		removeSpy.mockRestore()
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
+		restore()
 	})
 
 	it("rejects with an AbortError, removes the listener, and clears the timeout when aborted", async () => {
 		vi.useFakeTimers()
-		const removeSpy = vi.spyOn(window, "removeEventListener")
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
 		const controller = new AbortController()
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+		const listener = lastAdded()
 		expect(vi.getTimerCount()).toBe(1)
 
 		controller.abort()
 
 		await expect(promise).rejects.toMatchObject({ name: "AbortError", message: "Aborted" })
-		expect(removeSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
 		// The 10s timeout must not fire after an abort.
 		expect(vi.getTimerCount()).toBe(0)
-		removeSpy.mockRestore()
+		restore()
 	})
 
 	it("posts a cancellation message with the same request id when aborted, then rejects", async () => {
@@ -227,13 +250,14 @@ describe("useRouterModels", () => {
 	it("forwards the query cancellation to the in-flight fetch", async () => {
 		vi.useFakeTimers()
 		const queryClient = makeQueryClient()
-		const removeSpy = vi.spyOn(window, "removeEventListener")
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
 
 		const { result } = renderHook(() => useRouterModels({ provider: providerIdentifiers.openrouter }), {
 			wrapper: makeWrapper(queryClient),
 		})
 		expect(vscode.postMessage).toHaveBeenCalled()
 		expect(vi.getTimerCount()).toBe(1)
+		const listener = lastAdded()
 
 		// A cancelled query (e.g. a refetch handoff or explicit cancelQueries)
 		// must remove the window listener instead of leaking it until the
@@ -244,10 +268,10 @@ describe("useRouterModels", () => {
 			queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.openrouter],
 		})
 
-		expect(removeSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
 		// The abort rejection is swallowed by React Query's cancellation path.
 		expect(result.current.isError).toBe(false)
 
-		removeSpy.mockRestore()
+		restore()
 	})
 })
