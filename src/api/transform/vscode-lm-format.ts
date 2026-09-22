@@ -67,7 +67,7 @@ export function sanitizeIdentifierSurrogates(identifier: string): string {
  * backend rejects the whole request for a lone surrogate anywhere in the JSON payload, so a tool
  * argument carrying a sliced astral character fails the request just as message text would.
  */
-function sanitizeSurrogatesDeep(value: unknown): unknown {
+export function sanitizeSurrogatesDeep(value: unknown): unknown {
 	if (typeof value === "string") {
 		return sanitizeSurrogates(value)
 	}

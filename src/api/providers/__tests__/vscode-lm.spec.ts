@@ -304,6 +304,52 @@ describe("VsCodeLmHandler", () => {
 
 				expect(vscode.LanguageModelChatMessage.Assistant).toHaveBeenCalledWith("sys\uFFFDtem")
 			})
+
+			it("sanitizes lone surrogates in tool names, descriptions and nested schema strings", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("sys", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: {
+								name: "read\uD800file",
+								description: "desc\uDC00ription",
+								parameters: {
+									type: "object",
+									properties: { path: { type: "string", description: "p\uD800ath" } },
+								},
+							},
+						},
+					],
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+				const codeUnits = (value: string): number[] =>
+					Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
+
+				const requestOptions = mockLanguageModelChat.sendRequest.mock.calls[0][1]
+				const sentTool = requestOptions.tools[0]
+				expect(codeUnits(sentTool.name)).toEqual(codeUnits("read\uFFFDD800file"))
+				expect(codeUnits(sentTool.description)).toEqual(codeUnits("desc\uFFFDription"))
+				const schemaProperties = (
+					sentTool.inputSchema as { properties: Record<string, { description: string }> }
+				).properties
+				expect(codeUnits(schemaProperties.path.description)).toEqual(codeUnits("p\uFFFDath"))
+			})
 		})
 
 		it("should handle native tool calls when tools are provided", async () => {

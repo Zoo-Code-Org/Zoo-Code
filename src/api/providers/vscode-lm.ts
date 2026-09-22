@@ -18,7 +18,9 @@ import { ApiStream, ApiStreamChunk } from "../transform/stream"
 import {
 	convertToVsCodeLmMessages,
 	extractTextCountFromMessage,
+	sanitizeIdentifierSurrogates,
 	sanitizeSurrogates,
+	sanitizeSurrogatesDeep,
 } from "../transform/vscode-lm-format"
 
 import { BaseProvider } from "./base-provider"
@@ -35,10 +37,14 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 	return tools
 		.filter((tool) => tool.type === "function")
 		.map((tool) => ({
-			name: tool.function.name,
-			description: tool.function.description || "",
+			// Names use the injective identifier form so two tools differing only in a lone
+			// surrogate cannot collapse into one and misroute the model's tool calls.
+			name: sanitizeIdentifierSurrogates(tool.function.name),
+			description: sanitizeSurrogates(tool.function.description || ""),
 			inputSchema: tool.function.parameters
-				? normalizeToolSchema(tool.function.parameters as Record<string, unknown>)
+				? (sanitizeSurrogatesDeep(
+						normalizeToolSchema(tool.function.parameters as Record<string, unknown>),
+					) as object)
 				: undefined,
 		}))
 }
