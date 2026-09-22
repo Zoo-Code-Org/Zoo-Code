@@ -34,33 +34,138 @@ permissions:
   checks: read
   statuses: write
 
-# One concurrency group per PR so bursts of activity on unrelated PRs cannot
-# starve an individual PR's reconciliation (issue #1707). GitHub keeps only the
-# newest pending run per group; keyed per PR that becomes freshest-state-wins
-# within a PR. Issue/PR numbers share one GitHub sequence, so issue-comment runs
-# can never collide with a different PR's group. Sweep triggers (hourly
-# schedule, pushes to main) share a single group, and events that cannot be
-# tied to a PR (fork workflow_run without backfilled pull_requests) fall back
-# to a unique per-run group so they are never superseded.
+# Concurrency is keyed at two levels (issue #1707):
+#
+# Workflow level (below): keeps bursts of activity on unrelated PRs from
+# starving whole runs. GitHub keeps only the newest pending run per group even
+# with cancel-in-progress: false, so keying per PR makes that freshest-state-
+# wins within one PR. Issue/PR numbers share one GitHub sequence, so
+# issue-comment runs can never collide with a different PR's group.
+# workflow_run events key by the triggering run's id instead of a PR number: a
+# single run can reconcile several associated PRs (and fork runs backfill
+# none), so a PR-number key would let an unrelated event for the first PR
+# supersede reconciliation of the rest. Sweep triggers (hourly schedule,
+# pushes to main) share one group, and anything unresolved falls back to a
+# unique per-run group.
+#
+# Job level (on the reconcile job): every mutating shard keys per PR in one
+# shared group namespace, so direct-event shards, sweep-resolved shards, and
+# workflow_run-resolved shards for the same PR serialize against each other
+# instead of racing non-atomic label, status, and comment writes. Only the
+# reconcile job mutates PR state, so no workflow-level key can bypass that
+# per-PR serialization.
 concurrency:
   group: >-
     label-pr-review-state-${{
       github.event.pull_request.number ||
       github.event.issue.number ||
-      github.event.workflow_run.pull_requests[0].number ||
       github.event.inputs.pull_request_number ||
+      github.event.workflow_run.id ||
       ((github.event_name == 'schedule' || github.event_name == 'push') && 'sweep') ||
       github.run_id
     }}
   cancel-in-progress: false
 
 jobs:
-  reconcile:
-    name: Zoo Code / reconcile PR review state
+  resolve:
+    name: Zoo Code / resolve PRs to reconcile
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')
     runs-on: ubuntu-latest
+    outputs:
+      pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
+    steps:
+      - name: Resolve target PR numbers
+        id: resolve
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          retries: 3
+          script: |
+            const { owner, repo } = context.repo;
+
+            if (context.eventName === 'issue_comment' &&
+                (!context.payload.issue?.pull_request ||
+                 context.payload.comment?.user?.login?.toLowerCase() !== 'coderabbitai[bot]')) {
+              core.info('Ignoring untrusted issue comment event');
+              core.setOutput('pr_numbers', '[]');
+              return;
+            }
+
+            // Resolve which PRs this event targets. Single-PR events carry the
+            // number in the payload; sweep triggers (hourly schedule, pushes to
+            // main) list every open PR; workflow_run events use the run's
+            // associated PRs, with a fork-safe backfill by exact head owner,
+            // branch, and SHA when GitHub left pull_requests empty.
+            let prNumbers = [];
+            if (context.payload.pull_request?.number) {
+              prNumbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'issue_comment') {
+              prNumbers = [context.payload.issue.number];
+            } else if (context.eventName === 'workflow_dispatch') {
+              prNumbers = [Number(context.payload.inputs.pull_request_number)];
+            } else if (context.payload.workflow_run?.pull_requests?.length > 0) {
+              prNumbers = context.payload.workflow_run.pull_requests.map(pr => pr.number);
+            } else if (context.eventName === 'workflow_run') {
+              const run = context.payload.workflow_run;
+              const headOwner = run.head_repository?.owner?.login;
+              if (headOwner && run.head_branch && run.head_sha) {
+                const candidates = await github.paginate(github.rest.pulls.list, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  head: `${headOwner}:${run.head_branch}`,
+                  per_page: 100,
+                });
+                const baseRepository = `${owner}/${repo}`.toLowerCase();
+                prNumbers = candidates
+                  .filter(pr =>
+                    pr.head?.sha === run.head_sha &&
+                    pr.base?.repo?.full_name?.toLowerCase() === baseRepository
+                  )
+                  .map(pr => pr.number);
+                core.info(
+                  `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
+                  `${prNumbers.length} PR(s) by exact head owner, branch, and SHA`
+                );
+              }
+            } else {
+              const openPrs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+              prNumbers = openPrs.map(pr => pr.number);
+            }
+
+            core.info(
+              `Reconciliation targets: ` +
+              `${prNumbers.length > 0 ? prNumbers.join(', ') : '(none)'}`
+            );
+            core.setOutput('pr_numbers', JSON.stringify(prNumbers));
+
+  reconcile:
+    name: Zoo Code / reconcile PR review state
+    needs: resolve
+    if: >-
+      (github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')) &&
+      needs.resolve.outputs.pr_numbers != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}
+    # One mutating shard per PR, serialized per PR across every trigger path:
+    # direct-event shards, sweep-resolved shards, and workflow_run-resolved
+    # shards all share this group namespace, so their non-atomic writes can
+    # never interleave. cancel-in-progress stays false — within one PR,
+    # newest-pending-wins is exactly freshest-state-wins. The run_id fallback
+    # only applies to the skipped empty-resolution case so empty runs never
+    # contend.
+    concurrency:
+      group: label-pr-review-state-${{ matrix.pr_number || github.run_id }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ matrix.pr_number }}
     steps:
       - name: Reconcile PR review state labels
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
@@ -114,56 +219,15 @@ jobs:
               return;
             }
 
-            // When triggered by a single PR event, only reconcile that PR.
-            // Main-branch pushes, the hourly schedule, and workflow_dispatch reconcile all open PRs.
-            let prs;
-            let eventPrNumbers = [];
-            if (context.payload.pull_request?.number) {
-              eventPrNumbers = [context.payload.pull_request.number];
-            } else if (context.eventName === 'issue_comment') {
-              eventPrNumbers = [context.payload.issue.number];
-            } else if (context.eventName === 'workflow_dispatch') {
-              eventPrNumbers = [Number(context.payload.inputs.pull_request_number)];
-            } else if (context.payload.workflow_run?.pull_requests) {
-              eventPrNumbers = context.payload.workflow_run.pull_requests.map(pr => pr.number);
-            }
-            if (context.eventName === 'workflow_run' && eventPrNumbers.length === 0) {
-              const run = context.payload.workflow_run;
-              const headOwner = run.head_repository?.owner?.login;
-              if (headOwner && run.head_branch && run.head_sha) {
-                const candidates = await github.paginate(github.rest.pulls.list, {
-                  owner,
-                  repo,
-                  state: 'open',
-                  head: `${headOwner}:${run.head_branch}`,
-                  per_page: 100,
-                });
-                const baseRepository = `${owner}/${repo}`.toLowerCase();
-                eventPrNumbers = candidates
-                  .filter(pr =>
-                    pr.head?.sha === run.head_sha &&
-                    pr.base?.repo?.full_name?.toLowerCase() === baseRepository
-                  )
-                  .map(pr => pr.number);
-                core.info(
-                  `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
-                  `${eventPrNumbers.length} PR(s) by exact head owner, branch, and SHA`
-                );
-              }
-            }
-            if (eventPrNumbers.length > 0) {
-              prs = await Promise.all(eventPrNumbers.map(async pull_number => {
-                const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
-                return pr;
-              }));
-              prs = prs.filter(pr => pr.state === 'open');
-            } else if (context.eventName === 'workflow_run') {
-              prs = [];
-            } else {
-              prs = await github.paginate(github.rest.pulls.list, {
-                owner, repo, state: 'open', per_page: 100,
-              });
-            }
+            // The resolve job fans out one shard per target PR; this job
+            // reconciles exactly this matrix shard's PR. The single-PR GET
+            // endpoint returns mergeable fields that list endpoints omit.
+            const { data: shardPr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const prs = shardPr.state === 'open' ? [shardPr] : [];
 
             // pull_request_review runs originating from forks can still receive a read-only
             // token. pull_request_target, schedule, and workflow_dispatch runs execute in the
@@ -184,7 +248,12 @@ jobs:
                   await github.rest.issues.getLabel({ owner, repo, name: label.name });
                 } catch (error) {
                   if (error.status !== 404) throw error;
-                  await github.rest.issues.createLabel({ owner, repo, ...label });
+                  try {
+                    await github.rest.issues.createLabel({ owner, repo, ...label });
+                  } catch (createError) {
+                    // Concurrent shards for other PRs can win the creation race.
+                    if (createError.status !== 422) throw createError;
+                  }
                 }
               }
             }
@@ -500,8 +569,13 @@ jobs:
             for (const pr of prs) {
               let failurePhase = 'ci-pending';
               try {
+                // The matrix job reports one check per shard named
+                // "<reconciliationCheckName> (<pr_number>)", so catch both the
+                // bare name and any matrix-suffixed variant.
                 const selfReferentialRequirements = (requiredChecks ?? []).filter(check =>
-                  check.context === reviewGateName || check.context === reconciliationCheckName
+                  check.context === reviewGateName ||
+                  check.context === reconciliationCheckName ||
+                  check.context.startsWith(`${reconciliationCheckName} (`)
                 );
                 if (selfReferentialRequirements.length > 0) {
                   failurePhase = 'configuration-error';
@@ -519,15 +593,12 @@ jobs:
 
                 let existingGuide = await findReviewGuide(pr);
 
-                // `mergeable`/`mergeable_state` are only returned by the single-PR GET
-                // endpoint, and are computed asynchronously by GitHub — a PR fetched via
-                // pulls.list (schedule/workflow_dispatch runs) never has them, and even a
-                // single-PR fetch can return `null`/"unknown" if the merge check hasn't
-                // finished yet. Re-fetch the single PR to get a fresh value, and treat
-                // "unknown" as not-yet-computed rather than as conflicting.
-                const prDetail = eventPrNumbers.length > 0
-                  ? pr
-                  : (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
+                // `mergeable`/`mergeable_state` are only returned by the single-PR
+                // GET endpoint and are computed asynchronously by GitHub — this
+                // shard's own pulls.get above provides them, but even that can
+                // return `null`/"unknown" while the merge check is still running.
+                // Treat "unknown" as not-yet-computed rather than as conflicting.
+                const prDetail = pr;
 
                 if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
                   core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
@@ -702,12 +773,14 @@ jobs:
                   }
                 }
 
-                // Clear blockers the author explicitly re-requested. Only a
-                // review_requested timeline event whose actor is the PR author and
-                // whose requested reviewer is the blocking maintainer clears that
-                // maintainer's blocker. Team requests carry no requested_reviewer
-                // and never clear an individual blocker; review_request_removed
-                // events only trigger reconciliation and are not clearing evidence.
+                // Clear blockers that were explicitly re-requested. A
+                // review_requested timeline event clears that maintainer's
+                // blocker when the actor is the PR author re-requesting the
+                // blocking maintainer, or the blocking maintainer re-requesting
+                // themselves (signaling intent to re-review). Team requests
+                // carry no requested_reviewer and never clear an individual
+                // blocker; review_request_removed events only trigger
+                // reconciliation and are not clearing evidence.
                 // If the timeline cannot be reconstructed, fail closed: keep every
                 // blocker so awaiting-author is preserved.
                 if (maintainerBlockers.size > 0) {

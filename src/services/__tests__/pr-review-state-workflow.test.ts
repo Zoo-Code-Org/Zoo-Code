@@ -12,6 +12,7 @@ const workflow = parse(
 )
 const codeRabbitConfig = parse(fs.readFileSync(path.join(repositoryRoot, ".coderabbit.yaml"), "utf8"))
 const workflowScript = workflow.jobs.reconcile.steps[0].with.script as string
+const resolveScript = workflow.jobs.resolve.steps[0].with.script as string
 
 const SHA = "a".repeat(40)
 const OLD_SHA = "b".repeat(40)
@@ -34,6 +35,9 @@ interface HarnessOptions {
 	workflowRunHeadBranch?: string
 	workflowRunMissing?: "repository" | "branch" | "sha"
 	workflowDispatchPrNumber?: number
+	openPrNumbers?: number[]
+	workflowRunPrNumbers?: number[]
+	sharedState?: SharedState
 	existingGuide?: boolean
 	existingGuideHead?: string
 	existingGuidePendingHead?: string
@@ -93,11 +97,20 @@ interface HarnessOptions {
 	branchRulesFail?: boolean
 }
 
-/** Executes the embedded github-script workflow against deterministic GitHub API doubles. */
-async function runWorkflow(options: HarnessOptions = {}) {
-	const eventName = options.eventName ?? "pull_request_target"
+/**
+ * Remote state shared between two harness executions. Lets a test interleave
+ * two reconcile runs against the same labels, guide comment, and gate status
+ * to demonstrate how the job-level concurrency key serializes them.
+ */
+interface SharedState {
+	labels: Set<string>
+	guide: { body: string | null }
+	gate: { status: { state: string; description: string } | null }
+}
+
+function buildHarnessPr(options: HarnessOptions) {
 	const headRepository = options.fork ? "contributor/Zoo-Code" : "Zoo-Code-Org/Zoo-Code"
-	const pr = {
+	return {
 		number: 1437,
 		state: options.prState ?? "open",
 		draft: options.draft ?? false,
@@ -109,6 +122,77 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		mergeable: options.mergeable !== undefined ? options.mergeable : options.conflict ? false : true,
 		mergeable_state: options.mergeableState ?? (options.conflict ? "dirty" : "clean"),
 	}
+}
+
+type HarnessPr = ReturnType<typeof buildHarnessPr>
+
+function createListPullRequests(options: HarnessOptions, eventName: string, pr: HarnessPr) {
+	return vi.fn(async ({ state }: { state?: string }) => {
+		if (state === "open" && options.prState === "closed") return []
+		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
+			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
+			if (options.workflowRunFallback === "sha-mismatch") {
+				return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
+			}
+			if (options.workflowRunFallback === "base-mismatch") {
+				return [{ ...pr, base: { ...pr.base, repo: { full_name: "another/repository" } } }]
+			}
+		}
+		if (options.openPrNumbers) {
+			return options.openPrNumbers.map((number) => ({ ...pr, number }))
+		}
+		return [pr]
+	})
+}
+
+function buildEventPayload(eventName: string, options: HarnessOptions) {
+	const headRepository = options.fork ? "contributor/Zoo-Code" : "Zoo-Code-Org/Zoo-Code"
+	const pullRequestPayload =
+		eventName === "push"
+			? undefined
+			: {
+					number: 1437,
+					head: { repo: { full_name: headRepository } },
+					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				}
+	return eventName === "schedule"
+		? {}
+		: eventName === "issue_comment"
+			? {
+					issue: { number: 1437, pull_request: {} },
+					comment: { user: { login: options.issueCommentActor ?? "coderabbitai[bot]" } },
+				}
+			: eventName === "workflow_dispatch"
+				? { inputs: { pull_request_number: String(options.workflowDispatchPrNumber ?? 1437) } }
+				: eventName === "workflow_run"
+					? {
+							workflow_run: {
+								pull_requests:
+									options.workflowRunAssociated === false
+										? []
+										: (options.workflowRunPrNumbers ?? [1437]).map((number) => ({ number })),
+								head_repository:
+									options.workflowRunMissing === "repository"
+										? null
+										: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
+								head_branch:
+									options.workflowRunMissing === "branch"
+										? null
+										: (options.workflowRunHeadBranch ?? "feature/test"),
+								head_sha: options.workflowRunMissing === "sha" ? null : SHA,
+								id: 123456,
+							},
+						}
+					: {
+							action: "ready_for_review",
+							pull_request: pullRequestPayload,
+						}
+}
+
+/** Executes the embedded github-script workflow against deterministic GitHub API doubles. */
+async function runWorkflow(options: HarnessOptions = {}) {
+	const eventName = options.eventName ?? "pull_request_target"
+	const pr = buildHarnessPr(options)
 	const requiredContexts = options.requiredContexts ?? ["tests"]
 	const requiredRuns = (options.omitRequiredRuns ? [] : requiredContexts)
 		.filter((name) => name !== "Zoo Code / reconcile PR review state")
@@ -173,7 +257,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				]
 			: []),
 	]
-	const remoteLabels = new Set(pr.labels.map((label) => label.name))
+	const remoteLabels = options.sharedState?.labels ?? new Set(pr.labels.map((label) => label.name))
 
 	let addLabelsFailedOnce = false
 	const addLabels = vi.fn(async (args: { labels: string[] }) => {
@@ -205,17 +289,28 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		if (options.createCommentErrorStatus) {
 			throw Object.assign(new Error("Create comment failed"), { status: options.createCommentErrorStatus })
 		}
+		if (options.sharedState) {
+			options.sharedState.guide.body = args.body
+		}
 		return { data: { id: 11, user: { login: "github-actions[bot]" }, body: args.body } }
 	})
 	const updateComment = vi.fn(async (args: { comment_id: number; body: string }) => {
 		if (options.updateCommentErrorStatus) {
 			throw Object.assign(new Error("Update comment failed"), { status: options.updateCommentErrorStatus })
 		}
+		if (options.sharedState) {
+			options.sharedState.guide.body = args.body
+		}
 		return { data: { id: args.comment_id, user: { login: "github-actions[bot]" }, body: args.body } }
 	})
 	const listComments = vi.fn(async () => {
 		if (options.listCommentsErrorStatus) {
 			throw Object.assign(new Error("List comments failed"), { status: options.listCommentsErrorStatus })
+		}
+		if (options.sharedState) {
+			return options.sharedState.guide.body
+				? [{ id: 10, user: { login: "github-actions[bot]" }, body: options.sharedState.guide.body }]
+				: []
 		}
 		return existingComments
 	})
@@ -239,6 +334,9 @@ async function runWorkflow(options: HarnessOptions = {}) {
 					status: options.createCommitStatusErrorStatus,
 				})
 			}
+			if (options.sharedState) {
+				options.sharedState.gate.status = { state: args.state, description: args.description }
+			}
 			return { data: args }
 		},
 	)
@@ -256,19 +354,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		if (!permission) throw Object.assign(new Error("Not Found"), { status: 404 })
 		return { data: { permission } }
 	})
-	const listPullRequests = vi.fn(async ({ state }: { state?: string }) => {
-		if (state === "open" && options.prState === "closed") return []
-		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
-			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
-			if (options.workflowRunFallback === "sha-mismatch") {
-				return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
-			}
-			if (options.workflowRunFallback === "base-mismatch") {
-				return [{ ...pr, base: { ...pr.base, repo: { full_name: "another/repository" } } }]
-			}
-		}
-		return [pr]
-	})
+	const listPullRequests = createListPullRequests(options, eventName, pr)
 	let mergeabilityIndex = 0
 	const getPullRequest = vi.fn(async () => {
 		const mergeability = options.mergeabilitySequence?.[mergeabilityIndex++]
@@ -357,44 +443,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			},
 		},
 	}
-	const pullRequestPayload =
-		eventName === "push"
-			? undefined
-			: {
-					number: 1437,
-					head: { repo: { full_name: headRepository } },
-					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
-				}
-	const payload =
-		eventName === "schedule"
-			? {}
-			: eventName === "issue_comment"
-				? {
-						issue: { number: 1437, pull_request: {} },
-						comment: { user: { login: options.issueCommentActor ?? "coderabbitai[bot]" } },
-					}
-				: eventName === "workflow_dispatch"
-					? { inputs: { pull_request_number: String(options.workflowDispatchPrNumber ?? 1437) } }
-					: eventName === "workflow_run"
-						? {
-								workflow_run: {
-									pull_requests: options.workflowRunAssociated === false ? [] : [{ number: 1437 }],
-									head_repository:
-										options.workflowRunMissing === "repository"
-											? null
-											: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
-									head_branch:
-										options.workflowRunMissing === "branch"
-											? null
-											: (options.workflowRunHeadBranch ?? "feature/test"),
-									head_sha: options.workflowRunMissing === "sha" ? null : SHA,
-									id: 123456,
-								},
-							}
-						: {
-								action: "ready_for_review",
-								pull_request: pullRequestPayload,
-							}
+	const payload = buildEventPayload(eventName, options)
 	const context = {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
@@ -408,7 +457,19 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		setFailed,
 	}
 
-	await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
+	// The reconcile job runs one matrix shard per PR and receives the target
+	// through the job's PR_NUMBER env mapping.
+	const previousPrNumber = process.env.PR_NUMBER
+	process.env.PR_NUMBER = String(pr.number)
+	try {
+		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
+	} finally {
+		if (previousPrNumber === undefined) {
+			delete process.env.PR_NUMBER
+		} else {
+			process.env.PR_NUMBER = previousPrNumber
+		}
+	}
 
 	return {
 		addLabels,
@@ -426,6 +487,52 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		listPullRequests: github.rest.pulls.list,
 		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
 		permissionFor,
+	}
+}
+
+/** Executes the resolve job's embedded script against deterministic GitHub API doubles. */
+async function runResolve(options: HarnessOptions = {}) {
+	const eventName = options.eventName ?? "pull_request_target"
+	const pr = buildHarnessPr(options)
+	const listPullRequests = createListPullRequests(options, eventName, pr)
+	const getPullRequest = vi.fn(async () => ({ data: pr }))
+	const github = {
+		paginate: vi.fn(async (target: unknown, args: unknown) => {
+			if (typeof target !== "function") throw new Error("Unexpected paginate target")
+			return target(args)
+		}),
+		rest: {
+			pulls: {
+				get: getPullRequest,
+				list: listPullRequests,
+			},
+		},
+	}
+	const payload = buildEventPayload(eventName, options)
+	const context = {
+		eventName,
+		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
+		payload,
+	}
+	const setOutput = vi.fn()
+	const core = {
+		info: vi.fn(),
+		debug: vi.fn(),
+		warning: vi.fn(),
+		error: vi.fn(),
+		setFailed: vi.fn(),
+		setOutput,
+	}
+
+	await new AsyncFunction("github", "context", "core", resolveScript)(github, context, core)
+
+	const prNumbersOutput = setOutput.mock.calls.find(([name]) => name === "pr_numbers")?.[1] as string | undefined
+	return {
+		setOutput,
+		listPullRequests,
+		getPullRequest,
+		info: core.info,
+		prNumbers: () => (prNumbersOutput !== undefined ? (JSON.parse(prNumbersOutput) as number[]) : undefined),
 	}
 }
 
@@ -974,6 +1081,7 @@ describe("PR review-state workflow", () => {
 	})
 
 	it("clears awaiting-maintainer when a main push introduces conflicts", async () => {
+		const resolution = await runResolve({ eventName: "push" })
 		const result = await runWorkflow({
 			eventName: "push",
 			conflict: true,
@@ -981,7 +1089,8 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(workflow.on.push.branches).toContain("main")
-		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(resolution.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(resolution.prNumbers()).toEqual([1437])
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
@@ -1703,23 +1812,35 @@ describe("PR review-state workflow", () => {
 	})
 
 	it("lists open PRs during scheduled reconciliation", async () => {
+		const resolution = await runResolve({ eventName: "schedule" })
+
+		expect(resolution.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(resolution.prNumbers()).toEqual([1437])
+
 		const result = await runWorkflow({ eventName: "schedule" })
 
-		expect(result.listPullRequests).toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("reconciles only the requested PR during manual dispatch", async () => {
+		const resolution = await runResolve({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
+
+		expect(resolution.listPullRequests).not.toHaveBeenCalled()
+		expect(resolution.prNumbers()).toEqual([1437])
+
 		const result = await runWorkflow({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
-		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("reconciles the PR associated with a workflow run", async () => {
+		const resolution = await runResolve({ eventName: "workflow_run" })
+
+		expect(resolution.listPullRequests).not.toHaveBeenCalled()
+		expect(resolution.prNumbers()).toEqual([1437])
+
 		const result = await runWorkflow({ eventName: "workflow_run" })
 
-		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
@@ -1731,101 +1852,95 @@ describe("PR review-state workflow", () => {
 	})
 
 	it("resolves an unassociated same-repository workflow run by exact head", async () => {
-		const result = await runWorkflow({
+		const resolution = await runResolve({
 			eventName: "workflow_run",
 			workflowRunAssociated: false,
 			workflowRunFallback: "match",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(
+		expect(resolution.listPullRequests).toHaveBeenCalledWith(
 			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
 		)
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(resolution.prNumbers()).toEqual([1437])
 	})
 
 	it("ignores closed PRs when resolving an unassociated workflow run", async () => {
-		const result = await runWorkflow({
+		const resolution = await runResolve({
 			eventName: "workflow_run",
 			prState: "closed",
 			workflowRunAssociated: false,
 			workflowRunFallback: "match",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
-		expect(result.listPullRequests).toHaveBeenCalledWith(
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(resolution.listPullRequests).toHaveBeenCalledWith(
 			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
 		)
-		expect(result.getPullRequest).not.toHaveBeenCalled()
-		expect(result.createCommitStatus).not.toHaveBeenCalled()
-		expect(result.addLabels).not.toHaveBeenCalled()
-		expect(result.removeLabel).not.toHaveBeenCalled()
-		expect(result.createLabel).not.toHaveBeenCalled()
+		expect(resolution.getPullRequest).not.toHaveBeenCalled()
+		expect(resolution.prNumbers()).toEqual([])
 	})
 
 	it("resolves an unassociated fork workflow run by exact head", async () => {
-		const result = await runWorkflow({
+		const resolution = await runResolve({
 			eventName: "workflow_run",
 			workflowRunAssociated: false,
 			workflowRunFallback: "match",
 			fork: true,
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(
+		expect(resolution.listPullRequests).toHaveBeenCalledWith(
 			expect.objectContaining({ head: "contributor:feature/test", state: "open" }),
 		)
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(resolution.prNumbers()).toEqual([1437])
 	})
 
 	it("ignores an unassociated workflow run when the candidate head SHA differs", async () => {
-		const result = await runWorkflow({
+		const resolution = await runResolve({
 			eventName: "workflow_run",
 			workflowRunAssociated: false,
 			workflowRunFallback: "sha-mismatch",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalled()
-		expect(result.getPullRequest).not.toHaveBeenCalled()
-		expect(result.createCommitStatus).not.toHaveBeenCalled()
-		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(resolution.listPullRequests).toHaveBeenCalled()
+		expect(resolution.getPullRequest).not.toHaveBeenCalled()
+		expect(resolution.prNumbers()).toEqual([])
 	})
 
 	it("ignores an unassociated workflow run when the candidate base repository differs", async () => {
-		const result = await runWorkflow({
+		const resolution = await runResolve({
 			eventName: "workflow_run",
 			workflowRunAssociated: false,
 			workflowRunFallback: "base-mismatch",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
-		expect(result.getPullRequest).not.toHaveBeenCalled()
-		expect(result.createCommitStatus).not.toHaveBeenCalled()
-		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(resolution.getPullRequest).not.toHaveBeenCalled()
+		expect(resolution.prNumbers()).toEqual([])
 	})
 
 	it.each(["repository", "branch", "sha"] as const)(
 		"ignores an unassociated workflow run with missing %s metadata",
 		async (workflowRunMissing) => {
-			const result = await runWorkflow({
+			const resolution = await runResolve({
 				eventName: "workflow_run",
 				workflowRunAssociated: false,
 				workflowRunMissing,
 			})
 
-			expect(result.listPullRequests).not.toHaveBeenCalled()
-			expect(result.getPullRequest).not.toHaveBeenCalled()
-			expect(result.createCommitStatus).not.toHaveBeenCalled()
-			expect(result.addLabels).not.toHaveBeenCalled()
+			expect(resolution.listPullRequests).not.toHaveBeenCalled()
+			expect(resolution.getPullRequest).not.toHaveBeenCalled()
+			expect(resolution.prNumbers()).toEqual([])
 		},
 	)
 
 	it("does not sweep every PR when an unassociated workflow run has no exact match", async () => {
-		const result = await runWorkflow({ eventName: "workflow_run", workflowRunAssociated: false })
+		const resolution = await runResolve({ eventName: "workflow_run", workflowRunAssociated: false })
 
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
-		expect(result.listPullRequests).toHaveBeenCalledWith(
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(resolution.listPullRequests).toHaveBeenCalledWith(
 			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
 		)
-		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(resolution.prNumbers()).toEqual([])
 	})
 
 	it("invalidates prior automated and human reviews after a new push", async () => {
@@ -2237,22 +2352,32 @@ describe("PR review-state workflow", () => {
 	})
 })
 
-describe("PR review-state workflow concurrency group (#1707)", () => {
-	// Minimal evaluator for the exact GitHub expression subset used by
-	// workflow.concurrency.group: top-level `||` chains, `&&`, loose `==`,
-	// `github.` property paths, `[0]` indexing (null parent -> null),
-	// parenthesized operands, and string/number literals. GitHub expressions
-	// use loose truthiness, so `||`/`&&` return operand values rather than
-	// booleans and missing properties evaluate to null instead of throwing.
+describe("PR review-state workflow concurrency groups (#1707)", () => {
+	// Minimal evaluator for the exact GitHub expression subset used by the
+	// workflow- and job-level concurrency groups: top-level `||` chains, `&&`,
+	// loose `==`, `github.`/`matrix.` property paths, `[0]` indexing (null
+	// parent -> null), parenthesized operands, and string/number literals.
+	// GitHub expressions use loose truthiness, so `||`/`&&` return operand
+	// values rather than booleans and missing properties evaluate to null
+	// instead of throwing.
 	interface GithubExpressionContext {
 		event_name: string
 		run_id: number
 		event: {
 			pull_request?: { number: number }
 			issue?: { number: number }
-			workflow_run?: { pull_requests: Array<{ number: number }> }
+			workflow_run?: { id?: number; pull_requests?: Array<{ number: number }> }
 			inputs?: { pull_request_number: number }
 		}
+	}
+
+	interface MatrixContext {
+		pr_number?: number | null
+	}
+
+	interface ExpressionRoots {
+		github: GithubExpressionContext
+		matrix?: MatrixContext
 	}
 
 	function splitTopLevel(expression: string, operator: "||" | "&&" | "=="): string[] {
@@ -2292,8 +2417,8 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		return left === right
 	}
 
-	function resolvePath(path: string, github: GithubExpressionContext): unknown {
-		let value: unknown = github
+	function resolvePath(path: string, roots: ExpressionRoots): unknown {
+		let value: unknown = roots
 		for (const segment of path.split(".")) {
 			if (value === null || value === undefined) {
 				return null
@@ -2313,7 +2438,7 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		return value ?? null
 	}
 
-	function evaluatePrimary(expression: string, github: GithubExpressionContext): unknown {
+	function evaluatePrimary(expression: string, roots: ExpressionRoots): unknown {
 		const current = expression.trim()
 		if (current.startsWith("(")) {
 			// Strip the parentheses only when the first one wraps the whole expression.
@@ -2326,7 +2451,7 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 				}
 				if (depth === 0) {
 					if (index === current.length - 1) {
-						return evaluateExpression(current.slice(1, -1), github)
+						return evaluateExpression(current.slice(1, -1), roots)
 					}
 					break
 				}
@@ -2338,24 +2463,24 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		if (/^\d+$/.test(current)) {
 			return Number(current)
 		}
-		if (current.startsWith("github.")) {
-			return resolvePath(current.slice("github.".length), github)
+		if (/^(github|matrix)\./.test(current)) {
+			return resolvePath(current, roots)
 		}
-		return evaluateExpression(current, github)
+		return evaluateExpression(current, roots)
 	}
 
-	function evaluateComparison(expression: string, github: GithubExpressionContext): unknown {
+	function evaluateComparison(expression: string, roots: ExpressionRoots): unknown {
 		const parts = splitTopLevel(expression, "==")
 		if (parts.length === 1) {
-			return evaluatePrimary(parts[0], github)
+			return evaluatePrimary(parts[0], roots)
 		}
-		return looseEquals(evaluatePrimary(parts[0], github), evaluatePrimary(parts[1], github))
+		return looseEquals(evaluatePrimary(parts[0], roots), evaluatePrimary(parts[1], roots))
 	}
 
-	function evaluateAndChain(expression: string, github: GithubExpressionContext): unknown {
+	function evaluateAndChain(expression: string, roots: ExpressionRoots): unknown {
 		let result: unknown = true
 		for (const part of splitTopLevel(expression, "&&")) {
-			result = evaluateComparison(part, github)
+			result = evaluateComparison(part, roots)
 			if (!isTruthy(result)) {
 				return result
 			}
@@ -2363,10 +2488,10 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		return result
 	}
 
-	function evaluateExpression(expression: string, github: GithubExpressionContext): unknown {
+	function evaluateExpression(expression: string, roots: ExpressionRoots): unknown {
 		let result: unknown = null
 		for (const part of splitTopLevel(expression, "||")) {
-			result = evaluateAndChain(part, github)
+			result = evaluateAndChain(part, roots)
 			if (isTruthy(result)) {
 				return result
 			}
@@ -2374,12 +2499,21 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		return result
 	}
 
-	function concurrencyGroupFor(github: GithubExpressionContext): string {
-		const groupTemplate = workflow.concurrency.group as string
-		return groupTemplate.replace(/\$\{\{(.+?)\}\}/s, (_match, expression: string) => {
-			const value = evaluateExpression(expression, github)
+	function evaluateTemplate(template: string, roots: ExpressionRoots): string {
+		return template.replace(/\$\{\{(.+?)\}\}/s, (_match, expression: string) => {
+			const value = evaluateExpression(expression, roots)
 			return isTruthy(value) ? String(value) : ""
 		})
+	}
+
+	/** Evaluates the workflow-level concurrency group for an event context. */
+	function workflowGroupFor(github: GithubExpressionContext): string {
+		return evaluateTemplate(workflow.concurrency.group as string, { github })
+	}
+
+	/** Evaluates the mutating job's per-shard concurrency group for a matrix shard. */
+	function shardGroupFor(github: GithubExpressionContext, matrix: MatrixContext): string {
+		return evaluateTemplate(workflow.jobs.reconcile.concurrency.group as string, { github, matrix })
 	}
 
 	function contextFor(overrides: {
@@ -2394,36 +2528,33 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		}
 	}
 
-	it("keeps cancel-in-progress disabled", () => {
+	it("keeps cancel-in-progress disabled at both levels", () => {
 		expect(workflow.concurrency["cancel-in-progress"]).toBe(false)
+		expect(workflow.jobs.reconcile.concurrency["cancel-in-progress"]).toBe(false)
 	})
 
-	it("keys every per-PR event type for the same PR to the same group", () => {
+	it("keys every single-PR event type for the same PR to the same workflow-level group", () => {
 		const contexts = [
 			contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1664 } } }),
 			contextFor({ event_name: "pull_request_review", event: { pull_request: { number: 1664 } } }),
 			// CodeRabbit status comments arrive as issue_comment events on the PR.
 			contextFor({ event_name: "issue_comment", event: { issue: { number: 1664 } } }),
 			contextFor({ event_name: "workflow_dispatch", event: { inputs: { pull_request_number: 1664 } } }),
-			contextFor({
-				event_name: "workflow_run",
-				event: { workflow_run: { pull_requests: [{ number: 1664 }] } },
-			}),
 		]
 
 		for (const context of contexts) {
-			expect(concurrencyGroupFor(context)).toBe("label-pr-review-state-1664")
+			expect(workflowGroupFor(context)).toBe("label-pr-review-state-1664")
 		}
 	})
 
-	it("keys different PRs to different groups so unrelated triggers cannot starve a pending run", () => {
+	it("keys different PRs to different workflow-level groups so unrelated triggers cannot starve a pending run", () => {
 		// The #1707 regression: with one shared group, a trigger for PR B superseded
 		// PR A's pending reconcile. Per-PR keys make that supersession impossible.
 		const prA = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1664 } } })
 		const prB = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1707 } } })
 
-		const groupA = concurrencyGroupFor(prA)
-		const groupB = concurrencyGroupFor(prB)
+		const groupA = workflowGroupFor(prA)
+		const groupB = workflowGroupFor(prB)
 		expect(groupA).toBe("label-pr-review-state-1664")
 		expect(groupB).toBe("label-pr-review-state-1707")
 		expect(groupB).not.toBe(groupA)
@@ -2435,37 +2566,225 @@ describe("PR review-state workflow concurrency group (#1707)", () => {
 		const issueComment = contextFor({ event_name: "issue_comment", event: { issue: { number: 1707 } } })
 		const prEvent = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1707 } } })
 
-		expect(concurrencyGroupFor(issueComment)).toBe(concurrencyGroupFor(prEvent))
+		expect(workflowGroupFor(issueComment)).toBe(workflowGroupFor(prEvent))
 	})
 
-	it("falls back to unique per-run groups for workflow runs without an associated PR", () => {
-		// Fork workflow_run events leave pull_requests empty, as do branch runs with
-		// no open PR. They must never be superseded by (or supersede) another run.
-		const forkRunA = contextFor({
+	it("keys workflow_run events by the unique triggering run id rather than a PR number", () => {
+		// A workflow_run can reconcile several associated PRs; keying by the first
+		// PR's number would let an unrelated event for that PR supersede the whole
+		// run and starve the remaining PRs. The run id is unique per triggering
+		// run, so multi-PR runs can neither supersede nor be superseded by
+		// unrelated events.
+		const multiPrRun = contextFor({
 			event_name: "workflow_run",
-			run_id: 35477088534,
-			event: { workflow_run: { pull_requests: [] } },
+			event: { workflow_run: { id: 35477088534, pull_requests: [{ number: 1664 }, { number: 1707 }] } },
 		})
-		const forkRunB = contextFor({
+		expect(workflowGroupFor(multiPrRun)).toBe("label-pr-review-state-35477088534")
+		expect(workflowGroupFor(multiPrRun)).not.toBe("label-pr-review-state-1664")
+		expect(workflowGroupFor(multiPrRun)).not.toBe("label-pr-review-state-1707")
+
+		const otherRun = contextFor({
 			event_name: "workflow_run",
-			run_id: 35477090001,
-			event: { workflow_run: { pull_requests: [] } },
+			event: { workflow_run: { id: 35477090001, pull_requests: [{ number: 1664 }] } },
+		})
+		expect(workflowGroupFor(otherRun)).toBe("label-pr-review-state-35477090001")
+		expect(workflowGroupFor(otherRun)).not.toBe(workflowGroupFor(multiPrRun))
+	})
+
+	it("keys fork workflow runs without associated PRs by run id instead of falling through", () => {
+		// Fork workflow_run events leave pull_requests empty; the run id key
+		// inherently covers them so they never contend with other runs.
+		const forkRun = contextFor({
+			event_name: "workflow_run",
+			event: { workflow_run: { id: 777000111, pull_requests: [] } },
 		})
 
-		const groupA = concurrencyGroupFor(forkRunA)
-		const groupB = concurrencyGroupFor(forkRunB)
-		expect(groupA).toBe("label-pr-review-state-35477088534")
-		expect(groupB).toBe("label-pr-review-state-35477090001")
-		expect(groupA).not.toBe(groupB)
-		expect(groupA).not.toBe("label-pr-review-state-1664")
-		expect(groupB).not.toBe("label-pr-review-state-1664")
+		expect(workflowGroupFor(forkRun)).toBe("label-pr-review-state-777000111")
+		expect(workflowGroupFor(forkRun)).not.toBe("label-pr-review-state-21057")
 	})
 
 	it("shares a single sweep group for the hourly schedule and pushes to main", () => {
 		const scheduled = contextFor({ event_name: "schedule" })
 		const push = contextFor({ event_name: "push" })
 
-		expect(concurrencyGroupFor(scheduled)).toBe("label-pr-review-state-sweep")
-		expect(concurrencyGroupFor(push)).toBe("label-pr-review-state-sweep")
+		expect(workflowGroupFor(scheduled)).toBe("label-pr-review-state-sweep")
+		expect(workflowGroupFor(push)).toBe("label-pr-review-state-sweep")
+	})
+
+	it("falls back to a unique per-run workflow-level group when no event field resolves", () => {
+		const runA = contextFor({ event_name: "repository_dispatch", run_id: 101 })
+		const runB = contextFor({ event_name: "repository_dispatch", run_id: 102 })
+
+		expect(workflowGroupFor(runA)).toBe("label-pr-review-state-101")
+		expect(workflowGroupFor(runB)).toBe("label-pr-review-state-102")
+	})
+
+	it("keys every mutating shard per PR in one shared job-level group namespace", () => {
+		// The serialization point for a PR: direct-event shards, sweep-resolved
+		// shards, and workflow_run-resolved shards must all map to the identical
+		// job-level group so their non-atomic writes can never interleave.
+		const triggerContexts = [
+			contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1664 } } }),
+			contextFor({ event_name: "issue_comment", event: { issue: { number: 1664 } } }),
+			contextFor({ event_name: "workflow_dispatch", event: { inputs: { pull_request_number: 1664 } } }),
+			contextFor({
+				event_name: "workflow_run",
+				event: { workflow_run: { id: 999, pull_requests: [{ number: 1664 }] } },
+			}),
+			contextFor({ event_name: "schedule" }),
+			contextFor({ event_name: "push" }),
+		]
+
+		for (const context of triggerContexts) {
+			expect(shardGroupFor(context, { pr_number: 1664 })).toBe("label-pr-review-state-1664")
+		}
+		expect(shardGroupFor(triggerContexts[0], { pr_number: 1707 })).toBe("label-pr-review-state-1707")
+		expect(shardGroupFor(triggerContexts[0], { pr_number: 1707 })).not.toBe("label-pr-review-state-1664")
+	})
+
+	it("keeps the empty-resolution shard fallback unique per run", () => {
+		const runA = contextFor({
+			event_name: "workflow_run",
+			run_id: 555000111,
+			event: { workflow_run: { id: 1, pull_requests: [] } },
+		})
+		const runB = contextFor({
+			event_name: "workflow_run",
+			run_id: 555000222,
+			event: { workflow_run: { id: 2, pull_requests: [] } },
+		})
+
+		const groupA = shardGroupFor(runA, { pr_number: null })
+		const groupB = shardGroupFor(runB, { pr_number: null })
+		expect(groupA).toBe("label-pr-review-state-555000111")
+		expect(groupB).toBe("label-pr-review-state-555000222")
+		expect(groupA).not.toBe(groupB)
+		expect(groupA).not.toBe("label-pr-review-state-1664")
+	})
+
+	it("fans out one serialized shard per resolved PR", () => {
+		expect(workflow.jobs.reconcile.needs).toBe("resolve")
+		expect(workflow.jobs.reconcile.strategy["fail-fast"]).toBe(false)
+		expect(String(workflow.jobs.reconcile.strategy.matrix.pr_number)).toContain(
+			"fromJSON(needs.resolve.outputs.pr_numbers)",
+		)
+		expect(String(workflow.jobs.resolve.outputs.pr_numbers)).toContain("steps.resolve.outputs.pr_numbers")
+		expect(String(workflow.jobs.reconcile.env.PR_NUMBER)).toContain("matrix.pr_number")
+		expect(String(workflow.jobs.reconcile.if)).toContain("needs.resolve.outputs.pr_numbers != '[]'")
+	})
+
+	it("resolves a direct single-PR event to one shard carrying the shared per-PR group", async () => {
+		const resolution = await runResolve({ eventName: "pull_request_target" })
+
+		expect(resolution.prNumbers()).toEqual([1437])
+
+		const context = contextFor({ event_name: "pull_request_target", event: { pull_request: { number: 1437 } } })
+		expect(shardGroupFor(context, { pr_number: resolution.prNumbers()?.[0] })).toBe("label-pr-review-state-1437")
+	})
+
+	it("resolves a sweep to one shard per open PR, each serializing with direct runs for that PR", async () => {
+		const resolution = await runResolve({ eventName: "schedule", openPrNumbers: [1664, 1665, 1666] })
+
+		expect(resolution.prNumbers()).toEqual([1664, 1665, 1666])
+
+		const sweepContext = contextFor({ event_name: "schedule" })
+		const groups = (resolution.prNumbers() ?? []).map((prNumber) =>
+			shardGroupFor(sweepContext, { pr_number: prNumber }),
+		)
+		expect(groups).toEqual([
+			"label-pr-review-state-1664",
+			"label-pr-review-state-1665",
+			"label-pr-review-state-1666",
+		])
+
+		// A direct event for one of those PRs lands in the identical group, so the
+		// sweep shard and the direct shard serialize instead of racing.
+		const directContext = contextFor({
+			event_name: "pull_request_target",
+			event: { pull_request: { number: 1665 } },
+		})
+		expect(shardGroupFor(directContext, { pr_number: 1665 })).toBe(groups[1])
+	})
+
+	it("resolves every PR associated with a multi-PR workflow run", async () => {
+		const resolution = await runResolve({ eventName: "workflow_run", workflowRunPrNumbers: [1664, 1707] })
+
+		expect(resolution.prNumbers()).toEqual([1664, 1707])
+
+		const context = contextFor({
+			event_name: "workflow_run",
+			event: { workflow_run: { id: 123456, pull_requests: [{ number: 1664 }, { number: 1707 }] } },
+		})
+		expect(workflowGroupFor(context)).toBe("label-pr-review-state-123456")
+		expect(shardGroupFor(context, { pr_number: 1664 })).toBe("label-pr-review-state-1664")
+		expect(shardGroupFor(context, { pr_number: 1707 })).toBe("label-pr-review-state-1707")
+	})
+
+	it("demonstrates the stale-overwrite race that per-PR shard serialization prevents", async () => {
+		// The reconcile script is intentionally non-atomic: it reads CI, reviews,
+		// labels, and the guide comment, then writes the gate status, labels, and
+		// guide. Two shards for the same PR running concurrently can interleave
+		// those reads and writes. This simulates the interleave deterministically:
+		// a shard working from a stale snapshot lands its writes after a fresher
+		// shard and clobbers the newer gate status and guide comment. The shared
+		// job-level group keyed per PR is what makes that interleave impossible
+		// in production.
+		const sharedState: SharedState = {
+			labels: new Set(["awaiting-coderabbit"]),
+			guide: { body: null },
+			gate: { status: null },
+		}
+
+		// Fresher shard: CI is green and automated review approved the head commit.
+		const fresh = await runWorkflow({
+			sharedState,
+			labels: ["awaiting-coderabbit"],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(fresh.setFailed).not.toHaveBeenCalled()
+		expect(sharedState.labels.has("awaiting-maintainer")).toBe(true)
+		expect(sharedState.labels.has("awaiting-coderabbit")).toBe(false)
+		expect(sharedState.gate.status?.state).toBe("success")
+		expect(sharedState.guide.body).toContain("Awaiting fresh human maintainer")
+
+		// Stale shard: its snapshot still shows CI pending, so its writes land on
+		// top of the fresher shard's gate status and guide comment.
+		const stale = await runWorkflow({
+			sharedState,
+			labels: ["awaiting-coderabbit"],
+			requiredStatus: "in_progress",
+		})
+
+		expect(stale.setFailed).not.toHaveBeenCalled()
+		expect(sharedState.gate.status?.state).toBe("pending")
+		expect(sharedState.gate.status?.description).toContain("Wait for required CI checks")
+		expect(sharedState.guide.body).toContain("Wait for required CI checks")
+
+		// Both shards map to the identical job-level group for this PR, so GitHub
+		// serializes them (one running per group, newest pending wins) and this
+		// interleaving cannot occur in production.
+		const directContext = contextFor({
+			event_name: "pull_request_target",
+			event: { pull_request: { number: 1437 } },
+		})
+		const sweepContext = contextFor({ event_name: "schedule" })
+		expect(shardGroupFor(directContext, { pr_number: 1437 })).toBe("label-pr-review-state-1437")
+		expect(shardGroupFor(sweepContext, { pr_number: 1437 })).toBe(shardGroupFor(directContext, { pr_number: 1437 }))
+	})
+
+	it("tolerates label-bootstrap creation races between concurrent shards", async () => {
+		const result = await runWorkflow({ labelLookupStatus: 404, createLabelStatus: 422 })
+
+		expect(result.createLabel).toHaveBeenCalled()
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 })
