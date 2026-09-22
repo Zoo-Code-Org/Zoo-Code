@@ -273,8 +273,33 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		// Vertex rejects requests that end with a model turn, which can occur when
 		// resuming after an interrupted response. Preserve that turn and explicitly
 		// ask the model to continue rather than dropping conversation history.
-		if (this.isVertex && contents.at(-1)?.role === "model") {
-			contents.push({ role: "user", parts: [{ text: "Continue." }] })
+		const lastContent = contents.at(-1)
+		if (this.isVertex && lastContent?.role === "model") {
+			// If the trailing model turn contains unanswered function calls (e.g. the
+			// response was interrupted mid-tool-call), a plain-text turn would break
+			// Gemini's functionCall -> functionResponse pairing, so synthesize benign
+			// function responses instead. The functionCall parts already carry the tool
+			// name from convertAnthropicMessageToGemini (via toolIdToName).
+			const functionCallNames = (lastContent.parts ?? [])
+				.map((part) => part.functionCall?.name)
+				.filter((name): name is string => Boolean(name))
+			if (functionCallNames.length > 0) {
+				contents.push({
+					role: "user",
+					parts: functionCallNames.map((name) => ({
+						functionResponse: {
+							name,
+							response: {
+								name,
+								content:
+									"Tool execution was interrupted before a result was recorded. Continue without the result of this call.",
+							},
+						},
+					})),
+				})
+			} else {
+				contents.push({ role: "user", parts: [{ text: "Continue." }] })
+			}
 		}
 
 		// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS).

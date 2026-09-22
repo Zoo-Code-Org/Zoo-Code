@@ -135,6 +135,50 @@ describe("VertexHandler", () => {
 				}),
 			)
 		})
+
+		it("synthesizes a functionResponse when Vertex history ends with an unanswered functionCall", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const interruptedToolCallMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read the file" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "Reading the file." },
+						{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "foo.ts" } },
+					],
+				},
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, interruptedToolCallMessages))
+
+			const contents = generateContentStream.mock.calls[0][0].contents as Array<{
+				role?: string
+				parts?: Array<{ functionCall?: { name?: string }; functionResponse?: unknown; text?: string }>
+			}>
+
+			// The trailing model turn ends with the unanswered functionCall.
+			const lastModelTurn = contents.at(-2)
+			expect(lastModelTurn?.role).toBe("model")
+			expect(lastModelTurn?.parts?.at(-1)?.functionCall?.name).toBe("read_file")
+
+			// The continuation pairs that functionCall with a synthesized functionResponse
+			// instead of a plain-text turn, preserving Gemini's required pairing.
+			expect(contents.at(-1)).toEqual({
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "read_file",
+							response: {
+								name: "read_file",
+								content: expect.any(String),
+							},
+						},
+					},
+				],
+			})
+		})
 	})
 
 	describe("completePrompt", () => {
