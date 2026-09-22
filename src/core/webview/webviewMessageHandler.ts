@@ -1114,8 +1114,6 @@ export const webviewMessageHandler = async (
 			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
 			break
 		case RouterModelsMessageType.requestRouterModels: {
-			const { apiConfiguration } = await provider.getState()
-
 			// Optional single provider filter from webview
 			const requestedProvider = message?.values?.provider
 			const providerFilter = requestedProvider ? toRouterName(requestedProvider) : undefined
@@ -1124,8 +1122,9 @@ export const webviewMessageHandler = async (
 			const shouldRefresh = message?.values?.refresh === true
 
 			// Optional request identity: when present, the fetch is cancellable from the webview
-			// via cancelRouterModelsRequest. The controller's signal is threaded into every
-			// candidate's fetch options so an abort stops the modelCache wait for this request.
+			// via cancelRouterModelsRequest. Registered BEFORE the first await so a cancellation
+			// arriving while setup is still in flight (e.g. during getState) still finds the
+			// controller instead of racing a not-yet-created registration.
 			const requestId = message?.values?.requestId
 			let requestController: AbortController | undefined
 			if (typeof requestId === "string" && requestId.length > 0) {
@@ -1155,6 +1154,37 @@ export const webviewMessageHandler = async (
 							[providerIdentifiers.nanogpt]: {},
 							[providerIdentifiers.kimiCode]: {},
 						}
+
+				// Consistent answer for an aborted request: the same aggregate shape the normal
+				// flow posts, with every provider entry left {} (no fetch was attempted, so no
+				// per-provider error events are emitted). A filtered response still carries the
+				// requested provider's entry, mirroring the normal flow's invariant. The signal
+				// is checked at each setup boundary so a cancellation landing during any await
+				// skips the remaining work.
+				const postAbortedAggregate = () => {
+					if (providerFilter && !(providerFilter in routerModels)) {
+						routerModels[providerFilter] = {}
+					}
+					return provider.postMessageToWebview({
+						type: RouterModelsMessageType.routerModels,
+						routerModels,
+						values: providerFilter ? { provider: requestedProvider } : undefined,
+					})
+				}
+
+				// Cancelled before or during getState: skip setup entirely.
+				if (requestController?.signal.aborted) {
+					await postAbortedAggregate()
+					break
+				}
+
+				const { apiConfiguration } = await provider.getState()
+
+				// Cancelled during getState: skip the flush/refresh work and candidate building.
+				if (requestController?.signal.aborted) {
+					await postAbortedAggregate()
+					break
+				}
 
 				const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 					try {
@@ -1441,6 +1471,13 @@ export const webviewMessageHandler = async (
 				if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 					const targetCandidate = modelFetchPromises[0]
 					await flushModels(targetCandidate.options, true)
+				}
+
+				// Cancelled during the flush/refresh awaits (credential flushes, OAuth token
+				// lookup, explicit refresh): skip starting the candidate fetches.
+				if (requestController?.signal.aborted) {
+					await postAbortedAggregate()
+					break
 				}
 
 				const results = await Promise.allSettled(

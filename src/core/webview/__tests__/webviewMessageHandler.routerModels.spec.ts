@@ -981,4 +981,47 @@ describe("webviewMessageHandler - requestRouterModels cancellation", () => {
 		})
 		expect(settledSignal?.aborted).toBe(false)
 	})
+
+	it("honors a cancellation that arrives while getState is still pending", async () => {
+		// Deterministic setup race: the request handler registers synchronously at message
+		// receipt, then blocks on getState. The cancel lands while getState is unresolved.
+		let resolveGetState: ((state: unknown) => void) | undefined
+		mockProvider.getState.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveGetState = resolve
+				}),
+		)
+
+		const requestPromise = webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter, requestId: "req-race" },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-race" },
+		})
+
+		resolveGetState!({ apiConfiguration: {} })
+		await requestPromise
+
+		// The aborted request never started a candidate fetch...
+		expect(getModelsMock).not.toHaveBeenCalled()
+		// ...but still answered with the aggregate shape, with the provider entry empty —
+		// the same contract as a request whose candidates all came back empty.
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(c: unknown[]) => (c[0] as { type?: string } | undefined)?.type === RouterModelsMessageType.routerModels,
+		)
+		if (!response) throw new Error("Expected routerModels response")
+		expect((response[0] as { routerModels?: Record<string, unknown> }).routerModels).toEqual({
+			[providerIdentifiers.openrouter]: {},
+		})
+
+		// No dangling registration: a duplicate cancel for the same id no-ops.
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-race" },
+		})
+	})
 })
