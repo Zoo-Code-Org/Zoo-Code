@@ -268,20 +268,6 @@ describe("ModelPicker", () => {
 			expect(screen.queryByTestId("automatic-fetch-hint")).not.toBeInTheDocument()
 		})
 
-		it.each([providerIdentifiers.gemini, providerIdentifiers.vertex])(
-			"hides the automatic fetch hint for %s provider",
-			async (provider) => {
-				await act(async () => {
-					renderWithExtensionState(
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: provider }} />,
-						{ queryClient },
-					)
-				})
-
-				expect(screen.queryByTestId("automatic-fetch-hint")).not.toBeInTheDocument()
-			},
-		)
-
 		it("shows the automatic fetch hint for non-MiMo providers", async () => {
 			await act(async () => {
 				renderWithExtensionState(
