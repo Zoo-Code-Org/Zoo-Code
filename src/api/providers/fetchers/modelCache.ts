@@ -123,11 +123,10 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 // being skipped for both.
 // gemini is in both this set and URL_SCOPED_PROVIDERS: its catalog varies per API key and
 // custom base URLs (googleGeminiBaseUrl) can point at a different server entirely.
-// vertex is deliberately in NEITHER set: its options carry no apiKey/baseUrl discriminator
-// (GetModelsOptions scopes the key on those two fields only), and the listed gemini-* catalog
-// is global to the project/region rather than per credential. getCacheKey() therefore falls
-// back to the bare provider name, and the 5-minute memory/disk TTL bounds how stale a cached
-// catalog can get after the underlying project gains or loses model access.
+// vertex is deliberately in NEITHER set: its catalog carries no apiKey/baseUrl discriminator.
+// Instead getCacheKey() scopes vertex by projectId + effective region (see VERTEX_DEFAULT_REGION
+// below): the gemini-* catalog is per project/location, so two locations must never share an
+// entry, and the 5-minute memory/disk TTL bounds staleness after access changes.
 const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
 	providerIdentifiers.poe, // Per-account model availability
@@ -138,6 +137,14 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
 ])
+
+// Vertex catalogs are scoped to a project AND region: a model available in us-central1 may
+// be absent in europe-west1, so the same provider name across two locations must never share
+// a cache entry. projectId/region are identifiers rather than credentials, so they appear
+// verbatim in the key. Requests without a projectId (which cannot reach the fetcher) key on
+// the region alone; region defaults mirror the SDK's own default so an explicit region and
+// the unset default map to the same entry.
+const VERTEX_DEFAULT_REGION = "us-central1"
 
 // Providers whose model lists are scoped to the signed-in user (e.g. per-account
 // allowlists or org policies). For these we MUST NOT cache results on disk or
@@ -207,6 +214,8 @@ function deriveApiKeyDiscriminator(apiKey: string): string {
  *   from the API key so that two different API keys on the same server never share a cache
  *   entry (relevant when the server enforces per-key model allowlists, e.g. LiteLLM, Poe,
  *   Requesty). See deriveApiKeyDiscriminator for why the value cannot be reversed to the key.
+ * - Vertex is scoped by projectId + effective region: the catalog differs per project and
+ *   location, so neither may collapse into a bare provider entry.
  */
 function getCacheKey(options: GetModelsOptions): string {
 	const { provider } = options
@@ -219,9 +228,15 @@ function getCacheKey(options: GetModelsOptions): string {
 	// Strip trailing slashes so "http://host:4000/" and "http://host:4000" map to the same key.
 	const urlPart = isUrlScoped && options.baseUrl ? options.baseUrl.replace(/\/+$/, "") : undefined
 	const keyPart = isKeyScoped && options.apiKey ? deriveApiKeyDiscriminator(options.apiKey) : undefined
+	// Vertex: scope by project + effective region (identifiers, not credentials).
+	const vertexPart =
+		options.provider === providerIdentifiers.vertex
+			? `${options.projectId ?? ""}/${options.region ?? VERTEX_DEFAULT_REGION}`
+			: undefined
 
 	if (urlPart && keyPart) return `${provider}:${urlPart}:${keyPart}`
 	if (urlPart) return `${provider}:${urlPart}`
+	if (vertexPart) return `${provider}:${vertexPart}`
 	if (keyPart) return `${provider}:${keyPart}`
 	return provider
 }
@@ -263,6 +278,12 @@ export function sanitizeCacheKeyForLog(cacheKey: string): string {
 		if (!urlPart) {
 			// Key-scoped provider without a baseUrl ("gemini:abcd1234").
 			return digest ? `${provider}:${digest}` : provider
+		}
+
+		if (provider === providerIdentifiers.vertex && /^[a-z0-9-]*\/[a-z0-9-]+$/.test(urlPart)) {
+			// Vertex keys scope by `projectId/region` — identifiers, not credentials, and the
+			// character class cannot smuggle userinfo/query/fragment markers. Log verbatim.
+			return [provider, urlPart, digest].filter((part) => part !== undefined).join(":")
 		}
 
 		// Throws for anything that is not an absolute URL — fail closed below.

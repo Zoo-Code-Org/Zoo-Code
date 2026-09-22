@@ -1265,11 +1265,10 @@ describe("Gemini url+key-scoped cache isolation", () => {
 	})
 })
 
-describe("Vertex provider-scoped cache identity", () => {
+describe("Vertex project+region-scoped cache identity", () => {
 	// Vertex is in NEITHER URL_SCOPED_PROVIDERS nor KEY_SCOPED_PROVIDERS (modelCache.ts):
-	// its options carry no apiKey/baseUrl discriminator and the gemini-* catalog is global
-	// to the project/region, so getCacheKey() falls back to the bare provider name and the
-	// 5-minute TTL bounds staleness.
+	// instead getCacheKey() scopes it by projectId + effective region, because the gemini-*
+	// catalog differs per project/location and the two locations must never share an entry.
 	const vertexCatalog = {
 		"gemini-3.7-flash": {
 			maxTokens: 65_536,
@@ -1284,20 +1283,49 @@ describe("Vertex provider-scoped cache identity", () => {
 		mockGetVertexModels.mockResolvedValue(vertexCatalog)
 	})
 
-	it("falls back to the bare provider name regardless of project, region, or credentials", async () => {
+	it("keys the catalog per project+region and reuses the entry for an identical combo", async () => {
 		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
 		mockCache.get.mockReturnValue(undefined)
 
 		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a", region: "us-central1" })
 		await getModels({
 			provider: providerIdentifiers.vertex,
+			projectId: "project-a",
+			region: "us-central1",
+			keyFile: "/keys/sa.json",
+		})
+		await getModels({
+			provider: providerIdentifiers.vertex,
 			projectId: "project-b",
 			region: "europe-west1",
-			keyFile: "/keys/sa.json",
 		})
 
 		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
-		expect(cacheKeys).toEqual(["vertex", "vertex"])
+		// Same project+region (different credential route) reuses one entry; a different
+		// project or region gets its own.
+		expect(cacheKeys).toEqual([
+			"vertex:project-a/us-central1",
+			"vertex:project-a/us-central1",
+			"vertex:project-b/europe-west1",
+		])
+	})
+
+	it("maps an unset region to the SDK default region and a missing project to the region-only key", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a" })
+		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a", region: "us-central1" })
+		await getModels({ provider: providerIdentifiers.vertex, region: "europe-west1" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		// Explicit us-central1 and the unset default collapse into the same entry; a request
+		// without a projectId keys on the region alone instead of crashing the key builder.
+		expect(cacheKeys).toEqual([
+			"vertex:project-a/us-central1",
+			"vertex:project-a/us-central1",
+			"vertex:/europe-west1",
+		])
 	})
 })
 
@@ -1924,6 +1952,22 @@ describe("credential redaction in cache-key logs", () => {
 			expect(sanitizeCacheKeyForLog(key)).toBe(
 				`${providerIdentifiers.litellm}:https://proxy.example.com:4000<path>`,
 			)
+		})
+
+		it("logs the vertex project/region scope verbatim and still fails closed on smuggled markers", () => {
+			// projectId/region are identifiers, not credentials.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:my-project/us-central1`)).toBe(
+				`${providerIdentifiers.vertex}:my-project/us-central1`,
+			)
+			// The region-only shape (no projectId) is equally loggable.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:/us-central1`)).toBe(
+				`${providerIdentifiers.vertex}:/us-central1`,
+			)
+			// A vertex-shaped key smuggling URL components outside the safe character class fails closed.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:my-project/us-central1?x=1`)).toBe(
+				"<redacted>",
+			)
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:evil@host/path`)).toBe("<redacted>")
 		})
 	})
 
