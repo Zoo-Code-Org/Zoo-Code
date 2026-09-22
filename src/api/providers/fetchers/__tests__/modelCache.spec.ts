@@ -64,13 +64,13 @@ vi.mock("../../../core/config/ContextProxy", () => ({
 
 // Then imports
 import { getEventListeners } from "events"
-import type { Mock, Mocked } from "vitest"
+import type { Mock, MockInstance, Mocked } from "vitest"
 import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModels, getModelsFromCache } from "../modelCache"
+import { getModels, getModelsFromCache, sanitizeCacheKeyForLog } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
@@ -1846,4 +1846,95 @@ it("ignores the caller signal on the auth-scoped bypass without entering the fli
 	} finally {
 		boundSpy.mockRestore()
 	}
+})
+
+describe("credential redaction in cache-key logs", () => {
+	// A free-form base URL (googleGeminiBaseUrl, litellm baseUrl, ...) can embed credentials
+	// in userinfo/query/fragment. The compound cache key must keep the raw URL for storage
+	// identity, but every log line derived from it must be redacted (modelCache.ts sanitizes
+	// at each console.error site that embeds a cache key).
+	const credentialBaseUrl = "https://user:pass@proxy.example.com:8443/v1beta?api_key=topsecret#frag"
+
+	let mockCache: Mocked<NodeCache>
+	let consoleErrorSpy: MockInstance<typeof console.error>
+
+	const loggedOutput = () =>
+		consoleErrorSpy.mock.calls.map((call) => call.map((arg) => String(arg)).join(" ")).join("\n")
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
+	})
+
+	afterEach(() => {
+		consoleErrorSpy.mockRestore()
+	})
+
+	describe("sanitizeCacheKeyForLog", () => {
+		it("redacts userinfo, query, and fragment from URL-scoped keys", () => {
+			const key = `${providerIdentifiers.gemini}:${credentialBaseUrl}:abcd1234`
+			expect(sanitizeCacheKeyForLog(key)).toBe(
+				`${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta?:abcd1234`,
+			)
+		})
+
+		it("is a no-op for bare provider keys and key-digest keys", () => {
+			expect(sanitizeCacheKeyForLog(providerIdentifiers.gemini)).toBe(providerIdentifiers.gemini)
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:abcd1234`)).toBe(
+				`${providerIdentifiers.gemini}:abcd1234`,
+			)
+			expect(sanitizeCacheKeyForLog(providerIdentifiers.openrouter)).toBe(providerIdentifiers.openrouter)
+		})
+
+		it("leaves credential-free URL keys unchanged", () => {
+			const key = `${providerIdentifiers.litellm}:https://proxy.example.com:4000`
+			expect(sanitizeCacheKeyForLog(key)).toBe(key)
+		})
+	})
+
+	it("redacts the gemini cache key in the getModels cache-write failure log while storage keeps the raw key", async () => {
+		mockGetGeminiModels.mockResolvedValue({
+			"gemini-2.5-flash": { maxTokens: 64_000, contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+
+		await getModels({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		// The stored cache key keeps the raw URL (identity is unaffected by redaction)...
+		const storedKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(storedKeys).toHaveLength(1)
+		expect(storedKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		// ...while the logged key has credentials, query, and fragment stripped.
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[MODEL_CACHE] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta?:`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+		expect(output).not.toContain("#frag")
+	})
+
+	it("redacts litellm URL-scoped keys in the refreshModels failure log", async () => {
+		mockGetLiteLLMModels.mockRejectedValue(new Error("litellm unreachable"))
+		const { refreshModels } = await import("../modelCache")
+
+		await refreshModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "litellm-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443/v1beta?:`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
 })

@@ -227,6 +227,27 @@ function getCacheKey(options: GetModelsOptions): string {
 }
 
 /**
+ * Redact credential-bearing URL components from a cache key for logging.
+ *
+ * URL-scoped cache keys embed the provider's free-form baseUrl (e.g. a user-configured
+ * googleGeminiBaseUrl of `https://user:pass@host/path?x=1#frag`), and those components can
+ * carry credentials that must never reach logs or telemetry. Only the log output is
+ * sanitized -- the stored cache key is left unchanged. Keys without a URL (`provider` or
+ * `provider:<keyDigest>`) pass through untouched.
+ */
+export function sanitizeCacheKeyForLog(cacheKey: string): string {
+	return (
+		cacheKey
+			// userinfo: scheme://user:pass@host -> scheme://host (stops at the first
+			// path/query/fragment delimiter so '@' inside paths is preserved)
+			.replace(/(\/\/)[^/?#]*@/g, "$1")
+			// query/fragment: keep the delimiter as a structural marker, stop at the
+			// key-digest separator (':') so a trailing ':<digest>' survives
+			.replace(/([?#])[^:]*/g, "$1")
+	)
+}
+
+/**
  * Convert a cache key to a filesystem-safe filename component.
  * Hashes the full key to guarantee uniqueness while preserving a readable
  * provider prefix at the start of the filename.
@@ -398,7 +419,10 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 				memoryCache.set(cacheKey, fetched)
 
 				await writeModels(cacheKey, fetched).catch((err) =>
-					console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
+					console.error(
+						`[MODEL_CACHE] Error writing ${sanitizeCacheKeyForLog(cacheKey)} models to file cache:`,
+						err,
+					),
 				)
 			}
 		} else {
@@ -608,7 +632,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 			memoryCache.set(cacheKey, models)
 
 			await writeModels(cacheKey, models).catch((err) =>
-				console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
+				console.error(`[refreshModels] Error writing ${sanitizeCacheKeyForLog(cacheKey)} models to disk:`, err),
 			)
 		}
 
@@ -617,7 +641,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		// Log the error for debugging, then return existing cache if available (graceful degradation).
 		// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
 		// session, since they could belong to a different user -- return empty instead.
-		console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
+		console.error(`[refreshModels] Failed to refresh ${sanitizeCacheKeyForLog(cacheKey)} models:`, error)
 		if (shouldSkipCache) {
 			return {}
 		}
@@ -727,7 +751,7 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 			const validation = modelRecordSchema.safeParse(models)
 			if (!validation.success) {
 				console.error(
-					`[MODEL_CACHE] Invalid disk cache data structure for ${cacheKey}:`,
+					`[MODEL_CACHE] Invalid disk cache data structure for ${sanitizeCacheKeyForLog(cacheKey)}:`,
 					validation.error.format(),
 				)
 				return undefined
@@ -739,7 +763,7 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 			return validation.data
 		}
 	} catch (error) {
-		console.error(`[MODEL_CACHE] Error loading ${cacheKey} models from disk:`, error)
+		console.error(`[MODEL_CACHE] Error loading ${sanitizeCacheKeyForLog(cacheKey)} models from disk:`, error)
 	}
 
 	return undefined
