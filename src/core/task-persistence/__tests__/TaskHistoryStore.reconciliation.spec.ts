@@ -2435,6 +2435,31 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		expect(ownedIds(s).has("dm-2")).toBe(true)
 	})
 
+	it("reconcile() drops a peer-removed task id from locallyActiveTaskIds (CodeRabbit review 657db15e)", async () => {
+		// CodeRabbit finding on PR #1495: the reconcile() eviction loop removed the id
+		// from cache and taskFileMtimes but leaked it in locallyActiveTaskIds. Locally own
+		// an active task via a runtime write, remove its history file through the peer path
+		// (fs.rm of the task dir, NOT store.delete()), run reconcile(), and assert the id
+		// is gone from the ownership set along with its cache entry.
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		await s.upsert(makeItem({ id: "evict-own", status: "active" }))
+		await s.upsert(makeItem({ id: "evict-keep", status: "active" }))
+		expect(ownedIds(s).has("evict-own")).toBe(true)
+		expect(ownedIds(s).has("evict-keep")).toBe(true)
+
+		// A peer window removes the task directory; reconcile() must evict the cache
+		// entry AND the stale local-ownership claim.
+		await fs.rm(path.join(tmpDir, "tasks", "evict-own"), { recursive: true, force: true })
+		await s.reconcile()
+
+		expect(s.get("evict-own")).toBeUndefined()
+		expect(ownedIds(s).has("evict-own")).toBe(false)
+		// Untouched task keeps its ownership.
+		expect(s.get("evict-keep")).toBeDefined()
+		expect(ownedIds(s).has("evict-keep")).toBe(true)
+	})
+
 	it("markLocallyInactive releases an eager markLocallyActive claim so the tick repairs the orphan (kills L592 CallExpression)", async () => {
 		// markLocallyInactive: `this.locallyActiveTaskIds.delete(taskId)` — the rollback of the
 		// eager claim ClineProvider takes before scheduling. Its documented consumer is the

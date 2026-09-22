@@ -408,6 +408,9 @@ export class TaskHistoryStore {
 				if (!liveIds.has(taskId)) {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
+					// The record is gone (e.g. removed by a peer window), so any
+					// local-ownership claim for it is stale too.
+					this.locallyActiveTaskIds.delete(taskId)
 				}
 			}
 		})
