@@ -91,6 +91,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
+import { ALLOWED_BASE_URLS } from "../../api/providers/fetchers/mimo"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -1275,36 +1276,64 @@ export const webviewMessageHandler = async (
 			const mimoApiKey = message?.values?.mimoApiKey ?? apiConfiguration.mimoApiKey
 			const mimoBaseUrl = message?.values?.mimoBaseUrl ?? apiConfiguration.mimoBaseUrl
 
+			// Unsaved form values bypass the settings-schema validation that pins
+			// stored mimoBaseUrl to the four allowed Xiaomi endpoints, so gate them
+			// on the fetcher's allowlist before they can carry the bearer key into
+			// modelCache. The exact match subsumes credential-bearing URLs (no
+			// allowlisted literal contains userinfo), and the raw value is never
+			// echoed since an unsaved one may embed credentials.
+			const unsavedMimoBaseUrl = message?.values?.mimoBaseUrl
+			const mimoBaseUrlRejected =
+				typeof unsavedMimoBaseUrl === "string" &&
+				unsavedMimoBaseUrl !== "" &&
+				!ALLOWED_BASE_URLS.has(unsavedMimoBaseUrl.replace(/\/+$/, ""))
+
 			if (mimoApiKey) {
-				const mimoOptions = {
-					provider: providerIdentifiers.mimo,
-					apiKey: mimoApiKey,
-					baseUrl: mimoBaseUrl,
-				}
+				if (mimoBaseUrlRejected) {
+					// Same surface as a failed refresh: post the MiMo failure
+					// response and skip the candidate so no fetch is dispatched,
+					// while router aggregation for other providers continues.
+					const errorMessage =
+						"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint."
+					console.error(`Error refreshing models for ${providerIdentifiers.mimo}: ${errorMessage}`)
 
-				if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
-					// A refresh failure (bad key/endpoint) must not abort the
-					// aggregate fetch — surface the normal MiMo failure response
-					// and continue so routerModels is still posted.
-					try {
-						await flushModels(mimoOptions, true)
-					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error)
-						console.error(`Error refreshing models for ${providerIdentifiers.mimo}:`, error)
-
-						await provider.postMessageToWebview({
-							type: RouterModelsMessageType.singleRouterModelFetchResponse,
-							success: false,
-							error: errorMessage,
-							values: { provider: providerIdentifiers.mimo },
-						})
+					await provider.postMessageToWebview({
+						type: RouterModelsMessageType.singleRouterModelFetchResponse,
+						success: false,
+						error: errorMessage,
+						values: { provider: providerIdentifiers.mimo },
+					})
+				} else {
+					const mimoOptions = {
+						provider: providerIdentifiers.mimo,
+						apiKey: mimoApiKey,
+						baseUrl: mimoBaseUrl,
 					}
-				}
 
-				candidates.push({
-					key: providerIdentifiers.mimo,
-					options: mimoOptions,
-				})
+					if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
+						// A refresh failure (bad key/endpoint) must not abort the
+						// aggregate fetch — surface the normal MiMo failure response
+						// and continue so routerModels is still posted.
+						try {
+							await flushModels(mimoOptions, true)
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error)
+							console.error(`Error refreshing models for ${providerIdentifiers.mimo}:`, error)
+
+							await provider.postMessageToWebview({
+								type: RouterModelsMessageType.singleRouterModelFetchResponse,
+								success: false,
+								error: errorMessage,
+								values: { provider: providerIdentifiers.mimo },
+							})
+						}
+					}
+
+					candidates.push({
+						key: providerIdentifiers.mimo,
+						options: mimoOptions,
+					})
+				}
 			}
 
 			// Opencode Go's /models endpoint is public — it returns the full model list with no

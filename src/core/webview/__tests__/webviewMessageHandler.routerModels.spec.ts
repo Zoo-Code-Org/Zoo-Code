@@ -737,6 +737,52 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(response).toBeDefined()
 	})
 
+	it("rejects an unsaved MiMo base URL outside the Xiaomi allowlist without dispatching a fetch", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: {
+				mimoBaseUrl: "https://attacker.example",
+			},
+		})
+
+		// The off-list unsaved URL must never reach modelCache: no fetch and no
+		// cache flush for MiMo is dispatched.
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls.length).toBe(0)
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeDefined()
+		if (!errorCall) throw new Error("Expected MiMo failure response")
+		expect(errorCall[0].success).toBe(false)
+		expect(errorCall[0].error).toBe(
+			"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint.",
+		)
+
+		// Aggregation for the remaining providers still posts, with MiMo empty.
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.openrouter).toEqual({
+			"openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false },
+		})
+		expect(response[0].routerModels.mimo).toEqual({})
+	})
+
 	it("posts a Moonshot provider error and keeps an empty aggregate entry when fetch fails", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
