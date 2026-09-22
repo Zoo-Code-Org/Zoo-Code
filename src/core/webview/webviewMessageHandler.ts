@@ -1130,6 +1130,8 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.gemini]: {},
+						[providerIdentifiers.vertex]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.nanogpt]: {},
@@ -1264,6 +1266,71 @@ export const webviewMessageHandler = async (
 						provider: providerIdentifiers.moonshot,
 						apiKey: moonshotApiKey,
 						baseUrl: moonshotBaseUrl,
+					},
+				})
+			}
+
+			// Gemini is conditional on apiKey.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const geminiApiKey = message?.values?.geminiApiKey ?? apiConfiguration.geminiApiKey
+			const googleGeminiBaseUrl = message?.values?.googleGeminiBaseUrl ?? apiConfiguration.googleGeminiBaseUrl
+
+			if (geminiApiKey) {
+				if (message?.values?.geminiApiKey || message?.values?.googleGeminiBaseUrl) {
+					await flushModels(
+						{ provider: providerIdentifiers.gemini, apiKey: geminiApiKey, baseUrl: googleGeminiBaseUrl },
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.gemini,
+					options: {
+						provider: providerIdentifiers.gemini,
+						apiKey: geminiApiKey,
+						baseUrl: googleGeminiBaseUrl,
+					},
+				})
+			}
+
+			// Vertex is conditional on at least one credential signal (projectId, keyFile, or
+			// jsonCredentials — region alone is not a signal).
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const vertexProjectId = message?.values?.vertexProjectId ?? apiConfiguration.vertexProjectId
+			const vertexRegion = message?.values?.vertexRegion ?? apiConfiguration.vertexRegion
+			const vertexKeyFile = message?.values?.vertexKeyFile ?? apiConfiguration.vertexKeyFile
+			const vertexJsonCredentials =
+				message?.values?.vertexJsonCredentials ?? apiConfiguration.vertexJsonCredentials
+
+			if (vertexProjectId || vertexKeyFile || vertexJsonCredentials) {
+				if (
+					message?.values?.vertexProjectId ||
+					message?.values?.vertexRegion ||
+					message?.values?.vertexKeyFile ||
+					message?.values?.vertexJsonCredentials
+				) {
+					await flushModels(
+						{
+							provider: providerIdentifiers.vertex,
+							projectId: vertexProjectId,
+							region: vertexRegion,
+							keyFile: vertexKeyFile,
+							jsonCredentials: vertexJsonCredentials,
+						},
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.vertex,
+					options: {
+						provider: providerIdentifiers.vertex,
+						projectId: vertexProjectId,
+						region: vertexRegion,
+						keyFile: vertexKeyFile,
+						jsonCredentials: vertexJsonCredentials,
 					},
 				})
 			}

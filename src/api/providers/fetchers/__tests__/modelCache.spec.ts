@@ -47,6 +47,8 @@ vi.mock("../requesty")
 vi.mock("../kenari")
 vi.mock("../nanogpt")
 vi.mock("../moonshot")
+vi.mock("../gemini")
+vi.mock("../vertex")
 vi.mock("../zoo-gateway")
 
 // Mock ContextProxy with a simple static instance
@@ -75,6 +77,8 @@ import { getRequestyModels } from "../requesty"
 import { getKenariModels } from "../kenari"
 import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
+import { getGeminiModels } from "../gemini"
+import { getVertexModels } from "../vertex"
 import { getZooGatewayModels } from "../zoo-gateway"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
@@ -83,6 +87,8 @@ const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
+const mockGetGeminiModels = getGeminiModels as Mock<typeof getGeminiModels>
+const mockGetVertexModels = getVertexModels as Mock<typeof getVertexModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
@@ -258,6 +264,72 @@ describe("getModels with new GetModelsOptions", () => {
 		})
 
 		expect(mockGetMoonshotModels).toHaveBeenCalledWith("https://api.moonshot.ai/v1", "test-key", {
+			signal: expect.any(AbortSignal),
+		})
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getGeminiModels with the API key, base URL, and the flight signal", async () => {
+		const mockModels = {
+			"gemini-2.5-flash": {
+				maxTokens: 64_000,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: true,
+				description: "Gemini 2.5 Flash",
+			},
+		}
+		mockGetGeminiModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: "https://gemini-proxy.example",
+		})
+
+		expect(mockGetGeminiModels).toHaveBeenCalledWith("gemini-key", "https://gemini-proxy.example", {
+			signal: expect.any(AbortSignal),
+		})
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getGeminiModels without a base URL while preserving the signal arity", async () => {
+		mockGetGeminiModels.mockResolvedValue({
+			"gemini-2.5-flash": {
+				maxTokens: 64_000,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+		})
+
+		await getModels({ provider: providerIdentifiers.gemini, apiKey: "gemini-key" })
+
+		expect(mockGetGeminiModels).toHaveBeenCalledWith("gemini-key", undefined, {
+			signal: expect.any(AbortSignal),
+		})
+	})
+
+	it("calls getVertexModels with project, region, credentials, and the flight signal", async () => {
+		const mockModels = {
+			"gemini-3.7-flash": {
+				maxTokens: 65_536,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: true,
+				description: "Vertex Gemini 3.7 Flash",
+			},
+		}
+		mockGetVertexModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.vertex,
+			projectId: "gcp-project",
+			region: "us-central1",
+			keyFile: "/keys/sa.json",
+		})
+
+		expect(mockGetVertexModels).toHaveBeenCalledWith("gcp-project", "us-central1", "/keys/sa.json", undefined, {
 			signal: expect.any(AbortSignal),
 		})
 		expect(result).toEqual(mockModels)
@@ -1133,6 +1205,103 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("nanogpt")
 		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
+	})
+})
+
+describe("Gemini url+key-scoped cache isolation", () => {
+	// Gemini belongs to BOTH URL_SCOPED_PROVIDERS and KEY_SCOPED_PROVIDERS (modelCache.ts):
+	// its catalog can differ per API key and a custom base URL (googleGeminiBaseUrl) can
+	// point at an entirely different server, so neither dimension may collapse into a
+	// shared cache identity. Mirrors the MiMo/NanoGPT isolation tests above.
+	const geminiCatalog = {
+		"gemini-2.5-flash": {
+			maxTokens: 64_000,
+			contextWindow: 1_048_576,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetGeminiModels.mockResolvedValue(geminiCatalog)
+	})
+
+	it("separates cache identities by base URL and API key without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.gemini })
+		await getModels({ provider: providerIdentifiers.gemini, baseUrl: "https://gemini-proxy.example" })
+		await getModels({
+			provider: providerIdentifiers.gemini,
+			baseUrl: "https://gemini-proxy.example",
+			apiKey: "gemini-key-a",
+		})
+		await getModels({
+			provider: providerIdentifiers.gemini,
+			baseUrl: "https://gemini-proxy.example",
+			apiKey: "gemini-key-b",
+		})
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(4)
+		// Bare provider fallback when neither URL nor key is set; url-only component when
+		// the key is absent (catalog varies per key on the same server).
+		expect(cacheKeys).toContain("gemini")
+		expect(cacheKeys).toContain("gemini:https://gemini-proxy.example")
+		// url+key compound identity for each distinct key on the proxy server.
+		expect(cacheKeys.filter((key) => key.startsWith("gemini:https://gemini-proxy.example:"))).toHaveLength(2)
+		// Raw secrets must never appear in the on-disk-bound cache keys.
+		expect(cacheKeys.every((key) => !key.includes("gemini-key-a") && !key.includes("gemini-key-b"))).toBe(true)
+	})
+
+	it("keys the catalog per base URL so two servers never share an entry", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.gemini, apiKey: "shared-key", baseUrl: "https://a.example" })
+		await getModels({ provider: providerIdentifiers.gemini, apiKey: "shared-key", baseUrl: "https://b.example" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(2)
+		expect(cacheKeys.every((key) => key.startsWith("gemini:https://"))).toBe(true)
+	})
+})
+
+describe("Vertex provider-scoped cache identity", () => {
+	// Vertex is in NEITHER URL_SCOPED_PROVIDERS nor KEY_SCOPED_PROVIDERS (modelCache.ts):
+	// its options carry no apiKey/baseUrl discriminator and the gemini-* catalog is global
+	// to the project/region, so getCacheKey() falls back to the bare provider name and the
+	// 5-minute TTL bounds staleness.
+	const vertexCatalog = {
+		"gemini-3.7-flash": {
+			maxTokens: 65_536,
+			contextWindow: 1_048_576,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetVertexModels.mockResolvedValue(vertexCatalog)
+	})
+
+	it("falls back to the bare provider name regardless of project, region, or credentials", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a", region: "us-central1" })
+		await getModels({
+			provider: providerIdentifiers.vertex,
+			projectId: "project-b",
+			region: "europe-west1",
+			keyFile: "/keys/sa.json",
+		})
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(cacheKeys).toEqual(["vertex", "vertex"])
 	})
 })
 

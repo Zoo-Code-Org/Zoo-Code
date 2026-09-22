@@ -635,4 +635,216 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(call).toBeTruthy()
 		expect(call[0].routerModels.moonshot).toEqual({})
 	})
+
+	it("fetches Gemini models when stored Gemini credentials exist", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				geminiApiKey: "stored-gemini-key",
+				googleGeminiBaseUrl: "https://generativelanguage.example.com",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.gemini) {
+				return { "gemini-3-pro": { contextWindow: 1_048_576, supportsPromptCache: true } }
+			}
+
+			switch (options?.provider) {
+				case providerIdentifiers.openrouter:
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case providerIdentifiers.requesty:
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.vercelAiGateway:
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.litellm:
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.gemini,
+			apiKey: "stored-gemini-key",
+			baseUrl: "https://generativelanguage.example.com",
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.gemini).toEqual({
+			"gemini-3-pro": { contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+	})
+
+	it("does not fetch Gemini models when no apiKey is configured", async () => {
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.gemini }),
+		)
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.gemini).toEqual({})
+	})
+
+	it("flushes and fetches Gemini models when unsaved values override stored config", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				geminiApiKey: "stored-gemini-key",
+				googleGeminiBaseUrl: "https://stored.generativelanguage.example.com",
+			},
+		})
+
+		getModelsMock.mockResolvedValue({
+			"gemini-3-pro": { contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: {
+				geminiApiKey: "preview-gemini-key",
+				googleGeminiBaseUrl: "https://preview.generativelanguage.example.com",
+			},
+		})
+
+		const geminiOptions = {
+			provider: providerIdentifiers.gemini,
+			apiKey: "preview-gemini-key",
+			baseUrl: "https://preview.generativelanguage.example.com",
+		}
+		expect(flushModelsMock).toHaveBeenCalledWith(geminiOptions, true)
+		expect(getModelsMock).toHaveBeenCalledWith(geminiOptions)
+	})
+
+	it("fetches Vertex models when stored Vertex credentials exist", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				vertexProjectId: "stored-project",
+				vertexRegion: "us-central1",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.vertex) {
+				return { "gemini-3-pro-vertex": { contextWindow: 1_048_576, supportsPromptCache: true } }
+			}
+
+			return {}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.vertex,
+			projectId: "stored-project",
+			region: "us-central1",
+			keyFile: undefined,
+			jsonCredentials: undefined,
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.vertex).toEqual({
+			"gemini-3-pro-vertex": { contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+	})
+
+	it("fetches Vertex models when an explicit keyFile is provided via message values", async () => {
+		getModelsMock.mockResolvedValue({})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { vertexKeyFile: "/secrets/vertex-key.json" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.vertex,
+			projectId: undefined,
+			region: undefined,
+			keyFile: "/secrets/vertex-key.json",
+			jsonCredentials: undefined,
+		})
+	})
+
+	it("fetches Vertex models when explicit JSON credentials are provided via message values", async () => {
+		getModelsMock.mockResolvedValue({})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { vertexJsonCredentials: '{"type":"service_account"}' },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.vertex,
+			projectId: undefined,
+			region: undefined,
+			keyFile: undefined,
+			jsonCredentials: '{"type":"service_account"}',
+		})
+	})
+
+	it("prefers unsaved Vertex values over stored config", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				vertexProjectId: "stored-project",
+				vertexRegion: "us-central1",
+			},
+		})
+
+		getModelsMock.mockResolvedValue({})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { vertexRegion: "europe-west1" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.vertex,
+			projectId: "stored-project",
+			region: "europe-west1",
+			keyFile: undefined,
+			jsonCredentials: undefined,
+		})
+	})
+
+	it("does not fetch Vertex models when only a region is set", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				vertexRegion: "us-central1",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.vertex }),
+		)
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.vertex).toEqual({})
+	})
 })

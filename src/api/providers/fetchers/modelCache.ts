@@ -33,6 +33,8 @@ import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
 import { getMoonshotModels } from "./moonshot"
+import { getGeminiModels } from "./gemini"
+import { getVertexModels } from "./vertex"
 import { getZooGatewayModels } from "./zoo-gateway"
 import { getKimiCodeModels } from "./kimi-code"
 
@@ -105,6 +107,7 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.poe,
 	providerIdentifiers.deepseek,
 	providerIdentifiers.moonshot,
+	providerIdentifiers.gemini,
 	providerIdentifiers.ollama,
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.requesty,
@@ -118,11 +121,19 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 // (same server, different session token) doesn't collapse into the same throttle/in-flight
 // identity -- see the URL_SCOPED_PROVIDERS comment above for why this matters despite caching
 // being skipped for both.
+// gemini is in both this set and URL_SCOPED_PROVIDERS: its catalog varies per API key and
+// custom base URLs (googleGeminiBaseUrl) can point at a different server entirely.
+// vertex is deliberately in NEITHER set: its options carry no apiKey/baseUrl discriminator
+// (GetModelsOptions scopes the key on those two fields only), and the listed gemini-* catalog
+// is global to the project/region rather than per credential. getCacheKey() therefore falls
+// back to the bare provider name, and the 5-minute memory/disk TTL bounds how stale a cached
+// catalog can get after the underlying project gains or loses model access.
 const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
 	providerIdentifiers.poe, // Per-account model availability
 	providerIdentifiers.requesty, // Per-account custom model policies
 	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+	providerIdentifiers.gemini, // Catalog can differ per API key and per custom base URL
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
@@ -303,6 +314,18 @@ async function fetchModelsFromProvider(options: GetModelsOptions, signal?: Abort
 			break
 		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey, ...fetchOpts)
+			break
+		case providerIdentifiers.gemini:
+			models = await getGeminiModels(options.apiKey, options.baseUrl, ...fetchOpts)
+			break
+		case providerIdentifiers.vertex:
+			models = await getVertexModels(
+				options.projectId,
+				options.region,
+				options.keyFile,
+				options.jsonCredentials,
+				...fetchOpts,
+			)
 			break
 		case providerIdentifiers.zooGateway:
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
