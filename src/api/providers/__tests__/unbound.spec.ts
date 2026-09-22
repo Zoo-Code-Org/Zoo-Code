@@ -235,6 +235,17 @@ describe("getUnboundModels", () => {
 		},
 	)
 
+	it("returns no models when the Axios response has no data payload at all", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Axios resolves with a bare object when the response carries no body.
+		mockedAxios.get.mockResolvedValue({})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models).toEqual({})
+		expect(consoleError).toHaveBeenCalledWith("[getUnboundModels] Unexpected response format:", undefined)
+	})
+
 	it("returns mapped models when the API responds with an array", async () => {
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 		mockedAxios.get.mockResolvedValue({
