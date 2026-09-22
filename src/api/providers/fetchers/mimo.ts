@@ -8,6 +8,33 @@ import { DEFAULT_HEADERS } from "../constants"
 // builds, so discovery excludes them from the catalog.
 const NON_TEXT_MODEL_ID = /-(asr|tts)(-|$)/i
 
+// Network-boundary allowlist: the same four Xiaomi MiMo endpoints the persisted
+// settings schema validates `mimoBaseUrl` against via a zod union of literals
+// (packages/types/src/provider-settings/mimo.ts). The definition itself is not
+// re-exported through the @roo-code/types public entry points, so the literals
+// are mirrored here; __tests__/mimo.spec.ts cross-checks this exported set
+// against providerSettingsSchema so the two sources cannot silently drift. The
+// fetcher also receives unsaved webview values that bypass the schema entirely,
+// so this exact-match gate is the only thing guaranteeing the bearer key never
+// leaves a Xiaomi origin. Exported for that drift test only.
+export const ALLOWED_BASE_URLS: ReadonlySet<string> = new Set([
+	"https://api.xiaomimimo.com/v1",
+	"https://token-plan-cn.xiaomimimo.com/v1",
+	"https://token-plan-sgp.xiaomimimo.com/v1",
+	"https://token-plan-ams.xiaomimimo.com/v1",
+])
+
+// True when the authority component carries `user[:pass]@` credentials. Input
+// without a `scheme://` prefix is treated as bare authority so credential-like
+// strings cannot slip past the userinfo check into the allowlist rejection
+// message below. The raw URL is only echoed for credential-free rejections.
+function containsUserinfo(rawUrl: string): boolean {
+	const schemeEnd = rawUrl.indexOf("://")
+	const rest = schemeEnd === -1 ? rawUrl : rawUrl.slice(schemeEnd + 3)
+	const authority = rest.split(/[/?#]/)[0]
+	return authority.includes("@")
+}
+
 /**
  * Fetches available models from the Xiaomi MiMo API and merges them with known specs.
  *
@@ -27,14 +54,22 @@ export async function getMimoModels(
 	// The base URL from settings already includes /v1 (e.g. https://token-plan-sgp.xiaomimimo.com/v1),
 	// so we keep it as-is and append /models directly.
 	const base = (baseUrl || "https://token-plan-sgp.xiaomimimo.com/v1").replace(/\/+$/, "")
-	const url = new URL(`${base}/models`)
 
-	// The settings schema only allows https:// endpoints, but this fetcher also
-	// receives unsaved webview values — enforce the contract at the boundary so
-	// the bearer key is never sent over plaintext HTTP.
-	if (url.protocol !== "https:") {
-		throw new Error(`MiMo model fetch requires an https:// base URL (received "${url.protocol}")`)
+	// Reject embedded credentials first, then pin the request to the four allowed
+	// endpoints with an exact match. This subsumes the previous https-only guard
+	// (every allowed URL is https, so plaintext HTTP, arbitrary hosts, and path
+	// tricks all fail the allowlist) and runs before any header is built, so a
+	// partial or off-list request is never sent.
+	if (containsUserinfo(base)) {
+		throw new Error("MIMO/getMimoModels/001: MiMo model fetch rejected: base URL must not contain credentials.")
 	}
+	if (!ALLOWED_BASE_URLS.has(base)) {
+		throw new Error(
+			`MIMO/getMimoModels/002: MiMo model fetch rejected: "${base}" is not an allowed Xiaomi MiMo endpoint.`,
+		)
+	}
+
+	const url = new URL(`${base}/models`)
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
