@@ -560,6 +560,78 @@ describe("executeCommandTool", () => {
 			)
 		})
 
+		it("processes queued messages once after a command terminated by an interruption", async () => {
+			mockToolUse.params.command = "long-running-command"
+			mockToolUse.nativeArgs = { command: "long-running-command" }
+
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
+				runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+					const interruptedProcess = Object.assign(Promise.resolve(), {
+						continue: vitest.fn(),
+						abort: vitest.fn(),
+					}) as unknown as RooTerminalProcess
+					void callbacks.onCompleted?.("Command interrupted", interruptedProcess)
+					callbacks.onShellExecutionComplete?.(
+						{ exitCode: undefined, signalName: "SIGINT", coreDumpPossible: false },
+						interruptedProcess,
+					)
+					return interruptedProcess
+				}),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Process terminated by signal SIGINT"),
+			)
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			// The tool result must be published before queued messages are processed.
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("processes queued messages once after a user-configured execution timeout", async () => {
+			mockToolUse.params.command = "sleep 10"
+			mockToolUse.nativeArgs = { command: "sleep 10" }
+			// 0.1s user timeout keeps the test fast while exercising the real abort path.
+			vitest.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vitest
+					.fn()
+					.mockImplementation((key: string, defaultValue: unknown) =>
+						key === "commandExecutionTimeout" ? 0.1 : defaultValue,
+					),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
+				runCommand: vitest.fn().mockReturnValue(pendingProcess),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("terminated after exceeding a user-configured"),
+			)
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+		})
+
 		it("does not process queued messages when the user rejects the command", async () => {
 			mockAskApproval.mockResolvedValue(false)
 			mockToolUse.params.command = "echo test"

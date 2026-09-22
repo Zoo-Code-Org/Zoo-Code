@@ -61,7 +61,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				isWriteProtected: vi.fn().mockReturnValue(false),
 			} as unknown as Task["rooProtectedController"],
 			say: vi.fn().mockResolvedValue(undefined),
-			processQueuedMessages: vi.fn(),
+			processQueuedMessages: vi.fn().mockResolvedValue(true),
 			didEditFile: false,
 		}
 
