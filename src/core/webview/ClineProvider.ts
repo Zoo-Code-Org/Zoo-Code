@@ -3637,6 +3637,11 @@ export class ClineProvider
 					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!)
 
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
+						// Refresh the child after acquiring the parent transition lock. The pre-abort
+						// history snapshot can be stale if another serialized path interrupted it.
+						historyItem =
+							this.taskHistoryStore.get(task.taskId) ??
+							(await this.getTaskWithId(task.taskId)).historyItem
 						// Mark the child interrupted and leave parent delegated with awaitingChildId
 						// intact — the user can resume this child later and it will report back.
 						// A previous cancellation may already have persisted the interrupted status
