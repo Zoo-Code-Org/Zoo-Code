@@ -1632,4 +1632,24 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(moonshotModels["kimi-k2-turbo-preview"])
 		})
 	})
+
+	describe("mimo provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ mimo: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("should fallback to default when model ID is not in static or router models", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.mimo,
+				apiModelId: "non-existent-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe(mimoDefaultModelId)
+			expect(result.current.info).toEqual(mimoModels[mimoDefaultModelId])
+		})
+	})
 })
