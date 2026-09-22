@@ -749,6 +749,11 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
 
+			// Precondition: the watchdog interval was actually scheduled, so the
+			// null check below proves disposal stopped it rather than it never
+			// having started.
+			expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+
 			// The provider outlives a disposed sidebar view; VS Code re-resolves
 			// a fresh view later. Disposal must stop the watchdog and drop the
 			// stale view reference so no recovery reload targets the dead view.
@@ -785,6 +790,22 @@ describe("ClineProvider", () => {
 			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 				expect.stringContaining("[Zoo Code] Failed to reload webview: regen boom"),
 			)
+		})
+
+		test("logs and keeps the webview html when the recovery reload rejects", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+			// The watchdog reload no longer goes through a VS Code command; stub
+			// the recovery HTML regeneration itself to reject.
+			provider["getWebviewHtml"] = vi.fn().mockRejectedValue(new Error("reload boom"))
+			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[Zoo Code] Failed to reload webview: reload boom"),
+			)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
 		})
 
 		test("does not reassign html when the provider is disposed mid-recovery", async () => {
