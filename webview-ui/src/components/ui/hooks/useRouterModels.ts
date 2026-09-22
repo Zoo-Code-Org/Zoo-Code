@@ -14,12 +14,23 @@ type UseRouterModelsOptions = {
 	enabled?: boolean // gate fetching entirely
 }
 
-export const fetchRouterModels = async (provider?: string) =>
+export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
 		const cleanup = () => {
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
 			}
+			signal?.removeEventListener("abort", onAbort)
+		}
+
+		const onAbort = () => {
+			clearTimeout(timeout)
+			cleanup()
+			// Match the repo abort contract (abort-signal.ts): name "AbortError"
+			// so cancellation is recognizable by callers and React Query.
+			const abortError = new Error("Aborted")
+			abortError.name = "AbortError"
+			reject(abortError)
 		}
 
 		const timeout = setTimeout(() => {
@@ -51,6 +62,13 @@ export const fetchRouterModels = async (provider?: string) =>
 		}
 
 		window.addEventListener("message", handler)
+
+		if (signal?.aborted) {
+			onAbort()
+			return
+		}
+		signal?.addEventListener("abort", onAbort)
+
 		if (provider) {
 			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels, values: { provider } })
 		} else {
@@ -62,7 +80,7 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 	const provider = opts.provider || undefined
 	return useQuery({
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
-		queryFn: () => fetchRouterModels(provider),
+		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
 	})
 }
