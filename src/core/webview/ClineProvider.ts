@@ -1802,6 +1802,11 @@ export class ClineProvider
 				// Await the migration gate so a legacy task not yet migrated
 				// from globalState is still found.
 				await this.taskHistoryStoreReady
+
+				// The queue aborts this mutation after PENDING_OPERATION_TIMEOUT_MS
+				// and advances; once aborted it must not resume writing here.
+				if (signal?.aborted) return
+
 				const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 				if (taskHistoryItem) {
@@ -1984,7 +1989,7 @@ export class ClineProvider
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
 					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
+					await this.persistStickyProviderProfileToCurrentTask(name, {}, signal)
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				}
@@ -2028,8 +2033,10 @@ export class ClineProvider
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
 		options: { skipCurrentTaskRebuild?: boolean } = {},
+		signal?: AbortSignal,
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
+		if (signal?.aborted) return
 		const task = this.getCurrentTask()
 		if (!task) {
 			return
@@ -2043,6 +2050,11 @@ export class ClineProvider
 			// Await the migration gate so a legacy task not yet migrated
 			// from globalState is still found.
 			await this.taskHistoryStoreReady
+
+			// The queue may have aborted this mutation while it waited on the
+			// gate; once aborted it must not resume writing here.
+			if (signal?.aborted) return
+
 			const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 			if (taskHistoryItem) {
@@ -2109,7 +2121,7 @@ export class ClineProvider
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
+			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild }, signal)
 		}
 
 		if (!skipCurrentTaskRebuild) {

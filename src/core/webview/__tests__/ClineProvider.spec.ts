@@ -5162,6 +5162,106 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			)
 		})
 
+		it("aborts a mode switch that stays gated past the mutation timeout", async () => {
+			vi.useFakeTimers()
+			try {
+				const task = new Task(defaultTaskOptions)
+
+				vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+				vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+					key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+				let releaseMigration!: () => void
+				const migrationGate = new Promise<void>((resolve) => {
+					releaseMigration = resolve
+				})
+				vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+					await migrationGate
+					for (const entry of entries) {
+						provider.taskHistoryStore["cache"].set(entry.id, entry)
+					}
+				})
+
+				const initPromise = provider["initializeTaskHistoryStore"]()
+				const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+				const switchPromise = provider.handleModeSwitch("architect", task)
+				const switchOutcome = expect(switchPromise).rejects.toThrow("Provider profile mutation timed out")
+
+				// Hold the readiness gate past PENDING_OPERATION_TIMEOUT_MS so the
+				// queue aborts the mutation while it waits.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await switchOutcome
+
+				// The queue has aborted the mutation and moved on; releasing the
+				// gate must not let the dead mutation write task history, update
+				// in-memory mode, or advance the global mode.
+				releaseMigration()
+				await initPromise
+				await Promise.resolve()
+
+				expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+				expect(task).not.toHaveProperty("_taskMode")
+				expect(setValueSpy).not.toHaveBeenCalledWith("mode", "architect")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("aborts a sticky profile persistence that stays gated past the mutation timeout", async () => {
+			const task = new Task(defaultTaskOptions)
+			// The Task module is mocked in this spec; provide the method under test.
+			task["setTaskApiConfigName"] = vi.fn()
+			await provider.addClineToStack(task)
+
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "sticky-profile",
+				id: undefined,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			provider["updateTaskApiHandlerIfNeeded"] = vi.fn()
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory"
+					? [{ ...legacyItem, id: task.taskId }]
+					: undefined) as typeof mockContext.globalState.get)
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+
+			vi.useFakeTimers()
+			try {
+				const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+				const activation = provider.activateProviderProfile({ name: "sticky-profile" })
+				const activationOutcome = expect(activation).rejects.toThrow("Provider profile mutation timed out")
+
+				// Hold the readiness gate past PENDING_OPERATION_TIMEOUT_MS so the
+				// queue aborts the mutation while it waits.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await activationOutcome
+
+				// Releasing the gate must not let the dead mutation write task history.
+				releaseMigration()
+				await initPromise
+				await Promise.resolve()
+
+				expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("settles waiting lookups when store initialization rejects", async () => {
 			vi.spyOn(provider.taskHistoryStore, "initialize").mockRejectedValue(new Error("storage unavailable"))
 			const initPromise = provider["initializeTaskHistoryStore"]()
