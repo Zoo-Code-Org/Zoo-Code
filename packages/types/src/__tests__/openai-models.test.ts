@@ -46,6 +46,82 @@ describe("OpenAI native models", () => {
 		])
 	})
 
+	it("describes GPT-6 Sol and Luna with verified pricing and context metadata", () => {
+		expect(openAiNativeModels["gpt-6-sol"]).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			supportsTemperature: false,
+			inputPrice: 2,
+			cacheWritesPrice: 2.5,
+			cacheReadsPrice: 0.2,
+			outputPrice: 10,
+			longContextPricing: {
+				thresholdTokens: 272_000,
+				inputPriceMultiplier: 2,
+				outputPriceMultiplier: 1.5,
+				cacheWritesPriceMultiplier: 2,
+				cacheReadsPriceMultiplier: 2,
+				appliesToServiceTiers: ["default", "flex", "priority"],
+			},
+		})
+
+		expect(openAiNativeModels["gpt-6-sol"].tiers).toEqual([
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 1,
+				outputPrice: 5,
+				cacheWritesPrice: 1.25,
+				cacheReadsPrice: 0.1,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 4,
+				outputPrice: 20,
+				cacheWritesPrice: 5,
+				cacheReadsPrice: 0.4,
+			},
+		])
+
+		expect(openAiNativeModels["gpt-6-luna"]).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			supportsTemperature: false,
+			inputPrice: 0.1,
+			cacheWritesPrice: 0.125,
+			cacheReadsPrice: 0.01,
+			outputPrice: 0.5,
+		})
+
+		expect(openAiNativeModels["gpt-6-luna"].tiers).toEqual([
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 0.05,
+				outputPrice: 0.25,
+				cacheWritesPrice: 0.0625,
+				cacheReadsPrice: 0.005,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 0.2,
+				outputPrice: 1,
+				cacheWritesPrice: 0.25,
+				cacheReadsPrice: 0.02,
+			},
+		])
+	})
+
 	it("uses current GPT-5.6 base pricing and context metadata", () => {
 		expect(openAiNativeModels["gpt-5.6-sol"]).toMatchObject({
 			contextWindow: 1_050_000,
