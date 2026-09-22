@@ -1120,4 +1120,49 @@ describe("webviewMessageHandler - requestRouterModels cancellation", () => {
 		// was ever started for this request.
 		expect(getModelsMock).not.toHaveBeenCalled()
 	})
+
+	it("releases the registration when the aggregate post rejects", async () => {
+		getModelsMock.mockResolvedValue({})
+		mockProvider.postMessageToWebview.mockRejectedValue(new Error("webview disposed"))
+		const abortSpy = vi.spyOn(AbortController.prototype, "abort")
+
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider: providerIdentifiers.openrouter, requestId: "req-post-fail" },
+			}),
+		).rejects.toThrow("webview disposed")
+
+		// No leaked controller: a cancel for the failed request's id finds no entry to abort.
+		abortSpy.mockClear()
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-post-fail" },
+		})
+		expect(abortSpy).not.toHaveBeenCalled()
+
+		abortSpy.mockRestore()
+	})
+
+	it("releases the registration when the OAuth token lookup rejects", async () => {
+		getKimiCodeAccessTokenMock.mockRejectedValue(new Error("oauth unreachable"))
+		const abortSpy = vi.spyOn(AbortController.prototype, "abort")
+
+		// Aggregate request (no provider filter) reaches the Kimi Code OAuth await.
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { requestId: "req-oauth-fail" },
+			}),
+		).rejects.toThrow("oauth unreachable")
+
+		abortSpy.mockClear()
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-oauth-fail" },
+		})
+		expect(abortSpy).not.toHaveBeenCalled()
+
+		abortSpy.mockRestore()
+	})
 })

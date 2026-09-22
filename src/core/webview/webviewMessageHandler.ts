@@ -106,8 +106,9 @@ let telemetrySettingQueue: Promise<void> = Promise.resolve()
 // In-flight router-models fetches keyed by the webview-supplied requestId. The webview
 // posts cancelRouterModelsRequest when it stops waiting (e.g. React Query cancellation);
 // the matching AbortController here aborts the provider catalog fetches for that request.
-// Entries are removed when the request settles (finally in the requestRouterModels case)
-// or when the cancellation is delivered, whichever comes first.
+// Entries are removed on EVERY exit of the requestRouterModels case — normal settle, the
+// abort early-exits, and failure paths (getState, the OAuth lookup, and the aggregate post
+// release before rethrowing) — or when the cancellation is delivered, whichever comes first.
 const routerModelsRequestControllers = new Map<string, AbortController>()
 
 import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
@@ -1486,18 +1487,25 @@ export const webviewMessageHandler = async (
 			})
 
 			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
-				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-				const kimiCodeAuthMethod =
-					message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
-				const kimiCodeApiKey =
-					kimiCodeAuthMethod === "api-key"
-						? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
-						: await kimiCodeOAuthManager.getAccessToken()
-				if (kimiCodeApiKey) {
-					candidates.push({
-						key: providerIdentifiers.kimiCode,
-						options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
-					})
+				// The dynamic import and OAuth token lookup can reject; release the cancellation
+				// registration before rethrowing so a failure here cannot strand the entry.
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					const kimiCodeAuthMethod =
+						message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
+					const kimiCodeApiKey =
+						kimiCodeAuthMethod === "api-key"
+							? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
+							: await kimiCodeOAuthManager.getAccessToken()
+					if (kimiCodeApiKey) {
+						candidates.push({
+							key: providerIdentifiers.kimiCode,
+							options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
+						})
+					}
+				} catch (error) {
+					routerModelsRequestControllers.delete(requestId)
+					throw error
 				}
 			}
 
@@ -1556,11 +1564,18 @@ export const webviewMessageHandler = async (
 				}
 			})
 
-			await provider.postMessageToWebview({
-				type: RouterModelsMessageType.routerModels,
-				routerModels,
-				values: aggregateValues(),
-			})
+			// The aggregate post can reject (e.g. a disposed webview); release the cancellation
+			// registration before rethrowing so the failure cannot strand the entry.
+			try {
+				await provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: aggregateValues(),
+				})
+			} catch (error) {
+				routerModelsRequestControllers.delete(requestId)
+				throw error
+			}
 
 			// The request has settled (aggregate posted, per-candidate failures handled):
 			// release the cancellation registration. A cancellation arriving afterwards
