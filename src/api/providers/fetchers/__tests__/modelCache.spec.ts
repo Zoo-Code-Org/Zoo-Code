@@ -1873,10 +1873,38 @@ describe("credential redaction in cache-key logs", () => {
 	})
 
 	describe("sanitizeCacheKeyForLog", () => {
-		it("redacts userinfo, query, and fragment from URL-scoped keys", () => {
+		it("redacts userinfo, query, and fragment from URL-scoped keys, keeping the digest", () => {
 			const key = `${providerIdentifiers.gemini}:${credentialBaseUrl}:abcd1234`
 			expect(sanitizeCacheKeyForLog(key)).toBe(
-				`${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta?:abcd1234`,
+				`${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:abcd1234`,
+			)
+		})
+
+		it("drops query-only credentials entirely", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta?api_key=topsecret`
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com/v1beta`)
+		})
+
+		it("drops fragment-only content entirely", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta#section-2`
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com/v1beta`)
+		})
+
+		it("does not let a colon inside the query leak past the digest separator", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta?next=http://other.example:8080/x:abcd1234`
+			expect(sanitizeCacheKeyForLog(key)).toBe(
+				`${providerIdentifiers.gemini}:https://proxy.example.com/v1beta:abcd1234`,
+			)
+		})
+
+		it("fails closed to a fixed marker when a segment is unparseable", () => {
+			// Empty authority — the URL parser rejects the baseUrl.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:https://`)).toBe("<redacted>")
+			// No scheme at all — not an absolute URL.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:not-a-url`)).toBe("<redacted>")
+			// Whitespace inside the scheme — the URL parser rejects it.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:ht tps://proxy.example.com`)).toBe(
+				"<redacted>",
 			)
 		})
 
@@ -1888,9 +1916,9 @@ describe("credential redaction in cache-key logs", () => {
 			expect(sanitizeCacheKeyForLog(providerIdentifiers.openrouter)).toBe(providerIdentifiers.openrouter)
 		})
 
-		it("leaves credential-free URL keys unchanged", () => {
+		it("reduces credential-free URL keys to their structural shape", () => {
 			const key = `${providerIdentifiers.litellm}:https://proxy.example.com:4000`
-			expect(sanitizeCacheKeyForLog(key)).toBe(key)
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.litellm}:https://proxy.example.com:4000/`)
 		})
 	})
 
@@ -1913,7 +1941,7 @@ describe("credential redaction in cache-key logs", () => {
 		// ...while the logged key has credentials, query, and fragment stripped.
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[MODEL_CACHE] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta?:`,
+			`[MODEL_CACHE] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
@@ -1932,7 +1960,7 @@ describe("credential redaction in cache-key logs", () => {
 
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443/v1beta?:`,
+			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443/v1beta:`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")

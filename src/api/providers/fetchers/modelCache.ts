@@ -231,20 +231,47 @@ function getCacheKey(options: GetModelsOptions): string {
  *
  * URL-scoped cache keys embed the provider's free-form baseUrl (e.g. a user-configured
  * googleGeminiBaseUrl of `https://user:pass@host/path?x=1#frag`), and those components can
- * carry credentials that must never reach logs or telemetry. Only the log output is
- * sanitized -- the stored cache key is left unchanged. Keys without a URL (`provider` or
- * `provider:<keyDigest>`) pass through untouched.
+ * carry credentials that must never reach logs or telemetry. The key is decomposed into
+ * `provider[:baseUrl[:digest]]` (see getCacheKey); the baseUrl segment is structurally
+ * reduced through the WHATWG URL parser to `${protocol}//${host}${pathname}` — a shape
+ * that cannot contain userinfo, query, or fragment by construction — while the provider
+ * name and the non-secret key digest pass through for diagnosis. The stored cache key is
+ * left unchanged; only log output flows through here.
+ *
+ * Fail closed: the key shape is a security boundary, not a convenience. If any part of it
+ * is unrecognizable — a baseUrl the URL parser rejects, an unexpected segment — the whole
+ * key collapses to a constant marker rather than risking a partially redacted leak.
  */
 export function sanitizeCacheKeyForLog(cacheKey: string): string {
-	return (
-		cacheKey
-			// userinfo: scheme://user:pass@host -> scheme://host (stops at the first
-			// path/query/fragment delimiter so '@' inside paths is preserved)
-			.replace(/(\/\/)[^/?#]*@/g, "$1")
-			// query/fragment: keep the delimiter as a structural marker, stop at the
-			// key-digest separator (':') so a trailing ':<digest>' survives
-			.replace(/([?#])[^:]*/g, "$1")
-	)
+	try {
+		const segments = cacheKey.split(":")
+		const [provider, ...rest] = segments
+		if (rest.length === 0) {
+			// Bare provider key ("gemini") — nothing to redact.
+			return cacheKey
+		}
+
+		// A trailing key digest (deriveApiKeyDiscriminator: 4 bytes = 8 hex chars) is not
+		// secret and is preserved; peel it so colons inside the baseUrl survive reassembly.
+		let digest: string | undefined
+		if (rest.length > 0 && /^[0-9a-f]{8}$/.test(rest[rest.length - 1])) {
+			digest = rest.pop()
+		}
+
+		const urlPart = rest.join(":")
+		if (!urlPart) {
+			// Key-scoped provider without a baseUrl ("gemini:abcd1234").
+			return digest ? `${provider}:${digest}` : provider
+		}
+
+		// Throws for anything that is not an absolute URL — fail closed below.
+		const url = new URL(urlPart)
+		const reduced = `${url.protocol}//${url.host}${url.pathname}`
+		return [provider, reduced, digest].filter((part) => part !== undefined).join(":")
+	} catch {
+		// Unrecognizable key shape: never log a partially-redacted guess.
+		return "<redacted>"
+	}
 }
 
 /**
