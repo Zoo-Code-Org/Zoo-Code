@@ -787,6 +787,89 @@ describe("ClineProvider", () => {
 			)
 		})
 
+		test("does not reassign html when the provider is disposed mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Hold the recovery reload's HTML regeneration in flight until the
+			// disposal below lands.
+			let finishReload: (state: ExtensionState) => void = () => {}
+			vi.spyOn(provider, "getState").mockImplementation(
+				() =>
+					new Promise<ExtensionState>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			// The stale heartbeat started a recovery reload, but its HTML is still pending.
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			await provider.dispose()
+			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the sidebar view is disposed mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (state: ExtensionState) => void = () => {}
+			vi.spyOn(provider, "getState").mockImplementation(
+				() =>
+					new Promise<ExtensionState>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			disposeCallback()
+			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the watched view is replaced mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (state: ExtensionState) => void = () => {}
+			vi.spyOn(provider, "getState").mockImplementation(
+				() =>
+					new Promise<ExtensionState>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// VS Code re-resolves a fresh view (e.g. sidebar re-opened) while the
+			// recovery reload for the old view is still awaiting its HTML.
+			// @ts-ignore - accessing private property for testing
+			provider.view = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+			}
+
+			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
 		test("reloads only its own webview when multiple providers are active", async () => {
 			// Structural stand-in for the VS Code webview API surface this scenario
 			// exercises, same as the mockContext cast below.
@@ -827,6 +910,76 @@ describe("ClineProvider", () => {
 			} finally {
 				await providerB.dispose()
 			}
+		})
+
+		describe("tab panel (WebviewPanel shape)", () => {
+			let viewStateCallback: () => void
+			// Structural stand-in for the VS Code webview API surface this
+			// scenario exercises, same as the mockWebviewViewB cast below.
+			let mockWebviewPanel: vscode.WebviewPanel
+
+			beforeEach(() => {
+				// WebviewPanel-shaped stand-in: same webview surface, but the
+				// visibility listener is onDidChangeViewState instead of
+				// onDidChangeVisibility, matching resolveWebviewView's tab branch.
+				mockWebviewPanel = {
+					webview: {
+						postMessage: vi.fn(),
+						html: "",
+						options: {},
+						onDidReceiveMessage: vi.fn(),
+						asWebviewUri: vi.fn(),
+						cspSource: "vscode-webview://test-csp-source",
+					},
+					visible: true,
+					onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+					onDidChangeViewState: vi.fn().mockImplementation((cb: () => void) => {
+						viewStateCallback = cb
+						return { dispose: vi.fn() }
+					}),
+					dispose: vi.fn(),
+				} as unknown as vscode.WebviewPanel
+			})
+
+			test("reloads the tab webview when the heartbeat is stale and the tab is visible", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(120_000)
+
+				expect(mockWebviewPanel.webview.html).not.toBe(htmlAfterResolve)
+				expect(mockWebviewPanel.webview.html).toContain("<title>Zoo Code</title>")
+			})
+
+			test("does not reload a hidden tab even when the heartbeat is stale", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				Object.defineProperty(mockWebviewPanel, "visible", { value: false, configurable: true })
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(180_000)
+
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterResolve)
+			})
+
+			test("resets the grace window when the tab becomes visible", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				Object.defineProperty(mockWebviewPanel, "visible", { value: false, configurable: true })
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterResolve)
+
+				Object.defineProperty(mockWebviewPanel, "visible", { value: true, configurable: true })
+				viewStateCallback()
+				const htmlAfterBecomingVisible = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterBecomingVisible)
+
+				// Watchdog ticks every 60s; 120s after the flip the heartbeat is stale again.
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(mockWebviewPanel.webview.html).not.toBe(htmlAfterBecomingVisible)
+			})
 		})
 	})
 

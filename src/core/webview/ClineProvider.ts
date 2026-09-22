@@ -225,6 +225,10 @@ export class ClineProvider
 	private _disposed = false
 	private lastWebviewHeartbeatAt = 0
 	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
+	// Bumped to invalidate an in-flight recovery reload when the provider or
+	// the watched view is disposed; the reload must not reassign webview.html
+	// afterwards.
+	private webviewRecoveryEpoch = 0
 	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
 	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
@@ -821,6 +825,9 @@ export class ClineProvider
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		this.stopWebviewWatchdog()
+		// Invalidate any recovery reload still awaiting its HTML so it cannot
+		// reassign webview.html on the disposed view.
+		this.webviewRecoveryEpoch++
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -3442,8 +3449,18 @@ export class ClineProvider
 		if (!view?.webview) {
 			return
 		}
+		// Capture the epoch so a disposal or view replacement can invalidate
+		// this operation while the HTML is being generated.
+		const epoch = this.webviewRecoveryEpoch
 		try {
-			view.webview.html = await this.getWebviewHtml(view.webview)
+			const html = await this.getWebviewHtml(view.webview)
+			// The await yields; assigning html now that the provider is disposed
+			// or the watched view was disposed/replaced would touch a dead or
+			// unrelated webview.
+			if (this._disposed || this.webviewRecoveryEpoch !== epoch || this.view !== view) {
+				return
+			}
+			view.webview.html = html
 		} catch (error) {
 			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
 		}
