@@ -21,6 +21,8 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import { vertexDefaultModelId, vertexModels } from "@roo-code/types"
+
 import { ApiStreamChunk } from "../../transform/stream"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
@@ -249,17 +251,44 @@ describe("VertexHandler", () => {
 			expect(modelInfo.info).toBeDefined()
 			expect(modelInfo.info.excludedTools).toContain("apply_diff")
 			expect(modelInfo.info.includedTools).toContain("edit")
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
 		})
 
-		it("should fall back to a default Gemini model instead of Claude when apiModelId is undefined", () => {
+		it("should resolve to the shared vertex default when apiModelId is undefined", () => {
 			const testHandler = new VertexHandler({
 				vertexProjectId: "test-project",
 				vertexRegion: "us-central1",
 			})
 
 			const modelInfo = testHandler.getModel()
-			expect(modelInfo.id).toBe("gemini-3.7-flash")
-			expect(modelInfo.id).not.toContain("claude")
+			expect(modelInfo.id).toBe(vertexDefaultModelId)
+			expect(modelInfo.info).toEqual(
+				expect.objectContaining({
+					...vertexModels[vertexDefaultModelId],
+					excludedTools: expect.arrayContaining(["apply_diff"]),
+					includedTools: expect.arrayContaining(["edit"]),
+				}),
+			)
+		})
+
+		it("should honor an unknown unsuffixed gemini-* id and drop pricing fields", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-9.9-flash-exp",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-9.9-flash-exp")
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
 		})
 	})
 })

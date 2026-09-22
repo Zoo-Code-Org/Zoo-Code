@@ -49,15 +49,11 @@ export class VertexHandler extends GeminiHandler implements SingleCompletionHand
 				tiers: undefined,
 			}
 		} else {
-			const defaultGeminiModel: VertexModelId = (
-				"gemini-3.7-flash" in vertexModels
-					? "gemini-3.7-flash"
-					: "gemini-3.1-pro-preview" in vertexModels
-						? "gemini-3.1-pro-preview"
-						: vertexDefaultModelId
-			) as VertexModelId
-			id = defaultGeminiModel
-			info = vertexModels[defaultGeminiModel]
+			// An absent (or unrecognized non-Gemini) model id resolves to the
+			// shared vertex default so persisted-config consumers and the UI
+			// keep a single source of truth for the fallback.
+			id = vertexDefaultModelId
+			info = vertexModels[vertexDefaultModelId]
 		}
 
 		const params = getModelParams({
