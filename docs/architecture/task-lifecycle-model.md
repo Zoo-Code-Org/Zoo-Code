@@ -83,7 +83,7 @@ CI fails if either exact causal witness or violation class changes, a witness di
 
 The known-unsafe witnesses currently compare exact shortest action sequences. This is intentionally simple and reviewable, but brittle to harmless action renames or serialization refactors. A causal partial-order comparator would reduce that brittleness but would add a second trace-equivalence protocol to maintain. Until that complexity is justified, update an exact witness only after confirming the terminal violation class and required causal ordering are unchanged.
 
-`TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with real-filesystem checks through the real `proper-lockfile` and filesystem rename path, including the stale-settlement compare-and-clear regression; broader VS Code E2E remains reserved for restart and extension-host behavior.
+`TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with real-filesystem checks through the real `proper-lockfile` and filesystem rename path, including stale-settlement compare-and-clear and concurrent settlement/deletion regressions. Deletion uses the same per-file advisory lock as settlement, so it cannot interleave with the settlement rename window. Restart recovery also treats an interrupted task's pending `create_subtask` action as rejected: it must settle that exact action before replay, and a failed recovery write stops replay rather than creating another child. Broader VS Code E2E remains reserved for other restart and extension-host behavior.
 
 ## Task cleanup protocol model
 

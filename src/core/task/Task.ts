@@ -609,7 +609,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
-		this.initialStatus = initialStatus
+		this.initialStatus = initialStatus ?? historyItem?.status
 		this.pendingAction = historyItem?.pendingAction
 
 		// Store the task's mode and API config name when it's created.
@@ -991,6 +991,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.pendingAction = undefined
 		} else if (storedPendingAction.actionId !== actionId) {
 			this.pendingAction = storedPendingAction
+		}
+	}
+
+	/**
+	 * An interrupted task cannot legally delegate, so its staged create-subtask
+	 * action is a durable rejection marker rather than replayable work. Reconcile
+	 * it before restart replay; if persistence is still unavailable, propagate the
+	 * error and leave the task stopped instead of creating another doomed child.
+	 */
+	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
+		const action = this.pendingAction
+		if (this.initialStatus !== "interrupted" || action?.kind !== "create_subtask") {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new Error(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
+			)
+		}
+
+		const authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(this.taskId, action.actionId)
+		if (this.pendingAction?.actionId === action.actionId) {
+			this.pendingAction = authoritative.pendingAction
+		}
+
+		if (this.pendingAction?.kind === "create_subtask") {
+			throw new Error(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} still has a rejected create-subtask action`,
+			)
 		}
 	}
 
@@ -2372,6 +2403,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This is important in case the user deletes messages without resuming
 			// the task first.
 			this.hydrateApiConversationHistory(savedApiConversationHistory)
+			await this.settleInterruptedCreateSubtaskBeforeReplay()
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(

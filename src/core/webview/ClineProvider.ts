@@ -4088,8 +4088,9 @@ export class ClineProvider
 			}
 			try {
 				// A failed settlement write leaves the rejected pending action in
-				// durable storage. Restoring the stored parent would replay the
-				// rejected action, so leave the parent unrestored instead.
+				// durable storage. Restoring the stored parent would replay it in
+				// this process, so leave the parent unrestored. Restart recovery also
+				// settles interrupted create-subtask actions before allowing replay.
 				if (!settlementFailed) {
 					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
 					await this.createTaskWithHistoryItem(parentHistory)

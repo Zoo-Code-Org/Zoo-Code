@@ -7,7 +7,8 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import { acquireFileLock, LOCK_STALE_MS } from "../../utils/fileLock"
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -266,16 +267,9 @@ export class TaskHistoryStore {
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
+			await this.deleteTaskFile(taskId)
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
-
-			// Remove per-task file (best-effort)
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				await fs.unlink(filePath)
-			} catch {
-				// File may already be deleted
-			}
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -290,15 +284,9 @@ export class TaskHistoryStore {
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
 			for (const taskId of taskIds) {
+				await this.deleteTaskFile(taskId)
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
-
-				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					await fs.unlink(filePath)
-				} catch {
-					// File may already be deleted
-				}
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -880,6 +868,45 @@ export class TaskHistoryStore {
 			return item.id ? item : null
 		} catch {
 			return null
+		}
+	}
+
+	/** Delete through the same cross-process lock used by safeWriteJson. */
+	private async deleteTaskFile(taskId: string): Promise<void> {
+		const filePath = await this.getTaskFilePath(taskId)
+		const taskDir = path.dirname(filePath)
+		try {
+			await fs.access(taskDir)
+		} catch (error: unknown) {
+			const code =
+				error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+			if (code !== "ENOENT") {
+				throw error
+			}
+			// safeWriteJson creates the directory before taking this file lock.
+			// If it is absent, no writer has reached the shared protocol yet and
+			// deletion can linearize here without creating an empty task directory.
+			return
+		}
+
+		let releaseLock: (() => Promise<void>) | undefined
+		try {
+			releaseLock = await acquireFileLock(filePath)
+			await fs.unlink(filePath)
+		} catch (error: unknown) {
+			const code =
+				error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+			if (code !== "ENOENT") {
+				throw error
+			}
+		} finally {
+			if (releaseLock) {
+				try {
+					await releaseLock()
+				} catch (error) {
+					console.error(`Failed to release lock for ${filePath}:`, error)
+				}
+			}
 		}
 	}
 

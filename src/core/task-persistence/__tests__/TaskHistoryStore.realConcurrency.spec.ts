@@ -267,6 +267,56 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
+	it("rejects settlement for a task absent from the cache without creating it", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-cache-miss-settlement-"))
+		const store = new TaskHistoryStore(storagePath)
+		const filePath = path.join(storagePath, "tasks", "missing-task", "history_item.json")
+
+		try {
+			await store.initialize()
+
+			await expect(store.clearPendingActionIfMatching("missing-task", "action-a")).rejects.toThrow(
+				"task missing-task not found in cache",
+			)
+			expect(store.get("missing-task")).toBeUndefined()
+			await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" })
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("serializes deletion with an in-flight settlement so the task stays deleted", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-during-settlement-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const actionA = createAction("action-a", "action A")
+		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+		const lockPath = `${filePath}.lock`
+		const largeTask = "x".repeat(16 * 1024 * 1024)
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert({ ...item("shared-task"), task: largeTask, pendingAction: actionA })
+			await storeB.initialize()
+
+			const settlement = storeA.clearPendingActionIfMatching("shared-task", actionA.actionId)
+			await vi.waitFor(() => expect(fs.stat(lockPath)).resolves.toBeDefined(), { interval: 1, timeout: 2_000 })
+			const deletion = storeB.delete("shared-task")
+
+			await expect(settlement).resolves.toMatchObject({ id: "shared-task", pendingAction: undefined })
+			await expect(deletion).resolves.toBeUndefined()
+			await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(storeB.get("shared-task")).toBeUndefined()
+			await storeA.invalidate("shared-task")
+			expect(storeA.get("shared-task")).toBeUndefined()
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves independent stale-cache deltas through the real per-file lock", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-real-lock-"))
 		const storeA = new TaskHistoryStore(storagePath)
