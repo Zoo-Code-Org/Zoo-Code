@@ -1872,24 +1872,31 @@ describe("credential redaction in cache-key logs", () => {
 		it("redacts userinfo, query, and fragment from URL-scoped keys, keeping the digest", () => {
 			const key = `${providerIdentifiers.gemini}:${credentialBaseUrl}:abcd1234`
 			expect(sanitizeCacheKeyForLog(key)).toBe(
-				`${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:abcd1234`,
+				`${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>:abcd1234`,
 			)
+		})
+
+		it("reduces a token-bearing path to the origin plus a fixed path marker", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta/secret-token-123/models`
+			const sanitized = sanitizeCacheKeyForLog(key)
+			expect(sanitized).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com<path>`)
+			expect(sanitized).not.toContain("secret-token-123")
 		})
 
 		it("drops query-only credentials entirely", () => {
 			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta?api_key=topsecret`
-			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com/v1beta`)
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com<path>`)
 		})
 
 		it("drops fragment-only content entirely", () => {
 			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta#section-2`
-			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com/v1beta`)
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com<path>`)
 		})
 
 		it("does not let a colon inside the query leak past the digest separator", () => {
 			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta?next=http://other.example:8080/x:abcd1234`
 			expect(sanitizeCacheKeyForLog(key)).toBe(
-				`${providerIdentifiers.gemini}:https://proxy.example.com/v1beta:abcd1234`,
+				`${providerIdentifiers.gemini}:https://proxy.example.com<path>:abcd1234`,
 			)
 		})
 
@@ -1914,7 +1921,9 @@ describe("credential redaction in cache-key logs", () => {
 
 		it("reduces credential-free URL keys to their structural shape", () => {
 			const key = `${providerIdentifiers.litellm}:https://proxy.example.com:4000`
-			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.litellm}:https://proxy.example.com:4000/`)
+			expect(sanitizeCacheKeyForLog(key)).toBe(
+				`${providerIdentifiers.litellm}:https://proxy.example.com:4000<path>`,
+			)
 		})
 	})
 
@@ -1937,7 +1946,7 @@ describe("credential redaction in cache-key logs", () => {
 		// ...while the logged key has credentials, query, and fragment stripped.
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[MODEL_CACHE] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
+			`[MODEL_CACHE] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
@@ -1956,7 +1965,7 @@ describe("credential redaction in cache-key logs", () => {
 
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443/v1beta:`,
+			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443<path>`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
@@ -1981,7 +1990,7 @@ describe("credential redaction in cache-key logs", () => {
 
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[refreshModels] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
+			`[refreshModels] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
@@ -2006,7 +2015,7 @@ describe("credential redaction in cache-key logs", () => {
 
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[MODEL_CACHE] Error loading ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
+			`[MODEL_CACHE] Error loading ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
@@ -2029,7 +2038,7 @@ describe("credential redaction in cache-key logs", () => {
 
 		const output = loggedOutput()
 		expect(output).toContain(
-			`[MODEL_CACHE] Invalid disk cache data structure for ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
+			`[MODEL_CACHE] Invalid disk cache data structure for ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
