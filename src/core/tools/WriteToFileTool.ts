@@ -182,7 +182,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[WriteToFileTool] Failed to process queued messages:", error)
+			})
 
 			return
 		} catch (error) {

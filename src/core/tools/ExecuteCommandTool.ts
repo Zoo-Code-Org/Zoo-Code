@@ -205,9 +205,11 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				pushToolResult(result)
 				// Only drain queued messages when the command actually ran
 				// (early validation failures end the turn without an execution,
-				// matching file tools' error-path behavior).
+				// matching file tools' error-path behavior). The drain is awaited
+				// so a failed queued-message submission propagates instead of
+				// being dropped after the tool result was already published.
 				if (commandSubmitted) {
-					task.processQueuedMessages()
+					await task.processQueuedMessages()
 				}
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
@@ -229,7 +231,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 					pushToolResult(result)
 					if (commandSubmitted) {
-						task.processQueuedMessages()
+						await task.processQueuedMessages()
 					}
 				} else {
 					// Command was submitted but shell integration lost track of it — show warning.

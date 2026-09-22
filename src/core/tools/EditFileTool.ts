@@ -467,7 +467,9 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			this.resetPartialState()
 
 			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[EditFileTool] Failed to process queued messages:", error)
+			})
 		} catch (error) {
 			if (relPathForErrorHandling) {
 				await finalizePartialToolAskIfNeeded(relPathForErrorHandling)

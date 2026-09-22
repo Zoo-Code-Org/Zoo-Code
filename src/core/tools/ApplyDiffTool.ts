@@ -216,7 +216,9 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 				if (!didApprove) {
 					await task.diffViewProvider.revertChanges()
-					task.processQueuedMessages()
+					void task.processQueuedMessages().catch((error) => {
+						console.error("[ApplyDiffTool] Failed to process queued messages:", error)
+					})
 					return
 				}
 
@@ -257,14 +259,18 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			this.resetPartialState()
 
 			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[ApplyDiffTool] Failed to process queued messages:", error)
+			})
 
 			return
 		} catch (error) {
 			await handleError("applying diff", error as Error)
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[ApplyDiffTool] Failed to process queued messages:", error)
+			})
 			return
 		}
 	}

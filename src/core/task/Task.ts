@@ -1800,18 +1800,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.api = buildApiHandler(this.apiConfiguration)
 	}
 
+	/**
+	 * Submit a user message through the ask-response channel.
+	 *
+	 * @returns true when the message was handed to the ask-response channel;
+	 * false when there was nothing to submit or the handoff failed (the failure
+	 * is logged either way). Callers draining a durable queue must check this.
+	 */
 	public async submitUserMessage(
 		text: string,
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
-	): Promise<void> {
+	): Promise<boolean> {
 		try {
 			text = (text ?? "").trim()
 			images = images ?? []
 
 			if (text.length === 0 && images.length === 0) {
-				return
+				return false
 			}
 
 			const provider = this.providerRef.deref()
@@ -1840,11 +1847,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
 				this.handleWebviewAskResponse("messageResponse", text, images)
+				return true
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
+				return false
 			}
 		} catch (error) {
 			console.error("[Task#submitUserMessage] Failed to submit user message:", error)
+			return false
 		}
 	}
 
@@ -2003,7 +2013,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 
 		// Process any queued messages after condensing completes
-		this.processQueuedMessages()
+		await this.processQueuedMessages()
 	}
 
 	async say(
@@ -5409,26 +5419,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Process any queued messages by dequeuing and submitting them.
-	 * This ensures that queued user messages are sent when appropriate,
-	 * preventing them from getting stuck in the queue.
+	 * Process the next queued message by claiming and submitting it.
 	 *
-	 * @param context - Context string for logging (e.g., the calling tool name)
+	 * The message is claimed — not dequeued — before submission and is only
+	 * removed after the submission handoff succeeds. When submission fails, the
+	 * claim is released so the message stays queued for a later drain, and the
+	 * failure propagates to the caller instead of being logged and dropped.
+	 *
+	 * @returns Promise resolving to true when a queued message was submitted
+	 * and durably removed; false when the queue was empty.
 	 */
-	public processQueuedMessages(): void {
-		try {
-			if (!this.messageQueueService.isEmpty()) {
-				const queued = this.messageQueueService.dequeueMessage()
-				if (queued) {
-					setTimeout(() => {
-						this.submitUserMessage(queued.text, queued.images).catch((err) =>
-							console.error(`[Task] Failed to submit queued message:`, err),
-						)
-					}, 0)
-				}
-			}
-		} catch (e) {
-			console.error(`[Task] Queue processing error:`, e)
+	public async processQueuedMessages(): Promise<boolean> {
+		const queued = this.messageQueueService.claimNextMessage()
+		if (!queued) {
+			return false
 		}
+		try {
+			const submitted = await this.submitUserMessage(queued.text, queued.images)
+			if (!submitted) {
+				throw new Error(`[Task] Failed to submit queued message ${queued.id}`)
+			}
+		} catch (error) {
+			// Release the claim so a later drain can retry the message.
+			this.messageQueueService.releaseMessage(queued.id)
+			throw error
+		}
+		this.messageQueueService.removeMessage(queued.id)
+		return true
 	}
 }
