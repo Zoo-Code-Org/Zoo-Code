@@ -5798,6 +5798,67 @@ describe("Cline", () => {
 			expect(task.clineMessages).toHaveLength(2)
 		})
 
+		it("persists the merged partial delta before the webview update", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			// A tool approval ask interrupts the reasoning stream.
+			task.clineMessages.push({
+				ts: Date.now(),
+				type: "ask",
+				ask: "tool",
+				text: "Execute command?",
+				partial: false,
+			})
+
+			// Arm a deferred save for the merge call so await-order is observable:
+			// the merged state must reach persistence, and the webview update must
+			// not fire before the save settles.
+			const events: string[] = []
+			let resolveSave!: (saved: boolean) => void
+			const pendingSave = new Promise<boolean>((resolve) => {
+				resolveSave = resolve
+			})
+			let persistedAtSaveCall: Array<{ text?: string; partial?: boolean }> | undefined
+			saveSpy.mockClear()
+			saveSpy.mockImplementation(() => {
+				events.push("save")
+				persistedAtSaveCall = task.clineMessages.map((m) => ({ text: m.text, partial: m.partial }))
+				return pendingSave
+			})
+			const updateSpy = vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockImplementation(() => {
+				events.push("update")
+				return Promise.resolve()
+			})
+
+			let saySettled = false
+			const sayPromise = task.say("reasoning", "Thinking about it", undefined, true).then(() => {
+				saySettled = true
+			})
+
+			// The merge must not return while persistence is still pending.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(saySettled).toBe(false)
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			resolveSave(true)
+			await sayPromise
+
+			expect(events).toEqual(["save", "update"])
+			// The save observed the already-merged snapshot, not the stale text.
+			expect(persistedAtSaveCall).toEqual([
+				{ text: "Thinking about it", partial: true },
+				{ text: "Execute command?", partial: false },
+			])
+		})
+
 		it("appends a new partial message when no prefix-related stranded snapshot exists", async () => {
 			const task = new Task({
 				provider: mockProvider,

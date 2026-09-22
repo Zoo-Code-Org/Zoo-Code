@@ -2082,6 +2082,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						staleSnapshot.images = images
 						staleSnapshot.partial = partial
 						staleSnapshot.progressStatus = progressStatus
+						// A stranded snapshot merge has no guaranteed later save, so
+						// persist the merged delta before the webview update — the
+						// same save-then-post pattern as the complete-merge branch.
+						await this.saveClineMessages()
 						this.updateClineMessage(staleSnapshot).catch((error) => {
 							console.error("[Task#say] updateClineMessage failed:", error)
 						})
