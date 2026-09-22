@@ -63,6 +63,20 @@ export function sanitizeIdentifierSurrogates(identifier: string): string {
 }
 
 /**
+ * Sanitizes a request tool-definition name.
+ *
+ * VS Code Copilot validates declared tool names against `^[\w-]+$` before sending the request, so
+ * the U+FFFD produced by {@link sanitizeIdentifierSurrogates} would be rejected. Encoding each lone
+ * surrogate as `_u<HEX>` stays inside the permitted set and keeps distinct names distinct.
+ */
+export function sanitizeToolNameSurrogates(name: string): string {
+	// Escaping MUST precede encoding, or a literal "_u" would be indistinguishable from a marker.
+	return name
+		.replace(/_u/g, "_uu")
+		.replace(LONE_SURROGATE, (unit) => `_u${unit.charCodeAt(0).toString(16).toUpperCase()}`)
+}
+
+/**
  * Applies {@link sanitizeSurrogates} to every string nested in a tool-call argument object. The
  * backend rejects the whole request for a lone surrogate anywhere in the JSON payload, so a tool
  * argument carrying a sliced astral character fails the request just as message text would.

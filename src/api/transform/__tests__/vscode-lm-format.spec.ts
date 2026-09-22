@@ -9,6 +9,7 @@ import {
 	extractTextCountFromMessage,
 	sanitizeSurrogates,
 	sanitizeIdentifierSurrogates,
+	sanitizeToolNameSurrogates,
 } from "../vscode-lm-format"
 
 // Mock crypto using Vitest
@@ -821,6 +822,19 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		expectNoLoneSurrogate(sanitizedLiteral)
 		expect(codeUnits(sanitizeIdentifierSurrogates("toolu_01ABCDEF"))).toEqual(codeUnits("toolu_01ABCDEF"))
 		expect(codeUnits(sanitizeIdentifierSurrogates(`call-${VALID_PAIR}`))).toEqual(codeUnits(`call-${VALID_PAIR}`))
+	})
+
+	it("encodes tool names within the permitted identifier character set without collisions", () => {
+		const encoded = [`read${LONE_HIGH}file`, "read_uD800file", "readD800file", `read${LONE_LOW}file`].map((name) =>
+			sanitizeToolNameSurrogates(name),
+		)
+
+		for (const name of encoded) {
+			expect(name).toMatch(/^[\w-]+$/)
+			expectNoLoneSurrogate(name)
+		}
+		expect(new Set(encoded).size).toBe(encoded.length)
+		expect(codeUnits(sanitizeToolNameSurrogates(`read-${VALID_PAIR}`))).toEqual(codeUnits(`read-${VALID_PAIR}`))
 	})
 
 	it("leaves an id with no surrogates byte-identical", () => {

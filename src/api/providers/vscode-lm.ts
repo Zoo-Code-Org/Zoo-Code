@@ -18,9 +18,9 @@ import { ApiStream, ApiStreamChunk } from "../transform/stream"
 import {
 	convertToVsCodeLmMessages,
 	extractTextCountFromMessage,
-	sanitizeIdentifierSurrogates,
 	sanitizeSurrogates,
 	sanitizeSurrogatesDeep,
+	sanitizeToolNameSurrogates,
 } from "../transform/vscode-lm-format"
 
 import { BaseProvider } from "./base-provider"
@@ -37,9 +37,8 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 	return tools
 		.filter((tool) => tool.type === "function")
 		.map((tool) => ({
-			// Names use the injective identifier form so two tools differing only in a lone
-			// surrogate cannot collapse into one and misroute the model's tool calls.
-			name: sanitizeIdentifierSurrogates(tool.function.name),
+			// Declared names must stay within Copilot's ^[\w-]+$ validation while remaining distinct.
+			name: sanitizeToolNameSurrogates(tool.function.name),
 			description: sanitizeSurrogates(tool.function.description || ""),
 			inputSchema: tool.function.parameters
 				? (sanitizeSurrogatesDeep(

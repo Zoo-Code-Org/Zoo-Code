@@ -331,6 +331,10 @@ describe("VsCodeLmHandler", () => {
 								},
 							},
 						},
+						{
+							type: "function" as const,
+							function: { name: "read\uD801file", description: "other" },
+						},
 					],
 				})
 				for await (const _chunk of stream) {
@@ -343,7 +347,10 @@ describe("VsCodeLmHandler", () => {
 
 				const requestOptions = mockLanguageModelChat.sendRequest.mock.calls[0][1]
 				const sentTool = requestOptions.tools[0]
-				expect(codeUnits(sentTool.name)).toEqual(codeUnits("read\uFFFDD800file"))
+				// Copilot rejects declared tool names that do not match this pattern before sending.
+				expect(sentTool.name).toMatch(/^[\w-]+$/)
+				expect(codeUnits(sentTool.name)).toEqual(codeUnits("read_uD800file"))
+				expect(requestOptions.tools[1].name).toBe("read_uD801file")
 				expect(codeUnits(sentTool.description)).toEqual(codeUnits("desc\uFFFDription"))
 				const schemaProperties = (
 					sentTool.inputSchema as { properties: Record<string, { description: string }> }
