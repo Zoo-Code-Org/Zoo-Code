@@ -3738,8 +3738,11 @@ describe("ClineProvider - Router Models", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		// Mock getState to return API configuration
+		// Unbound's catalog is only fetched when Unbound is the active provider,
+		// so make it active to include it in this aggregate coverage.
 		vi.spyOn(provider, "getState").mockResolvedValue({
 			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
 				openRouterApiKey: "openrouter-key",
 				requestyApiKey: "requesty-key",
 				litellmApiKey: "litellm-key",
@@ -3812,8 +3815,11 @@ describe("ClineProvider - Router Models", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
+		// Unbound's catalog is only fetched when Unbound is the active provider,
+		// so make it active to include it in this aggregate coverage.
 		vi.spyOn(provider, "getState").mockResolvedValue({
 			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
 				openRouterApiKey: "openrouter-key",
 				requestyApiKey: "requesty-key",
 				litellmApiKey: "litellm-key",
@@ -3918,8 +3924,11 @@ describe("ClineProvider - Router Models", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
+		// Unbound's catalog is only fetched when Unbound is the active provider,
+		// so make it active to include it in this aggregate coverage.
 		vi.spyOn(provider, "getState").mockResolvedValue({
 			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
 				openRouterApiKey: "openrouter-key",
 				requestyApiKey: "requesty-key",
 				// No litellm config
