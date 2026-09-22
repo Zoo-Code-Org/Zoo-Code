@@ -35,7 +35,7 @@ describe("Opencode Go Fetchers", () => {
 
 			expect(mockedAxios.get).toHaveBeenCalledWith("https://opencode.ai/zen/go/v1/models", {
 				headers: { Authorization: "Bearer test-key" },
-				timeout: 10_000,
+				signal: undefined,
 			})
 
 			expect(Object.keys(models).sort()).toEqual(["deepseek-v4-pro", "glm-5.1"])
@@ -149,6 +149,33 @@ describe("Opencode Go Fetchers", () => {
 			expect(warnSpy.mock.calls[1][0]).toContain("Skipping invalid Opencode Go model entry")
 
 			warnSpy.mockRestore()
+		})
+
+		it("forwards the caller's abort signal to the request", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+			const controller = new AbortController()
+
+			await getOpencodeGoModels("test-key", { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://opencode.ai/zen/go/v1/models", {
+				headers: { Authorization: "Bearer test-key" },
+				signal: controller.signal,
+			})
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getOpencodeGoModels("k", { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 		})
 	})
 

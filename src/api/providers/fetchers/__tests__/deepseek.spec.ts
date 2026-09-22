@@ -59,4 +59,35 @@ describe("getDeepSeekModels", () => {
 
 		await expect(getDeepSeekModels("http://127.0.0.1:43123/v1", "mock-key")).rejects.toThrow("HTTP 404: Not Found")
 	})
+
+	it("passes the caller's abort signal to the request", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+		const controller = new AbortController()
+
+		await getDeepSeekModels(undefined, "test-key", { signal: controller.signal })
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"https://api.deepseek.com/models",
+			expect.objectContaining({ signal: controller.signal }),
+		)
+	})
+
+	it("rejects instead of serving the static fallback when the signal is aborted during an error response", async () => {
+		process.env.E2E_MOCK_MODEL_LIST_FALLBACK = "true"
+		const controller = new AbortController()
+		controller.abort()
+
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response('{"error":{"message":"Not found","type":"not_found"}}', {
+				status: 404,
+				statusText: "Not Found",
+			}),
+		)
+
+		await expect(
+			getDeepSeekModels("http://127.0.0.1:43123/v1", "mock-key", { signal: controller.signal }),
+		).rejects.toMatchObject({ name: "AbortError" })
+	})
 })

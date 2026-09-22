@@ -12,6 +12,7 @@
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
+		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
