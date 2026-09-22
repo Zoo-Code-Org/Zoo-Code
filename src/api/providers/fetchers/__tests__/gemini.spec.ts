@@ -1,9 +1,15 @@
 // Mocks must come first, before imports
 
-const { mockList } = vi.hoisted(() => ({ mockList: vi.fn() }))
+const { mockList, mockConstruct } = vi.hoisted(() => ({
+	mockList: vi.fn(),
+	mockConstruct: vi.fn(),
+}))
 
 vi.mock("@google/genai", () => ({
 	GoogleGenAI: class {
+		constructor(options: unknown) {
+			mockConstruct(options)
+		}
 		models = { list: mockList }
 	},
 }))
@@ -35,6 +41,12 @@ describe("getGeminiModels", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockList.mockResolvedValue(fakePager(["models/gemini-2.5-flash"]))
+	})
+
+	it("constructs the client with the caller's API key", async () => {
+		await getGeminiModels("test-key")
+
+		expect(mockConstruct).toHaveBeenCalledWith({ apiKey: "test-key" })
 	})
 
 	it("strips the models/ prefix and returns a null-prototype record", async () => {

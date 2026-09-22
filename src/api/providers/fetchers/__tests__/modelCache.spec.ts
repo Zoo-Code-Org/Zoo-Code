@@ -52,7 +52,7 @@ vi.mock("../vertex")
 vi.mock("../zoo-gateway")
 
 // Mock ContextProxy with a simple static instance
-vi.mock("../../../core/config/ContextProxy", () => ({
+vi.mock("../../../../core/config/ContextProxy", () => ({
 	ContextProxy: {
 		instance: {
 			globalStorageUri: {
@@ -407,10 +407,6 @@ describe("getModelsFromCache disk fallback", () => {
 	})
 
 	it("returns disk cache data when memory cache misses and context is available", () => {
-		// Note: This test validates the logic but the ContextProxy mock in test environment
-		// returns undefined for getCacheDirectoryPathSync, which is expected behavior
-		// when the context is not fully initialized. The actual disk cache loading
-		// is validated through integration tests.
 		const diskModels = {
 			"disk-model": {
 				maxTokens: 4096,
@@ -424,9 +420,9 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
-		// In the test environment, ContextProxy.instance may not be fully initialized,
-		// so getCacheDirectoryPathSync returns undefined and disk cache is not attempted
-		expect(result).toBeUndefined()
+		expect(result).toEqual(diskModels)
+		// A validated disk hit is promoted to the memory cache for subsequent lookups.
+		expect(mockCache.set).toHaveBeenCalledWith(providerIdentifiers.openrouter, diskModels)
 	})
 
 	it("handles disk read errors gracefully", () => {
@@ -1961,6 +1957,79 @@ describe("credential redaction in cache-key logs", () => {
 		const output = loggedOutput()
 		expect(output).toContain(
 			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443/v1beta:`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
+
+	it("redacts the key in the refreshModels disk-write failure log while storage keeps the raw key", async () => {
+		mockGetGeminiModels.mockResolvedValue({
+			"gemini-2.5-flash": { maxTokens: 64_000, contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+		const { refreshModels } = await import("../modelCache")
+
+		await refreshModels({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		// The refresh stored the catalog under the raw key before the disk write failed.
+		const storedKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(storedKeys).toHaveLength(1)
+		expect(storedKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[refreshModels] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
+
+	it("redacts the key in the disk-load failure log while the lookup uses the raw key", async () => {
+		vi.mocked(fsSync.existsSync).mockReturnValue(true)
+		vi.mocked(fsSync.readFileSync).mockImplementation(() => {
+			throw new Error("Disk read failed")
+		})
+
+		getModelsFromCache({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		// The cache lookup itself used the raw credentialed key (storage identity is untouched).
+		const lookupKeys = mockCache.get.mock.calls.map(([key]) => key as string)
+		expect(lookupKeys).toHaveLength(1)
+		expect(lookupKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[MODEL_CACHE] Error loading ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
+
+	it("redacts the key in the invalid disk-cache structure log", async () => {
+		vi.mocked(fsSync.existsSync).mockReturnValue(true)
+		// Parses as JSON but violates the ModelRecord schema, so the structure log fires.
+		vi.mocked(fsSync.readFileSync).mockReturnValue(JSON.stringify({ "gemini-bad": { contextWindow: "huge" } }))
+
+		getModelsFromCache({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		const lookupKeys = mockCache.get.mock.calls.map(([key]) => key as string)
+		expect(lookupKeys).toHaveLength(1)
+		expect(lookupKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[MODEL_CACHE] Invalid disk cache data structure for ${providerIdentifiers.gemini}:https://proxy.example.com:8443/v1beta:`,
 		)
 		expect(output).not.toContain("user:pass")
 		expect(output).not.toContain("api_key=topsecret")
