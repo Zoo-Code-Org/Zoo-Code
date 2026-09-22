@@ -12,6 +12,7 @@ import {
 	type RouterModels,
 	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	VERTEX_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
@@ -26,6 +27,10 @@ import {
 	friendliModels,
 	deepSeekDefaultModelId,
 	deepSeekModels,
+	geminiDefaultModelId,
+	geminiModels,
+	vertexDefaultModelId,
+	vertexModels,
 	openRouterDefaultModelId,
 	vscodeLlmModels,
 	vscodeLlmDefaultModelId,
@@ -234,22 +239,33 @@ describe("useSelectedModel", () => {
 		expect(result.current.info).toEqual(opencodeGoDefaultModelInfo)
 	})
 
-	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot])(
-		"prefers router data over static data for %s",
-		(provider) => {
-			const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
-			const modelId = provider === providerIdentifiers.deepseek ? "deepseek-v4-pro" : moonshotDefaultModelId
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [provider]: { [modelId]: modelInfo } }))
-			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+	it.each([
+		providerIdentifiers.deepseek,
+		providerIdentifiers.moonshot,
+		providerIdentifiers.gemini,
+		providerIdentifiers.vertex,
+	])("prefers router data over static data for %s", (provider) => {
+		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
+		let modelId: string
+		if (provider === providerIdentifiers.deepseek) {
+			modelId = "deepseek-v4-pro"
+		} else if (provider === providerIdentifiers.moonshot) {
+			modelId = moonshotDefaultModelId
+		} else if (provider === providerIdentifiers.gemini) {
+			modelId = geminiDefaultModelId
+		} else {
+			modelId = vertexDefaultModelId
+		}
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [provider]: { [modelId]: modelInfo } }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 
-			const { result } = renderHook(() => useSelectedModel({ apiProvider: provider, apiModelId: modelId }), {
-				wrapper: createWrapper(),
-			})
+		const { result } = renderHook(() => useSelectedModel({ apiProvider: provider, apiModelId: modelId }), {
+			wrapper: createWrapper(),
+		})
 
-			expect(result.current.id).toBe(modelId)
-			expect(result.current.info).toEqual(modelInfo)
-		},
-	)
+		expect(result.current.id).toBe(modelId)
+		expect(result.current.info).toEqual(modelInfo)
+	})
 
 	it("selects static vision metadata when the DeepSeek catalog is unavailable", () => {
 		const modelId = "deepseek-v4-flash-vision-exp"
@@ -266,23 +282,84 @@ describe("useSelectedModel", () => {
 		expect(result.current.info?.supportsImages).toBe(true)
 	})
 
-	it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot])(
-		"falls back to static data when the %s router catalog is null",
+	it.each([
+		providerIdentifiers.deepseek,
+		providerIdentifiers.moonshot,
+		providerIdentifiers.gemini,
+		providerIdentifiers.vertex,
+	])("falls back to static data when the %s router catalog is null", (provider) => {
+		let modelId: string
+		if (provider === providerIdentifiers.deepseek) {
+			modelId = deepSeekDefaultModelId
+		} else if (provider === providerIdentifiers.moonshot) {
+			modelId = moonshotDefaultModelId
+		} else if (provider === providerIdentifiers.gemini) {
+			modelId = geminiDefaultModelId
+		} else {
+			modelId = vertexDefaultModelId
+		}
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [provider]: null }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+		const { result } = renderHook(() => useSelectedModel({ apiProvider: provider, apiModelId: modelId }), {
+			wrapper: createWrapper(),
+		})
+
+		expect(result.current.id).toBe(modelId)
+		if (provider === providerIdentifiers.deepseek) {
+			expect(result.current.info).toEqual(deepSeekModels[deepSeekDefaultModelId])
+		} else if (provider === providerIdentifiers.moonshot) {
+			expect(result.current.info).toEqual(moonshotModels[modelId as keyof typeof moonshotModels])
+		} else if (provider === providerIdentifiers.gemini) {
+			expect(result.current.info).toEqual(geminiModels[modelId as keyof typeof geminiModels])
+		} else {
+			expect(result.current.info).toEqual(vertexModels[modelId as keyof typeof vertexModels])
+		}
+	})
+
+	it.each([providerIdentifiers.gemini, providerIdentifiers.vertex])(
+		"%s: selects a router-only model not present in the static catalog",
 		(provider) => {
-			const modelId = provider === providerIdentifiers.deepseek ? deepSeekDefaultModelId : moonshotDefaultModelId
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [provider]: null }))
+			// Regression guard: the merged catalog must admit model IDs that exist
+			// ONLY in the router response. A static-only regression would validate the
+			// configured ID against the static map, miss it, and silently reset the
+			// selection to the static default. The default-id-keyed tests above cannot
+			// catch that, so this is the only possible guard for that regression.
+			const routerOnlyModelId = `${provider}-router-only-preview`
+			const routerModelInfo: ModelInfo = {
+				maxTokens: 8192,
+				contextWindow: 262144,
+				supportsImages: false,
+				supportsPromptCache: true,
+				description: `Router-only ${provider} model`,
+			}
+
+			// Guard the test premise: if this ID were ever added to the static catalog,
+			// the test would silently degrade into the "prefers router data" coverage
+			// and must fail loudly instead.
+			if (provider === providerIdentifiers.gemini) {
+				expect(geminiModels[routerOnlyModelId as keyof typeof geminiModels]).toBeUndefined()
+			} else {
+				expect(vertexModels[routerOnlyModelId as keyof typeof vertexModels]).toBeUndefined()
+			}
+
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ [provider]: { [routerOnlyModelId]: routerModelInfo } }),
+			)
 			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 
-			const { result } = renderHook(() => useSelectedModel({ apiProvider: provider, apiModelId: modelId }), {
-				wrapper: createWrapper(),
-			})
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: provider, apiModelId: routerOnlyModelId }),
+				{ wrapper: createWrapper() },
+			)
 
-			expect(result.current.id).toBe(modelId)
-			if (provider === providerIdentifiers.deepseek) {
-				expect(result.current.info).toEqual(deepSeekModels[deepSeekDefaultModelId])
-			} else {
-				expect(result.current.info).toEqual(moonshotModels[modelId as keyof typeof moonshotModels])
-			}
+			// The router-only ID survives validation instead of resetting to the static default.
+			expect(result.current.id).toBe(routerOnlyModelId)
+			expect(result.current.id).not.toBe(
+				provider === providerIdentifiers.gemini ? geminiDefaultModelId : vertexDefaultModelId,
+			)
+			// The selection carries the ROUTER metadata, not a static fallback.
+			expect(result.current.info).toEqual(routerModelInfo)
 		},
 	)
 
@@ -1576,6 +1653,109 @@ describe("useSelectedModel", () => {
 
 			expect(result.current.id).toBe("kimi-k2-turbo-preview")
 			expect(result.current.info).toEqual(moonshotModels["kimi-k2-turbo-preview"])
+		})
+	})
+
+	describe("gemini provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ gemini: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("should fallback to default when model ID is not in static or router models", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.gemini,
+				apiModelId: "non-existent-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe(geminiDefaultModelId)
+			expect(result.current.info).toEqual(geminiModels[geminiDefaultModelId])
+		})
+	})
+
+	describe("vertex provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ vertex: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("should fallback to default when model ID is not in static or router models", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.vertex,
+				apiModelId: "non-existent-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe(vertexDefaultModelId)
+			expect(result.current.info).toEqual(vertexModels[vertexDefaultModelId])
+		})
+
+		describe("with 1M context", () => {
+			it("should apply 1M context window and tier pricing when vertex1MContext is enabled", () => {
+				const apiConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.vertex,
+					apiModelId: VERTEX_1M_CONTEXT_MODEL_IDS[0],
+					vertex1MContext: true,
+				}
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+				expect(result.current.id).toBe(VERTEX_1M_CONTEXT_MODEL_IDS[0])
+				expect(result.current.info?.contextWindow).toBe(1_000_000)
+				expect(result.current.info?.inputPrice).toBe(6.0)
+				expect(result.current.info?.outputPrice).toBe(22.5)
+			})
+
+			it("should use the default context window when vertex1MContext is disabled", () => {
+				const apiConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.vertex,
+					apiModelId: VERTEX_1M_CONTEXT_MODEL_IDS[0],
+					vertex1MContext: false,
+				}
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+				expect(result.current.id).toBe(VERTEX_1M_CONTEXT_MODEL_IDS[0])
+				expect(result.current.info?.contextWindow).toBe(200_000)
+			})
+
+			it("should still apply the 1M tier when the selected model info comes from the router catalog", () => {
+				// The fetched catalog can carry the known specs (including tiers) for
+				// models also present in the static map; the tier expansion must run on
+				// that router-provided info exactly as it did on the static entry.
+				const modelId = VERTEX_1M_CONTEXT_MODEL_IDS[0]
+				const routerModelInfo: ModelInfo = { ...vertexModels[modelId as keyof typeof vertexModels] }
+
+				mockUseRouterModels.mockReturnValue(
+					createRouterModelsResult({ vertex: { [modelId]: routerModelInfo } }),
+				)
+
+				const apiConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.vertex,
+					apiModelId: modelId,
+					vertex1MContext: true,
+				}
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+				expect(result.current.id).toBe(modelId)
+				expect(result.current.info).toEqual({
+					...routerModelInfo,
+					contextWindow: 1_000_000,
+					inputPrice: 6.0,
+					outputPrice: 22.5,
+					cacheWritesPrice: 7.5,
+					cacheReadsPrice: 0.6,
+				})
+			})
 		})
 	})
 })

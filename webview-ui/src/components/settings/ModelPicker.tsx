@@ -312,20 +312,25 @@ export const ModelPicker = ({
 							hidePricing={hidePricing}
 						/>
 					)}
-					{!hidePricing && apiConfiguration.apiProvider !== providerIdentifiers.mimo && (
-						<div className="text-sm text-vscode-descriptionForeground" data-testid="automatic-fetch-hint">
-							<Trans
-								i18nKey="settings:modelPicker.automaticFetch"
-								components={{
-									serviceLink: <VSCodeLink href={serviceUrl} className="text-sm" />,
-									defaultModelLink: (
-										<VSCodeLink onClick={() => onSelect(defaultModelId)} className="text-sm" />
-									),
-								}}
-								values={{ serviceName, defaultModelId }}
-							/>
-						</div>
-					)}
+					{!hidePricing &&
+						apiConfiguration.apiProvider !== providerIdentifiers.mimo &&
+						apiConfiguration.apiProvider !== providerIdentifiers.gemini &&
+						apiConfiguration.apiProvider !== providerIdentifiers.vertex && (
+							<div
+								className="text-sm text-vscode-descriptionForeground"
+								data-testid="automatic-fetch-hint">
+								<Trans
+									i18nKey="settings:modelPicker.automaticFetch"
+									components={{
+										serviceLink: <VSCodeLink href={serviceUrl} className="text-sm" />,
+										defaultModelLink: (
+											<VSCodeLink onClick={() => onSelect(defaultModelId)} className="text-sm" />
+										),
+									}}
+									values={{ serviceName, defaultModelId }}
+								/>
+							</div>
+						)}
 				</div>
 			)}
 		</>
