@@ -16,6 +16,13 @@ type UseRouterModelsOptions = {
 
 export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
+		// Request identity lets the extension host abort this specific fetch when the webview
+		// cancels (see cancelRouterModelsRequest in webviewMessageHandler).
+		const requestId = crypto.randomUUID()
+		// Set once the request message has been posted; a cancellation is only forwarded for
+		// requests the extension host actually received.
+		let requestPosted = false
+
 		const cleanup = () => {
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
@@ -26,6 +33,15 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		const onAbort = () => {
 			clearTimeout(timeout)
 			cleanup()
+			// Fire-and-forget: ask the extension host to abort the matching in-flight fetch.
+			// Only when the request was actually posted -- a pre-aborted signal never reaches
+			// the host, so there is nothing to cancel there.
+			if (requestPosted) {
+				void vscode.postMessage({
+					type: RouterModelsMessageType.cancelRouterModelsRequest,
+					values: { requestId },
+				})
+			}
 			// Match the repo abort contract (abort-signal.ts): name "AbortError"
 			// so cancellation is recognizable by callers and React Query.
 			const abortError = new Error("Aborted")
@@ -70,10 +86,17 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		signal?.addEventListener("abort", onAbort)
 
 		if (provider) {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels, values: { provider } })
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider, requestId },
+			})
 		} else {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { requestId },
+			})
 		}
+		requestPosted = true
 	})
 
 export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {

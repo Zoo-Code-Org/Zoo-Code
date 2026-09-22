@@ -62,28 +62,34 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	flushModels: (...args: any[]) => flushModelsMock(...args),
 }))
 
+type MockRouterModelsProvider = ClineProvider & {
+	postMessageToWebview: ReturnType<typeof vi.fn>
+	getState: ReturnType<typeof vi.fn>
+	contextProxy: unknown
+	log: ReturnType<typeof vi.fn>
+}
+
+// The handler only touches these members; cast the literal once so every describe below
+// shares the same double.
+const makeMockProvider = (): MockRouterModelsProvider =>
+	({
+		postMessageToWebview: vi.fn(),
+		getState: vi.fn().mockResolvedValue({ apiConfiguration: {} }),
+		contextProxy: {
+			getValue: vi.fn(),
+			setValue: vi.fn(),
+			globalStorageUri: { fsPath: "/mock/storage" },
+		},
+		log: vi.fn(),
+	}) as any
+
 describe("webviewMessageHandler - requestRouterModels provider filter", () => {
-	let mockProvider: ClineProvider & {
-		postMessageToWebview: ReturnType<typeof vi.fn>
-		getState: ReturnType<typeof vi.fn>
-		contextProxy: any
-		log: ReturnType<typeof vi.fn>
-	}
+	let mockProvider: MockRouterModelsProvider
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 
-		mockProvider = {
-			// Only methods used by this code path
-			postMessageToWebview: vi.fn(),
-			getState: vi.fn().mockResolvedValue({ apiConfiguration: {} }),
-			contextProxy: {
-				getValue: vi.fn(),
-				setValue: vi.fn(),
-				globalStorageUri: { fsPath: "/mock/storage" },
-			},
-			log: vi.fn(),
-		} as any
+		mockProvider = makeMockProvider()
 
 		// Default mock: return distinct model maps per provider so we can verify keys
 		getModelsMock.mockImplementation(async (options: any) => {
@@ -846,5 +852,133 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(response).toBeDefined()
 		if (!response) throw new Error("Expected routerModels response")
 		expect(response[0].routerModels.vertex).toEqual({})
+	})
+})
+
+describe("webviewMessageHandler - requestRouterModels cancellation", () => {
+	let mockProvider: MockRouterModelsProvider
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+
+		mockProvider = makeMockProvider()
+	})
+
+	it("threads the per-request abort signal into getModels when a requestId is present", async () => {
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter, requestId: "req-1" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.openrouter,
+			signal: expect.any(AbortSignal),
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+	})
+
+	it("threads the signal into the gemini and vertex candidate fetches", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				geminiApiKey: "stored-gemini-key",
+				vertexProjectId: "stored-project",
+				vertexRegion: "us-central1",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId: "req-gemini-vertex" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				provider: providerIdentifiers.gemini,
+				signal: expect.any(AbortSignal),
+			}),
+		)
+		expect(getModelsMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				provider: providerIdentifiers.vertex,
+				signal: expect.any(AbortSignal),
+			}),
+		)
+	})
+
+	it("aborts the matching in-flight request on cancelRouterModelsRequest and no-ops unknown ids", async () => {
+		let resolveFetch: ((models: Record<string, unknown>) => void) | undefined
+		getModelsMock.mockImplementation(
+			() =>
+				new Promise<Record<string, unknown>>((resolve) => {
+					resolveFetch = resolve
+				}),
+		)
+
+		const requestPromise = webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter, requestId: "req-cancel" },
+		})
+
+		await vi.waitFor(() => expect(getModelsMock).toHaveBeenCalled())
+		const call = getModelsMock.mock.calls.find(
+			(c: unknown[]) => (c[0] as { provider?: string }).provider === providerIdentifiers.openrouter,
+		)
+		if (!call) throw new Error("Expected openrouter getModels call")
+		const signal = (call[0] as { signal?: AbortSignal }).signal
+		expect(signal).toBeInstanceOf(AbortSignal)
+		expect(signal?.aborted).toBe(false)
+
+		// A cancellation for an unknown request id must not disturb the in-flight request.
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-unknown" },
+		})
+		expect(signal?.aborted).toBe(false)
+
+		// The matching cancellation aborts the threaded signal.
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-cancel" },
+		})
+		expect(signal?.aborted).toBe(true)
+
+		// The aborted request still settles and posts its aggregate response.
+		resolveFetch!({ "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } })
+		await requestPromise
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(c: unknown[]) => (c[0] as { type?: string } | undefined)?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+
+		// After the request settled, its registry entry is gone: a duplicate cancellation no-ops.
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-cancel" },
+		})
+	})
+
+	it("cleans up the cancellation registration when the request finishes on its own", async () => {
+		let settledSignal: AbortSignal | undefined
+		getModelsMock.mockImplementation((options: { signal?: AbortSignal }) => {
+			settledSignal = options.signal
+			return Promise.resolve({ "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } })
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter, requestId: "req-settled" },
+		})
+
+		// The finally cleanup removed the settled request's controller: a late cancellation for
+		// the same id finds no registry entry and must not abort the settled request's signal.
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId: "req-settled" },
+		})
+		expect(settledSignal?.aborted).toBe(false)
 	})
 })

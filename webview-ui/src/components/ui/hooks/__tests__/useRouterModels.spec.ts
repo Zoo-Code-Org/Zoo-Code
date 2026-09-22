@@ -63,7 +63,7 @@ describe("fetchRouterModels", () => {
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { provider: providerIdentifiers.openrouter },
+			values: { provider: providerIdentifiers.openrouter, requestId: expect.any(String) },
 		})
 
 		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
@@ -78,7 +78,10 @@ describe("fetchRouterModels", () => {
 		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
 		const promise = fetchRouterModels()
 
-		expect(vscode.postMessage).toHaveBeenCalledWith({ type: RouterModelsMessageType.requestRouterModels })
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId: expect.any(String) },
+		})
 
 		respondWithRouterModels(routerModels)
 
@@ -124,6 +127,26 @@ describe("fetchRouterModels", () => {
 		removeSpy.mockRestore()
 	})
 
+	it("posts a cancellation message with the same request id when aborted, then rejects", async () => {
+		const controller = new AbortController()
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+
+		// The cancellation must carry the exact requestId from the original request so the
+		// extension host can abort the matching in-flight fetch.
+		const requestMessage = vi.mocked(vscode.postMessage).mock.calls[0][0]
+		const requestId = (requestMessage.values as { requestId: string }).requestId
+		expect(requestId).toEqual(expect.any(String))
+
+		controller.abort()
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId },
+		})
+		await expect(promise).rejects.toMatchObject({ name: "AbortError", message: "Aborted" })
+	})
+
 	it("rejects immediately without posting the request when the signal is already aborted", async () => {
 		const controller = new AbortController()
 		controller.abort()
@@ -154,7 +177,7 @@ describe("useRouterModels", () => {
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { provider: providerIdentifiers.openrouter },
+			values: { provider: providerIdentifiers.openrouter, requestId: expect.any(String) },
 		})
 
 		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
