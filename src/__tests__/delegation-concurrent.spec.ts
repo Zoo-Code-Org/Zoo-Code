@@ -23,17 +23,6 @@ vi.mock("../utils/safeWriteJson", () => ({
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 
-// The store's cross-process task guard and advisory file lock need a real
-// filesystem, which this spec stubs out. The in-process serialization under
-// test does not depend on them.
-vi.mock("../utils/fileLock", async () => ({
-	...(await vi.importActual("../utils/fileLock")),
-	acquireFileLock: vi.fn().mockResolvedValue({
-		release: vi.fn().mockResolvedValue(undefined),
-		isCompromised: vi.fn().mockReturnValue(false),
-	}),
-}))
-
 vi.mock("../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockResolvedValue("/tmp/test-storage"),
 }))

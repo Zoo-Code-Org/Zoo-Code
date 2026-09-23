@@ -158,44 +158,57 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ initial: "content" })
 	})
 
-	test("should leave the original file in place when the commit rename fails", async () => {
+	test("should handle failure when renaming filePath to tempBackupFilePath (filePath exists)", async () => {
 		const initialData = { message: "Initial content, should remain" }
 		const newData = { message: "New content, should not be written" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// The replacement is a single rename, so its failure leaves the
-		// original file untouched — the target is never missing.
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.rename).mockImplementationOnce(async () => {
-			throw new Error("Rename from temp to final failed")
+			throw new Error("Rename to backup failed")
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename to backup failed")
 
+		// Verify the original file still exists with initial content
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(initialData)
 	})
 
-	test("should remove leftover temp and backup orphans for the target before writing", async () => {
-		const orphanNew = path.join(tempDir, ".test-file.json.new_123_abc.tmp")
-		const orphanBackup = path.join(tempDir, ".test-file.json.bak_456_def.tmp")
-		const orphanOtherTarget = path.join(tempDir, ".other-file.json.new_789_ghi.tmp")
-		await fs.writeFile(orphanNew, "{}")
-		await fs.writeFile(orphanBackup, "{}")
-		await fs.writeFile(orphanOtherTarget, "{}")
+	test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup succeeded)", async () => {
+		const initialData = { message: "Initial content, should be restored" }
+		const newData = { message: "New content" }
 
-		const data = { message: "written after orphan recovery" }
-		await safeWriteJson(currentTestFilePath, data)
+		// Overwrite the pre-created file with specific initial data
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// Orphans of this target are removed while holding the lock.
-		await expect(fileExists(orphanNew)).resolves.toBe(false)
-		await expect(fileExists(orphanBackup)).resolves.toBe(false)
-		// Temp files of other targets are left alone.
-		await expect(fileExists(orphanOtherTarget)).resolves.toBe(true)
+		// Track rename calls
+		let renameCallCount = 0
 
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 1) {
+				// First call: filePath -> tempBackupFilePath (should succeed)
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			} else if (renameCallCount === 2) {
+				// Second call: tempNewFilePath -> filePath (should fail)
+				throw new Error("Rename from temp to final failed")
+			} else if (renameCallCount === 3) {
+				// Third call: tempBackupFilePath -> filePath (rollback, should succeed)
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			}
+			// Default: use original implementation
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
+
+		// Verify the file was restored to initial content
 		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(data)
+		expect(content).toEqual(initialData)
 	})
 
 	// Tests for directory creation functionality
@@ -279,6 +292,78 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(data)
 	})
 
+	test("should handle failure when deleting tempBackupFilePath (filePath exists, all renames succeed)", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "Successfully written new content" }
+
+		// Overwrite the pre-created file with specific initial data
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.unlink).mockImplementationOnce(async () => {
+			throw new Error("Failed to delete backup file")
+		})
+
+		// The write should succeed even if backup deletion fails
+		await safeWriteJson(currentTestFilePath, newData)
+
+		// Verify the new content was written successfully
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
+	})
+
+	// Test for console error suppression during backup deletion
+	test("should suppress console.error when backup deletion fails", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+		const initialData = { message: "Initial" }
+		const newData = { message: "New" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
+			if (filePath.toString().includes(".bak_")) {
+				throw new Error("Backup deletion failed")
+			}
+			return fsPromisesActuals.unlink!(filePath)
+		})
+
+		await safeWriteJson(currentTestFilePath, newData)
+
+		// Verify console.error was called with the expected message
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Successfully wrote"), expect.any(Error))
+
+		consoleErrorSpy.mockRestore()
+		vi.mocked(fs.unlink).mockRestore()
+	})
+
+	// The expected error message might need to change if the mock behaves differently.
+	test("should handle failure when renaming tempNewFilePath to filePath (filePath initially exists)", async () => {
+		// currentTestFilePath exists due to beforeEach.
+		const initialData = { message: "Initial content" }
+		const newData = { message: "New content" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		let renameCallCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 2) {
+				// Second call: tempNewFilePath -> filePath (should fail)
+				throw new Error("Rename failed")
+			}
+			// For all other calls, use the original implementation
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename failed")
+
+		// The file should be restored to its initial content
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(initialData)
+	})
+
 	test("should throw an error if an inter-process lock is already held for the filePath", async () => {
 		vi.resetModules() // Clear module cache to ensure fresh imports for this test
 
@@ -347,6 +432,41 @@ describe("safeWriteJson", () => {
 
 		// Verify access was called
 		expect(vi.mocked(fs.access)).toHaveBeenCalled()
+	})
+
+	// Test for rollback failure scenario
+	test("should log error and re-throw original if rollback fails", async () => {
+		const initialData = { message: "Initial, should be lost if rollback fails" }
+		const newData = { message: "New content" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		let renameCallCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 2) {
+				// Second call: tempNewFilePath -> filePath (fail)
+				throw new Error("Primary rename failed")
+			} else if (renameCallCount === 3) {
+				// Third call: tempBackupFilePath -> filePath (rollback, also fail)
+				throw new Error("Rollback rename failed")
+			}
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		// Should throw the original error, not the rollback error
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
+
+		// Verify console.error was called for the rollback failure
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to restore backup"),
+			expect.objectContaining({ message: "Rollback rename failed" }),
+		)
+
+		consoleErrorSpy.mockRestore()
 	})
 
 	// Merge option tests
@@ -421,69 +541,5 @@ describe("safeWriteJson", () => {
 
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual({ c: 3 })
-	})
-
-	test("should remove no orphan temp files when the lock is compromised before orphan cleanup", async () => {
-		vi.resetModules()
-
-		const compromisedPath = path.join(tempDir, "compromised-cleanup-file.json")
-		await fsPromisesActuals.writeFile!(compromisedPath, JSON.stringify({ initial: "content" }))
-
-		const orphanNew = path.join(tempDir, ".compromised-cleanup-file.json.new_123_abc.tmp")
-		const orphanBackup = path.join(tempDir, ".compromised-cleanup-file.json.bak_456_def.tmp")
-		await fs.writeFile(orphanNew, "{}")
-		await fs.writeFile(orphanBackup, "{}")
-
-		// Simulate proper-lockfile reporting the lost lock right after
-		// acquisition, before any file operation runs.
-		vi.doMock("proper-lockfile", () => ({
-			lock: (_file: string, options: { onCompromised: (error: Error) => void }) => {
-				options.onCompromised(new Error("Lock no longer available"))
-				return Promise.resolve(async () => {})
-			},
-		}))
-
-		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
-
-		await expect(mockedSafeWriteJson(compromisedPath, { replaced: true })).rejects.toThrow("was compromised")
-
-		// The compromised lock must not classify any temp file as an orphan:
-		// without exclusion it could belong to a live peer writer.
-		await expect(fileExists(orphanNew)).resolves.toBe(true)
-		await expect(fileExists(orphanBackup)).resolves.toBe(true)
-
-		// The write aborted, so the target kept its original content.
-		const content = await readFileContent(compromisedPath)
-		expect(content).toEqual({ initial: "content" })
-
-		vi.doUnmock("proper-lockfile")
-	})
-
-	test("should abort before replacing the target when the lock is compromised", async () => {
-		vi.resetModules()
-
-		const compromisedPath = path.join(tempDir, "compromised-lock-file.json")
-		await fsPromisesActuals.writeFile!(compromisedPath, JSON.stringify({ initial: "content" }))
-
-		// Simulate proper-lockfile detecting the lost lock right after
-		// acquisition: it reports compromise from its update timer instead of
-		// rejecting the lock() promise.
-		vi.doMock("proper-lockfile", () => ({
-			lock: (_file: string, options: { onCompromised: (error: Error) => void }) => {
-				options.onCompromised(new Error("Lock no longer available"))
-				return Promise.resolve(async () => {})
-			},
-		}))
-
-		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
-
-		await expect(mockedSafeWriteJson(compromisedPath, { replaced: true })).rejects.toThrow("was compromised")
-
-		// The write aborted before the commit rename, so the target kept its
-		// original content instead of being replaced without exclusion.
-		const content = await readFileContent(compromisedPath)
-		expect(content).toEqual({ initial: "content" })
-
-		vi.unmock("proper-lockfile")
 	})
 })

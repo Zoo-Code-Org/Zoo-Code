@@ -7,14 +7,7 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import {
-	acquireFileLock,
-	assertLockUsable,
-	DESTRUCTIVE_LOCK_RETRIES,
-	LOCK_STALE_MS,
-	type AcquireFileLockOptions,
-} from "../../utils/fileLock"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -273,9 +266,16 @@ export class TaskHistoryStore {
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
-			await this.deleteTaskFile(taskId)
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
+
+			// Remove per-task file (best-effort)
+			try {
+				const filePath = await this.getTaskFilePath(taskId)
+				await fs.unlink(filePath)
+			} catch {
+				// File may already be deleted
+			}
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -290,9 +290,15 @@ export class TaskHistoryStore {
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
 			for (const taskId of taskIds) {
-				await this.deleteTaskFile(taskId)
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
+
+				try {
+					const filePath = await this.getTaskFilePath(taskId)
+					await fs.unlink(filePath)
+				} catch {
+					// File may already be deleted
+				}
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -810,21 +816,9 @@ export class TaskHistoryStore {
 					await fs.access(filePath)
 					// File already exists, skip (don't overwrite existing per-task files)
 				} catch {
-					// File doesn't exist, write it under the same task guard as
-					// every other history write so a concurrent deletion cannot
-					// interleave with the removal of the task directory.
-					const guard = await this.acquireTaskIoGuard(item.id)
-					try {
-						assertLockUsable(guard, filePath, "write")
-						await safeWriteJson(filePath, item)
-						this.cache.set(item.id, item)
-					} finally {
-						try {
-							await guard.release()
-						} catch (error) {
-							console.error(`Failed to release task guard for ${item.id}:`, error)
-						}
-					}
+					// File doesn't exist, write it
+					await safeWriteJson(filePath, item)
+					this.cache.set(item.id, item)
 				}
 			}
 
@@ -848,22 +842,6 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Cross-process guard for one task. It lives outside the removable task
-	 * directory, so deletion can hold it across the history-file unlink and
-	 * the recursive directory removal while history writers hold it around
-	 * their writes. Neither side can then interleave with the other.
-	 */
-	private async acquireTaskIoGuard(
-		taskId: string,
-		options?: AcquireFileLockOptions,
-	): Promise<ReturnType<typeof acquireFileLock>> {
-		const tasksDir = await this.getTasksDir()
-		const guardDir = path.join(tasksDir, ".guards")
-		await fs.mkdir(guardDir, { recursive: true })
-		return acquireFileLock(path.join(guardDir, `${taskId}.guard`), options)
-	}
-
-	/**
 	 * Write a HistoryItem to its per-task `history_item.json` file.
 	 *
 	 * When `delta` is provided, the merge callback applies only the
@@ -873,30 +851,20 @@ export class TaskHistoryStore {
 	 */
 	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
-		const guard = await this.acquireTaskIoGuard(item.id)
-		try {
-			assertLockUsable(guard, filePath, "write")
-			if (delta) {
-				let written: HistoryItem = item
-				const mergeFn = mergeWithDisk(delta)
-				await safeWriteJson(filePath, item, {
-					merge: (existing, incoming) => {
-						const result = mergeFn(existing, incoming)
-						written = result as HistoryItem
-						return result
-					},
-				})
-				return written
-			} else {
-				await safeWriteJson(filePath, item)
-				return item
-			}
-		} finally {
-			try {
-				await guard.release()
-			} catch (error) {
-				console.error(`Failed to release task guard for ${item.id}:`, error)
-			}
+		if (delta) {
+			let written: HistoryItem = item
+			const mergeFn = mergeWithDisk(delta)
+			await safeWriteJson(filePath, item, {
+				merge: (existing, incoming) => {
+					const result = mergeFn(existing, incoming)
+					written = result as HistoryItem
+					return result
+				},
+			})
+			return written
+		} else {
+			await safeWriteJson(filePath, item)
+			return item
 		}
 	}
 
@@ -912,77 +880,6 @@ export class TaskHistoryStore {
 			return item.id ? item : null
 		} catch {
 			return null
-		}
-	}
-
-	/**
-	 * Delete the history file and remove the task directory.
-	 *
-	 * The task guard lives outside the removable directory and spans the
-	 * unlink and the recursive removal, so a concurrent history writer
-	 * cannot interleave with either step. Both acquisitions use a retry
-	 * budget that outlasts LOCK_STALE_MS, so a lock left by a crashed
-	 * process is broken within this call instead of failing the deletion.
-	 */
-	private async deleteTaskFile(taskId: string): Promise<void> {
-		const filePath = await this.getTaskFilePath(taskId)
-		const taskDir = path.dirname(filePath)
-		try {
-			await fs.access(taskDir)
-		} catch (error: unknown) {
-			const code =
-				error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
-			if (code !== "ENOENT") {
-				throw error
-			}
-			// safeWriteJson creates the directory before taking this file lock.
-			// If it is absent, no writer has reached the shared protocol yet and
-			// deletion can linearize here without creating an empty task directory.
-			return
-		}
-
-		const guard = await this.acquireTaskIoGuard(taskId, { retries: DESTRUCTIVE_LOCK_RETRIES })
-		try {
-			let fileLock: Awaited<ReturnType<typeof acquireFileLock>> | undefined
-			try {
-				fileLock = await acquireFileLock(filePath, { retries: DESTRUCTIVE_LOCK_RETRIES })
-				assertLockUsable(fileLock, filePath, "deletion")
-				// The guard can be lost while waiting for the file lock above.
-				assertLockUsable(guard, filePath, "deletion")
-				await fs.unlink(filePath)
-			} catch (error: unknown) {
-				const code =
-					error && typeof error === "object" && "code" in error
-						? (error as { code?: string }).code
-						: undefined
-				if (code !== "ENOENT") {
-					throw error
-				}
-			} finally {
-				if (fileLock) {
-					try {
-						await fileLock.release()
-					} catch (error) {
-						console.error(`Failed to release lock for ${filePath}:`, error)
-					}
-				}
-			}
-
-			// The guard must still hold exclusion before this second mutation.
-			assertLockUsable(guard, taskDir, "task directory removal")
-			try {
-				await fs.rm(taskDir, { recursive: true, force: true })
-			} catch (error) {
-				// The record is already unlinked. Mirror the provider's historical
-				// tolerance for a directory that cannot be removed right now.
-				console.error(`[TaskHistoryStore] Failed to remove task directory ${taskDir}:`, error)
-			}
-		} finally {
-			try {
-				await guard.release()
-			} catch (error) {
-				console.error(`Failed to release task guard for ${taskId}:`, error)
-			}
 		}
 	}
 
@@ -1188,32 +1085,22 @@ export class TaskHistoryStore {
 			}
 			const filePath = await this.getTaskFilePath(taskId)
 			let authoritative: HistoryItem = cached
-			const guard = await this.acquireTaskIoGuard(taskId)
-			try {
-				assertLockUsable(guard, filePath, "write")
-				await safeWriteJson(filePath, cached, {
-					merge: (existing) => {
-						if (!existing || typeof existing !== "object" || !("id" in existing)) {
-							// Writing the cached record back would recreate a task
-							// another host deleted, so drop the stale entry first.
-							this.cache.delete(taskId)
-							this.taskFileMtimes.delete(taskId)
-							throw new Error(
-								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
-							)
-						}
-						const disk = existing as HistoryItem
-						authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
-						return authoritative
-					},
-				})
-			} finally {
-				try {
-					await guard.release()
-				} catch (error) {
-					console.error(`Failed to release task guard for ${taskId}:`, error)
-				}
-			}
+			await safeWriteJson(filePath, cached, {
+				merge: (existing) => {
+					if (!existing || typeof existing !== "object" || !("id" in existing)) {
+						// Writing the cached record back would recreate a task
+						// another host deleted, so drop the stale entry first.
+						this.cache.delete(taskId)
+						this.taskFileMtimes.delete(taskId)
+						throw new Error(
+							`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+						)
+					}
+					const disk = existing as HistoryItem
+					authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
+					return authoritative
+				},
+			})
 			this.cache.set(taskId, authoritative)
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())

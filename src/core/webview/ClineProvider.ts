@@ -2375,15 +2375,15 @@ export class ClineProvider
 				}
 			}
 
-			// Delete all tasks from state in one batch. The store removes each
-			// history file and its task directory under the shared task guard,
-			// so a concurrent history write cannot interleave with the removal.
+			// Delete all tasks from state in one batch
 			await this.taskHistoryStore.deleteMany(allIdsToDelete)
 			this.recentTasksCache = undefined
 
-			// Delete associated shadow repositories or branches
+			// Delete associated shadow repositories or branches and task directories
 			const globalStorageDir = this.contextProxy.globalStorageUri.fsPath
 			const workspaceDir = this.cwd
+			const { getTaskDirectoryPath } = await import("../../utils/storage")
+			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			for (const taskId of allIdsToDelete) {
 				try {
@@ -2391,6 +2391,17 @@ export class ClineProvider
 				} catch (error) {
 					console.error(
 						`[deleteTaskWithId${taskId}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				}
+
+				// Delete the task directory
+				try {
+					const dirPath = await getTaskDirectoryPath(globalStoragePath, taskId)
+					await fs.rm(dirPath, { recursive: true, force: true })
+					console.log(`[deleteTaskWithId${taskId}] removed task directory`)
+				} catch (error) {
+					console.error(
+						`[deleteTaskWithId${taskId}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
 					)
 				}
 			}

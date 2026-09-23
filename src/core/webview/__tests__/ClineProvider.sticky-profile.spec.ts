@@ -88,17 +88,6 @@ vi.mock("../../prompts/sections/custom-instructions")
 
 vi.mock("../../../utils/safeWriteJson")
 
-// The store's cross-process task guard and advisory file lock need a real
-// filesystem, which this spec stubs out. The store behavior under test does
-// not depend on them.
-vi.mock("../../../utils/fileLock", async () => ({
-	...(await vi.importActual("../../../utils/fileLock")),
-	acquireFileLock: vi.fn().mockResolvedValue({
-		release: vi.fn().mockResolvedValue(undefined),
-		isCompromised: vi.fn().mockReturnValue(false),
-	}),
-}))
-
 vi.mock("../../../api", () => ({
 	buildApiHandler: vi.fn().mockReturnValue({
 		getModel: vi.fn().mockReturnValue({

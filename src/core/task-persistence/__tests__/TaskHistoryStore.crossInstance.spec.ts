@@ -142,25 +142,25 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(storeB.get("shared-task")).toBeUndefined()
 	})
 
-	it("delete by instance A removes the history file, the task directory, and is detected by instance B", async () => {
+	it("delete by instance A is detected even when the task directory remains", async () => {
 		await storeA.initialize()
 		await storeB.initialize()
 
-		const item = makeHistoryItem({ id: "full-delete" })
+		const item = makeHistoryItem({ id: "file-only-delete" })
 		await storeA.upsert(item)
 		await storeB.reconcile()
 
-		expect(storeB.get("full-delete")).toBeDefined()
+		expect(storeB.get("file-only-delete")).toBeDefined()
 
-		// delete() unlinks history_item.json and removes the task directory
-		// under the task guard shared with history writes.
-		await storeA.delete("full-delete")
+		// delete() unlinks history_item.json but leaves the task directory.
+		await storeA.delete("file-only-delete")
 
-		const taskDir = path.join(tmpDir, "tasks", "full-delete")
-		await expect(fs.access(taskDir)).rejects.toMatchObject({ code: "ENOENT" })
+		// Directory still exists (other files like ui_messages.json may remain).
+		const taskDir = path.join(tmpDir, "tasks", "file-only-delete")
+		await expect(fs.access(taskDir)).resolves.toBeUndefined()
 
 		await storeB.reconcile()
-		expect(storeB.get("full-delete")).toBeUndefined()
+		expect(storeB.get("file-only-delete")).toBeUndefined()
 	})
 
 	it("per-task file updates by one instance are visible to another after invalidation", async () => {
