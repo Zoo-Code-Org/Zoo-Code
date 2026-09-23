@@ -130,8 +130,15 @@ export interface ApiHandler {
 	 * Ensures model metadata has been fetched from the remote API so that getModel()
 	 * returns accurate info (context window, pricing, etc.) instead of hardcoded defaults.
 	 * Only router providers that discover models over the network implement this.
+	 *
+	 * `signal` bounds the caller's wait: when it aborts (e.g. the caller's bounded
+	 * metadata wait expired or the owning task was cancelled), the returned promise
+	 * settles with a rejection so no handler-side waiter outlives its caller.
+	 * Fetchers that observe the signal may also stop their network request; the
+	 * shared, de-duplicated catalog fetch may still complete and populate the model
+	 * cache, which is by design for concurrent waiters.
 	 */
-	ensureModelFetched?(): Promise<void>
+	ensureModelFetched?(signal?: AbortSignal): Promise<void>
 
 	/**
 	 * Optional context window for context-management / auto-condense when it must differ from

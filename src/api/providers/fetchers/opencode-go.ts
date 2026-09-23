@@ -4,6 +4,8 @@ import { z } from "zod"
 import type { ModelInfo } from "@roo-code/types"
 import { opencodeGoDefaultModelInfo, getOpencodeGoModelInfo } from "@roo-code/types"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
 
 // The Opencode Go `/models` endpoint follows the OpenAI `/models` shape. The
@@ -41,15 +43,12 @@ const opencodeGoModelsResponseSchema = z.object({
  * slider, and accurate cost reporting.
  *
  * Resolution order for a fully-populated {@link ModelInfo}:
- *   1. Start from the native registry ({@link getOpencodeGoModelInfo}) when the
- *      model ID is curated — this supplies correct context lengths, max tokens,
- *      capability flags, and pricing sourced from vendor specs.
- *   2. Override `contextWindow`, `maxTokens`, and `supportsImages` with values
- *      from the live `/models` payload when present, so the gateway stays the
- *      source of truth for those volatile fields.
- *   3. Fall back to {@link opencodeGoDefaultModelInfo} for any field still
- *      missing on an unknown (non-curated) model, ensuring downstream consumers
- *      always receive a fully-populated object.
+ *   1. Use the native registry ({@link getOpencodeGoModelInfo}) when the model
+ *      is curated, including its capabilities and pricing.
+ *   2. Override static limits and image support with live `/models` values when
+ *      present, keeping the gateway authoritative for volatile fields.
+ *   3. Fall back to {@link opencodeGoDefaultModelInfo} for an unknown model,
+ *      ensuring downstream consumers always receive a fully-populated object.
  *
  * @param model - Validated model entry from the `/models` response.
  * @returns Normalised model metadata suitable for the model picker.
@@ -90,15 +89,19 @@ export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
  * with a console warning rather than propagated to the UI.
  *
  * @param apiKey - Optional Bearer token for authenticated requests.
+ * @param opts - Optional per-request controls; `signal` cancels the in-flight request.
  * @returns A record mapping model IDs to their normalised {@link ModelInfo}.
  */
-export async function getOpencodeGoModels(apiKey?: string): Promise<Record<string, ModelInfo>> {
+export async function getOpencodeGoModels(
+	apiKey?: string,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
 	try {
 		const response = await axios.get(`${OPENCODE_GO_BASE_URL}/models`, {
 			headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-			timeout: 10_000,
+			signal: opts?.signal,
 		})
 
 		const result = opencodeGoModelsResponseSchema.safeParse(response.data)
@@ -120,6 +123,10 @@ export async function getOpencodeGoModels(apiKey?: string): Promise<Record<strin
 			models[parsed.data.id] = parseOpencodeGoModel(parsed.data)
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching Opencode Go models: ${error instanceof Error ? error.message : String(error)}`)
 	}
 

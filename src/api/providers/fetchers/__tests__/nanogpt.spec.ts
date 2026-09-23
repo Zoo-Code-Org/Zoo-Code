@@ -14,7 +14,7 @@ describe("NanoGPT model fetcher", () => {
 		await getNanoGptModels("key-a")
 		expect(axios.get).toHaveBeenCalledWith(`${NANOGPT_BASE_URL}/models?detailed=true`, {
 			headers: { Authorization: "Bearer key-a" },
-			timeout: 10_000,
+			signal: undefined,
 		})
 	})
 
@@ -23,8 +23,35 @@ describe("NanoGPT model fetcher", () => {
 		await getNanoGptModels()
 		expect(axios.get).toHaveBeenCalledWith(`${NANOGPT_BASE_URL}/models?detailed=true`, {
 			headers: undefined,
-			timeout: 10_000,
+			signal: undefined,
 		})
+	})
+
+	it("forwards the caller's abort signal to the request", async () => {
+		vi.mocked(axios.get).mockResolvedValue({ data: { data: [] } })
+		const controller = new AbortController()
+
+		await getNanoGptModels("key-a", { signal: controller.signal })
+
+		expect(axios.get).toHaveBeenCalledWith(`${NANOGPT_BASE_URL}/models?detailed=true`, {
+			headers: { Authorization: "Bearer key-a" },
+			signal: controller.signal,
+		})
+	})
+
+	it("rejects with an AbortError when the signal aborts the pending request", async () => {
+		const controller = new AbortController()
+		vi.mocked(axios.get).mockImplementation((_url, config) => {
+			// Mirror the HTTP client: a pending request rejects when its signal fires.
+			return new Promise<never>((_resolve, reject) => {
+				config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+			})
+		})
+
+		const fetchPromise = getNanoGptModels("key-a", { signal: controller.signal })
+		controller.abort()
+
+		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
 
 	it("maps detailed metadata and exact per-million pricing for multiple models", async () => {

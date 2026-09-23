@@ -139,9 +139,10 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn().mockReturnValue(null),
+vi.mock("../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getOrCreate: vi.fn().mockReturnValue(null),
+		disposeAll: vi.fn(),
 	},
 }))
 
@@ -463,6 +464,7 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
 
 			vi.mocked(TelemetryService.instance.shutdown).mockRejectedValue(new Error("shutdown failed"))
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
@@ -474,6 +476,7 @@ describe("extension.ts", () => {
 
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
 
 			setTerminalProfileSpy.mockRestore()
 		})
@@ -486,6 +489,7 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
 
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
 
@@ -509,9 +513,9 @@ describe("extension.ts", () => {
 			expect(mockTelemetryServiceInstance.shutdown).not.toHaveBeenCalled()
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
 
 			instanceGetterSpy.mockRestore()
-
 			setTerminalProfileSpy.mockRestore()
 		})
 	})

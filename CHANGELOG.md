@@ -1,5 +1,59 @@
 # Zoo Code Changelog
 
+## [3.82.2]
+
+### Patch Changes
+
+- Prevent unavailable tools from appearing in system prompts (#505 by @DScoNOIZ, #1240 by @JunyongParkDev, PR #1505 by @DaubnerF)
+- Fix DeepSeek Flash image input by adding the new deepseek-flash model ID (PR #1618 by @app/zoomote)
+- Fix token usage tracking for Grok and xAI-compatible endpoints whose domains contain "x.ai" (#1483 by @BambinoSK, PR #1484 by @BambinoSK)
+- Apply the configured reasoning effort consistently across OpenAI-compatible requests (#993 by @Gringo675, PR #1604 by @JunyongParkDev)
+- Preserve the configured LiteLLM model ID in the model picker (#1367 by @easonLiangWorldedtech, PR #1368 by @easonLiangWorldedtech)
+- Fix delegated subtasks reading the parent mode in environment details and tool validation (#1623 by @edelauna, PR #1625 by @edelauna)
+- Add a file version token to the guarded-write path to prevent stale overwrites (PR #1383 by @easonLiangWorldedtech)
+- Extract the code-index manager registry for clearer ownership (PR #1622 by @WebMad)
+- Route Roomote pull requests through the CodeRabbit review path (PR #1598 by @app/zoomote)
+- Make mutation-testing findings advisory instead of blocking (PR #1610 by @app/zoomote)
+- Group mutation warnings by source location to remove duplicate warnings (PR #1619 by @app/zoomote)
+- Skip mutation testing while pull requests are in draft (PR #1645 by @app/zoomote)
+- Scope the mutation diff against the exact merge base so unrelated changes on main stop inflating the scope (PR #1655 by @app/zoomote)
+- Model test bundle dependencies in Turbo so caching stays correct (#114 by @edelauna, PR #1611 by @app/zoomote)
+- Separate extension unit tests from bundle smoke tests (PR #1614 by @app/zoomote)
+- Move extension source coverage to cacheable test lanes (#118 by @edelauna, PR #1620 by @app/zoomote)
+- Cache extension coverage by ownership lanes (#115 by @edelauna, PR #1631 by @app/zoomote)
+- Keep coverage caches valid when only verification scripts change (PR #1649 by @app/zoomote)
+- Union ownership-lane coverage reports before uploading to Codecov (#1647 by @DaubnerF, PR #1650 by @app/zoomote)
+- Validate coverage lanes dynamically in the merge queue (PR #1644 by @app/zoomote)
+- Stabilize the accessibility contrast audit during theme changes (#1612 by @edelauna, PR #1613 by @app/zoomote)
+- Make CodeRabbit completeness checks advisory (PR #1621 by @app/zoomote)
+
+## [3.82.1]
+
+### Patch Changes
+
+- Fix task history entries disappearing when users reopen a task (#1279 by @jiangbing321, PR #1319 by @app/zoomote)
+- Fix task history entries disappearing when users restart after a task completes (#1453 by @zoomote, PR #1452 by @app/zoomote)
+- Fix tasks stalling when interrupted subtasks resume (#1468 by @zoomote, PR #1470 by @app/zoomote)
+- Fix nested subtask tool calls stalling mid-task (#921 by @easonLiangWorldedtech, PR #1494 by @app/zoomote)
+- Fix reasoning models stopping their thinking after a model selection change (#1348 by @zoomote, PR #1349 by @app/zoomote)
+- Fix provider settings requests contacting model services that the user did not select (#1424 by @zoomote, PR #1425 by @app/zoomote)
+- Fix MCP OAuth registration failing for servers that advertise unsupported grant types (#1531 by @edelauna, PR #1532 by @app/zoomote)
+- Fix commits failing after users interrupt mutation tests (#1514 by @easonLiangWorldedtech, PR #1525 by @app/zoomote)
+- Fix the OpenCode Go context meter showing incorrect limits (PR #1428 by @app/zoomote)
+- Fix NanoGPT requests dropping optional tool parameters (PR #1590 by @huggix)
+- Ignore blank or missing follow-up suggestion answers in the webview (#1226 by @andreluko, PR #1286 by @easonLiangWorldedtech)
+- Finish the canonical provider identifier audit across providers (#944 by @WebMad, PR #1493 by @WebMad)
+- Add test coverage for code-index and tools lines left uncovered by #1297 (PR #1317 by @easonLiangWorldedtech)
+- Add an LM Studio reasoning_content E2E guard (#1075 by @marunguy, PR #1322 by @easonLiangWorldedtech)
+- Refresh pull-request review labels after base updates (PR #1584 by @app/zoomote)
+- Bump GitHub Actions to node24 runtimes to clear Node 20 deprecation warnings (PR #1534 by @app/zoomote)
+- Refine CodeRabbit review checks (PR #1571 by @app/zoomote)
+- Clarify CodeRabbit approval checks (PR #1577 by @app/zoomote)
+- Update mammoth to v1.12.2 (PR #1472 by @app/renovate)
+- Update globals to v16.5.0 (PR #1474 by @app/renovate)
+- Update i18next to v25.10.10 (PR #1475 by @app/renovate)
+- Update ink to v6.8.0 (PR #1477 by @app/renovate)
+
 ## [3.82.0]
 
 - 🔑 **Use your Zoo Gateway API key anywhere** — bring it to any OpenAI-compatible client or workflow: https://zoocode.dev/models

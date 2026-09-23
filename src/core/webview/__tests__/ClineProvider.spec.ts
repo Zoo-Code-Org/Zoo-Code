@@ -9,6 +9,7 @@ import axios from "axios"
 
 import {
 	type ProviderSettingsEntry,
+	type ProviderSettings,
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
@@ -19,6 +20,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
+	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -3057,6 +3059,25 @@ describe("ClineProvider", () => {
 		expect(postedState.apiConfiguration).toMatchObject(expectedConfiguration)
 	})
 
+	test.each([true, false, undefined])(
+		"returns saved OpenAI-compatible reasoning settings to the webview when enabled is %s",
+		async (enableReasoningEffort) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const configuration: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				openAiModelId: "custom-model",
+				enableReasoningEffort,
+				reasoningEffort: "low",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
+			}
+			await provider.contextProxy.setProviderSettings(configuration)
+
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject(configuration)
+			expect((await provider.getState()).apiConfiguration).toMatchObject(configuration)
+			expect((await provider.getStateToPostToWebview()).apiConfiguration).toMatchObject(configuration)
+		},
+	)
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 
@@ -4802,7 +4823,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	})
 
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
-		const { CodeIndexManager } = await import("../../../services/code-index/manager")
+		const { CodeIndexManagerRegistry } = await import("../../../services/code-index/code-index-manager-registry")
 		let workspaceEnabled = false
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
@@ -4812,8 +4833,8 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
 		const getAllInstances = vi
-			.spyOn(CodeIndexManager, "getAllInstances")
-			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManager.getAllInstances>)
+			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
+			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
 		})
