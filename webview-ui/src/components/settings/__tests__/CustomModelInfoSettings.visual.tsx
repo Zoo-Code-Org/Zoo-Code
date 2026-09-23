@@ -1,15 +1,8 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import {
-	CollapsedFixture,
-	ExpandedWithOverridesFixture,
-	WarningFixture,
-	UnresolvedFixture,
-} from "./CustomModelInfoSettings.visual.fixture"
+import { mountedStory } from "../../../../playwright/mounted-story"
 
 test("renders the collapsed panel in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<CollapsedFixture />)
+	const component = mountedStory(await mount("custom-model-info-collapsed"))
 
 	await component.evaluate(async () => {
 		await document.fonts.ready
@@ -20,10 +13,9 @@ test("renders the collapsed panel in the VS Code dark theme", async ({ mount }) 
 })
 
 test("renders the expanded panel with overrides in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<ExpandedWithOverridesFixture />)
+	const component = mountedStory(await mount("custom-model-info-expanded-overrides"))
 
-	const trigger = component.getByText("Custom model metadata")
-	await trigger.click()
+	await component.getByText("Custom model metadata").click()
 
 	await component.evaluate(async () => {
 		await document.fonts.ready
@@ -34,10 +26,9 @@ test("renders the expanded panel with overrides in the VS Code dark theme", asyn
 })
 
 test("renders the maxTokens exceeds contextWindow warning in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<WarningFixture />)
+	const component = mountedStory(await mount("custom-model-info-warning"))
 
-	const trigger = component.getByText("Custom model metadata")
-	await trigger.click()
+	await component.getByText("Custom model metadata").click()
 
 	await component.evaluate(async () => {
 		await document.fonts.ready
@@ -48,9 +39,9 @@ test("renders the maxTokens exceeds contextWindow warning in the VS Code dark th
 })
 
 test("renders the unresolved model state in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<UnresolvedFixture />)
+	// When selectedModelInfo is undefined the panel auto-opens.
+	const component = mountedStory(await mount("custom-model-info-unresolved"))
 
-	// When selectedModelInfo is undefined the panel auto-opens
 	await component.evaluate(async () => {
 		await document.fonts.ready
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))

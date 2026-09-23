@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
-import type { ModelInfo, ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers, type ModelInfo, type ProviderSettings } from "@roo-code/types"
 
 import { CustomModelInfoSettings } from "../CustomModelInfoSettings"
 
@@ -21,7 +21,7 @@ describe("CustomModelInfoSettings", () => {
 	it("keeps numeric edits in the cached provider configuration and supports reset", () => {
 		const setApiConfigurationField = vi.fn()
 		const apiConfiguration: ProviderSettings = {
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			customModelInfo: { contextWindow: 64_000 },
 		}
 
@@ -51,7 +51,7 @@ describe("CustomModelInfoSettings", () => {
 
 		render(
 			<CustomModelInfoSettings
-				apiConfiguration={{ apiProvider: "requesty" }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.requesty }}
 				setApiConfigurationField={setApiConfigurationField}
 				selectedModelInfo={modelInfo}
 			/>,
@@ -74,7 +74,7 @@ describe("CustomModelInfoSettings", () => {
 		render(
 			<CustomModelInfoSettings
 				apiConfiguration={{
-					apiProvider: "requesty",
+					apiProvider: providerIdentifiers.requesty,
 					customModelInfo: { contextWindow: 64_000 },
 				}}
 				setApiConfigurationField={setApiConfigurationField}
@@ -99,7 +99,7 @@ describe("CustomModelInfoSettings", () => {
 		render(
 			<CustomModelInfoSettings
 				apiConfiguration={{
-					apiProvider: "requesty",
+					apiProvider: providerIdentifiers.requesty,
 					customModelInfo: { contextWindow: 64_000 },
 				}}
 				setApiConfigurationField={setApiConfigurationField}
@@ -118,7 +118,7 @@ describe("CustomModelInfoSettings", () => {
 	it("accumulates capability overrides across toggles with rerender", () => {
 		const setApiConfigurationField = vi.fn()
 		const baseConfig: ProviderSettings = {
-			apiProvider: "unbound",
+			apiProvider: providerIdentifiers.unbound,
 			customModelInfo: { contextWindow: 1000, maxTokens: 2000 },
 		}
 
@@ -171,7 +171,7 @@ describe("CustomModelInfoSettings", () => {
 
 		const { rerender } = render(
 			<CustomModelInfoSettings
-				apiConfiguration={{ apiProvider: "openrouter" }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }}
 				setApiConfigurationField={setApiConfigurationField}
 				selectedModelInfo={modelInfo}
 			/>,
@@ -181,7 +181,7 @@ describe("CustomModelInfoSettings", () => {
 
 		rerender(
 			<CustomModelInfoSettings
-				apiConfiguration={{ apiProvider: "openrouter", customModelInfo: { maxTokens: 200 } }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter, customModelInfo: { maxTokens: 200 } }}
 				setApiConfigurationField={setApiConfigurationField}
 				selectedModelInfo={modelInfo}
 			/>,

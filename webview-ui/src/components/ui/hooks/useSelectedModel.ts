@@ -161,7 +161,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 							(activeProvider &&
 								apiConfiguration &&
 								getConfiguredRouterModelId(activeProvider, apiConfiguration)) ||
-							getProviderDefaultModelId(activeProvider ?? "openrouter"),
+							getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter),
 						info: undefined,
 					}
 

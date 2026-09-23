@@ -60,6 +60,26 @@ export const stories: Record<string, Story> = {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />
 	},
+	"custom-model-info-collapsed": async () => {
+		const { CollapsedFixture } = await import("@/components/settings/__tests__/CustomModelInfoSettings.visual.fixture")
+		return <CollapsedFixture />
+	},
+	"custom-model-info-expanded-overrides": async () => {
+		const { ExpandedWithOverridesFixture } = await import(
+			"@/components/settings/__tests__/CustomModelInfoSettings.visual.fixture"
+		)
+		return <ExpandedWithOverridesFixture />
+	},
+	"custom-model-info-unresolved": async () => {
+		const { UnresolvedFixture } = await import(
+			"@/components/settings/__tests__/CustomModelInfoSettings.visual.fixture"
+		)
+		return <UnresolvedFixture />
+	},
+	"custom-model-info-warning": async () => {
+		const { WarningFixture } = await import("@/components/settings/__tests__/CustomModelInfoSettings.visual.fixture")
+		return <WarningFixture />
+	},
 	"history-empty": async () => {
 		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([
 			import("../AppProviders"),

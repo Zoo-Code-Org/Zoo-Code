@@ -1,6 +1,7 @@
 /* v8 ignore file -- Playwright component fixture; covered by the visual test. */
 import React from "react"
 
+import { providerIdentifiers } from "@roo-code/types"
 import type { ModelInfo } from "@roo-code/types/model"
 
 import { TranslationContext } from "@src/i18n/TranslationContext"
@@ -45,7 +46,7 @@ export const CollapsedFixture = () => (
 	<TranslationContext.Provider value={translationValue}>
 		<div className="w-[480px] bg-vscode-editor-background p-4 text-vscode-foreground">
 			<CustomModelInfoSettings
-				apiConfiguration={{ apiProvider: "zoo-gateway" }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.zooGateway }}
 				setApiConfigurationField={() => {}}
 				selectedModelInfo={selectedModelInfo}
 			/>
@@ -59,7 +60,7 @@ export const ExpandedWithOverridesFixture = () => (
 		<div className="w-[480px] bg-vscode-editor-background p-4 text-vscode-foreground">
 			<CustomModelInfoSettings
 				apiConfiguration={{
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsImages: false },
 				}}
 				setApiConfigurationField={() => {}}
@@ -75,7 +76,7 @@ export const WarningFixture = () => (
 		<div className="w-[480px] bg-vscode-editor-background p-4 text-vscode-foreground">
 			<CustomModelInfoSettings
 				apiConfiguration={{
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					customModelInfo: { contextWindow: 1000, maxTokens: 2000 },
 				}}
 				setApiConfigurationField={() => {}}
@@ -90,7 +91,7 @@ export const UnresolvedFixture = () => (
 	<TranslationContext.Provider value={translationValue}>
 		<div className="w-[480px] bg-vscode-editor-background p-4 text-vscode-foreground">
 			<CustomModelInfoSettings
-				apiConfiguration={{ apiProvider: "zoo-gateway" }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.zooGateway }}
 				setApiConfigurationField={() => {}}
 				selectedModelInfo={undefined}
 			/>
