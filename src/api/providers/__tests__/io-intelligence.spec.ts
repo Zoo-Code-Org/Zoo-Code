@@ -33,6 +33,13 @@ vi.mocked(OpenAI).mockImplementation(function () {
 
 const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
 
+/** Flattens every argument of every console.error call into one searchable string. */
+const loggedText = (spy: { mock: { calls: unknown[][] } }) =>
+	spy.mock.calls
+		.flat()
+		.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
+		.join("\n")
+
 describe("IOIntelligenceHandler", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -194,15 +201,64 @@ describe("IOIntelligenceHandler", () => {
 		])
 	})
 
-	it("redacts the API key from streaming errors", async () => {
-		mockCreate.mockRejectedValue(new Error("upstream rejected secret-key"))
-		const handler = new IOIntelligenceHandler({
-			ioIntelligenceApiKey: "secret-key",
-			ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
-		})
-		await expect(collectStream(handler.createMessage("sys", messages))).rejects.toMatchObject({
-			message: "IO Intelligence streaming error: upstream rejected [REDACTED]",
-		})
+	it("redacts the API key from streaming errors and from the logged error", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			mockCreate.mockRejectedValue(new Error("upstream rejected secret-key"))
+			const handler = new IOIntelligenceHandler({
+				ioIntelligenceApiKey: "secret-key",
+				ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			})
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toMatchObject({
+				message: "IO Intelligence streaming error: upstream rejected [REDACTED]",
+			})
+			// The error handler logs message + stack before the transformer runs,
+			// so the key must already be gone from both.
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[IO Intelligence] API error:",
+				expect.objectContaining({
+					message: "upstream rejected [REDACTED]",
+					stack: expect.stringContaining("[REDACTED]"),
+				}),
+			)
+			expect(loggedText(consoleErrorSpy)).not.toContain("secret-key")
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
+	it("redacts the API key from non-Error rejections and their log line", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			mockCreate.mockRejectedValue("upstream rejected secret-key")
+			const handler = new IOIntelligenceHandler({
+				ioIntelligenceApiKey: "secret-key",
+				ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			})
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toMatchObject({
+				message: "IO Intelligence streaming error: upstream rejected [REDACTED]",
+			})
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[IO Intelligence] Non-Error exception:",
+				"upstream rejected [REDACTED]",
+			)
+			expect(loggedText(consoleErrorSpy)).not.toContain("secret-key")
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
+	it("completePrompt wraps upstream errors without a configured key", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			mockCreate.mockRejectedValue(new Error("boom"))
+			const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+			await expect(handler.completePrompt("ping")).rejects.toMatchObject({
+				message: "IO Intelligence completion error: boom",
+			})
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
 	})
 
 	it("completePrompt without options forwards no request options", async () => {

@@ -43,12 +43,23 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 	}
 
 	private createSafeError(operation: string, error: unknown): Error {
-		return handleProviderError(error, "IO Intelligence", {
+		const apiKey = this.options.ioIntelligenceApiKey
+		const redact = (text: string) => (apiKey ? text.replaceAll(apiKey, "[REDACTED]") : text)
+
+		// handleProviderError logs the message and stack before it applies the
+		// transformer, so the key has to be scrubbed from the error itself first.
+		if (error instanceof Error) {
+			error.message = redact(error.message)
+			if (error.stack) {
+				error.stack = redact(error.stack)
+			}
+		}
+		const safeError = error instanceof Error ? error : redact(String(error))
+
+		return handleProviderError(safeError, "IO Intelligence", {
 			messagePrefix: operation,
-			messageTransformer: (message) =>
-				this.options.ioIntelligenceApiKey
-					? `IO Intelligence ${operation} error: ${message.replaceAll(this.options.ioIntelligenceApiKey, "[REDACTED]")}`
-					: `IO Intelligence ${operation} error: ${message}`,
+			// The transformer input can also come from `error.error.metadata.raw`.
+			messageTransformer: (message) => `IO Intelligence ${operation} error: ${redact(message)}`,
 		})
 	}
 
