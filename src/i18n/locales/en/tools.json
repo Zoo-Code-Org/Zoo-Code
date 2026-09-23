@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo tried to use an unknown tool: \"{{toolName}}\". Retrying...",
 	"missingToolParameter": "Zoo tried to use {{toolName}} without value for required parameter '{{paramName}}'. Retrying...",
 	"missingToolParameterWithPath": "Zoo tried to use {{toolName}} for '{{relPath}}' without value for required parameter '{{paramName}}'. Retrying...",
+	"duplicateToolResultDropped": "Removed {{droppedCount}} duplicate result(s) for tool call '{{toolUseId}}' before sending the request. The conversation continues normally, but this indicates a bug in how the tool result was recorded.",
 	"codebaseSearch": {
 		"approval": "Searching for '{{query}}' in codebase..."
 	},

@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo가 알 수 없는 도구를 사용하려고 했습니다: \"{{toolName}}\". 다시 시도 중...",
 	"missingToolParameter": "Zoo가 필수 매개변수 '{{paramName}}'의 값 없이 {{toolName}}을(를) 사용하려고 했습니다. 다시 시도 중...",
 	"missingToolParameterWithPath": "Zoo가 '{{relPath}}'에 대해 필수 매개변수 '{{paramName}}'의 값 없이 {{toolName}}을(를) 사용하려고 했습니다. 다시 시도 중...",
+	"duplicateToolResultDropped": "요청을 보내기 전에 도구 호출 '{{toolUseId}}'의 중복된 결과 {{droppedCount}}개를 제거했습니다. 대화는 정상적으로 계속되지만, 도구 결과를 기록하는 방식에 버그가 있음을 의미합니다.",
 	"codebaseSearch": {
 		"approval": "코드베이스에서 '{{query}}' 검색 중..."
 	},

@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo ने एक अज्ञात उपकरण का उपयोग करने का प्रयास किया: \"{{toolName}}\"। पुनः प्रयास कर रहा है...",
 	"missingToolParameter": "Zoo ने आवश्यक पैरामीटर '{{paramName}}' के मान के बिना {{toolName}} का उपयोग करने का प्रयास किया। पुनः प्रयास कर रहा है...",
 	"missingToolParameterWithPath": "Zoo ने '{{relPath}}' के लिए आवश्यक पैरामीटर '{{paramName}}' के मान के बिना {{toolName}} का उपयोग करने का प्रयास किया। पुनः प्रयास कर रहा है...",
+	"duplicateToolResultDropped": "अनुरोध भेजने से पहले टूल कॉल '{{toolUseId}}' के {{droppedCount}} डुप्लिकेट परिणाम हटा दिए गए। बातचीत सामान्य रूप से जारी है, लेकिन यह दर्शाता है कि टूल परिणाम रिकॉर्ड करने में कोई बग है।",
 	"codebaseSearch": {
 		"approval": "कोडबेस में '{{query}}' खोज रहा है..."
 	},

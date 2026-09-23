@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo mencoba menggunakan alat yang tidak dikenal: \"{{toolName}}\". Mencoba lagi...",
 	"missingToolParameter": "Zoo mencoba menggunakan {{toolName}} tanpa nilai untuk parameter wajib '{{paramName}}'. Mencoba lagi...",
 	"missingToolParameterWithPath": "Zoo mencoba menggunakan {{toolName}} untuk '{{relPath}}' tanpa nilai untuk parameter wajib '{{paramName}}'. Mencoba lagi...",
+	"duplicateToolResultDropped": "{{droppedCount}} hasil duplikat untuk panggilan tool '{{toolUseId}}' dihapus sebelum permintaan dikirim. Percakapan berlanjut seperti biasa, tetapi ini menandakan ada bug dalam cara hasil tool dicatat.",
 	"codebaseSearch": {
 		"approval": "Mencari '{{query}}' di codebase..."
 	},

@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo 嘗試使用未知工具：「{{toolName}}」。正在重試...",
 	"missingToolParameter": "Zoo 嘗試使用 {{toolName}} 但未提供必要參數 '{{paramName}}' 的值。正在重試...",
 	"missingToolParameterWithPath": "Zoo 嘗試對 '{{relPath}}' 使用 {{toolName}} 但未提供必要參數 '{{paramName}}' 的值。正在重試...",
+	"duplicateToolResultDropped": "在傳送請求前，已移除工具呼叫 '{{toolUseId}}' 的 {{droppedCount}} 個重複結果。對話會正常繼續，但這代表工具結果的記錄方式存在缺陷。",
 	"codebaseSearch": {
 		"approval": "正在搜尋程式碼庫中的「{{query}}」..."
 	},

@@ -136,7 +136,7 @@ import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
-import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { DuplicateToolResultIdError, mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
@@ -365,6 +365,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// LLM Messages & Chat Messages
 	apiConversationHistory: ApiMessage[] = []
 	clineMessages: ClineMessage[] = []
+
+	// Duplicate tool_result ids dropped while shaping an API request. Once a duplicate is in
+	// stored history the merge runs again on every subsequent request, so each id is reported
+	// to the user at most once per task.
+	private reportedDuplicateToolUseIds = new Set<string>()
 
 	// Ask
 	private askResponse?: ClineAskResponse
@@ -4934,7 +4939,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const messagesSinceLastSummary = getMessagesSinceLastSummary(effectiveHistory)
 		// For API only: merge consecutive user messages (excludes summary messages per
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
-		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
+		const { messages: mergedForApi, droppedDuplicateToolUseIds } = mergeConsecutiveApiMessages(
+			messagesSinceLastSummary,
+			{ roles: ["user"] },
+		)
+		await this.reportDroppedDuplicateToolResults(droppedDuplicateToolUseIds)
 		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
 		const cleanConversationHistory = this.buildCleanConversationHistory(
 			messagesWithoutImages as ApiMessage[],
@@ -5209,6 +5218,55 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public async checkpointSave(force: boolean = false, suppressMessage: boolean = false) {
 		return checkpointSave(this, force, suppressMessage)
+	}
+
+	/**
+	 * Surfaces duplicate `tool_result` blocks that were dropped while shaping the API request.
+	 *
+	 * The drop keeps the request legal (providers reject a message carrying the same tool result
+	 * id twice), but it hides a real bug in how pending tool results are written to history, so
+	 * it is reported both to the user and to telemetry. The merge re-runs on every subsequent
+	 * request over the same history, so each `tool_use_id` is only reported once per task.
+	 */
+	private async reportDroppedDuplicateToolResults(droppedDuplicateToolUseIds: string[]) {
+		if (droppedDuplicateToolUseIds.length === 0) {
+			return
+		}
+
+		const unreported = droppedDuplicateToolUseIds.filter((id) => !this.reportedDuplicateToolUseIds.has(id))
+
+		if (unreported.length === 0) {
+			return
+		}
+
+		const dropCountsByToolUseId = new Map<string, number>()
+
+		for (const toolUseId of unreported) {
+			this.reportedDuplicateToolUseIds.add(toolUseId)
+			dropCountsByToolUseId.set(toolUseId, (dropCountsByToolUseId.get(toolUseId) ?? 0) + 1)
+		}
+
+		if (TelemetryService.hasInstance()) {
+			TelemetryService.instance.captureException(
+				new DuplicateToolResultIdError(
+					`Dropped duplicate tool_result blocks while merging consecutive user messages. Duplicate tool_use IDs: [${[
+						...dropCountsByToolUseId.keys(),
+					].join(", ")}]`,
+					[...dropCountsByToolUseId.keys()],
+				),
+				{
+					taskId: this.taskId,
+					duplicateToolUseIds: [...dropCountsByToolUseId.keys()],
+					droppedCount: unreported.length,
+				},
+			)
+		}
+
+		for (const [toolUseId, droppedCount] of dropCountsByToolUseId) {
+			// Deliberately not named `count`: that is an i18next pluralization keyword and would
+			// make the lookup depend on `_one`/`_other` suffixed keys.
+			await this.say("error", t("tools:duplicateToolResultDropped", { toolUseId, droppedCount }))
+		}
 	}
 
 	private buildCleanConversationHistory(
