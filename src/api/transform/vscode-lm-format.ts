@@ -62,14 +62,28 @@ export function sanitizeIdentifierSurrogates(identifier: string): string {
 		.replace(LONE_SURROGATE, (unit) => `\uFFFD${unit.charCodeAt(0).toString(16).toUpperCase()}`)
 }
 
+/** Non-global twin of {@link LONE_SURROGATE}; `test` on a `/g` regex is stateful via `lastIndex`. */
+const HAS_LONE_SURROGATE = new RegExp(LONE_SURROGATE.source)
+
+/** Marks a name whose `_u` sequences would otherwise be read as encoding markers when decoded. */
+const TOOL_NAME_MARKER = /_u(?:u|[0-9A-Fa-f]{4})/
+
 /**
- * Sanitizes a request tool-definition name.
+ * Sanitizes a request tool-definition name into Copilot's permitted `^[\w-]+$` alphabet.
  *
- * VS Code Copilot validates declared tool names against `^[\w-]+$` before sending the request, so
- * the U+FFFD produced by {@link sanitizeIdentifierSurrogates} would be rejected. Encoding each lone
- * surrogate as `_u<HEX>` stays inside the permitted set and keeps distinct names distinct.
+ * The U+FFFD produced by {@link sanitizeIdentifierSurrogates} would be rejected by that validation,
+ * so each lone surrogate is encoded as `_u<HEX>`. Names that neither carry a lone surrogate nor
+ * could be mistaken for this encoding are returned unchanged, so an ordinary `get_user` reaches the
+ * model under its registry name; {@link decodeToolNameSurrogates} inverts the encoded form. Outputs
+ * of the two branches are disjoint — an encoded name always contains a marker, an untouched one
+ * never does — which keeps the whole mapping injective and the decode unambiguous. A surrogate-free
+ * name that merely looks like a marker (`get_uuid`) is still escaped, so it reaches the model
+ * slightly altered; it round-trips correctly, so dispatch is unaffected.
  */
 export function sanitizeToolNameSurrogates(name: string): string {
+	if (!HAS_LONE_SURROGATE.test(name) && !TOOL_NAME_MARKER.test(name)) {
+		return name
+	}
 	// Escaping MUST precede encoding, or a literal "_u" would be indistinguishable from a marker.
 	return name
 		.replace(/_u/g, "_uu")
@@ -77,9 +91,42 @@ export function sanitizeToolNameSurrogates(name: string): string {
 }
 
 /**
+ * Inverts {@link sanitizeToolNameSurrogates} so a returned tool call carries the name the tool is
+ * registered under, which is what dispatch matches on.
+ */
+export function decodeToolNameSurrogates(name: string): string {
+	let decoded = ""
+	let index = 0
+	while (index < name.length) {
+		if (name[index] === "_" && name[index + 1] === "u") {
+			if (name[index + 2] === "u") {
+				decoded += "_u"
+				index += 3
+				continue
+			}
+			const hex = name.slice(index + 2, index + 6)
+			if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
+				decoded += String.fromCharCode(parseInt(hex, 16))
+				index += 6
+				continue
+			}
+		}
+		decoded += name[index]
+		index += 1
+	}
+	return decoded
+}
+
+/**
  * Applies {@link sanitizeSurrogates} to every string nested in a tool-call argument object. The
  * backend rejects the whole request for a lone surrogate anywhere in the JSON payload, so a tool
  * argument carrying a sliced astral character fails the request just as message text would.
+ *
+ * LIMITATION: keys are sanitized with the same lossy mapping, so keys differing only in their lone
+ * surrogate (`"a\uD800"`, `"a\uD801"`) both become `"a\uFFFD"` and the last value wins. This also
+ * applies to tool schemas, where colliding property definitions collapse and `required` can end up
+ * with duplicate entries. Accepted deliberately: the alternative is rewriting keys into a form no
+ * schema reference would match, and a request that reaches the backend beats one rejected outright.
  */
 export function sanitizeSurrogatesDeep(value: unknown): unknown {
 	if (typeof value === "string") {
@@ -219,7 +266,9 @@ export function convertToVsCodeLmMessages(
 							new vscode.LanguageModelToolCallPart(
 								// Deterministic, so a call id and its paired tool_use_id stay equal after sanitizing.
 								sanitizeIdentifierSurrogates(toolMessage.id),
-								sanitizeSurrogates(toolMessage.name),
+								// History MUST use the declaration encoding, or the replayed call names a tool
+								// the model was never offered.
+								sanitizeToolNameSurrogates(toolMessage.name),
 								sanitizeSurrogatesDeep(asObjectSafe(toolMessage.input)) as object,
 							),
 					),

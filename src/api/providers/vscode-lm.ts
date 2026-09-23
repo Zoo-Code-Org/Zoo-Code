@@ -17,6 +17,7 @@ import { normalizeToolSchema } from "../../utils/json-schema"
 import { ApiStream, ApiStreamChunk } from "../transform/stream"
 import {
 	convertToVsCodeLmMessages,
+	decodeToolNameSurrogates,
 	extractTextCountFromMessage,
 	sanitizeSurrogates,
 	sanitizeSurrogatesDeep,
@@ -917,7 +918,8 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 							yield {
 								type: "tool_call",
 								id: chunk.callId,
-								name: chunk.name,
+								// Undo the declaration-time encoding; dispatch matches registry names.
+								name: decodeToolNameSurrogates(chunk.name),
 								arguments: argumentsString,
 							}
 						}

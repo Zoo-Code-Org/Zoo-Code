@@ -9,7 +9,9 @@ import {
 	extractTextCountFromMessage,
 	sanitizeSurrogates,
 	sanitizeIdentifierSurrogates,
+	sanitizeSurrogatesDeep,
 	sanitizeToolNameSurrogates,
+	decodeToolNameSurrogates,
 } from "../vscode-lm-format"
 
 // Mock crypto using Vitest
@@ -658,9 +660,10 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		const toolCall = (result[0].content as unknown as MockLanguageModelToolCallPart[])[0]
 
 		expect(toolCall.callId).toBe("call\uFFFDD8001")
-		expect(toolCall.name).toBe("tool\uFFFDx")
+		// Names use the declaration encoding so the replayed call matches a declared tool.
+		expect(toolCall.name).toBe("tool_uDC00x")
 		expect(codeUnits(toolCall.callId)).toContain(0xfffd)
-		expect(codeUnits(toolCall.name)).toContain(0xfffd)
+		expect(toolCall.name).toMatch(/^[\w-]+$/)
 		expectNoLoneSurrogate(toolCall.callId)
 		expectNoLoneSurrogate(toolCall.name)
 	})
@@ -835,6 +838,65 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		}
 		expect(new Set(encoded).size).toBe(encoded.length)
 		expect(codeUnits(sanitizeToolNameSurrogates(`read-${VALID_PAIR}`))).toEqual(codeUnits(`read-${VALID_PAIR}`))
+	})
+
+	it("leaves a valid tool name untouched so it still matches its registry entry", () => {
+		for (const name of ["get_user", "read_file", "apply_diff", "update_todo_list"]) {
+			expect(sanitizeToolNameSurrogates(name)).toBe(name)
+			expect(decodeToolNameSurrogates(sanitizeToolNameSurrogates(name))).toBe(name)
+		}
+	})
+
+	it("round-trips encoded tool names back to the original registry name", () => {
+		for (const name of [`read${LONE_HIGH}file`, `read${LONE_LOW}file`, "a_uu_b", "x_uD800y", "get_user"]) {
+			const declared = sanitizeToolNameSurrogates(name)
+			expect(declared).toMatch(/^[\w-]+$/)
+			expect(codeUnits(decodeToolNameSurrogates(declared))).toEqual(codeUnits(name))
+		}
+	})
+
+	it("replays a tool call in history under the same name it was declared with", () => {
+		const originalName = `read${LONE_HIGH}file`
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "toolu_1", name: originalName, input: {} }],
+			},
+		]
+
+		const toolCall = (
+			convertToVsCodeLmMessages(messages)[0].content as unknown as MockLanguageModelToolCallPart[]
+		)[0]
+
+		expect(toolCall.name).toBe(sanitizeToolNameSurrogates(originalName))
+		expect(toolCall.name).toMatch(/^[\w-]+$/)
+		expect(decodeToolNameSurrogates(toolCall.name)).toBe(originalName)
+	})
+
+	it("keeps a valid history tool name unchanged", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "toolu_1", name: "get_user", input: {} }],
+			},
+		]
+
+		const toolCall = (
+			convertToVsCodeLmMessages(messages)[0].content as unknown as MockLanguageModelToolCallPart[]
+		)[0]
+
+		expect(toolCall.name).toBe("get_user")
+	})
+
+	it("collapses argument keys differing only in their lone surrogate, last value winning", () => {
+		// Pins the documented lossy-key limitation of sanitizeSurrogatesDeep.
+		const collapsed = sanitizeSurrogatesDeep({ [`a${LONE_HIGH}`]: 1, [`a${LONE_LOW}`]: 2 }) as Record<
+			string,
+			unknown
+		>
+
+		expect(Object.keys(collapsed)).toEqual(["a\uFFFD"])
+		expect(collapsed["a\uFFFD"]).toBe(2)
 	})
 
 	it("leaves an id with no surrogates byte-identical", () => {
