@@ -732,4 +732,23 @@ describe("shouldUseReasoningEffort", () => {
 			shouldUseReasoningEffort({ model, settings: { enableReasoningEffort: false, reasoningEffort: "high" } }),
 		).toBe(false)
 	})
+
+	test("array capability with a user-selected effort outside the ladder -> false", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			reasoningEffort: "high",
+		}
+
+		// The selection wins over the model default, but "medium" is not in the K3
+		// ladder, so reasoning must be omitted rather than sent as an unsupported effort.
+		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "medium" } })).toBe(false)
+		expect(
+			shouldUseReasoningEffort({
+				model,
+				settings: { enableReasoningEffort: true, reasoningEffort: "medium" },
+			}),
+		).toBe(false)
+	})
 })
