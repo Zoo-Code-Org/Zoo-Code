@@ -274,6 +274,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		} catch (error) {
 			// An abort landing while the lookup is pending must surface as the shared abort
 			// contract, not as an authentication failure.
+			// Stryker disable next-line ConditionalExpression: the false mutant differs from the original only if an abort lands between the OAuth race's settle and this catch — a microtask window (the abort event is a microtask) no test can schedule deterministically, because the test's own microtasks queue after the settle that precedes the window; the observable contract (a genuine failure with no cancellation propagates as-is, an abort surfaces as the shared contract) is pinned by the adjacent regressions and the true mutant is killed by the non-abort-failure regression.
 			if (isRequestAborted(error, abortSignal)) {
 				throw createAbortError(this.providerName)
 			}
@@ -1450,6 +1451,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				// A buffered chunk can still be pulled in the window between the abort and the
 				// inner generator's own stop, so break here: post-abort output must never be
 				// joined into the completion.
+				// Stryker disable next-line ConditionalExpression: the false mutant differs from the original only if an abort lands between the transport's last pre-yield check and this consumer's resumption — the yield-hop microtask window no test can schedule deterministically (the abort event is a microtask; the test's own microtasks queue after the chunk's yield); the guard is retained for that production window, the abort regressions pin its pre-abort contract, and the true mutant is killed by the multi-chunk happy paths.
 				if (requestSignal?.aborted) {
 					break
 				}

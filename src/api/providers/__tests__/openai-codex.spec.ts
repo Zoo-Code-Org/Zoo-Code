@@ -1549,6 +1549,155 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 		])
 	})
 
+	it("propagates a non-abort token failure as-is when no cancellation is involved", async () => {
+		const handler = createHandler()
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockRejectedValue(new Error("oauth down"))
+		const create = vitest.fn()
+		Reflect.set(handler, "client", { responses: { create } })
+
+		// No abort signal: a genuine lookup failure must reach the caller unchanged, not be
+		// normalized into the abort contract.
+		await expect(
+			collectStream(
+				handler.createMessage("System", [{ role: "user", content: "Hello" }], { taskId: "task-test" }),
+			),
+		).rejects.toThrow("oauth down")
+
+		expect(create).not.toHaveBeenCalled()
+	})
+
+	it("settles with the abort contract when the SDK stream fails at the moment the caller cancels", async () => {
+		const handler = createHandler()
+		const refresh = vitest
+			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+			.mockResolvedValue("refreshed-token")
+		const controller = new AbortController()
+		const event1 = { type: "response.output_text.delta", delta: "pre-abort" }
+		const create = vitest.fn().mockImplementation(() => {
+			return Promise.resolve({
+				[Symbol.asyncIterator]() {
+					let pulls = 0
+					return {
+						next: async () => {
+							pulls++
+							if (pulls === 1) {
+								return { value: event1, done: false }
+							}
+							// The cancellation lands while the second pull is in flight: the top-of-loop
+							// check has already passed, so the failure must settle via the retry-catch
+							// abort check, not the auth-refresh path.
+							controller.abort()
+							throw new Error("401 invalid token")
+						},
+						return: async () => ({ value: undefined, done: true }),
+					}
+				},
+			})
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "pre-abort" } })
+		await expect(iter.next()).rejects.toMatchObject({ name: "AbortError" })
+
+		// The cancellation wins over the auth-failure wording: no refresh, no SSE fallback.
+		expect(refresh).not.toHaveBeenCalled()
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("settles with the abort contract when the signal aborts as the token lookup settles", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		const create = vitest.fn()
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		// The first pull runs the generator up to the token race. The token is already resolved, so
+		// the race settles on the next microtask and detaches its abort listener; queueing the abort
+		// after that microtask lands it in the window where only the request-local bridge can still
+		// see it.
+		const firstPull = iter.next()
+		queueMicrotask(() => controller.abort())
+
+		await expect(firstPull).rejects.toMatchObject({ name: "AbortError" })
+
+		expect(create).not.toHaveBeenCalled()
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// Each case streams one line before the cancellation and buffers the target line in the
+	// handler's line loop: the target's pre-yield guard must break before its chunk streams.
+	const sseData = (obj: unknown) => "data: " + JSON.stringify(obj)
+	const completeTextLine = (t: string) =>
+		sseData({ response: { output: [{ type: "text", content: [{ type: "text", text: t }] }] } })
+	const completeReasoningLine = (t: string) =>
+		sseData({ response: { output: [{ type: "reasoning", summary: [{ type: "summary_text", text: t }] }] } })
+	const completeUsageLine = (t: string) =>
+		sseData({
+			response: {
+				output: [{ type: "text", content: [{ type: "text", text: t }] }],
+				usage: { input_tokens: 1, output_tokens: 1 },
+			},
+		})
+	const choicesLine = (t: string) => sseData({ choices: [{ delta: { content: t } }] })
+	const itemLine = (t: string) => sseData({ item: { type: "text", text: t } })
+	const usageLine = sseData({ usage: { input_tokens: 1, output_tokens: 1 } })
+	const plainLine = (t: string) => JSON.stringify({ content: t })
+
+	const sseGuardCases: [string, string, string, Record<string, unknown>][] = [
+		[
+			"a complete-response reasoning summary",
+			completeTextLine("a"),
+			completeReasoningLine("b"),
+			{ type: "text", text: "a" },
+		],
+		["a complete-response usage chunk", completeTextLine("a"), completeUsageLine("b"), { type: "text", text: "a" }],
+		["a legacy choices delta", itemLine("a"), choicesLine("b"), { type: "text", text: "a" }],
+		["a legacy item text", choicesLine("a"), itemLine("b"), { type: "text", text: "a" }],
+		["a legacy usage object", itemLine("a"), usageLine, { type: "text", text: "a" }],
+		["a plain JSON line", usageLine, plainLine("b"), { type: "usage", inputTokens: 1, outputTokens: 1 }],
+	]
+	for (const [name, firstLine, targetLine, firstChunk] of sseGuardCases) {
+		it(`never yields ${name} once the caller cancels before the handler reads it`, async () => {
+			const handler = createHandler()
+			const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+			Reflect.set(handler, "client", { responses: { create } })
+			const controller = new AbortController()
+			const encoder = new TextEncoder()
+			const body = new ReadableStream<Uint8Array>({
+				start(streamController) {
+					// A single chunk: both lines land in one read so the target is buffered in the
+					// handler's line loop when the cancellation lands.
+					streamController.enqueue(encoder.encode(`${firstLine}\n\n${targetLine}\n\n`))
+					streamController.close()
+				},
+			})
+			const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+			vitest.stubGlobal("fetch", mockFetch)
+
+			const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+				taskId: "task-test",
+				abortSignal: controller.signal,
+			})
+			expect(await iter.next()).toMatchObject({ value: firstChunk })
+			controller.abort()
+			// The target line was buffered before the cancellation, but its pre-yield guard
+			// breaks out of the line loop and the while-top guard ends the read.
+			expect(await collectStream(iter)).toEqual([])
+		})
+	}
+
 	it("emits nothing once the caller cancels before the first SDK event", async () => {
 		const handler = createHandler()
 		const controller = new AbortController()
