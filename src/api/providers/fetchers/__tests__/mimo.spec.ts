@@ -200,6 +200,27 @@ describe("getMimoModels", () => {
 		expect(fetchSpy).not.toHaveBeenCalled()
 	})
 
+	it.each([
+		["query string", "https://token-plan-sgp.xiaomimimo.com/v1?api_key=QUERYSECRET"],
+		["fragment", "https://token-plan-sgp.xiaomimimo.com/v1#api_key=FRAGMENTSECRET"],
+	])("never echoes a secret carried in a URL %s", async (_label, maliciousUrl) => {
+		const fetchSpy = vi.fn()
+		globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+		const secret = maliciousUrl.split("=")[1]
+		let thrown: unknown
+		try {
+			await getMimoModels(maliciousUrl, "key")
+		} catch (error) {
+			thrown = error
+		}
+
+		expect(thrown).toBeInstanceOf(Error)
+		expect((thrown as Error).message).toContain("not an allowed Xiaomi MiMo endpoint")
+		expect((thrown as Error).message).not.toContain(secret)
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
 	it("rejects embedded credentials on an allowed endpoint and never echoes the secret", async () => {
 		const fetchSpy = vi.fn()
 		globalThis.fetch = fetchSpy as unknown as typeof fetch

@@ -27,7 +27,8 @@ export const ALLOWED_BASE_URLS: ReadonlySet<string> = new Set([
 // True when the authority component carries `user[:pass]@` credentials. Input
 // without a `scheme://` prefix is treated as bare authority so credential-like
 // strings cannot slip past the userinfo check into the allowlist rejection
-// message below. The raw URL is only echoed for credential-free rejections.
+// below. Rejection messages never echo the input: query strings and fragments
+// can also carry secrets and are not visible to this authority-only check.
 function containsUserinfo(rawUrl: string): boolean {
 	const schemeEnd = rawUrl.indexOf("://")
 	const rest = schemeEnd === -1 ? rawUrl : rawUrl.slice(schemeEnd + 3)
@@ -59,13 +60,15 @@ export async function getMimoModels(
 	// endpoints with an exact match. This subsumes the previous https-only guard
 	// (every allowed URL is https, so plaintext HTTP, arbitrary hosts, and path
 	// tricks all fail the allowlist) and runs before any header is built, so a
-	// partial or off-list request is never sent.
+	// partial or off-list request is never sent. Rejection errors are constant
+	// strings: the raw URL is never echoed because query strings and fragments
+	// can carry secrets too.
 	if (containsUserinfo(base)) {
 		throw new Error("MIMO/getMimoModels/001: MiMo model fetch rejected: base URL must not contain credentials.")
 	}
 	if (!ALLOWED_BASE_URLS.has(base)) {
 		throw new Error(
-			`MIMO/getMimoModels/002: MiMo model fetch rejected: "${base}" is not an allowed Xiaomi MiMo endpoint.`,
+			"MIMO/getMimoModels/002: MiMo model fetch rejected: base URL is not an allowed Xiaomi MiMo endpoint.",
 		)
 	}
 

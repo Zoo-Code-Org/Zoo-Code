@@ -14,14 +14,8 @@ type UseRouterModelsOptions = {
 	enabled?: boolean // gate fetching entirely
 }
 
-export const fetchRouterModels = async (provider?: string) =>
+export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
-		const cleanup = () => {
-			if (typeof window !== "undefined") {
-				window.removeEventListener("message", handler)
-			}
-		}
-
 		const timeout = setTimeout(() => {
 			cleanup()
 			reject(new Error("Router models request timed out"))
@@ -39,7 +33,6 @@ export const fetchRouterModels = async (provider?: string) =>
 					return
 				}
 
-				clearTimeout(timeout)
 				cleanup()
 
 				if (message.routerModels) {
@@ -48,6 +41,31 @@ export const fetchRouterModels = async (provider?: string) =>
 					reject(new Error("No router models in response"))
 				}
 			}
+		}
+
+		const cleanup = () => {
+			clearTimeout(timeout)
+			if (typeof window !== "undefined") {
+				window.removeEventListener("message", handler)
+			}
+			signal?.removeEventListener("abort", onAbort)
+		}
+
+		const onAbort = () => {
+			cleanup()
+			reject(new DOMException("Router models request aborted", "AbortError"))
+		}
+
+		// React Query cancels the queryFn when the consuming component unmounts or
+		// the query is removed. Honour that signal so the window listener and the
+		// timeout do not outlive the request (and a stale response can never
+		// resolve a disposed query).
+		if (signal) {
+			if (signal.aborted) {
+				onAbort()
+				return
+			}
+			signal.addEventListener("abort", onAbort, { once: true })
 		}
 
 		window.addEventListener("message", handler)
@@ -62,7 +80,7 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 	const provider = opts.provider || undefined
 	return useQuery({
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
-		queryFn: () => fetchRouterModels(provider),
+		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
 	})
 }
