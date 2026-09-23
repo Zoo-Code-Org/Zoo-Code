@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "ZooCodeOrganization",
-	"version": "3.82.1",
+	"version": "3.82.2",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -447,6 +447,11 @@
 		"merge:coverage": "node scripts/merge-lcov.mjs coverage/merged/lcov.info coverage/api/lcov.info coverage/core/lcov.info coverage/services/lcov.info coverage/misc/lcov.info coverage/tree-sitter/lcov.info",
 		"test:unit": "vitest run --config vitest.unit.config.ts",
 		"test:dist": "vitest run --config vitest.dist.config.ts",
+		"test:api": "vitest run --config vitest.api.config.ts",
+		"test:core": "vitest run --config vitest.core.config.ts",
+		"test:services": "vitest run --config vitest.services.config.ts",
+		"test:misc": "vitest run --config vitest.misc.config.ts",
+		"test:tree-sitter": "vitest run --config vitest.tree-sitter.config.ts",
 		"test:coverage": "vitest run --coverage",
 		"test:coverage:unit": "vitest run --config vitest.unit.config.ts --coverage",
 		"test:coverage:api": "vitest run --config vitest.api.config.ts --coverage",
@@ -559,6 +564,6 @@
 		"nock": "14.0.15",
 		"ovsx": "0.10.12",
 		"rimraf": "6.0.1",
-		"vitest": "4.1.9"
+		"vitest": "4.1.11"
 	}
 }

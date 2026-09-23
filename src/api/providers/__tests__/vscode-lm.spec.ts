@@ -16,6 +16,14 @@ vi.mock("vscode", () => {
 		) {}
 	}
 
+	class MockLanguageModelToolResultPart {
+		type = "tool_result"
+		constructor(
+			public callId: string,
+			public content: unknown[],
+		) {}
+	}
+
 	return {
 		workspace: {
 			getConfiguration: vi.fn(() => ({
@@ -53,6 +61,7 @@ vi.mock("vscode", () => {
 		},
 		LanguageModelTextPart: MockLanguageModelTextPart,
 		LanguageModelToolCallPart: MockLanguageModelToolCallPart,
+		LanguageModelToolResultPart: MockLanguageModelToolResultPart,
 		lm: {
 			selectChatModels: vi.fn(),
 		},
@@ -60,12 +69,16 @@ vi.mock("vscode", () => {
 })
 
 import * as vscode from "vscode"
-import { VsCodeLmHandler } from "../vscode-lm"
+import { VsCodeLmHandler, extractLeakedToolCalls, trailingPartialToolMarkerLength } from "../vscode-lm"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
+import { normalizeToolSchema } from "../../../utils/json-schema"
+import { getMcpServerTools } from "../../../core/prompts/tools/native-tools/mcp_server"
+import type { McpHub } from "../../../services/mcp/McpHub"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { collectStream } from "../../../test-utils/stream"
 
 const mockLanguageModelChat = {
 	id: "test-model",
@@ -1075,5 +1088,1228 @@ describe("VsCodeLmHandler", () => {
 			const result = handler["cleanMessageContent"](input) as unknown as Array<Record<string, unknown>>
 			expect(result[0].extra).toBe(42)
 		})
+	})
+})
+
+describe("leaked tool-call recovery", () => {
+	// Builders keep the XML fixtures readable and prevent this file's own markup from being
+	// mistaken for a real tool call.
+	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
+	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+	const wrap = (body: string) => `<function${"_calls"}>${body}</function${"_calls"}>`
+
+	describe("extractLeakedToolCalls", () => {
+		it("recovers a known-tool block and strips it from the leftover text", () => {
+			const text = `Working on it.\n${wrap(invoke("update_todo_list", param("todos", "[x] one\n[ ] two")))}`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one\n[ ] two" } }])
+			expect(leftoverText).toBe("Working on it.\n")
+		})
+
+		it("recovers a wrapped leak preceded by a stray token", () => {
+			const text = `court\n${wrap(invoke("update_todo_list", param("todos", "[x] done")))}`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] done" } }])
+			expect(leftoverText).toBe("court\n")
+		})
+
+		it("does not recover a bare invoke block with no function_calls wrapper", () => {
+			const text = `court\n${invoke("update_todo_list", param("todos", "[x] done"))}`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke that follows an already-closed wrapper", () => {
+			const text = `${wrap("")}\n${invoke("update_todo_list", param("todos", "[x] done"))}`
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("recovers multiple params and strips function-call wrapper tags", () => {
+			const body = param("mode", "code") + param("message", "go")
+			const text = `<function_calls>${invoke("new_task", body)}</function_calls>`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["new_task"]))
+
+			expect(calls).toEqual([{ name: "new_task", input: { mode: "code", message: "go" } }])
+			expect(leftoverText).toBe("")
+		})
+
+		it("passes through invoke blocks for tools that were not offered", () => {
+			const text = invoke("some_other_tool", param("x", "1"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("returns no calls for ordinary text", () => {
+			const { calls, leftoverText } = extractLeakedToolCalls("just a normal reply", new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe("just a normal reply")
+		})
+	})
+
+	describe("trailingPartialToolMarkerLength", () => {
+		it("holds back a split marker prefix at the end of a chunk", () => {
+			expect(trailingPartialToolMarkerLength("some text <in")).toBe(3)
+		})
+
+		it("returns 0 for plain text and complete tags", () => {
+			expect(trailingPartialToolMarkerLength("hello world")).toBe(0)
+			expect(trailingPartialToolMarkerLength("a < b")).toBe(0)
+			expect(trailingPartialToolMarkerLength("text <function_calls>")).toBe(0)
+		})
+
+		it("holds back an invoke tag whose name attribute has not arrived", () => {
+			expect(trailingPartialToolMarkerLength("text <invoke ")).toBe(8)
+		})
+
+		it("does not hold back an over-long trailing fragment", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(200))).toBe(0)
+		})
+
+		it("does not hold back an over-long generic tag fragment", () => {
+			expect(trailingPartialToolMarkerLength("text <" + "a".repeat(200))).toBe(0)
+		})
+	})
+
+	describe("quoted markup", () => {
+		it("does not recover an invoke block inside a fenced code block", () => {
+			const text = "```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke block inside an inline code span", () => {
+			const text = "avoid `" + invoke("update_todo_list", param("todos", "x")) + "`"
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("does not recover an invoke block quoted in unfenced, backtick-free prose", () => {
+			const text = "You must never emit " + invoke("update_todo_list", param("todos", "x")) + " directly."
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover a quoted invoke block that ends its line", () => {
+			// Defect 3: an empty rest-of-line previously made this look like a genuine leak.
+			const text = "You must never emit " + invoke("update_todo_list", param("todos", "x"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke block inside a tilde fence", () => {
+			const text = "~~~\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n~~~"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke inside a four-backtick fence containing a three-backtick fence", () => {
+			// A narrower inner fence must not close the wider outer one, so the invoke stays quoted.
+			const text = "````\n```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```\n````"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke inside a tilde fence containing a backtick fence line", () => {
+			const text = "~~~\n```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```\n~~~"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("recovers an invoke block that follows a closed code fence", () => {
+			const text = "```\nexample output\n```\n" + wrap(invoke("update_todo_list", param("todos", "[x] one")))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
+		})
+
+		it("does not treat doubled angle brackets as trailing prose after stripping", () => {
+			// Defect 1: a single strip pass turns `<<x>>` into a tag-looking `<x>`, so the
+			// trailing-text check must strip repeatedly until stable.
+			const text = wrap(invoke("update_todo_list", param("todos", "x")) + "<<script>>")
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "x" } }])
+		})
+
+		it("keeps wrapper tags around a block that was not recovered", () => {
+			const text = `<function_calls>${invoke("some_other_tool", param("x", "1"))}</function_calls>`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not let a wrapper marker quoted inside an unrecovered invoke body arm a later bare invoke", () => {
+			// A wrapper tag is only real when it appears outside an invoke body, otherwise quoted
+			// markup in one block can authorize recovery of an unwrapped block after it.
+			const text =
+				invoke("some_other_tool", `<function${"_calls"}>`) +
+				"\n" +
+				invoke("update_todo_list", param("todos", "[x] one"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on an invoke whose parameter markup is left unclosed", () => {
+			// Partially parsed parameters would dispatch a call missing arguments the model wrote.
+			const text = wrap(invoke("update_todo_list", `<param${"eter"} name="todos">[x] one`))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("fails closed on a malformed parameter opener before a well-formed parameter", () => {
+			// The strict pattern skips the unquoted-attribute opener, so recovering `beta` alone
+			// would dispatch a call missing `alpha`.
+			const text = wrap(
+				invoke("update_todo_list", `<param${"eter"} name=alpha>A</param${"eter"}>` + param("beta", "B")),
+			)
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on a malformed parameter opener between two well-formed parameters", () => {
+			// The defect is any unparseable opener in an inter-match gap, not only a leading one.
+			const text = wrap(
+				invoke(
+					"update_todo_list",
+					param("alpha", "A") + `<param${"eter"} name=mid>M</param${"eter"}>` + param("beta", "B"),
+				),
+			)
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("still recovers an invoke whose multiple parameters are all well-formed", () => {
+			const text = wrap(invoke("update_todo_list", param("alpha", "A") + param("beta", "B")))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { alpha: "A", beta: "B" } }])
+		})
+	})
+
+	// The bare-invoke cases above short-circuit at the wrapper check, so they never exercise the
+	// quoting guards. These keep the wrapper open so each guard is actually reached.
+	describe("quoted markup inside an open function_calls wrapper", () => {
+		const tools = new Set(["update_todo_list"])
+		const quoted = (body: string) => `<function${"_calls"}>\n${body}`
+
+		it("suppresses an invoke inside a three-backtick fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("```\n" + block + "\n```")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses an invoke inside a tilde fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("~~~\n" + block + "\n~~~")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses an invoke inside a four-backtick fence containing a narrower fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("````\n```\n" + block + "\n```\n````")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not treat an info-string fence line as a closing fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("```md\n```ts\n" + block + "\n```\n```")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("treats a fence line with a whitespace-only suffix as a closing fence", () => {
+			const text = quoted("```\nexample\n```   \n" + invoke("update_todo_list", param("todos", "[x] one")))
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
+		})
+
+		it("recovers an invoke that follows a CLOSED fence, proving the fence guard reopens", () => {
+			const text = quoted("```\nexample\n```\n" + invoke("update_todo_list", param("todos", "[x] one")))
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
+		})
+
+		it("suppresses an invoke inside an inline code span", () => {
+			const text = quoted("avoid `" + invoke("update_todo_list", param("todos", "x")) + "`")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses an invoke introduced by a quoting cue that ends its line", () => {
+			const text = quoted("You must never emit " + invoke("update_todo_list", param("todos", "x")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses an invoke followed by narrative text on the same line", () => {
+			const text = quoted(invoke("update_todo_list", param("todos", "x")) + " is what you must not do.")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses a bare invoke after a wrapper closer that appeared inside a fence", () => {
+			const text =
+				`<function${"_calls"}>\n` +
+				"```md\n" +
+				`</function${"_calls"}>\n` +
+				"```\n" +
+				invoke("write_to_file", param("path", "a.txt") + param("content", "hi"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["write_to_file"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+	})
+
+	describe("schema-aware recovered parameters", () => {
+		const schemas = new Map<string, Record<string, unknown> | undefined>([
+			[
+				"update_todo_list",
+				{ type: "object", properties: { todos: { type: "array" }, note: { type: "string" } } },
+			],
+			[
+				"read_file",
+				{
+					type: "object",
+					properties: {
+						path: { type: "string" },
+						indentation: { type: "object" },
+						limit: { type: "integer" },
+						ratio: { type: "number" },
+						recursive: { type: "boolean" },
+						optional: { type: ["object", "null"] },
+						nullScalar: { type: "null" },
+						nullUnion: { type: ["null"] },
+					},
+				},
+			],
+		])
+
+		it("converts a declared array parameter into a real array", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", '["a","b"]')))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: ["a", "b"] } }])
+		})
+
+		it("converts declared object, number, integer and boolean parameters", () => {
+			const body =
+				param("path", "src/app.ts") +
+				param("indentation", '{"anchor_line":42}') +
+				param("limit", "10") +
+				param("ratio", "1.5") +
+				param("recursive", "true")
+			const { calls } = extractLeakedToolCalls(wrap(invoke("read_file", body)), schemas)
+
+			expect(calls).toEqual([
+				{
+					name: "read_file",
+					input: {
+						path: "src/app.ts",
+						indentation: { anchor_line: 42 },
+						limit: 10,
+						ratio: 1.5,
+						recursive: true,
+					},
+				},
+			])
+		})
+
+		it("resolves a nullable union to its non-null type", () => {
+			const text = wrap(invoke("read_file", param("optional", '{"a":1}')))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { optional: { a: 1 } } }])
+		})
+
+		it("accepts an explicit null for a nullable union parameter", () => {
+			const text = wrap(invoke("read_file", param("optional", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { optional: null } }])
+			expect(Object.keys(calls[0].input)).toContain("optional")
+			expect(calls[0].input.optional).toBeNull()
+		})
+
+		it("fails closed when a non-nullable object parameter is null", () => {
+			const text = wrap(invoke("read_file", param("indentation", "null")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("accepts an explicit null for a scalar null-only parameter", () => {
+			const text = wrap(invoke("read_file", param("nullScalar", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { nullScalar: null } }])
+			expect(calls[0].input.nullScalar).toBeNull()
+		})
+
+		it("accepts an explicit null for a single-entry null union parameter", () => {
+			const text = wrap(invoke("read_file", param("nullUnion", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { nullUnion: null } }])
+			expect(calls[0].input.nullUnion).toBeNull()
+		})
+
+		it("fails closed when a scalar null-only parameter carries a non-null value", () => {
+			const text = wrap(invoke("read_file", param("nullScalar", '{"a":1}')))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a single-entry null union parameter carries a non-null value", () => {
+			const text = wrap(invoke("read_file", param("nullUnion", "123")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("keeps a declared string parameter as the literal text null", () => {
+			const text = wrap(invoke("read_file", param("path", "null")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "read_file", input: { path: "null" } }])
+		})
+
+		it("keeps a declared string parameter literal even when it looks like JSON", () => {
+			const text = wrap(invoke("update_todo_list", param("note", "123")))
+
+			const { calls } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { note: "123" } }])
+		})
+
+		it("keeps every parameter literal when no schemas are supplied", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", '["a"]')))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: '["a"]' } }])
+		})
+
+		it("fails closed to unchanged text when a structured parameter is not valid JSON", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", "[x] not json")))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a parsed value has the wrong type for its schema", () => {
+			const text = wrap(invoke("update_todo_list", param("todos", '{"a":1}')))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("still requires the function_calls wrapper for a schema-typed call", () => {
+			const text = invoke("update_todo_list", param("todos", '["a"]'))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+	})
+})
+
+// The MCP path normalizes dynamic server schemas before they reach the provider, so these fixtures
+// must come from the real normalizer rather than a hand-written guess at its output shape.
+describe("recovered parameters for normalized MCP schemas", () => {
+	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
+	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+	const wrap = (body: string) => `<function${"_calls"}>${body}</function${"_calls"}>`
+
+	const normalized = normalizeToolSchema({
+		type: "object",
+		properties: {
+			tags: { type: ["array", "null"], items: { type: "string" } },
+			options: { type: ["object", "null"], properties: { deep: { type: "string" } } },
+			limit: { type: ["integer", "null"] },
+			note: { type: ["string", "null"] },
+		},
+		required: ["tags"],
+	}) as Record<string, unknown>
+
+	const schemas = new Map<string, Record<string, unknown> | undefined>([["mcp_server_search", normalized]])
+
+	const recover = (body: string) => extractLeakedToolCalls(wrap(invoke("mcp_server_search", body)), schemas).calls
+
+	it("emits typed alternatives rather than a plain type for nullable properties", () => {
+		const properties = normalized.properties as Record<string, Record<string, unknown>>
+		expect(properties.tags.type).toBeUndefined()
+		expect(properties.tags.anyOf).toEqual([{ type: "array", items: { type: "string" } }, { type: "null" }])
+	})
+
+	it("converts a nullable array parameter to a real array", () => {
+		expect(recover(param("tags", '["a","b"]'))).toEqual([
+			{ name: "mcp_server_search", input: { tags: ["a", "b"] } },
+		])
+	})
+
+	it("converts a nullable object parameter to a real object", () => {
+		expect(recover(param("options", '{"deep":"x"}'))).toEqual([
+			{ name: "mcp_server_search", input: { options: { deep: "x" } } },
+		])
+	})
+
+	it("converts a nullable integer parameter to a number", () => {
+		expect(recover(param("limit", "5"))).toEqual([{ name: "mcp_server_search", input: { limit: 5 } }])
+	})
+
+	it("accepts an explicit null for a nullable alternative", () => {
+		expect(recover(param("tags", "null"))).toEqual([{ name: "mcp_server_search", input: { tags: null } }])
+	})
+
+	it("keeps a nullable string alternative literal", () => {
+		expect(recover(param("note", "123"))).toEqual([{ name: "mcp_server_search", input: { note: "123" } }])
+	})
+
+	it("rejects a malformed value for a nullable array alternative", () => {
+		const text = wrap(invoke("mcp_server_search", param("tags", "[not json")))
+		const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+		expect(calls).toHaveLength(0)
+		expect(leftoverText).toBe(text)
+	})
+
+	it("rejects a well-formed value of the wrong type for a nullable array alternative", () => {
+		expect(recover(param("tags", '{"a":1}'))).toHaveLength(0)
+	})
+
+	it("leaves a mixed non-null union unresolved so no alternative is guessed", () => {
+		const mixed = normalizeToolSchema({
+			type: "object",
+			properties: { value: { type: ["array", "number"] } },
+		}) as Record<string, unknown>
+		const mixedSchemas = new Map<string, Record<string, unknown> | undefined>([["mcp_server_search", mixed]])
+		const text = wrap(invoke("mcp_server_search", param("value", "[1]")))
+
+		expect(extractLeakedToolCalls(text, mixedSchemas).calls).toEqual([
+			{ name: "mcp_server_search", input: { value: "[1]" } },
+		])
+	})
+
+	it("routes a schema built by the MCP tool builder through the same conversion", () => {
+		const mcpHub = {
+			getServers: () => [
+				{
+					name: "server",
+					tools: [
+						{
+							name: "search",
+							inputSchema: {
+								type: "object",
+								properties: { tags: { type: ["array", "null"], items: { type: "string" } } },
+							},
+						},
+					],
+				},
+			],
+		} as unknown as McpHub
+
+		const [tool] = getMcpServerTools(mcpHub)
+		if (tool.type !== "function") {
+			throw new Error("expected a function tool")
+		}
+		const { name, parameters } = tool.function
+		const builderSchemas = new Map<string, Record<string, unknown> | undefined>([
+			[name, parameters as Record<string, unknown>],
+		])
+		const text = wrap(invoke(name, param("tags", '["a"]')))
+
+		expect(extractLeakedToolCalls(text, builderSchemas).calls).toEqual([{ name, input: { tags: ["a"] } }])
+	})
+})
+
+describe("leaked tool-call parser contracts", () => {
+	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
+	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+	const wrap = (body: string) => `<function${"_calls"}>${body}</function${"_calls"}>`
+	// The fence in a quoting fixture must begin a line, so the wrapper opens on its own line.
+	const wrapLines = (body: string) => `<function${"_calls"}>\n${body}\n</function${"_calls"}>`
+
+	const tools = new Set(["update_todo_list"])
+	const callsOf = (text: string) => extractLeakedToolCalls(text, tools).calls
+	const todo = (value = "x") => invoke("update_todo_list", param("todos", value))
+
+	const schemaFor = (properties: Record<string, unknown>) =>
+		new Map<string, Record<string, unknown> | undefined>([["update_todo_list", { properties }]])
+	const convert = (properties: Record<string, unknown>, raw: string) =>
+		extractLeakedToolCalls(wrap(invoke("update_todo_list", param("value", raw))), schemaFor(properties)).calls
+
+	describe("wrapper discrimination", () => {
+		it("requires whitespace between invoke and its name attribute", () => {
+			const glued = `<function${"_calls"}><in${"voke"}name="update_todo_list"></in${"voke"}></function${"_calls"}>`
+
+			expect(callsOf(glued)).toHaveLength(0)
+		})
+
+		it("tolerates a newline between invoke and its name attribute", () => {
+			const spaced = wrap(`<in${"voke"}\n name="update_todo_list">${param("todos", "x")}</in${"voke"}>`)
+
+			expect(callsOf(spaced)).toHaveLength(1)
+		})
+
+		it("does not recover an unterminated name attribute", () => {
+			expect(callsOf(wrap(`<in${"voke"} name="update_todo_list>x</in${"voke"}>`))).toHaveLength(0)
+		})
+
+		it("does not recover an empty name attribute", () => {
+			expect(callsOf(wrap(invoke("", param("todos", "x"))))).toHaveLength(0)
+		})
+
+		it("recovers after an unrelated closed wrapper", () => {
+			expect(callsOf(`${wrap("")}\n${wrap(todo())}`)).toHaveLength(1)
+		})
+
+		it("does not let a wrapper opener inside a closed code fence arm a later bare invoke", () => {
+			const text = ["```", `<function${"_calls"}>`, "```", "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside an inline-code span arm a later bare invoke", () => {
+			const text = [`Use \`<function${"_calls"}>\` to open a block.`, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside a double-backtick span arm a later bare invoke", () => {
+			const text = [`Example: \`\`<function${"_calls"}>\`\``, "", todo()].join("\n")
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("keeps a double-backtick span quoted when it nests a literal single backtick", () => {
+			const text = [`Example: \`\`<function${"_calls"}> \` here\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside a four-backtick span arm a later bare invoke", () => {
+			const text = [`Example: \`\`\`\`<function${"_calls"}>\`\`\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a double-backtick span with a wider backtick run", () => {
+			const text = [`Example: \`\`quoted \`\`\` <function${"_calls"}>\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a double-backtick span with either a wider or a narrower backtick run", () => {
+			const text = [`Example: \`\`a \`\`\` b \` c <function${"_calls"}>\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("arms on a wrapper opener that follows a closed double-backtick span", () => {
+			const text = [`Example: \`\`quoted\`\` then <function${"_calls"}>`, todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("still arms on a wrapper opener that is not inside any backtick span", () => {
+			expect(callsOf(wrap(todo()))).toHaveLength(1)
+		})
+
+		it("does not leak an unterminated double-backtick span across a newline", () => {
+			expect(callsOf(wrapLines("see ``\n" + todo()))).toHaveLength(1)
+		})
+
+		it("still arms on a real wrapper opener that follows a closed code fence", () => {
+			const text = ["```", "example", "```", "", `<function${"_calls"}>`, todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("arms on an opening wrapper tag carrying inner whitespace", () => {
+			expect(callsOf(`<function${"_calls"} >${todo()}`)).toHaveLength(1)
+		})
+
+		it("disarms on a closing wrapper tag carrying inner whitespace", () => {
+			expect(callsOf(`<function${"_calls"}></function${"_calls"} >${todo()}`)).toHaveLength(0)
+		})
+	})
+
+	describe("fence and quote discrimination", () => {
+		it("keeps a fence indented three spaces open", () => {
+			expect(callsOf(wrapLines("   ```\n" + todo()))).toHaveLength(0)
+		})
+
+		it("does not open a fence indented four spaces", () => {
+			expect(callsOf(wrapLines("    ```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("requires a fence to begin its line", () => {
+			expect(callsOf(wrapLines("text ```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("does not arm a wrapper opener that shares a line with a fence opener", () => {
+			// The invoke is placed AFTER the fence closes so the fence gate alone cannot
+			// suppress it — only the missing wrapper can.  A mutation that drops the
+			// opener guard would open the wrapper, recover the invoke, and fail this test.
+			const text = `~~~ ` + `<function${"_calls"}>` + `\n~~~\n` + todo()
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a wide fence with a narrower one", () => {
+			expect(callsOf(wrapLines("````\n```\n" + todo() + "\n"))).toHaveLength(0)
+		})
+
+		it("closes a fence of equal width", () => {
+			expect(callsOf(wrapLines("```\ncode\n```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("does not close a tilde fence with a backtick fence", () => {
+			expect(callsOf(wrapLines("~~~\n```\n" + todo() + "\n"))).toHaveLength(0)
+		})
+
+		it("does not treat a closed inline-code run before the wrapper as a fence", () => {
+			const text = "text ```x``` " + `<function${"_calls"}>` + "\n" + todo()
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("does not open a backtick fence whose info string contains a backtick", () => {
+			expect(callsOf("```lang`value\nmore\n" + wrapLines(todo()))).toHaveLength(1)
+		})
+
+		it("still opens a tilde fence whose info string contains a backtick", () => {
+			expect(callsOf("~~~lang`value\nmore\n" + wrapLines(todo()))).toHaveLength(0)
+		})
+
+		it("suppresses on an odd backtick count earlier in the line", () => {
+			expect(callsOf(wrapLines("see `" + todo()))).toHaveLength(0)
+		})
+
+		it("does not suppress on an even backtick count", () => {
+			expect(callsOf(wrapLines("see `x` " + todo()))).toHaveLength(1)
+		})
+
+		it("does not suppress on trailing whitespace alone", () => {
+			expect(callsOf(wrapLines(todo() + "   "))).toHaveLength(1)
+		})
+
+		it("does not suppress on trailing residual tags alone", () => {
+			expect(callsOf(wrapLines(todo() + "<<>>"))).toHaveLength(1)
+		})
+
+		it("stops applying a quoting cue after sentence punctuation", () => {
+			expect(callsOf(wrapLines("Never do that. Now " + todo()))).toHaveLength(1)
+		})
+
+		it("does not suppress on ordinary narration", () => {
+			expect(callsOf(wrapLines("Working on it now " + todo()))).toHaveLength(1)
+		})
+	})
+
+	describe("schema-directed conversion boundaries", () => {
+		it("rejects a float for a declared integer", () => {
+			expect(convert({ value: { type: "integer" } }, "1.5")).toHaveLength(0)
+		})
+
+		it("rejects a non-finite number", () => {
+			expect(convert({ value: { type: "number" } }, "1e400")).toHaveLength(0)
+		})
+
+		it("rejects an array for a declared object", () => {
+			expect(convert({ value: { type: "object" } }, "[]")).toHaveLength(0)
+		})
+
+		it("leaves an ambiguous multi-type union literal", () => {
+			expect(convert({ value: { type: ["array", "object"] } }, '["a"]')[0].input).toEqual({ value: '["a"]' })
+		})
+
+		it("fails a block closed for an unsupported declared type", () => {
+			expect(convert({ value: { type: "date" } }, "x")).toHaveLength(0)
+		})
+
+		it("does not treat an inherited Object.prototype key as a supported type", () => {
+			expect(convert({ value: { type: "toString" } }, "x")).toHaveLength(0)
+		})
+
+		it("bails out on a null anyOf branch", () => {
+			expect(convert({ value: { anyOf: [null] } }, '["a"]')[0].input).toEqual({ value: '["a"]' })
+		})
+
+		it("trims a parameter value", () => {
+			expect(callsOf(wrap(invoke("update_todo_list", param("todos", "  spaced  "))))[0].input).toEqual({
+				todos: "spaced",
+			})
+		})
+
+		it("parses a whitespace-padded JSON array", () => {
+			expect(convert({ value: { type: "array" } }, '  ["a"]  ')[0].input).toEqual({ value: ["a"] })
+		})
+
+		it("rejects a number for a declared object", () => {
+			expect(convert({ value: { type: "object" } }, "5")).toHaveLength(0)
+		})
+
+		it("fails closed on a nested unclosed parameter tag and passes the text through", () => {
+			const schemas = schemaFor({ a: { type: "string" }, b: { type: "string" } })
+			const body = `<param${"eter"} name="a">` + param("b", "1") + "\n"
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a value hides markup that would overwrite an earlier argument", () => {
+			// The split block would otherwise re-bind `path`, dispatching an attacker-chosen target.
+			const schemas = schemaFor({ path: { type: "string" }, content: { type: "string" } })
+			const body =
+				param("path", "safe.txt") +
+				param("content", `harmless</param${"eter"}><param${"eter"} name="path">/evil`)
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on a value whose markup repeats the same parameter name", () => {
+			const schemas = schemaFor({ path: { type: "string" } })
+			const body = param("path", `a</param${"eter"}><param${"eter"} name="path">b`)
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a value injects a parameter name absent from the schema", () => {
+			// A different-name injection bypasses the same-name Object.hasOwn guard; the schema
+			// allow-list check after the loop is what catches it.
+			const schemas = schemaFor({ path: { type: "string" }, content: { type: "string" } })
+			const body =
+				param("path", "safe.txt") +
+				param("content", `harmless</param${"eter"}><param${"eter"} name="injected">evil`)
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when the schema declares no properties but a parameter is present", () => {
+			const schemas = schemaFor({})
+			const body = param("path", "safe.txt")
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when the schema has no properties record despite having a type constraint", () => {
+			// A schema like { type: "object", additionalProperties: false } has no properties key.
+			// Without schema.properties to validate against, recovery cannot safely allow-list params.
+			const schemas = new Map<string, Record<string, unknown> | undefined>([
+				["update_todo_list", { type: "object", additionalProperties: false }],
+			])
+			const body = param("path", "safe.txt")
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("also rejects a declared-string value containing literal parameter markup", () => {
+			// Deliberate narrowing: failing closed beats dispatching a wrongly-parsed argument.
+			expect(convert({ value: { type: "string" } }, `see <param${"eter"} name="b">`)).toHaveLength(0)
+		})
+
+		it("rejects a number for a declared boolean", () => {
+			expect(convert({ value: { type: "boolean" } }, "5")).toHaveLength(0)
+		})
+
+		it("fails a block closed when an unsupported declared type carries parseable JSON", () => {
+			expect(convert({ value: { type: "date" } }, "5")).toHaveLength(0)
+		})
+
+		it("ignores a non-string member of a declared type union", () => {
+			expect(convert({ value: { type: ["array", 5] } }, '["a"]')[0].input).toEqual({ value: ["a"] })
+		})
+	})
+
+	describe("carry boundaries", () => {
+		it("holds a generic fragment of exactly the carry bound", () => {
+			expect(trailingPartialToolMarkerLength("<" + "a".repeat(63))).toBe(64)
+		})
+
+		it("drops a generic fragment one character past the bound", () => {
+			expect(trailingPartialToolMarkerLength("<" + "a".repeat(64))).toBe(0)
+		})
+
+		it("holds an invoke tail of exactly the carry bound", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(56))).toBe(64)
+		})
+
+		it("drops an invoke tail one character past the bound", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(57))).toBe(0)
+		})
+	})
+
+	describe("preceding text and leftover segments", () => {
+		it("positions the quote window using preceding text", () => {
+			const { calls } = extractLeakedToolCalls(todo(), tools, `<function${"_calls"}>`)
+
+			expect(calls).toHaveLength(1)
+		})
+
+		it("suppresses on a fence opened in an earlier chunk", () => {
+			const { calls } = extractLeakedToolCalls(todo(), tools, `<function${"_calls"}>\n\`\`\`\n`)
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("keeps text that follows a recovered call", () => {
+			expect(extractLeakedToolCalls(`${wrap(todo())}\nAfterwards.`, tools).leftoverText).toBe("\nAfterwards.")
+		})
+
+		it("strips a closing wrapper tag carrying inner whitespace", () => {
+			const text = `<function${"_calls"}>${todo()}</function${"_calls"} >`
+
+			expect(extractLeakedToolCalls(text, tools).leftoverText).toBe("")
+		})
+
+		it("recovers two calls from one wrapper", () => {
+			const { calls } = extractLeakedToolCalls(wrap(`${todo("a")}\n${todo("b")}`), tools)
+
+			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
+		})
+
+		// Two recoveries put a non-last placeholder segment in the middle of the array, where both the
+		// placeholder seeding and the last-segment lookup can silently reorder or leak text.
+		it("keeps interleaved text in order across two recovered calls", () => {
+			const text = `${wrap(`${todo("a")}\nmid\n${todo("b")}`)}\ntail`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
+			expect(leftoverText).toBe("\nmid\n\ntail")
+		})
+	})
+
+	// Tag shapes a real backend varies on: whitespace inside the tags, and the `antml:` prefix.
+	describe("tag whitespace tolerance", () => {
+		it("recovers an invoke whose opening tag has whitespace before the closing bracket", () => {
+			const spaced = `<in${"voke"} name="update_todo_list" >${param("todos", "x")}</in${"voke"}>`
+
+			expect(callsOf(wrap(spaced))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("recovers an invoke whose closing tag has whitespace before the bracket", () => {
+			const spaced = `<in${"voke"} name="update_todo_list">${param("todos", "x")}</in${"voke"} >`
+
+			expect(callsOf(wrap(spaced))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("keeps a parameter whose closing tag has whitespace before the bracket", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"} >`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("reads a parameter name separated by more than one whitespace character", () => {
+			const body = `<param${"eter"}\t\tname="todos">x</param${"eter"}>`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("arms on a reopened wrapper whose tag carries inner whitespace", () => {
+			const text = `${wrap("")}\n<function${"_calls"} >\n${todo()}`
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("treats a tilde run shorter than three characters as ordinary text, not a fence", () => {
+			expect(callsOf(`<function${"_calls"}>\n~\n${todo()}`)).toHaveLength(1)
+		})
+
+		it("recovers an invoke inside an antml: prefixed wrapper and strips the wrapper from leftover", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"}>`
+			const invoke = `<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`
+			const text = `<antml:function${"_calls"}>${invoke}</antml:function${"_calls"}>`
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+			expect(calls[0].input).toEqual({ todos: "x" })
+			expect(leftoverText).toBe("")
+		})
+
+		it("recovers an antml: prefixed invoke inside a regular wrapper", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"}>`
+			const invoke = `<antml:in${"voke"} name="update_todo_list">${body}</antml:in${"voke"}>`
+			expect(callsOf(wrap(invoke))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("reads a parameter wrapped in antml: prefixed parameter tags", () => {
+			const body = `<antml:param${"eter"} name="todos">x</antml:param${"eter"}>`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("holds back a trailing antml: prefixed partial invoke at a chunk boundary", () => {
+			expect(trailingPartialToolMarkerLength(`leading <antml:in${"voke"} name="`)).toBe(20)
+		})
+	})
+
+	describe("chunk-boundary positioning", () => {
+		it("does not hold back an invoke tag that already closed earlier in the chunk", () => {
+			expect(trailingPartialToolMarkerLength("mid <invoke tail> more")).toBe(0)
+		})
+
+		it("locates the quoting cue relative to the preceding chunk, not its mirror image", () => {
+			// The window offset is preceding.length + match.index; subtracting instead lands on an
+			// earlier, cue-free slice and wrongly recovers the quoted block.
+			const { calls } = extractLeakedToolCalls(`see \`${todo()}`, tools, `<function${"_calls"}>`)
+
+			expect(calls).toHaveLength(0)
+		})
+	})
+})
+
+describe("quoting heuristics on the incremental scanner", () => {
+	const tools = new Set(["update_todo_list"])
+	const open = `<function${"_calls"}>`
+	const todo = () =>
+		`<in${"voke"} name="update_todo_list"><param${"eter"} name="todos">x</param${"eter"}></in${"voke"}>`
+	const callsOf = (text: string) => extractLeakedToolCalls(text, tools).calls
+	const fence = "```"
+
+	it("suppresses on an unterminated tag left after the block on the same line", () => {
+		expect(callsOf(`${open}\n${todo()} <`)).toHaveLength(0)
+	})
+
+	it("suppresses on narrative words following the block on the same line", () => {
+		expect(callsOf(`${open}\n${todo()} trailing words`)).toHaveLength(0)
+	})
+
+	it("suppresses on a stray closing angle bracket after the block", () => {
+		expect(callsOf(`${open}\n${todo()} >`)).toHaveLength(0)
+	})
+
+	it("suppresses when an unterminated tag precedes the block after a quoting cue", () => {
+		expect(callsOf(`${open}\nnever <${todo()}`)).toHaveLength(0)
+	})
+
+	it("recovers when a sentence terminator inside an unterminated tag ends the cue's sentence", () => {
+		expect(callsOf(`${open}\nnever <a.b${todo()}`)).toHaveLength(1)
+	})
+
+	it("recovers when the terminator immediately closes the cue's sentence", () => {
+		expect(callsOf(`${open}\nnever.${todo()}`)).toHaveLength(1)
+	})
+
+	it("treats a repeated non-fence character run as ordinary text", () => {
+		expect(callsOf(`${open}\n---\n${todo()}`)).toHaveLength(1)
+	})
+
+	it("closes a fence whose run is bare", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence}\n${todo()}`)).toHaveLength(1)
+	})
+
+	it("closes a fence whose suffix is whitespace only", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence} \n${todo()}`)).toHaveLength(1)
+	})
+
+	it("keeps a fence open when its closing run carries a single-character info string", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence}j\n${todo()}`)).toHaveLength(0)
+	})
+
+	it("keeps a fence open when its closing run carries a space-separated info string", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence} j\n${todo()}`)).toHaveLength(0)
+	})
+
+	it("tracks the line start across a newline that follows an earlier block on its own line", () => {
+		// The first block leaves the scanner mid-line; the newline after it arrives in a later span,
+		// so the running offset must survive that hand-off for the second block's cue to be found.
+		expect(callsOf(`${open}\n${todo()}\nnever ${todo()}`)).toHaveLength(1)
+	})
+
+	it("measures the cue window from the line start when the preceding chunk ends mid-line", () => {
+		// The cue sits in the preceding chunk, so the line-start offset must carry across the
+		// boundary; drifting it lands on a different slice and the quoted block is wrongly recovered.
+		expect(extractLeakedToolCalls(todo(), tools, `${open}\nnever `).calls).toHaveLength(0)
+	})
+})
+
+describe("leaked tool-call parser scaling", () => {
+	const tools = new Set(["update_todo_list"])
+	const todo = () =>
+		`<in${"voke"} name="update_todo_list"><param${"eter"} name="todos">x</param${"eter"}></in${"voke"}>`
+
+	/**
+	 * Characters the parser copies out of the message while scanning. Wall-clock timing flaked on
+	 * shared CI runners, so work performed is counted instead: it is exact and machine-independent.
+	 */
+	const charactersScanned = (run: () => void): number => {
+		const originalSlice = String.prototype.slice
+		let scanned = 0
+		String.prototype.slice = function (this: string, start?: number, end?: number): string {
+			const piece = originalSlice.call(this, start, end)
+			scanned += piece.length
+			return piece
+		}
+		try {
+			run()
+		} finally {
+			String.prototype.slice = originalSlice
+		}
+		return scanned
+	}
+
+	/**
+	 * Work at 4x input over work at 1x. Linear scanning lands near 4; the quadratic prefix re-scan
+	 * this pins landed near 16. Only the ratio is asserted, never an absolute count.
+	 */
+	const growthFactor = (build: (size: number) => string, baseSize: number, run: (input: string) => void): number => {
+		const small = build(baseSize)
+		const large = build(baseSize * 4)
+		return (
+			charactersScanned(() => run(large)) /
+			Math.max(
+				charactersScanned(() => run(small)),
+				1,
+			)
+		)
+	}
+
+	/** Linear work must grow with the input, so a collapsed ratio near 1 fails too. */
+	const expectLinearGrowth = (growth: number) => {
+		expect(growth).toBeGreaterThan(3)
+		expect(growth).toBeLessThan(6)
+	}
+
+	it("scans ordinary wrapped output doing work linear in message length", () => {
+		const build = (count: number) => `<function${"_calls"}>\n${`${todo()}\n`.repeat(count)}</function${"_calls"}>\n`
+
+		expectLinearGrowth(growthFactor(build, 150, (input) => extractLeakedToolCalls(input, tools)))
+		expect(extractLeakedToolCalls(build(150), tools).calls).toHaveLength(150)
+	})
+
+	it("scans unclosed markup, deep nesting, and repeated quoting cues without quadratic blowup", () => {
+		const unclosed = (count: number) =>
+			`<function${"_calls"}>\n${`<in${"voke"} name="update_todo_list">\n`.repeat(count)}`
+		expectLinearGrowth(growthFactor(unclosed, 400, (input) => extractLeakedToolCalls(input, tools)))
+
+		// Nested tags before the block exercise tag stripping; cues with a trailing terminator
+		// exercise the quoting-cue scan. Both are read through the public entry point.
+		const nested = (depth: number) =>
+			`<function${"_calls"}>\n${"<".repeat(depth)}tag${">".repeat(depth)} ${todo()}\n`
+		expectLinearGrowth(growthFactor(nested, 500, (input) => extractLeakedToolCalls(input, tools)))
+
+		const cues = (count: number) => `<function${"_calls"}>\n${"never. ".repeat(count)}never ${todo()}\n`
+		expectLinearGrowth(growthFactor(cues, 500, (input) => extractLeakedToolCalls(input, tools)))
+		// The cue still suppresses recovery, so the fast path did not silently change the verdict.
+		expect(extractLeakedToolCalls(cues(500), tools).calls).toHaveLength(0)
 	})
 })

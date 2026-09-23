@@ -761,7 +761,7 @@
 	},
 	"core/prompts/tools/filter-tools-for-mode.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 1
 		}
 	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
@@ -966,7 +966,7 @@
 	},
 	"core/tools/__tests__/mcpServerRestriction.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 6
 		}
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
