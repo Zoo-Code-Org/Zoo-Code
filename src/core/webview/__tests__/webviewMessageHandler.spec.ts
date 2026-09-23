@@ -315,6 +315,23 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
 	})
 
+	// Capture the fixture's pre-suite values for the members this suite reassigns:
+	// the module-level fixture does not declare them, and vi.clearAllMocks() only
+	// resets call history — it never restores property assignments, so without this
+	// restore the launch doubles leak into every later suite in this file.
+	const originalLaunchMembers = {
+		setViewStateId: double.setViewStateId,
+		workspaceTracker: double.workspaceTracker,
+		providerSettingsManager: double.providerSettingsManager,
+		activateProviderProfile: double.activateProviderProfile,
+		getMcpHub: double.getMcpHub,
+		getStateToPostToWebview: double.getStateToPostToWebview,
+	}
+
+	afterEach(() => {
+		Object.assign(double, originalLaunchMembers)
+	})
+
 	it("validates the view-local currentApiConfigName on launch", async () => {
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))

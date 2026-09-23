@@ -2279,7 +2279,10 @@ export class ClineProvider
 						// view-local mutation path: also refresh this view's buffer so a stale
 						// loaded apiConfiguration cannot keep shadowing the new settings in
 						// getState().
-						this._saveViewLocalStateFromMutation(providerSettings),
+						// Wrap as the apiConfiguration field: _updateViewLocalStateFromMutation only
+						// branches on mode / currentApiConfigName / apiConfiguration, so a flat
+						// ProviderSettings object would be a no-op and leave the stale buffer in place.
+						this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 					])
 
 					// Other live views may have buffered this profile's settings earlier;
@@ -2373,7 +2376,9 @@ export class ClineProvider
 			// and this view's buffer still carry its settings; replace both so
 			// getState() reports the surviving profile's configuration.
 			await this.contextProxy.setProviderSettings(survivingSettings)
-			await this._saveViewLocalStateFromMutation(survivingSettings)
+			// Wrap as the apiConfiguration field for the same reason as the upsert/activate
+			// sites: a flat ProviderSettings object would not refresh the view-local buffer.
+			await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
 		}
 
 		// Re-pin other live views still buffered on the deleted profile: their
@@ -2459,7 +2464,10 @@ export class ClineProvider
 				// view-local mutation path: also refresh this view's buffer so a stale
 				// loaded apiConfiguration cannot keep shadowing the new settings in
 				// getState().
-				this._saveViewLocalStateFromMutation(providerSettings),
+				// Wrap as the apiConfiguration field: _updateViewLocalStateFromMutation only
+				// branches on mode / currentApiConfigName / apiConfiguration, so a flat
+				// ProviderSettings object would be a no-op and leave the stale buffer in place.
+				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
 
 			// Other live views may have buffered this profile's settings earlier;

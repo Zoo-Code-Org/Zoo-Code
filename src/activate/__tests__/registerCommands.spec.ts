@@ -671,6 +671,10 @@ describe("openClineInNewTab", () => {
 
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
+		// The reuse path must resolve the tracked panel (not skip the lookup):
+		// without this assertion the test would also pass if the handler
+		// stopped consulting getInstanceForView at all.
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(mockPanel)
 		expect(mockPanel.reveal).not.toHaveBeenCalled()
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
@@ -700,7 +704,11 @@ describe("openClineInNewTab", () => {
 		const stateChange = (panelA.onDidChangeViewState as Mock).mock.calls[0]![0] as (e: {
 			webviewPanel: vscode.WebviewPanel
 		}) => void
-		stateChange({ webviewPanel: { ...panelA, active: true, visible: true } })
+		// Activate panelA in place and pass it through: the production handler
+		// tracks e.webviewPanel directly, so a clone would let a handler that
+		// copies the event panel still pass the identity check below.
+		Object.assign(panelA, { active: true, visible: true })
+		stateChange({ webviewPanel: panelA })
 
 		// ...so plusButtonClickedInTab targets A's provider, not B's.
 		const mockProviderA = {
@@ -708,8 +716,10 @@ describe("openClineInNewTab", () => {
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 		}
+		// Require the tracked panel by identity: a handler that clones the
+		// state-change panel can no longer resolve the provider.
 		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: unknown) =>
-			(view as { marker?: string }).marker === "panel-A" ? mockProviderA : undefined,
+			view === panelA ? mockProviderA : undefined,
 		)
 		const handlers = new Map<string, (...args: unknown[]) => unknown>()
 		;(vscode.commands.registerCommand as Mock).mockImplementation(
