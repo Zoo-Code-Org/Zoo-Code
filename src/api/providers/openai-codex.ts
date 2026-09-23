@@ -29,7 +29,13 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
-import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	throwIfAborted,
+} from "./utils/abort-signal"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
@@ -251,7 +257,28 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		this.streamedToolCallIds.clear()
 
 		// Get access token from OAuth manager
-		let accessToken = await openAiCodexOAuthManager.getAccessToken()
+		// The lookup can await credential loading, token refresh, and persistence: race it against
+		// the caller's signal so a cancelled request settles immediately instead of hanging on a
+		// lookup that no longer matters.
+		let accessToken: string | null
+		try {
+			if (abortSignal) {
+				accessToken = await rejectOnAbort(
+					openAiCodexOAuthManager.getAccessToken(),
+					abortSignal,
+					this.providerName,
+				)
+			} else {
+				accessToken = await openAiCodexOAuthManager.getAccessToken()
+			}
+		} catch (error) {
+			// An abort landing while the lookup is pending must surface as the shared abort
+			// contract, not as an authentication failure.
+			if (isRequestAborted(error, abortSignal)) {
+				throw createAbortError(this.providerName)
+			}
+			throw error
+		}
 		if (!accessToken) {
 			throw new Error(
 				t("common:errors.openAiCodex.notAuthenticated", {
@@ -487,7 +514,14 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			// is consistent across providers.
 			try {
 				// Get ChatGPT account ID for organization subscriptions
-				const accountId = await openAiCodexOAuthManager.getAccountId()
+				// The account lookup has the same gap as the token fetch: the request-local
+				// controller is already bridged to the caller's signal, so racing against it
+				// settles a cancelled request immediately instead of waiting on a dead lookup.
+				const accountId = await rejectOnAbort(
+					openAiCodexOAuthManager.getAccountId(),
+					abortController.signal,
+					this.providerName,
+				)
 
 				// Build Codex-specific headers. Authorization is provided by the SDK apiKey.
 				const codexHeaders = this.buildCodexHeaders(model, effectiveSessionId, accountId)
@@ -524,6 +558,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					this.sawSdkEventInCurrentResponse = true
 
 					for await (const outChunk of this.processEvent(event, model)) {
+						// The top-of-loop check covers the wire; this one covers the buffered chunks
+						// processEvent still emits for an event whose processing raced the abort. A break would let
+						// the event loop pull the stream once more before its top check sees the abort, so hand
+						// back the abort contract immediately instead.
+						if (abortController.signal.aborted) throw createAbortError(this.providerName)
 						if (outChunk.type === "text") {
 							this.sawTextOutputInCurrentResponse = true
 						}
@@ -655,7 +694,9 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		const url = `${CODEX_API_BASE_URL}/responses`
 
 		// Get ChatGPT account ID for organization subscriptions
-		const accountId = await openAiCodexOAuthManager.getAccountId()
+		// The signal here is the request-local controller the caller's abort is bridged into, so a
+		// cancellation lands in the lookup and settles it before the fallback fetch would start.
+		const accountId = await rejectOnAbort(openAiCodexOAuthManager.getAccountId(), abortSignal, this.providerName)
 
 		// Build headers with required Codex-specific fields
 		const headers: Record<string, string> = {
@@ -823,6 +864,9 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 								}
 
 								for await (const outChunk of this.processEvent(parsed, model)) {
+									// A cancellation landing while processEvent is still emitting must not stream the
+									// event's remaining buffered chunks, so hand back the abort contract immediately.
+									if (abortSignal.aborted) throw createAbortError(this.providerName)
 									if (outChunk.type === "text" || outChunk.type === "reasoning") {
 										hasContent = true
 										if (outChunk.type === "text") {
@@ -842,6 +886,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 											if (content.type === "text" && content.text) {
 												hasContent = true
 												this.sawTextOutputInCurrentResponse = true
+												if (abortSignal.aborted) break
 												yield { type: "text", text: content.text }
 											}
 										}
@@ -850,6 +895,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 										for (const summary of outputItem.summary) {
 											if (summary?.type === "summary_text" && typeof summary.text === "string") {
 												hasContent = true
+												if (abortSignal.aborted) break
 												yield { type: "reasoning", text: summary.text }
 											}
 										}
@@ -858,6 +904,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 								if (parsed.response.usage) {
 									const usageData = this.normalizeUsage(parsed.response.usage, model)
 									if (usageData) {
+										if (abortSignal.aborted) break
 										yield usageData
 									}
 								}
@@ -984,6 +1031,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 							} else if (parsed.choices?.[0]?.delta?.content) {
 								hasContent = true
 								this.sawTextOutputInCurrentResponse = true
+								if (abortSignal.aborted) break
 								yield { type: "text", text: parsed.choices[0].delta.content }
 							} else if (
 								parsed.item &&
@@ -992,10 +1040,12 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 							) {
 								hasContent = true
 								this.sawTextOutputInCurrentResponse = true
+								if (abortSignal.aborted) break
 								yield { type: "text", text: parsed.item.text }
 							} else if (parsed.usage) {
 								const usageData = this.normalizeUsage(parsed.usage, model)
 								if (usageData) {
+									if (abortSignal.aborted) break
 									yield usageData
 								}
 							}
@@ -1010,6 +1060,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 							if (parsed.content || parsed.text || parsed.message) {
 								hasContent = true
 								this.sawTextOutputInCurrentResponse = true
+								if (abortSignal.aborted) break
 								yield { type: "text", text: parsed.content || parsed.text || parsed.message }
 							}
 						} catch {
