@@ -3,8 +3,106 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	mergeAbortSignals,
+	rejectOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
+
+describe("rejectOnAbort", () => {
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+
+		await expect(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")).resolves.toBe("done")
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	it("rejects with the provider abort error when the signal aborts first", async () => {
+		const controller = new AbortController()
+		// Never settles: the race must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const race = rejectOnAbort(pending, controller.signal, "TestProvider")
+		controller.abort()
+
+		// Bound the wait so a broken race fails this test fast (and fails the
+		// Stryker mutant) instead of hanging.
+		await expect(
+			new Promise<unknown>((_resolve, reject) => {
+				const deadline = setTimeout(() => reject(new Error("race deadline exceeded")), 3000)
+				void race.then(
+					(value) => {
+						clearTimeout(deadline)
+						reject(new Error(`race unexpectedly resolved: ${String(value)}`))
+					},
+					(error) => {
+						clearTimeout(deadline)
+						reject(error)
+					},
+				)
+			}),
+		).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const pending = new Promise<never>(() => {})
+
+		await expect(rejectOnAbort(pending, controller.signal, "TestProvider")).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+
+	it("propagates the pending rejection when the signal stays active", async () => {
+		const controller = new AbortController()
+		const boom = new Error("lookup failed")
+
+		await expect(rejectOnAbort(Promise.reject(boom), controller.signal, "TestProvider")).rejects.toBe(boom)
+	})
+
+	it("detaches the abort listener once the pending settles", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+		await expect(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")).resolves.toBe("done")
+
+		// The settle path must remove the exact listener that was registered, not just any
+		// function: removing a different reference would leave the original abort listener
+		// attached to the signal. First require the registration to have happened at all,
+		// so a missing registration cannot silently degrade to an undefined comparison.
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("detaches the abort listener when the pending rejects", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const lookupError = new Error("lookup failed")
+
+		await expect(rejectOnAbort(Promise.reject(lookupError), controller.signal, "TestProvider")).rejects.toBe(
+			lookupError,
+		)
+
+		// The settle path must remove the exact listener that was registered, not just any
+		// function: removing a different reference would leave the original abort listener
+		// attached to the signal. First require the registration to have happened at all,
+		// so a missing registration cannot silently degrade to an undefined comparison.
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+})
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {

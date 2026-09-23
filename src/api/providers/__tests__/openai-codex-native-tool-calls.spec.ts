@@ -625,15 +625,11 @@ describe("OpenAiCodexHandler native tool calls", () => {
 				abortSignal: controller.signal,
 			})
 
-			// Consume the stream to trigger the request; the request-local controller is already
-			// aborted, so the loop must break before the first event is processed.
-			const chunks = await collectStream(stream)
-			expect(chunks).toEqual([])
-
-			expect(mockCreate).toHaveBeenCalled()
-			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
-			// The internal signal should already be aborted since the external one was pre-aborted
-			expect(createCallArgs.signal?.aborted).toBe(true)
+			// A pre-aborted signal settles in the OAuth race before the SDK is reached: the abort
+			// contract must win over the request setup, so the stream rejects and the SDK is never
+			// called with a signal that is already aborted.
+			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 	})
 })

@@ -517,13 +517,12 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		expect(getAccountId).not.toHaveBeenCalled()
 	})
 
-	// The abort lands in the only window the consumer guard can still act: event2's `delta`
-	// getter fires it while processEvent builds the chunk - after executeRequest's
-	// top-of-loop check has passed, before completePrompt's own. The post-loop check throws
-	// the same AbortError whether or not the guard breaks, so what distinguishes the guarded
-	// loop from a mutated one is the pull count: the guard stops pulling after the chunk that
-	// the abort rode in on, a loop that keeps running pulls the SDK stream a third time.
-	it("breaks the streaming consumer loop at the top-of-loop guard and stops pulling", async () => {
+	// The abort lands while event2 is being processed: its `delta` getter fires it after
+	// executeRequest's top-of-loop check has passed. The pre-yield guard must end the request
+	// there, so the stream is never pulled a third time - the pull count distinguishes a flow
+	// that kept pulling (a mutated guard that lets the loop's continuation run) from the
+	// guarded one, and the buffered "post-abort" chunk must never be joined.
+	it("settles with the abort contract and stops pulling once an event's processing aborts the request", async () => {
 		const handler = createHandler()
 		const controller = new AbortController()
 		let sdkPulls = 0
@@ -556,9 +555,9 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 			name: "AbortError",
 		})
 
-		// event1 is pulled and joined; event2 is pulled (its getter fires the abort) but the
-		// guard breaks before it is joined - a third pull only happens when the mutated
-		// top-of-loop check keeps the loop running.
+		// event1 is pulled and joined; event2 is pulled (its getter fires the abort) and the
+		// pre-yield guard ends the request before its buffered chunk is joined - a third pull
+		// only happens when a mutated guard lets the event loop's continuation run.
 		expect(sdkPulls).toBe(2)
 	})
 
@@ -1227,6 +1226,28 @@ describe("OpenAiCodexHandler.completePrompt timeout", () => {
 		expect(signalDuringRequest!.aborted).toBe(true)
 		expect(mockFetch).not.toHaveBeenCalled()
 	})
+
+	it("rejects with the abort contract when the timeout fires while the token lookup is pending", async () => {
+		const handler = createHandler()
+		let resolveToken!: (token: string) => void
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockReturnValue(
+			new Promise<string>((resolve) => {
+				resolveToken = resolve
+			}),
+		)
+		const create = vitest.fn()
+		Reflect.set(handler, "client", { responses: { create } })
+
+		// No abort signal: the timeout is the only cancellation source, so the timeout path must
+		// race the OAuth lookup itself.
+		await expect(handler.completePrompt("test prompt", { timeoutMs: 20 })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+
+		// The lookup settling afterwards must be ignored: the request is already gone.
+		resolveToken("late-token")
+		expect(create).not.toHaveBeenCalled()
+	})
 })
 
 describe("OpenAiCodexHandler.createMessage abort bridging", () => {
@@ -1251,8 +1272,8 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 		const refresh = vitest
 			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
 			.mockResolvedValue("refreshed-token")
-		// The SDK fails with exactly the auth-failure wording the retry path would act on, so the
-		// abort check must win over the refresh-and-retry logic.
+		// The SDK is wired to fail with exactly the auth-failure wording the retry path would act
+		// on: the cancellation must win over the refresh-and-retry logic at every level.
 		const create = vitest.fn().mockRejectedValue(new Error("401 invalid token"))
 		Reflect.set(handler, "client", { responses: { create } })
 		const mockFetch = vitest.fn()
@@ -1267,10 +1288,265 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 			),
 		).rejects.toMatchObject({ name: "AbortError" })
 
-		// No refresh, no second SDK attempt, no SSE fallback.
+		// A pre-aborted signal settles in the OAuth race before the SDK is even reached, so there
+		// is no SDK attempt, no refresh, and no SSE fallback.
 		expect(refresh).not.toHaveBeenCalled()
+		expect(create).not.toHaveBeenCalled()
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("settles with the abort contract before a pending token lookup resolves", async () => {
+		const handler = createHandler()
+		let resolveToken!: (token: string) => void
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockReturnValue(
+			new Promise<string>((resolve) => {
+				resolveToken = resolve
+			}),
+		)
+		const create = vitest.fn()
+		Reflect.set(handler, "client", { responses: { create } })
+
+		const controller = new AbortController()
+		const stream = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		// The first pull runs the generator up to the token lookup, which is still pending.
+		const firstPull = stream.next()
+		controller.abort()
+
+		await expect(firstPull).rejects.toMatchObject({ name: "AbortError" })
+
+		// The lookup settling afterwards must be ignored: the request is already gone.
+		resolveToken("late-token")
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(create).not.toHaveBeenCalled()
+	})
+
+	it("settles with the abort contract before a pending account lookup resolves", async () => {
+		const handler = createHandler()
+		let resolveAccount!: (id: string) => void
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockReturnValue(
+			new Promise<string>((resolve) => {
+				resolveAccount = resolve
+			}),
+		)
+		const create = vitest.fn()
+		Reflect.set(handler, "client", { responses: { create } })
+
+		const controller = new AbortController()
+		const stream = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		const firstPull = stream.next()
+		// Let the token lookup settle so the generator reaches the account lookup.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		controller.abort()
+
+		await expect(firstPull).rejects.toMatchObject({ name: "AbortError" })
+
+		resolveAccount("late-account")
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(create).not.toHaveBeenCalled()
+	})
+
+	it("settles with the abort contract before a pending account lookup resolves on the fallback", async () => {
+		const handler = createHandler()
+		let resolveAccount!: (id: string) => void
+		// The executeRequest-level lookup settles; the fallback's own lookup stays pending.
+		vitest
+			.spyOn(openAiCodexOAuthManager, "getAccountId")
+			.mockImplementationOnce(() => Promise.resolve("acct_sdk"))
+			.mockImplementationOnce(
+				() =>
+					new Promise<string>((resolve) => {
+						resolveAccount = resolve
+					}),
+			)
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		const stream = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		const firstPull = stream.next()
+		// Let the SDK fail and the fallback reach its own account lookup.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		controller.abort()
+
+		await expect(firstPull).rejects.toMatchObject({ name: "AbortError" })
+
+		resolveAccount("late-account")
+		await new Promise((resolve) => setTimeout(resolve, 0))
 		expect(create).toHaveBeenCalledTimes(1)
 		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("never yields the buffered chunks of an event whose processing aborts the request", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		const event1 = { type: "response.output_text.delta", delta: "pre-abort" }
+		const event2 = {
+			type: "response.output_text.delta",
+			get delta() {
+				controller.abort()
+				return "post-abort"
+			},
+		}
+		const create = vitest.fn().mockImplementation(() => {
+			return Promise.resolve({
+				[Symbol.asyncIterator]() {
+					let pulls = 0
+					return {
+						next: async () => {
+							pulls++
+							return { value: pulls === 1 ? event1 : event2, done: false }
+						},
+						return: async () => ({ value: undefined, done: true }),
+					}
+				},
+			})
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		// event1's chunk streams; the abort lands while event2 is being processed, so its buffered
+		// "post-abort" chunk must not reach the caller - createMessage has no consumer-side guard.
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "pre-abort" } })
+		await expect(iter.next()).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("never yields a buffered SSE line after a cancellation that lands between lines", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const controller = new AbortController()
+		const encoder = new TextEncoder()
+		const body = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				// A single chunk: both lines land in one read so the second is buffered in the
+				// handler's line loop when the cancellation lands.
+				streamController.enqueue(
+					encoder.encode(
+						'data: {"type":"response.output_text.delta","delta":"one"}\n\ndata: {"type":"response.output_text.delta","delta":"two"}\n\n',
+					),
+				)
+				streamController.close()
+			},
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "one" } })
+		controller.abort()
+		// The second line was enqueued before the cancellation but must not stream: the delegate
+		// guard hands back the abort contract instead of yielding its chunk.
+		await expect(iter.next()).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("never yields the remaining complete-response chunks once the caller cancels", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const controller = new AbortController()
+		const encoder = new TextEncoder()
+		const complete = {
+			response: {
+				id: "resp_test",
+				output: [
+					{ type: "text", content: [{ type: "text", text: "first" }] },
+					{ type: "text", content: [{ type: "text", text: "second" }] },
+				],
+			},
+		}
+		const body = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				streamController.enqueue(encoder.encode(`data: ${JSON.stringify(complete)}\n\n`))
+				streamController.close()
+			},
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: controller.signal,
+		})
+		expect(await iter.next()).toMatchObject({ value: { type: "text", text: "first" } })
+		controller.abort()
+		// The second text item was buffered before the cancellation but must not stream: the
+		// guard before the yield breaks out of the item loop, and the while-top guard ends the read.
+		const chunks = await collectStream(iter)
+		expect(chunks).toEqual([])
+	})
+
+	it("streams every direct SSE chunk shape the fallback supports", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const encoder = new TextEncoder()
+		const complete = {
+			response: {
+				output: [
+					{ type: "text", content: [{ type: "text", text: "complete-text" }] },
+					{ type: "reasoning", summary: [{ type: "summary_text", text: "complete-summary" }] },
+				],
+				usage: { input_tokens: 7, output_tokens: 11 },
+			},
+		}
+		const lines = [
+			`data: ${JSON.stringify(complete)}`,
+			'data: {"type":"response.output_text.delta","delta":"delegated"}',
+			'data: {"choices":[{"delta":{"content":"choices-text"}}]}',
+			'data: {"item":{"type":"text","text":"item-text"}}',
+			'data: {"usage":{"input_tokens":3,"output_tokens":4}}',
+			'{"content":"plain-text"}',
+		]
+		const body = new ReadableStream<Uint8Array>({
+			start(streamController) {
+				for (const line of lines) {
+					streamController.enqueue(encoder.encode(`${line}\n\n`))
+				}
+				streamController.close()
+			},
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const chunks = await collectStream(
+			handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+				taskId: "task-test",
+			}),
+		)
+
+		// One stream, every direct SSE shape: the complete-response block (text, reasoning,
+		// usage), the delegated delta, the legacy choices/item/usage shapes, and a plain JSON
+		// line. The sequence also pins the order the fallback emits them in.
+		expect(chunks).toEqual([
+			{ type: "text", text: "complete-text" },
+			{ type: "reasoning", text: "complete-summary" },
+			{ type: "usage", inputTokens: 7, outputTokens: 11, cacheWriteTokens: 0, cacheReadTokens: 0, totalCost: 0 },
+			{ type: "text", text: "delegated" },
+			{ type: "text", text: "choices-text" },
+			{ type: "text", text: "item-text" },
+			{ type: "usage", inputTokens: 3, outputTokens: 4, cacheWriteTokens: 0, cacheReadTokens: 0, totalCost: 0 },
+			{ type: "text", text: "plain-text" },
+		])
 	})
 
 	it("emits nothing once the caller cancels before the first SDK event", async () => {
