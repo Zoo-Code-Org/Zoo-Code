@@ -919,8 +919,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 			})
 
-			// The empty viewLocalState takes the activate branch, which may persist an extra
-			// temporary view entry, so assert on the re-pointed entry rather than the whole map.
+			// The empty viewLocalState takes the unrelated-pin branch (the shared selection
+			// does not reference the deleted profile), so assert on the re-pointed entry
+			// rather than the whole map.
 			expect(mockContext.globalState.get("viewStates")).toEqual(
 				expect.objectContaining({
 					"view-legacy": { currentApiConfigName: "keeper-profile", updatedAt: expect.any(Number) },
@@ -974,7 +975,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		it("should activate the replacement profile when the deleting view has no profile pin", async () => {
+		it("should not activate for an unrelated deletion when the deleting view has no profile pin", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
@@ -982,6 +983,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.openrouter },
 			])
 			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
+			const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
 
 			await provider.deleteProviderProfile({
 				id: "doomed-id",
@@ -989,10 +991,49 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 			})
 
-			// A view without its own profile pin follows the deletion through the activation path,
-			// so the shared selection refreshes to the replacement profile via activation.
-			expect(activateSpy).toHaveBeenCalledWith({ name: "keeper-profile" })
-			expect(await provider.getState()).toMatchObject({ currentApiConfigName: "keeper-profile" })
+			// A view without its own profile pin follows the shared selection, which does not
+			// reference the deleted profile: no activation (an unrelated deletion must not
+			// rebuild this view's task handler), and only a targeted shared-list write that
+			// leaves the shared selection and every other key untouched.
+			expect(activateSpy).not.toHaveBeenCalled()
+			expect(setValuesSpy).not.toHaveBeenCalled()
+			expect(mockContext.globalState.get("listApiConfigMeta")).toEqual([
+				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.anthropic },
+			])
+			expect(mockContext.globalState.get("currentApiConfigName")).toBe("keeper-profile")
+
+			await provider.dispose()
+		})
+
+		it("should activate the replacement when the shared selection references the deleted profile and the view has no pin", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider.contextProxy.setValue("currentApiConfigName", "deleted-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "deleted-id", name: "deleted-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// Structural cast: the env mock shapes activateProfile results as getProfile results.
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "replacement-key",
+			} as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>)
+			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
+
+			await provider.deleteProviderProfile({
+				id: "deleted-id",
+				name: "deleted-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			// The shared selection referenced the deleted profile, so the unpinned view takes
+			// the activation path and adopts the replacement profile.
+			expect(activateSpy).toHaveBeenCalledWith({ name: "replacement-profile" })
+			expect(await provider.getState()).toMatchObject({ currentApiConfigName: "replacement-profile" })
 
 			await provider.dispose()
 		})
@@ -1221,40 +1262,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
-		// when the provider was already disposed the deref is undefined, so the optional chain
-		// must swallow the call and the tool still reports success instead of erroring out.
-		it("should report a successful switch when the provider reference is already released", async () => {
-			const toolTask = {
-				consecutiveMistakeCount: 0,
-				recordToolError: vi.fn(),
-				didToolFailInCurrentTurn: false,
-				sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
-				ask: vi.fn().mockResolvedValue({}),
-				getTaskMode: vi.fn().mockResolvedValue("code"),
-				providerRef: {
-					deref: vi.fn().mockReturnValue(undefined),
-				},
-			} as unknown as Task // structural double: the tool only reads the fields above
-			const callbacks: ToolCallbacks = {
-				askApproval: vi.fn().mockResolvedValue(true),
-				handleError: vi.fn(),
-				pushToolResult: vi.fn(),
-			}
-			const block = {
-				type: "tool_use" as const,
-				name: "switch_mode" as const,
-				params: { mode_slug: "architect", reason: "test" },
-				partial: false,
-				nativeArgs: { mode_slug: "architect", reason: "test" },
-			} as unknown as ToolUse<"switch_mode"> // mirrors createBlock in switchModeTool.spec.ts
-
-			await switchModeTool.handle(toolTask, block, callbacks)
-
-			expect(callbacks.handleError).not.toHaveBeenCalled()
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
-		})
-
 		// K1: a no-task switch captures its target before any task is focused; a task gains
 		// focus before the queued mutation runs. The view-level durable write and the
 		// ModeChanged broadcast belong to the view and must still happen.
@@ -1356,6 +1363,42 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 	})
 
+	describe("SwitchModeTool routing", () => {
+		// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
+		// when the provider was already disposed the deref is undefined, so the optional chain
+		// must swallow the call and the tool still reports success instead of erroring out.
+		it("should report a successful switch when the provider reference is already released", async () => {
+			const toolTask = {
+				consecutiveMistakeCount: 0,
+				recordToolError: vi.fn(),
+				didToolFailInCurrentTurn: false,
+				sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
+				ask: vi.fn().mockResolvedValue({}),
+				getTaskMode: vi.fn().mockResolvedValue("code"),
+				providerRef: {
+					deref: vi.fn().mockReturnValue(undefined),
+				},
+			} as unknown as Task // structural double: the tool only reads the fields above
+			const callbacks: ToolCallbacks = {
+				askApproval: vi.fn().mockResolvedValue(true),
+				handleError: vi.fn(),
+				pushToolResult: vi.fn(),
+			}
+			const block = {
+				type: "tool_use" as const,
+				name: "switch_mode" as const,
+				params: { mode_slug: "architect", reason: "test" },
+				partial: false,
+				nativeArgs: { mode_slug: "architect", reason: "test" },
+			} as unknown as ToolUse<"switch_mode"> // mirrors createBlock in switchModeTool.spec.ts
+
+			await switchModeTool.handle(toolTask, block, callbacks)
+
+			expect(callbacks.handleError).not.toHaveBeenCalled()
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
+		})
+	})
+
 	describe("multi-instance isolation", () => {
 		it("should maintain independent state across three instances", async () => {
 			const provider1 = new ClineProvider(
@@ -1417,6 +1460,48 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider1.dispose()
 			await provider2.dispose()
+		})
+
+		it("should keep resetting siblings when one sibling's state post fails", async () => {
+			vi.mocked(vscode.window.showInformationMessage).mockImplementationOnce(
+				async (_message: string, _options: unknown, ...items: vscode.MessageItem[]) => items[0],
+			)
+			const caller = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const failingSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+			)
+			const laterSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+			)
+
+			await caller.resolveWebviewView(createMockWebviewView())
+			await laterSibling.resolveWebviewView(createMockWebviewView())
+			await failingSibling.saveViewState("mode", "architect")
+			await laterSibling.saveViewState("mode", "debugger")
+			// State generation throws for the failing sibling mid-reset (e.g. through a
+			// settings-file write in customModesManager.getCustomModes): the broadcast must
+			// still reach the later sibling instead of aborting.
+			vi.spyOn(failingSibling, "postStateToWebview").mockRejectedValue(new Error("state generation failed"))
+			const logSpy = vi.spyOn(caller, "log")
+
+			await caller.resetState()
+
+			// The failing sibling's buffer was cleared before its post failed ...
+			expect(failingSibling["viewLocalState"]).toEqual({})
+			// ... the broadcast continued to the later sibling and cleared it too ...
+			expect(laterSibling["viewLocalState"]).toEqual({})
+			// ... and the failure was logged by the caller.
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("failed to post reset state to a sibling view"))
+
+			await caller.dispose()
+			await failingSibling.dispose()
+			await laterSibling.dispose()
 		})
 	})
 

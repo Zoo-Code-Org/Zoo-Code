@@ -656,11 +656,15 @@ export const webviewMessageHandler = async (
 								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
 
-							if (globalStillValid && globalConfigName && name) {
+							if (globalStillValid && globalConfigName) {
 								// Re-pin this view to the still-valid shared global selection (not the
-								// first listed profile) so the view adopts the shared choice; the
-								// global selection itself is left untouched.
-								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// first listed profile) through the activation path so the view adopts
+								// the shared choice's settings: a name-only re-pin would leave the
+								// invalid profile's stale apiConfiguration in place. The activation
+								// writes the shared slot back with the same value, so the global
+								// selection itself is left untouched, and the first listed profile's
+								// name (absent on legacy shapes) is irrelevant to this branch.
+								await provider.activateProviderProfile({ name: globalConfigName })
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {

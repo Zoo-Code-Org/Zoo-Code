@@ -2367,8 +2367,12 @@ export class ClineProvider
 		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 		const viewPinsDeletedProfile =
-			this.viewLocalState.currentApiConfigName === undefined ||
-			this.viewLocalState.currentApiConfigName === profileToDelete.name
+			this.viewLocalState.currentApiConfigName === profileToDelete.name ||
+			// No view-local pin: the view follows the shared selection, so it only needs the
+			// replacement activation when that shared selection referenced the deleted profile;
+			// an unrelated deletion must not rebuild this view's task handler.
+			(this.viewLocalState.currentApiConfigName === undefined &&
+				globalSettings.currentApiConfigName === profileToDelete.name)
 
 		if (viewPinsDeletedProfile) {
 			// Apply the replacement through the activation path so this view's
@@ -2380,20 +2384,14 @@ export class ClineProvider
 		}
 
 		// This view pins an unrelated profile, which must survive the deletion: sync the
-		// shared profile list and post the updated state only. The buffer already holds
-		// the surviving pin, so the current-profile slot is left untouched here: a
-		// setValue would only trigger a viewStates prune write and could clobber the pin
-		// with the shared slot's value.
+		// shared profile list and post the updated state only.
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
-		// Write the other settings in one bulk call, excluding the current-profile slot
-		// so the view-local buffer keeps the surviving pin.
-		const { currentApiConfigName: _previousApiConfigName, ...globalSettingsWithoutCurrent } = globalSettings
-
-		await this.contextProxy.setValues({
-			...globalSettingsWithoutCurrent,
-			listApiConfigMeta: entries,
-		})
+		// Write only the changed key: the shared current-profile slot is left untouched so
+		// the view-local buffer keeps the surviving pin, and the other keys (including
+		// viewStates, which concurrent views mutate directly in storage) are not replayed
+		// from the snapshot captured before the awaits above.
+		await this.contextProxy.setValue("listApiConfigMeta", entries)
 
 		await this.postStateToWebview()
 	}
@@ -3784,7 +3782,19 @@ export class ClineProvider
 			await instance.contextProxy.setValue("viewStates", undefined)
 
 			if (instance !== this) {
-				await instance.postStateToWebview()
+				// A sibling's post can throw mid-reset (state generation reaches the
+				// settings file through customModesManager.getCustomModes): the failure
+				// must not stop the reset from reaching the remaining instances, whose
+				// buffers are already cleared above.
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[broadcastResetToAllInstances] failed to post reset state to a sibling view: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}
 		}
 	}

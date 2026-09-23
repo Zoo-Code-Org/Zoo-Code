@@ -47,9 +47,13 @@ describe("API.setConfiguration", () => {
 
 		await api.setConfiguration(configuration)
 
+		// Exact side-effect counts: a regression that repeats any of these operations
+		// (duplicate settings write, duplicate profile save, duplicate webview post) fails.
+		expect(provider.setValues).toHaveBeenCalledTimes(1)
 		expect(provider.setValues).toHaveBeenCalledWith(configuration)
 		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledTimes(1)
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
-		expect(provider.postStateToWebview).toHaveBeenCalled()
+		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })
