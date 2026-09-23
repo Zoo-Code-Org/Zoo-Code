@@ -12,16 +12,24 @@ import { vscode } from "@src/utils/vscode"
 
 import { fetchRouterModels } from "../useRouterModels"
 
-const postResponse = (provider: string | undefined, routerModels: Record<string, unknown>) => {
+const postMessageMock = vi.mocked(vscode.postMessage)
+
+const postResponse = (requestId: string | undefined, routerModels: Record<string, unknown>) => {
 	window.dispatchEvent(
 		new MessageEvent("message", {
 			data: {
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: provider ? { provider } : undefined,
+				values: { requestId },
 			},
 		}),
 	)
+}
+
+const startRequest = (provider?: string, signal?: AbortSignal) => {
+	const promise = fetchRouterModels(provider, signal)
+	const requestId = postMessageMock.mock.calls.at(-1)?.[0]?.values?.requestId as string
+	return { promise, requestId }
 }
 
 describe("fetchRouterModels", () => {
@@ -29,39 +37,77 @@ describe("fetchRouterModels", () => {
 		vi.clearAllMocks()
 	})
 
-	it("posts a provider-filtered request and resolves on the matching response", async () => {
-		const promise = fetchRouterModels(providerIdentifiers.mimo)
+	it("posts a provider-filtered request with a request ID and resolves on the matching response", async () => {
+		const { promise, requestId } = startRequest(providerIdentifiers.mimo)
 
-		expect(vscode.postMessage).toHaveBeenCalledWith({
+		expect(requestId).toBeTruthy()
+		expect(postMessageMock).toHaveBeenCalledWith({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { provider: providerIdentifiers.mimo },
+			values: { requestId, provider: providerIdentifiers.mimo },
 		})
 
-		postResponse(providerIdentifiers.mimo, { mimo: {} })
+		postResponse(requestId, { mimo: {} })
 		await expect(promise).resolves.toEqual({ mimo: {} })
 	})
 
-	it("ignores responses for other providers", async () => {
-		const promise = fetchRouterModels(providerIdentifiers.mimo)
+	it("posts an aggregate request without a provider filter", async () => {
+		const { promise, requestId } = startRequest()
 
-		postResponse("openrouter", { openrouter: {} })
-		postResponse(undefined, {})
-		postResponse(providerIdentifiers.mimo, { mimo: { "mimo-v2.6-pro": {} } })
+		expect(postMessageMock).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId },
+		})
 
-		await expect(promise).resolves.toEqual({ mimo: { "mimo-v2.6-pro": {} } })
+		postResponse(requestId, {})
+		await expect(promise).resolves.toEqual({})
 	})
 
-	it("rejects with an abort error when the signal aborts mid-flight", async () => {
-		const controller = new AbortController()
-		const promise = fetchRouterModels(providerIdentifiers.mimo, controller.signal)
+	it("ignores responses carrying a different or missing request ID", async () => {
+		const { promise, requestId } = startRequest(providerIdentifiers.mimo)
 
-		controller.abort()
+		postResponse("stale-request-id", { mimo: { stale: {} } })
+		postResponse(undefined, { mimo: {} })
 
-		await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		postResponse(requestId, { mimo: { fresh: {} } })
+		await expect(promise).resolves.toEqual({ mimo: { fresh: {} } })
+	})
 
-		// A late response must not reach the removed listener or resolve anything.
-		postResponse(providerIdentifiers.mimo, { mimo: {} })
-		await Promise.resolve()
+	it("resolves concurrent same-provider requests independently by request ID", async () => {
+		const first = startRequest(providerIdentifiers.mimo)
+		const second = startRequest(providerIdentifiers.mimo)
+
+		expect(first.requestId).not.toBe(second.requestId)
+
+		postResponse(second.requestId, { mimo: { second: {} } })
+		postResponse(first.requestId, { mimo: { first: {} } })
+
+		await expect(first.promise).resolves.toEqual({ mimo: { first: {} } })
+		await expect(second.promise).resolves.toEqual({ mimo: { second: {} } })
+	})
+
+	it("rejects on abort and removes the exact registered listener and timer", async () => {
+		vi.useFakeTimers()
+		try {
+			const addSpy = vi.spyOn(window, "addEventListener")
+			const removeSpy = vi.spyOn(window, "removeEventListener")
+			const controller = new AbortController()
+
+			const { promise, requestId } = startRequest(providerIdentifiers.mimo, controller.signal)
+			const registeredHandler = addSpy.mock.calls.find(([eventName]) => eventName === "message")?.[1]
+
+			expect(vi.getTimerCount()).toBe(1)
+
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+			expect(removeSpy).toHaveBeenCalledWith("message", registeredHandler)
+			expect(vi.getTimerCount()).toBe(0)
+
+			// A stale response for the aborted request must find no listener.
+			postResponse(requestId, { mimo: {} })
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("rejects immediately when the signal is already aborted, without posting", async () => {
@@ -71,7 +117,7 @@ describe("fetchRouterModels", () => {
 		await expect(fetchRouterModels(providerIdentifiers.mimo, controller.signal)).rejects.toMatchObject({
 			name: "AbortError",
 		})
-		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(postMessageMock).not.toHaveBeenCalled()
 	})
 
 	it("times out when no response arrives", async () => {

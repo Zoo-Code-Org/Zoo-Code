@@ -16,6 +16,13 @@ type UseRouterModelsOptions = {
 
 export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
+		// Correlate the response by a unique request ID instead of the provider
+		// alone: a remount can issue a replacement request for the same provider
+		// while a stale response to an aborted request is still in flight, and
+		// provider-only matching would let that stale response resolve the new
+		// query. The extension host echoes the ID in the routerModels response.
+		const requestId = crypto.randomUUID()
+
 		const timeout = setTimeout(() => {
 			cleanup()
 			reject(new Error("Router models request timed out"))
@@ -25,11 +32,10 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			const message: ExtensionMessage = event.data
 
 			if (message.type === RouterModelsMessageType.routerModels) {
-				const msgProvider = message?.values?.provider as string | undefined
+				const msgRequestId = message?.values?.requestId as string | undefined
 
-				// Verify response matches request
-				if (provider !== msgProvider) {
-					// Not our response; ignore and wait for the matching one
+				// Verify the response belongs to this exact request.
+				if (msgRequestId !== requestId) {
 					return
 				}
 
@@ -69,11 +75,10 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		}
 
 		window.addEventListener("message", handler)
-		if (provider) {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels, values: { provider } })
-		} else {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
-		}
+		vscode.postMessage({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId, ...(provider ? { provider } : {}) },
+		})
 	})
 
 export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {

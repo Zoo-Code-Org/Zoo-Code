@@ -1443,7 +1443,13 @@ export const webviewMessageHandler = async (
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
+				// Echo the webview's request ID so fetchRouterModels can correlate
+				// the response to the exact pending request (a remount may re-issue
+				// the same provider request while a stale response is in flight).
+				values: {
+					requestId: message?.values?.requestId,
+					...(providerFilter ? { provider: requestedProvider } : {}),
+				},
 			})
 			break
 		}
