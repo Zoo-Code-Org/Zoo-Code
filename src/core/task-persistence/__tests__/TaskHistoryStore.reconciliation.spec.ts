@@ -1644,6 +1644,82 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const repaired = lastCall.find((i) => i.id === "parent-onwrite")
 		expect(repaired?.status).toBe("active")
 	})
+
+	it("skips repair for an active child with a stale mtime but a fresh lastActivityAt heartbeat (long streaming turn)", async () => {
+		// The delegated child's owning session streams a turn for minutes without
+		// writing anything else to its history file, so the file mtime goes stale.
+		// Only the throttled liveness heartbeat (lastActivityAt) proves the
+		// session is alive — and this fresh store (extension-host restart, no
+		// local ownership claims) must accept that signal and keep the link.
+		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const child = makeItem({
+			id: "child-hb-live",
+			status: "active",
+			parentTaskId: "parent-hb-live",
+			rootTaskId: "parent-hb-live",
+			lastActivityAt: Date.now() - 60_000,
+		})
+		const parent = makeItem({
+			id: "parent-hb-live",
+			status: "delegated",
+			awaitingChildId: "child-hb-live",
+			delegatedToId: "child-hb-live",
+			childIds: ["child-hb-live"],
+		})
+		await seedItems(tmpDir, [parent, child])
+		await markStaleMtime("child-hb-live")
+
+		await store.initialize()
+
+		expect(store.get("child-hb-live")?.status).toBe("active")
+		const preservedParent = store.get("parent-hb-live")
+		expect(preservedParent?.status).toBe("delegated")
+		expect(preservedParent?.awaitingChildId).toBe("child-hb-live")
+		expect(preservedParent?.delegatedToId).toBe("child-hb-live")
+
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", "child-hb-live", GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("active")
+		expect(persistedChild.lastActivityAt).toBe(child.lastActivityAt)
+
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child child-hb-live"))
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("(heartbeat 60s ago)"))
+		expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+
+		logSpy.mockRestore()
+	})
+
+	it("repairs an active child whose lastActivityAt heartbeat is also stale (genuine crash orphan)", async () => {
+		// The owning window heartbeated for a while, then crashed. A heartbeat
+		// past the liveness threshold is not evidence of life: with both signals
+		// stale the child must be repaired to interrupted exactly as before the
+		// heartbeat mechanism existed.
+		const child = makeItem({
+			id: "child-hb-stale",
+			status: "active",
+			parentTaskId: "parent-hb-stale",
+			rootTaskId: "parent-hb-stale",
+			lastActivityAt: Date.now() - 10 * 60 * 1000,
+		})
+		const parent = makeItem({
+			id: "parent-hb-stale",
+			status: "delegated",
+			awaitingChildId: "child-hb-stale",
+			delegatedToId: "child-hb-stale",
+			childIds: ["child-hb-stale"],
+		})
+		await seedItems(tmpDir, [parent, child])
+		await markStaleMtime("child-hb-stale")
+
+		await store.initialize()
+
+		expect(store.get("child-hb-stale")).toMatchObject({ id: "child-hb-stale", status: "interrupted" })
+		const repairedParent = store.get("parent-hb-stale")
+		expect(repairedParent).toMatchObject({ id: "parent-hb-stale", status: "active" })
+		expect(repairedParent?.awaitingChildId).toBeUndefined()
+		expect(repairedParent?.delegatedToId).toBeUndefined()
+	})
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

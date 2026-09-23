@@ -14,20 +14,30 @@ type TaskId = (typeof taskIds)[number]
 type TaskMap = Record<TaskId, HistoryItem | undefined>
 
 /**
- * Abstract cross-window liveness flag. Production decides whether an active
- * child awaited by a delegated parent belongs to another live window by
- * comparing the child's history-file mtime against a 5-minute threshold
- * (`TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS`). The model never reads
- * wall-clock time: `liveElsewhere[child]` is true exactly when the modeled
- * mtime is "recent" (the child is owned by another window) and false when it
- * is "stale" or unreadable (the child is a crash orphan, repaired
- * conservatively).
+ * Abstract cross-window liveness signals. Production decides whether an
+ * active child awaited by a delegated parent belongs to another live window
+ * through two independent freshness checks against a 5-minute threshold
+ * (`TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS`, shared predicate
+ * `isDelegatedChildLive` in `src/core/task-persistence/taskLifecycle.ts`):
+ *
+ * - `liveElsewhere[id]` models the child's history-file mtime: true when the
+ *   mtime is "recent" (the child is owned by another window that is actively
+ *   persisting it), false when it is "stale" or the file is unreadable.
+ * - `heartbeatAlive[id]` models the persisted `lastActivityAt` heartbeat: true
+ *   when the owning session heartbeated within the threshold (a long streaming
+ *   turn that writes nothing else to the history file), false when the
+ *   heartbeat is absent or stale.
+ *
+ * The model never reads wall-clock time. Reconciliation treats the child as
+ * live when EITHER signal is true and repairs it to interrupted only when
+ * BOTH are false (the crash-orphan case).
  */
 type LivenessMap = Record<TaskId, boolean>
 
 interface ModelState {
 	tasks: TaskMap
 	liveElsewhere: LivenessMap
+	heartbeatAlive: LivenessMap
 }
 
 interface Transition {
@@ -49,6 +59,8 @@ const expectedActions = [
 	"abandon",
 	"markLiveElsewhere",
 	"expireLiveElsewhere",
+	"heartbeat",
+	"expireHeartbeat",
 	"reconcileStartup",
 ] as const
 const semanticLandmarks = {
@@ -75,11 +87,27 @@ const semanticLandmarks = {
 		const childId = parent.awaitingChildId as TaskId
 		return state.tasks[childId]?.status === "active" && state.liveElsewhere[childId]
 	},
+	// Proves the heartbeat companion of the same guard: a child whose history
+	// file mtime is stale (no recent persistence write) but whose owning session
+	// heartbeats a fresh `lastActivityAt` — the long-streaming-turn case — must
+	// survive reconciliation with its delegation link intact.
+	"heartbeat-protected-child-preserved": (state: ModelState) => {
+		const parent = state.tasks.parent
+		if (parent?.status !== "delegated" || !parent.awaitingChildId) {
+			return false
+		}
+		const childId = parent.awaitingChildId as TaskId
+		return (
+			state.tasks[childId]?.status === "active" &&
+			!state.liveElsewhere[childId] &&
+			state.heartbeatAlive[childId]
+		)
+	},
 	// Proves the repair half of the same reconciliation outcome still works: a
-	// non-live (crash-orphan) active child is repaired to interrupted while the
-	// parent resumes as active with both delegation pointers cleared. This
-	// state class is only reachable through `reconcileStartup`, never through
-	// `interrupt`/`abandon`/`complete`.
+	// non-live (crash-orphan) active child — stale mtime AND stale/absent
+	// heartbeat — is repaired to interrupted while the parent resumes as active
+	// with both delegation pointers cleared. This state class is only reachable
+	// through `reconcileStartup`, never through `interrupt`/`abandon`/`complete`.
 	"crash-orphan-repaired-by-startup": (state: ModelState) => {
 		const parent = state.tasks.parent
 		const child = state.tasks["child-a"]
@@ -88,7 +116,8 @@ const semanticLandmarks = {
 			!parent.awaitingChildId &&
 			child?.status === "interrupted" &&
 			child.parentTaskId === "parent" &&
-			!state.liveElsewhere["child-a"]
+			!state.liveElsewhere["child-a"] &&
+			!state.heartbeatAlive["child-a"]
 		)
 	},
 } satisfies Record<string, (state: ModelState) => boolean>
@@ -113,13 +142,14 @@ function initialState(): ModelState {
 	return {
 		tasks: { parent: task("parent"), "child-a": undefined, "child-b": undefined },
 		liveElsewhere: { parent: false, "child-a": false, "child-b": false },
+		heartbeatAlive: { parent: false, "child-a": false, "child-b": false },
 	}
 }
 
 function replace(state: ModelState, ...updates: HistoryItem[]): ModelState {
 	const tasks = { ...state.tasks }
 	for (const update of updates) tasks[update.id as TaskId] = update
-	return { tasks, liveElsewhere: state.liveElsewhere }
+	return { tasks, liveElsewhere: state.liveElsewhere, heartbeatAlive: state.heartbeatAlive }
 }
 
 function transitions(state: ModelState): Transition[] {
@@ -156,10 +186,13 @@ function transitions(state: ModelState): Transition[] {
 
 		// A child marked live-elsewhere is owned by another window's session, so
 		// window-local lifecycle operations cannot target it until the flag
-		// expires. `checkTransitionInvariants` re-proves universally that no
-		// reachable action clears the parent's link while the child is active
-		// and live-elsewhere.
-		if (state.liveElsewhere[childId]) continue
+		// expires. The same holds for a heartbeat-alive child: the owning session
+		// is mid-turn and its completion can only arrive after the heartbeat
+		// expires (production clears the heartbeat timer when the stream ends).
+		// `checkTransitionInvariants` re-proves universally that no reachable
+		// action clears the parent's link while the child is active and live
+		// (either signal).
+		if (state.liveElsewhere[childId] || state.heartbeatAlive[childId]) continue
 
 		if (parent.status === "delegated" && parent.awaitingChildId === child.id && child.status === "active") {
 			const interrupted = interruptDelegatedChild(parent, child)
@@ -189,18 +222,19 @@ function transitions(state: ModelState): Transition[] {
 
 	// Cross-window startup reconciliation (`TaskHistoryStore.reconcileDelegationStateCore`,
 	// run at initialize() and on every periodic tick). For every delegated parent
-	// whose awaited child is active, the outcome is decided solely by the
-	// abstract liveness flag:
-	//  - stale/unreadable mtime (not live-elsewhere) → repair: child → interrupted
-	//    via the shared production reducer, parent → active with both delegation
-	//    pointers cleared. The parent-side rewrite is modeled directly here
-	//    because production performs it as administrative recovery through
+	// whose awaited child is active, the outcome is decided by the OR of the two
+	// abstract liveness signals (mirroring the shared production predicate
+	// `isDelegatedChildLive`):
+	//  - stale mtime AND stale/absent heartbeat (not live) → repair: child →
+	//    interrupted via the shared production reducer, parent → active with both
+	//    delegation pointers cleared. The parent-side rewrite is modeled directly
+	//    here because production performs it as administrative recovery through
 	//    `upsertCore(..., { skipTransitionCheck: true })`, outside the shared
 	//    `taskLifecycle.ts` reducers; the child side matches `interruptDelegatedChild`.
-	//  - recent mtime (live-elsewhere) → skip: the pre-fix bug repaired exactly
-	//    this child, breaking the delegation link so the subtask's completion
-	//    could no longer return to the parent. The fix `continue`s, so the
-	//    action stays observable (it still marks `reconcileStartup` as executed)
+	//  - recent mtime OR fresh heartbeat (live) → skip: the pre-fix bug repaired
+	//    exactly these children, breaking the delegation link so the subtask's
+	//    completion could no longer return to the parent. The fix `continue`s, so
+	//    the action stays observable (it still marks `reconcileStartup` as executed)
 	//    while intentionally not producing a new state.
 	for (const parentId of taskIds) {
 		const parent = state.tasks[parentId]
@@ -208,7 +242,7 @@ function transitions(state: ModelState): Transition[] {
 		const childId = parent.awaitingChildId as TaskId
 		const child = state.tasks[childId]
 		if (child?.status !== "active") continue
-		if (state.liveElsewhere[childId]) {
+		if (state.liveElsewhere[childId] || state.heartbeatAlive[childId]) {
 			result.push({ name: `reconcileStartup(${parentId})`, next: state })
 			continue
 		}
@@ -241,12 +275,37 @@ function transitions(state: ModelState): Transition[] {
 		if (!state.liveElsewhere[id2]) {
 			result.push({
 				name: `markLiveElsewhere(${id2})`,
-				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: true } },
+				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: true }, heartbeatAlive: state.heartbeatAlive },
 			})
 		} else {
 			result.push({
 				name: `expireLiveElsewhere(${id2})`,
-				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: false } },
+				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: false }, heartbeatAlive: state.heartbeatAlive },
+			})
+		}
+	}
+
+	// Model actions for the abstract heartbeat flag: `heartbeat` represents the
+	// owning session persisting a fresh `lastActivityAt` while it streams a long
+	// turn (production: Task's throttled liveness heartbeat), and
+	// `expireHeartbeat` represents the heartbeat going stale — the session
+	// stopped heartbeating (turn finished, task disposed, or owner crashed)
+	// without another window taking over persistence. Same child-slot
+	// restriction as the mtime flag: only active delegated children carry a
+	// liveness dimension in this bug class.
+	for (const id of taskIds) {
+		const current = state.tasks[id]
+		if (current?.status !== "active" || !current.parentTaskId) continue
+		const id2 = id as TaskId
+		if (!state.heartbeatAlive[id2]) {
+			result.push({
+				name: `heartbeat(${id2})`,
+				next: { tasks: state.tasks, liveElsewhere: state.liveElsewhere, heartbeatAlive: { ...state.heartbeatAlive, [id2]: true } },
+			})
+		} else {
+			result.push({
+				name: `expireHeartbeat(${id2})`,
+				next: { tasks: state.tasks, liveElsewhere: state.liveElsewhere, heartbeatAlive: { ...state.heartbeatAlive, [id2]: false } },
 			})
 		}
 	}
@@ -297,7 +356,11 @@ function invariantViolations(state: ModelState): string[] {
 }
 
 function canonical(state: ModelState): string {
-	return JSON.stringify([taskIds.map((id) => state.tasks[id] ?? null), taskIds.map((id) => state.liveElsewhere[id])])
+	return JSON.stringify([
+		taskIds.map((id) => state.tasks[id] ?? null),
+		taskIds.map((id) => state.liveElsewhere[id]),
+		taskIds.map((id) => state.heartbeatAlive[id]),
+	])
 }
 
 function formatCounterexample(message: string, trace: TraceStep[]): string {
@@ -324,21 +387,22 @@ function checkTransitionInvariants(previous: ModelState, transition: Transition)
 			violations.push(`${id}: completed task changed after ${transition.name}`)
 			continue
 		}
-		// Cross-window ownership guard (PR #1495 bug class): no transition may
-		// clear a delegated parent's link to a child that is active AND marked
-		// live-elsewhere. Pre-fix, startup reconciliation repaired exactly these
-		// children; the mtime guard skips them, so the only enabled successor for
-		// such a state is the identity reconciliation. Any future model edit
-		// that reintroduces a link-clearing transition on a live-elsewhere child
-		// fails here with the shortest causal trace.
+		// Cross-window ownership guard (PR #1495 bug class, extended by the
+		// liveness-heartbeat fix): no transition may clear a delegated parent's
+		// link to a child that is active AND live — where live means either a
+		// recent history-file mtime (`liveElsewhere`) or a fresh persisted
+		// `lastActivityAt` heartbeat (`heartbeatAlive`). Pre-fix, startup
+		// reconciliation repaired exactly these children; the shared production
+		// predicate `isDelegatedChildLive` skips them, so the only enabled
+		// successor for such a state is the identity reconciliation. Any future
+		// model edit that reintroduces a link-clearing transition on a live
+		// child fails here with the shortest causal trace.
 		if (before?.status === "delegated" && before.awaitingChildId) {
 			const childId = before.awaitingChildId as TaskId
 			const childBefore = previous.tasks[childId]
-			if (childBefore?.status === "active" && previous.liveElsewhere[childId]) {
+			if (childBefore?.status === "active" && (previous.liveElsewhere[childId] || previous.heartbeatAlive[childId])) {
 				if (after?.status !== "delegated" || after.awaitingChildId !== childId) {
-					violations.push(
-						`${id}: ${transition.name} cleared delegation to active live-elsewhere child ${childId}`,
-					)
+					violations.push(`${id}: ${transition.name} cleared delegation to active live child ${childId}`)
 				}
 			}
 		}
@@ -432,6 +496,38 @@ function runRepresentativeScenarios(): void {
 	const interruptedCompletion = completeDelegatedChild(delegated, interruptedA, "resumed result")
 	assert.equal(interruptedCompletion.child.status, "completed")
 	assert.equal(interruptedCompletion.parent.status, "active")
+
+	// Heartbeat-only liveness (stale mtime, fresh `lastActivityAt`) — the long
+	// streaming turn: production's shared `isDelegatedChildLive` predicate treats
+	// the child as live, so reconciliation must be an identity transition and the
+	// delegation link survives.
+	{
+		const state: ModelState = {
+			tasks: { parent: delegated, "child-a": childA, "child-b": undefined },
+			liveElsewhere: { parent: false, "child-a": false, "child-b": false },
+			heartbeatAlive: { parent: false, "child-a": true, "child-b": false },
+		}
+		const reconcile = transitions(state).filter((t) => t.name.startsWith("reconcileStartup"))
+		assert.equal(reconcile.length, 1)
+		assert.equal(reconcile[0]!.next, state)
+	}
+
+	// Both signals stale — the genuine crash orphan: the startup repair must
+	// still run (child → interrupted, parent → active, both pointers cleared).
+	{
+		const state: ModelState = {
+			tasks: { parent: delegated, "child-a": childA, "child-b": undefined },
+			liveElsewhere: { parent: false, "child-a": false, "child-b": false },
+			heartbeatAlive: { parent: false, "child-a": false, "child-b": false },
+		}
+		const reconcile = transitions(state).filter((t) => t.name.startsWith("reconcileStartup"))
+		assert.equal(reconcile.length, 1)
+		const repaired = reconcile[0]!.next
+		assert.equal(repaired.tasks["child-a"]?.status, "interrupted")
+		assert.equal(repaired.tasks.parent?.status, "active")
+		assert.equal(repaired.tasks.parent?.awaitingChildId, undefined)
+		assert.equal(repaired.tasks.parent?.delegatedToId, undefined)
+	}
 }
 
 runRepresentativeScenarios()

@@ -9,7 +9,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import { assertValidTransition, isDelegatedChildLive, isLivenessSignalFresh, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -501,16 +501,19 @@ export class TaskHistoryStore {
 						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
 						// Cross-instance liveness guard: a child whose history file was written
-						// recently is owned by another live window, not a crash orphan.
+						// recently, or whose owning session heartbeats a fresh `lastActivityAt`,
+						// is owned by a live window — not a crash orphan.
 						const mtimeMs = await this.getChildFileMtimeMs(child.id)
-						const isLiveElsewhere =
-							// Stryker disable next-line ConditionalExpression: replacing `mtimeMs !== undefined` with `true` is mutation-equivalent; with a defined mtimeMs `true && X === X`, and with undefined the right operand is `NaN < threshold === false`, identical to the short-circuit result.
-							mtimeMs !== undefined &&
-							Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+						const isLiveElsewhere = isDelegatedChildLive(
+							child,
+							Date.now(),
+							TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
+							mtimeMs,
+						)
 						if (isLiveElsewhere) {
 							console.warn(
 								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
-									`(mtime ${Math.round((Date.now() - mtimeMs) / 1000)}s ago) — owned by another window`,
+									`(${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`,
 							)
 							continue
 						}
@@ -610,6 +613,30 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Persist a liveness heartbeat for a live task session: bump the record's
+	 * `lastActivityAt` so a delegated child streaming a long turn (minutes
+	 * without any other history-file write) is still recognized as alive by
+	 * reconciliation in another window or after an extension-host restart.
+	 *
+	 * Callers are expected to throttle (see Task's streaming heartbeat);
+	 * each call writes only the `lastActivityAt` delta. Best-effort by design:
+	 * a missing record, a non-active status, or a transient write failure
+	 * never rejects — a heartbeat must never disturb the turn it reports on.
+	 */
+	public async recordTaskActivity(taskId: string, at: number = Date.now()): Promise<void> {
+		try {
+			await this.atomicReadAndUpdate(taskId, (historyItem) => {
+				if ((historyItem.status ?? "active") !== "active" || historyItem.lastActivityAt === at) {
+					return historyItem
+				}
+				return { ...historyItem, lastActivityAt: at }
+			})
+		} catch (error) {
+			console.warn(`[TaskHistoryStore] Failed to record activity heartbeat for task ${taskId}:`, error)
+		}
+	}
+
+	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side
 	 * when the other side is already at its target, or when both records still
@@ -663,9 +690,12 @@ export class TaskHistoryStore {
 			// `getChildFileMtimeMs`) and lets a later tick retry.
 			if (!childAtTarget) {
 				const mtimeMs = await this.getChildFileMtimeMs(child.id)
-				const isLiveElsewhere =
-					// Stryker disable next-line ConditionalExpression: replacing `mtimeMs !== undefined` with `true` is mutation-equivalent; with a defined mtimeMs `true && X === X`, and with undefined the right operand is `NaN < threshold === false`, identical to the short-circuit result.
-					mtimeMs !== undefined && Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+				const isLiveElsewhere = isDelegatedChildLive(
+					child,
+					Date.now(),
+					TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
+					mtimeMs,
+				)
 				if (isLiveElsewhere) {
 					await this.quarantineDelegationRepairIntent(intent, "child live in another window (recent mtime)")
 					return
@@ -1309,5 +1339,20 @@ export class TaskHistoryStore {
 			}
 			return Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
 		}
+	}
+
+	/**
+	 * Renders the signal that keeps a delegated child from being repaired as a
+	 * crash orphan: the freshest of the history-file mtime and the persisted
+	 * `lastActivityAt` heartbeat. Called only when `isDelegatedChildLive` held,
+	 * so at least one signal is fresh; the mtime label wins when the file mtime
+	 * is itself fresh, preserving the historical skip-log shape.
+	 */
+	private describeLivenessSignal(child: HistoryItem, mtimeMs: number | undefined): string {
+		const now = Date.now()
+		if (mtimeMs !== undefined && isLivenessSignalFresh(mtimeMs, now, TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)) {
+			return `mtime ${Math.round((now - mtimeMs) / 1000)}s ago`
+		}
+		return `heartbeat ${Math.round((now - (child.lastActivityAt ?? 0)) / 1000)}s ago`
 	}
 }

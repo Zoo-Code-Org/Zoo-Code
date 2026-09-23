@@ -113,3 +113,42 @@ export function abandonDelegatedChild(
 		},
 	}
 }
+
+/**
+ * Returns true when a liveness timestamp is fresh relative to `now`: present
+ * and less than `thresholdMs` old. Timestamps in the future (clock skew, or
+ * the future-shifted sentinel used for transient stat failures) count as
+ * fresh because `now - timestamp` is negative. An absent timestamp is never
+ * fresh — callers must treat "no signal" as "not evidence of life".
+ */
+export function isLivenessSignalFresh(timestamp: number | undefined, now: number, thresholdMs: number): boolean {
+	return timestamp !== undefined && now - timestamp < thresholdMs
+}
+
+/**
+ * Cross-instance liveness decision for an active delegated child, owned by
+ * the shared reconciliation guard in `TaskHistoryStore` (startup/periodic
+ * orphan repair and repair-intent replay).
+ *
+ * A child is live when EITHER signal is fresh within `thresholdMs`:
+ * - its history file mtime (`fileMtimeMs`) — another window is persisting it;
+ * - its persisted `lastActivityAt` heartbeat — the owning session is running
+ *   a long turn that legitimately writes nothing else to the history file
+ *   (minutes of model streaming between saves).
+ *
+ * Requiring both signals to be stale before repair is what keeps a live
+ * child streamed by another window (or by this window before an
+ * extension-host restart wiped the local ownership claim) from being
+ * misjudged as a crash orphan and cut out of its delegation link.
+ */
+export function isDelegatedChildLive(
+	child: Pick<HistoryItem, "lastActivityAt">,
+	now: number,
+	thresholdMs: number,
+	fileMtimeMs?: number,
+): boolean {
+	return (
+		isLivenessSignalFresh(fileMtimeMs, now, thresholdMs) ||
+		isLivenessSignalFresh(child.lastActivityAt, now, thresholdMs)
+	)
+}

@@ -476,6 +476,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private disposalPromise?: Promise<void>
 	private diffReversionPromise: Promise<void> = Promise.resolve()
 
+	/**
+	 * Delegated-child liveness heartbeat. While a child task streams a turn its
+	 * history file can legitimately go quiet for minutes (no saves between long
+	 * model generations), which used to let startup/periodic reconciliation in
+	 * another window — or this window after an extension-host restart, before
+	 * any local-ownership claim — misjudge the live child as a crash orphan and
+	 * repair it to `interrupted`, severing the delegation link. A throttled
+	 * `lastActivityAt` write is the durable signal that the owning session is
+	 * still alive. One minute keeps the signal comfortably inside the store's
+	 * 5-minute liveness threshold even with jittered ticks.
+	 */
+	private static readonly LIVENESS_HEARTBEAT_INTERVAL_MS = 60 * 1000
+	private livenessHeartbeatInterval?: NodeJS.Timeout
+
 	// Checkpoints
 	enableCheckpoints: boolean
 	checkpointTimeout: number
@@ -2833,6 +2847,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error flushing shutdown telemetry:", error)
 		}
 
+		// A disposed task must stop claiming liveness: a trailing heartbeat
+		// would keep reconciliation from repairing a genuinely orphaned child.
+		this.stopLivenessHeartbeat()
+
 		// A task being disposed is no longer serving requests: set the same
 		// cancellation state `abortTask()` sets, synchronously before the aborts
 		// below, so the request-construction guard (`abort || abandoned` in
@@ -3340,6 +3358,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let reasoningMessage = ""
 				const pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
+				this.startLivenessHeartbeat()
 
 				try {
 					const iterator = stream[Symbol.asyncIterator]()
@@ -3827,6 +3846,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				} finally {
 					this.isStreaming = false
+					this.stopLivenessHeartbeat()
 					// Clean up the abort controller when streaming completes
 					this.currentRequestAbortController = undefined
 				}
@@ -5401,6 +5421,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Don't hold the process open just for this timer.
 		this.idleTelemetryCheckInterval?.unref?.()
+	}
+
+	/**
+	 * Start the delegated-child liveness heartbeat for the upcoming streaming
+	 * session. No-op for non-child tasks: only an active child awaited by a
+	 * delegated parent is at risk of reconcile orphan-repair, so standalone
+	 * tasks never pay the write cost. Idempotent — a second call while a
+	 * heartbeat is already running leaves the existing interval in place.
+	 */
+	private startLivenessHeartbeat(): void {
+		if (this.livenessHeartbeatInterval !== undefined || !this.parentTaskId) {
+			return
+		}
+		this.livenessHeartbeatInterval = setInterval(() => {
+			void this.recordLivenessHeartbeat()
+		}, Task.LIVENESS_HEARTBEAT_INTERVAL_MS)
+		// Don't hold the process open just for this timer.
+		this.livenessHeartbeatInterval.unref?.()
+	}
+
+	/**
+	 * Stop the liveness heartbeat. Safe to call when none is running.
+	 */
+	private stopLivenessHeartbeat(): void {
+		if (this.livenessHeartbeatInterval !== undefined) {
+			clearInterval(this.livenessHeartbeatInterval)
+			this.livenessHeartbeatInterval = undefined
+		}
+	}
+
+	/**
+	 * One heartbeat beat: persist `lastActivityAt` for this task so
+	 * reconciliation sees the session as alive. Skipped once streaming has
+	 * ended or the task was cancelled/abandoned — a stale trailing beat must
+	 * not claim life the session no longer has. Failures are logged, never
+	 * thrown: a heartbeat must never disturb the turn it reports on.
+	 */
+	private async recordLivenessHeartbeat(): Promise<void> {
+		if (!this.isStreaming || this.abort || this.abandoned) {
+			return
+		}
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return
+		}
+		try {
+			await provider.taskHistoryStore.recordTaskActivity(this.taskId)
+		} catch (error) {
+			console.warn(`[Task#${this.taskId}] Failed to persist liveness heartbeat:`, error)
+		}
 	}
 
 	// Getters
