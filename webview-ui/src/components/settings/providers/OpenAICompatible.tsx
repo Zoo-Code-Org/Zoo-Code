@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react"
 import { useEvent } from "react-use"
 import { Checkbox } from "vscrui"
-import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeTextArea, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
 	type ProviderSettings,
@@ -13,10 +13,12 @@ import {
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	OpenAiModelsMessageType,
+	parseOpenAiExtraBody,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Button, StandardTooltip } from "@src/components/ui"
+import { formatOpenAiExtraBodyValidationError } from "@src/utils/validate"
 
 import { convertHeadersToObject } from "../utils/headers"
 import { inputEventTransform, noTransform } from "../transforms"
@@ -54,6 +56,8 @@ export const OpenAICompatible = ({
 		const headers = apiConfiguration?.openAiHeaders || {}
 		return Object.entries(headers)
 	})
+	const extraBodyResult = parseOpenAiExtraBody(apiConfiguration.openAiExtraBody)
+	const extraBodyError = formatOpenAiExtraBodyValidationError(extraBodyResult, t)
 
 	const handleAddCustomHeader = useCallback(() => {
 		// Only update the local state to show the new row in the UI.
@@ -248,6 +252,36 @@ export const OpenAICompatible = ({
 							</StandardTooltip>
 						</div>
 					))
+				)}
+			</div>
+
+			<div className="mb-4">
+				<label id="openai-extra-body-label" className="block font-medium mb-1">
+					{t("settings:providers.extraBody")}
+				</label>
+				<div id="openai-extra-body-description" className="text-sm text-vscode-descriptionForeground mb-2">
+					{t("settings:providers.extraBodyDescription")}
+				</div>
+				<VSCodeTextArea
+					resize="vertical"
+					rows={5}
+					value={apiConfiguration.openAiExtraBody ?? ""}
+					onInput={handleInputChange("openAiExtraBody")}
+					placeholder={'{\n  "metadata": {\n    "completion_window": "balanced"\n  }\n}'}
+					className="w-full font-mono"
+					aria-labelledby="openai-extra-body-label"
+					aria-describedby={
+						extraBodyError
+							? "openai-extra-body-description openai-extra-body-error"
+							: "openai-extra-body-description"
+					}
+					aria-invalid={extraBodyError ? "true" : undefined}
+					data-testid="openai-extra-body-input"
+				/>
+				{extraBodyError && (
+					<div id="openai-extra-body-error" className="text-sm text-vscode-errorForeground mt-1" role="alert">
+						{extraBodyError}
+					</div>
 				)}
 			</div>
 

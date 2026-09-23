@@ -7,7 +7,7 @@ This file provides guidance to agents working in `webview-ui/`.
 We use a complementary two-layer strategy for testing webview UI code:
 
 1. **Vitest + JSDOM (`*.test.tsx`)**: Unit, hook, state-machine, and interaction tests.
-2. **Playwright Component Testing (`*.visual.tsx`)**: Visual snapshot, VS Code theme variable, layout, and shadow DOM tests.
+2. **Playwright Story Gallery (`*.visual.tsx`)**: Visual snapshot, VS Code theme variable, layout, and shadow DOM tests.
 
 ---
 
@@ -18,9 +18,9 @@ We use a complementary two-layer strategy for testing webview UI code:
 | Component state transitions, reducer actions, custom hook behavior    | **Vitest + JSDOM** (`*.test.tsx`)                                     |
 | User interactions (button clicks, form validation, text typing)       | **Vitest + JSDOM** (`*.test.tsx`) using `@testing-library/user-event` |
 | Conditional DOM rendering or prop wiring                              | **Vitest + JSDOM** (`*.test.tsx`)                                     |
-| Visual layout, flexbox/grid alignment, or padding/margin verification | **Playwright CT** (`*.visual.tsx`)                                    |
-| VS Code dark/light theme CSS tokens (`--vscode-*`)                    | **Playwright CT** (`*.visual.tsx`)                                    |
-| Web component shadow DOM style encapsulation & upgrades               | **Playwright CT** (`*.visual.tsx`)                                    |
+| Visual layout, flexbox/grid alignment, or padding/margin verification | **Playwright gallery** (`*.visual.tsx`)                               |
+| VS Code dark/light theme CSS tokens (`--vscode-*`)                    | **Playwright gallery** (`*.visual.tsx`)                               |
+| Web component shadow DOM style encapsulation & upgrades               | **Playwright gallery** (`*.visual.tsx`)                               |
 
 ---
 
@@ -41,7 +41,7 @@ Codecov tracks `webview-ui` coverage under the `webview-ui` flag.
 
 ---
 
-## Visual Tests (Playwright CT)
+## Visual Tests (Playwright Story Gallery)
 
 ### When a UI change needs a snapshot
 
@@ -59,11 +59,15 @@ Skip a visual test when the change is behavior-only (state transitions, handler 
 ### Where the two coverage flags fit
 
 - `webview-ui` (Vitest + JSDOM) — broad line coverage over component logic, hooks, and state. This is your main coverage gate.
-- `webview-ui-ct` (Playwright CT) — narrow pixel-regression signal over a small set of critical screens. Low absolute % is expected and fine; the flag is not a coverage-to-hit target, it's a "did the surface still render the same" check.
+- `webview-ui-ct` (Playwright gallery) — narrow pixel-regression signal over a small set of critical screens. Low absolute % is expected and fine; the flag is not a coverage-to-hit target, it's a "did the surface still render the same" check.
 
 ### Authoring rules
 
 - Keep behavioral assertions in Vitest. A `*.visual.tsx` test should establish a deterministic state and make a focused screenshot assertion.
+- Register browser-owned stories in `playwright/gallery/stories.tsx` under a stable, descriptive ID and mount them with `mount(storyId, props)`. Props must be serializable; callbacks, React state, providers, and query clients stay inside the story so every mount starts fresh.
+- Keep gallery-wide production CSS, theme fixtures, image setup, aliases, and mocks in `playwright/gallery/main.tsx` and `playwright/vite.config.ts` rather than duplicating setup in specs.
+- Use `playwright/vscode-messages.ts` to inspect outbound `vscode.postMessage` payloads. The gallery resets captured messages before every mount; do not parse the browser console for host messages.
+- Use `playwright/layout-contracts.ts` for bounded-layout checks. Critical real stories should cover WCAG text spacing at the 320px reflow width, horizontal overflow, clipped text and controls, action-row containment, and focused-control visibility without adding snapshots for that geometry matrix.
 - Run visual comparisons with `pnpm test:visual:docker` from `webview-ui/`.
 - Update intentional baselines with `pnpm test:visual:docker:update` and commit the resulting `__screenshots__` files with the UI change.
 - Use the Docker commands when creating or reviewing baselines; host-rendered screenshots are not the source of truth.
@@ -77,4 +81,4 @@ Skip a visual test when the change is behavior-only (state transitions, handler 
 - The files under `playwright/themes/` are generated from the resolved webview variables exposed by the VS Code version pinned in `apps/vscode-e2e/package.json`; do not edit them manually. On Linux, update them with `xvfb-run -a pnpm --filter @roo-code/vscode-e2e themes:update` and verify them with `xvfb-run -a pnpm --filter @roo-code/vscode-e2e themes:check`. CI runs the same check and fails when the checked-in fixtures drift from the pinned VS Code runtime.
 - Keep visual tests limited to components supported by the current Playwright harness. Add shared extension state, translation, React Query, or other provider support before snapshotting components that require it.
 - The current baseline naming assumes a single Chromium project. Include `{projectName}` in `snapshotPathTemplate` before adding another browser project.
-- Import `test` and `expect` from `webview-ui/playwright/coverage-fixture.ts` (not directly from `@playwright/experimental-ct-react`) so the auto-fixture collects V8 coverage for `monocart-reporter` — that's what produces `coverage-ct/lcov.info` for the Codecov upload.
+- Import `test` and `expect` from `webview-ui/playwright/coverage-fixture.ts` (not directly from `@playwright/test`) so the built-in gallery mount fixture retains V8 coverage collection for `monocart-reporter` — that's what produces `coverage-ct/lcov.info` for the Codecov upload.

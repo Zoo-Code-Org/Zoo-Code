@@ -5,7 +5,11 @@
 	"exports": {
 		"./base": "./base.js",
 		"./react": "./react.js",
-		"./next-js": "./next.js"
+		"./next-js": "./next.js",
+		"./provider-identifiers": "./provider-identifiers.js"
+	},
+	"scripts": {
+		"test": "node --test provider-identifiers.test.js"
 	},
 	"devDependencies": {
 		"@eslint/js": "9.39.4",
@@ -15,7 +19,7 @@
 		"eslint-plugin-react": "7.37.5",
 		"eslint-plugin-react-hooks": "5.2.0",
 		"eslint-plugin-turbo": "2.10.0",
-		"globals": "16.1.0",
+		"globals": "16.5.0",
 		"typescript-eslint": "8.32.1"
 	}
 }

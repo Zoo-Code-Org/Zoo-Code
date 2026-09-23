@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as path from "path"
 import Mocha from "mocha"
 import { glob } from "glob"
@@ -5,7 +6,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
 
-import { waitFor } from "./utils"
+import { isCompletedAsk, waitFor } from "./utils"
 
 export async function run() {
 	const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
@@ -20,7 +21,7 @@ export async function run() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 
 	await api.setConfiguration({
-		apiProvider: "openrouter" as const,
+		apiProvider: providerIdentifiers.openrouter,
 		// In record mode, forward the real key so aimock can proxy it to OpenRouter.
 		// In replay mode, "mock-key" is sufficient — aimock never contacts the real API.
 		openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
@@ -34,8 +35,10 @@ export async function run() {
 	// Automatically approve completion_result asks so tests don't stall waiting
 	// for a button that the webview routes to "start new task" rather than "yes".
 	api.on(RooCodeEventName.Message, ({ message }) => {
-		if (message.type === "ask" && message.ask === "completion_result") {
-			api.approveCurrentAsk()
+		if (isCompletedAsk(message) && message.ask === "completion_result") {
+			void api.approveCurrentAsk().catch((error) => {
+				console.error("Failed to approve completion result", error)
+			})
 		}
 	})
 

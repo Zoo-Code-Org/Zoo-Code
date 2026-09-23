@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 /**
  * Tests for the auto-population feature in CodeIndexPopover
  *
@@ -34,7 +35,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			awsRegion: "us-west-2",
 			awsProfile: "my-profile",
 		}
@@ -46,7 +47,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
 		// Auto-populate Region and Profile when switching to Bedrock
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -75,7 +76,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration: TestApiConfiguration = {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 			apiKey: "test-key",
 		}
 
@@ -84,7 +85,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -114,7 +115,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			awsRegion: "us-west-2",
 			awsProfile: "default",
 		}
@@ -124,7 +125,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -154,7 +155,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration: TestApiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			awsRegion: "ap-southeast-1",
 			// No awsProfile configured
 		}
@@ -164,7 +165,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -193,7 +194,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration: TestApiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			// No awsRegion or awsProfile configured
 		}
 
@@ -202,7 +203,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -229,7 +230,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			awsRegion: "us-east-1",
 			awsProfile: undefined, // Explicitly undefined
 		}
@@ -239,7 +240,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -266,7 +267,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "",
 		}
 		const apiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			awsRegion: "us-west-2",
 			awsProfile: "my-profile",
 		}
@@ -277,7 +278,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
 		// The condition intentionally won't match since value is "openai"
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}
@@ -304,7 +305,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 			codebaseIndexBedrockProfile: "production",
 		}
 		const apiConfiguration = {
-			apiProvider: "bedrock",
+			apiProvider: providerIdentifiers.bedrock,
 			awsRegion: "us-west-2",
 			awsProfile: "default",
 		}
@@ -314,7 +315,7 @@ describe("CodeIndexPopover - Auto-population Feature Logic", () => {
 
 		mockUpdateSetting("codebaseIndexEmbedderModelId", "")
 
-		if (value === "bedrock" && apiConfiguration?.apiProvider === "bedrock") {
+		if (value === "bedrock" && apiConfiguration?.apiProvider === providerIdentifiers.bedrock) {
 			if (!currentSettings.codebaseIndexBedrockRegion && apiConfiguration.awsRegion) {
 				mockUpdateSetting("codebaseIndexBedrockRegion", apiConfiguration.awsRegion)
 			}

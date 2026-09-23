@@ -2,8 +2,6 @@ import * as fs from "fs"
 import * as path from "path"
 import { execSync } from "child_process"
 
-import { ViewsContainer, Views, Menus, Configuration, Keybindings, contributesSchema } from "./types.js"
-
 function copyDir(srcDir: string, dstDir: string, count: number): number {
 	const entries = fs.readdirSync(srcDir, { withFileTypes: true })
 
@@ -265,82 +263,4 @@ export function setupLocaleWatcher(srcDir: string, distDir: string) {
 			error instanceof Error ? error.message : "Unknown error",
 		)
 	}
-}
-
-export function generatePackageJson({
-	packageJson: { contributes, ...packageJson },
-	overrideJson,
-	substitution,
-}: {
-	packageJson: Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
-	overrideJson: Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
-	substitution: [string, string]
-}) {
-	const { viewsContainers, views, commands, menus, submenus, keybindings, configuration } =
-		contributesSchema.parse(contributes)
-	const [from, to] = substitution
-
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const result: Record<string, any> = {
-		...packageJson,
-		...overrideJson,
-		contributes: {
-			viewsContainers: transformArrayRecord<ViewsContainer>(viewsContainers, from, to, ["id"]),
-			views: transformArrayRecord<Views>(views, from, to, ["id"]),
-			commands: transformArray(commands, from, to, "command"),
-			menus: transformArrayRecord<Menus>(menus, from, to, ["command", "submenu", "when"]),
-			submenus: transformArray(submenus, from, to, "id"),
-			configuration: {
-				title: configuration.title,
-				properties: transformRecord<Configuration["properties"]>(configuration.properties, from, to),
-			},
-		},
-	}
-
-	// Only add keybindings if they exist
-	if (keybindings) {
-		result.contributes.keybindings = transformArray<Keybindings>(keybindings, from, to, "command")
-	}
-
-	return result
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function transformArrayRecord<T>(obj: Record<string, any[]>, from: string, to: string, props: string[]): T {
-	return Object.entries(obj).reduce(
-		(acc, [key, ary]) => ({
-			...acc,
-			[key.replaceAll(from, to)]: ary.map((item) => {
-				const transformedItem = { ...item }
-
-				for (const prop of props) {
-					if (prop in item && typeof item[prop] === "string") {
-						transformedItem[prop] = item[prop].replaceAll(from, to)
-					}
-				}
-
-				return transformedItem
-			}),
-		}),
-		{} as T,
-	)
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function transformArray<T>(arr: any[], from: string, to: string, idProp: string): T[] {
-	return arr.map(({ [idProp]: id, ...rest }) => ({
-		[idProp]: id.replaceAll(from, to),
-		...rest,
-	}))
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function transformRecord<T>(obj: Record<string, any>, from: string, to: string): T {
-	return Object.entries(obj).reduce(
-		(acc, [key, value]) => ({
-			...acc,
-			[key.replaceAll(from, to)]: value,
-		}),
-		{} as T,
-	)
 }

@@ -47,11 +47,11 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.80.0
+## Nieuw in v3.82.0
 
-- **Veiligere bestandstoegang** — gebruik afzonderlijke toelatingslijsten voor lezen en schrijven om te bepalen tot welke paden Zoo Code toegang heeft.
-- **Meer modelkeuze** — GLM 5.3 is nu beschikbaar via Z.ai en Gemini 3.5 Flash Lite en Gemini 3.1 Flash Lite zijn toegevoegd aan de Gemini-provider.
-- **Betrouwbaardere dagelijkse workflows** — verbeteringen versterken taakherstel en -geschiedenis, streaming en toolgebruik van providers, het importeren van instellingen en de leesbaarheid in verschillende IDE-thema's.
+- 🔑 **Gebruik je Zoo Gateway API-sleutel overal** — voeg hem toe aan elke OpenAI-compatibele client of workflow: https://zoocode.dev/models
+- 🎁 **Tijdelijk gratis modeltoegang** — krijg gratis toegang tot MiniMax-M3 via Zoo Gateway.
+- ✨ **Gloednieuwe modellen** — GPT-6 Astra en Claude Fable 5.1 zijn nu beschikbaar.
 
 ## Wat kan Zoo Code voor JOU doen?
 

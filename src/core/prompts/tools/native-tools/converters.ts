@@ -52,7 +52,7 @@ export function convertOpenAIToolsToAnthropic(tools: OpenAI.Chat.ChatCompletionT
  * Converts OpenAI tool_choice to Anthropic ToolChoice format.
  *
  * Maps OpenAI's tool_choice parameter to Anthropic's equivalent format:
- * - "none" → undefined (Anthropic doesn't have "none", just omit tools)
+ * - "none" → { type: "none" }
  * - "auto" → { type: "auto" }
  * - "required" → { type: "any" }
  * - { type: "function", function: { name } } → { type: "tool", name }
@@ -86,7 +86,7 @@ export function convertOpenAIToolChoiceToAnthropic(
 	if (typeof toolChoice === "string") {
 		switch (toolChoice) {
 			case "none":
-				return undefined // Anthropic doesn't have "none", just omit tools
+				return { type: "none" }
 			case "auto":
 				return { type: "auto", disable_parallel_tool_use: disableParallelToolUse }
 			case "required":

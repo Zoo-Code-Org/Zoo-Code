@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 // pnpm --filter @roo-code/cli test src/agent/__tests__/extension-host.test.ts
 
 import { EventEmitter } from "events"
@@ -28,7 +29,7 @@ vi.mock("@/lib/storage/index.js", () => ({
  */
 function createTestHost({
 	mode = "code",
-	provider = "openrouter",
+	provider = providerIdentifiers.openrouter,
 	model = "test-model",
 	...options
 }: Partial<ExtensionHostOptions> = {}): ExtensionHost {
@@ -113,7 +114,7 @@ describe("ExtensionHost", () => {
 				extensionPath: "/my/extension",
 				user: null,
 				apiKey: "test-key",
-				provider: "openrouter",
+				provider: providerIdentifiers.openrouter,
 				model: "test-model",
 				ephemeral: false,
 				debug: false,

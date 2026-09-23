@@ -489,6 +489,21 @@ export const vertexModels = {
 		supportsTemperature: false,
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"claude-fable-5-1": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 0.25,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Fable 5.1 extends Fable 5 with stronger long-running agentic coding, multistep research, and document work.",
+	},
 	"claude-fable-5": {
 		maxTokens: 8192,
 		contextWindow: 1_000_000,

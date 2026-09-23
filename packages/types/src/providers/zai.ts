@@ -6,6 +6,7 @@ import { ZaiApiLine } from "../provider-settings.js"
 // https://docs.z.ai/guides/llm/glm-4.5
 // https://docs.z.ai/guides/llm/glm-4.6
 // https://docs.z.ai/guides/llm/glm-5.3
+// https://docs.z.ai/guides/vlm/glm-5.3-flash
 // https://docs.z.ai/guides/llm/glm-5.1
 // https://docs.z.ai/guides/llm/glm-5-turbo
 // https://docs.z.ai/guides/overview/pricing
@@ -24,6 +25,13 @@ const glm53ModelInfo = {
 	defaultTemperature: 1,
 	description:
 		"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max).",
+} as const satisfies ModelInfo
+
+const glm53FlashModelInfo = {
+	...glm53ModelInfo,
+	supportsImages: true,
+	description:
+		"GLM-5.3-Flash is Zhipu's efficient multimodal coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max).",
 } as const satisfies ModelInfo
 
 export type InternationalZAiModelId = keyof typeof internationalZAiModels
@@ -192,6 +200,13 @@ export const internationalZAiModels = {
 		outputPrice: 4.4,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.26,
+	},
+	"glm-5.3-flash": {
+		...glm53FlashModelInfo,
+		inputPrice: 0.15,
+		outputPrice: 0.5,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.03,
 	},
 	"glm-5-turbo": {
 		maxTokens: 131_072,
@@ -504,6 +519,13 @@ export const mainlandZAiCodingPlanOnlyModels = {
 		outputPrice: 2.28,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.13,
+	},
+	"glm-5.3-flash": {
+		...glm53FlashModelInfo,
+		inputPrice: 0.075,
+		outputPrice: 0.25,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.015,
 	},
 } as const satisfies Record<string, ModelInfo>
 

@@ -1,6 +1,6 @@
 :root,
 body {
-	/* Font settings are environment/user configuration, not theme colors. Keep CT typography stable across runners. */
+	/* Font settings are environment/user configuration, not theme colors. Keep gallery typography stable across runners. */
 	--vscode-font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
 	--vscode-editor-font-family: "Droid Sans Mono", "monospace", monospace;
 }
@@ -15,6 +15,20 @@ body {
 
 #root {
 	padding: 16px;
+}
+
+.vscode-text-field-mock {
+	box-sizing: border-box;
+	background: var(--vscode-input-background);
+	border: 1px solid var(--vscode-input-border, transparent);
+	color: var(--vscode-input-foreground);
+	font: inherit;
+	padding: 4px 6px;
+}
+
+.vscode-text-field-mock::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+	opacity: 1;
 }
 
 /* @vscode/webview-ui-toolkit/react renders VSCodeButton as a bare

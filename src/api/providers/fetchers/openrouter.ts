@@ -12,6 +12,8 @@ import {
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { parseApiPrice } from "../../../shared/cost"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 /**
  * OpenRouterBaseModel
  */
@@ -94,12 +96,15 @@ type OpenRouterModelEndpointsResponse = z.infer<typeof openRouterModelEndpointsR
  * getOpenRouterModels
  */
 
-export async function getOpenRouterModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export async function getOpenRouterModels(
+	options?: ApiHandlerOptions,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
 
 	try {
-		const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models`)
+		const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models`, { signal: opts?.signal })
 		const result = openRouterModelsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 
@@ -127,6 +132,10 @@ export async function getOpenRouterModels(options?: ApiHandlerOptions): Promise<
 			models[id] = parsedModel
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(
 			`Error fetching OpenRouter models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 		)
@@ -221,6 +230,13 @@ export const parseOpenRouterModel = ({
 		supportedParameters: supportedParameters ? supportedParameters.filter(isModelParameter) : undefined,
 	}
 
+	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-pro") {
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
+		modelInfo.requiredReasoningEffort = true
+		modelInfo.reasoningEffort = "medium"
+		modelInfo.supportsTemperature = false
+	}
+
 	if (OPEN_ROUTER_REASONING_BUDGET_MODELS.has(id)) {
 		modelInfo.supportsReasoningBudget = true
 	}
@@ -261,6 +277,15 @@ export const parseOpenRouterModel = ({
 	// Set claude-opus-4.6 model to use the correct configuration
 	if (id === "anthropic/claude-opus-4.6") {
 		modelInfo.maxTokens = anthropicModels["claude-opus-4-6"].maxTokens
+	}
+
+	// Set claude-fable-5.1 model to use the correct Anthropic configuration.
+	// OpenRouter uses a dotted version suffix, unlike Anthropic's direct API.
+	if (id === "anthropic/claude-fable-5.1") {
+		modelInfo.maxTokens = anthropicModels["claude-fable-5-1"].maxTokens
+		modelInfo.supportsReasoningBudget = true
+		modelInfo.supportsReasoningBinary = true
+		modelInfo.supportsTemperature = false
 	}
 
 	// Set claude-fable-5 model to use the correct Anthropic configuration

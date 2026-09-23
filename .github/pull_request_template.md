@@ -46,7 +46,7 @@ Detail the steps to test your changes. This helps reviewers verify your work.
 
 <!--
 For UI changes to static rendered state, the primary artifact is a committed
-Playwright CT snapshot (`*.visual.tsx` in `webview-ui/`) — that baseline
+Playwright Story Gallery snapshot (`*.visual.tsx` in `webview-ui/`) — that baseline
 becomes durable regression coverage for the surface. See
 `webview-ui/AGENTS.md` for what deserves a snapshot.
 

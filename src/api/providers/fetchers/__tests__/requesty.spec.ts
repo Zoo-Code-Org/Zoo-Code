@@ -25,6 +25,32 @@ function makeRawModel(overrides: Record<string, unknown>) {
 }
 
 describe("getRequestyModels", () => {
+	it("applies Fable 5.1 overrides when parsing anthropic/claude-fable-5.1", async () => {
+		const rawFable51 = makeRawModel({
+			id: "anthropic/claude-fable-5.1",
+			max_output_tokens: 128000,
+			context_window: 1000000,
+			supports_caching: true,
+			supports_vision: true,
+			supports_reasoning: true,
+			input_price: "0.00001",
+			output_price: "0.00005",
+			caching_price: "0.0000125",
+			cached_price: "0.00000025",
+		})
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [rawFable51] } })
+
+		const models = await getRequestyModels()
+		const fable51 = models["anthropic/claude-fable-5.1"]
+
+		expect(fable51).toBeDefined()
+		expect(fable51.cacheReadsPrice).toBe(0.25)
+		expect(fable51.supportsReasoningBudget).toBe(true)
+		expect(fable51.supportsReasoningBinary).toBe(true)
+		expect(fable51.supportsTemperature).toBe(false)
+	})
+
 	it("applies Fable 5 overrides when parsing anthropic/claude-fable-5", async () => {
 		const rawFable5 = makeRawModel({
 			id: "anthropic/claude-fable-5",
@@ -113,5 +139,37 @@ describe("getRequestyModels", () => {
 
 		expect(sonnet.supportsReasoningBinary).toBeUndefined()
 		expect(sonnet.supportsTemperature).toBeUndefined()
+	})
+
+	it("passes the caller's abort signal to the catalog request", async () => {
+		const controller = new AbortController()
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
+
+		await getRequestyModels(undefined, undefined, { signal: controller.signal })
+
+		expect(mockAxiosGet).toHaveBeenCalledWith("https://router.requesty.ai/v1/models", {
+			headers: {},
+			signal: controller.signal,
+		})
+	})
+
+	it("rejects with an AbortError when the signal aborts the pending request", async () => {
+		const controller = new AbortController()
+		mockAxiosGet.mockImplementation((_url, config) => {
+			// Mirror the HTTP client: a request rejects when its signal fires,
+			// including when the signal was already aborted when the request started.
+			return new Promise<never>((_resolve, reject) => {
+				if (config?.signal?.aborted) {
+					reject(new Error("canceled"))
+					return
+				}
+				config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+			})
+		})
+
+		const fetchPromise = getRequestyModels(undefined, undefined, { signal: controller.signal })
+		controller.abort()
+
+		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
 })

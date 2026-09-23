@@ -1,8 +1,11 @@
 import { reactConfig } from "@roo-code/config-eslint/react"
+import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /** @type {import("eslint").Linter.Config} */
 export default [
 	...reactConfig,
+	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
 	{
 		rules: {
 			"@typescript-eslint/no-unused-vars": [

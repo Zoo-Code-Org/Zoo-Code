@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/chat/__tests__/TaskHeader.spec.tsx
 
 import React from "react"
@@ -42,7 +43,7 @@ const mockExtensionState: {
 	taskHistory: any[]
 } = {
 	apiConfiguration: {
-		apiProvider: "anthropic",
+		apiProvider: providerIdentifiers.anthropic,
 		apiKey: "test-api-key",
 		apiModelId: "claude-3-opus-20240229",
 	} as ProviderSettings,
@@ -75,7 +76,7 @@ let mockModelInfo: { contextWindow: number; maxTokens: number } | undefined = un
 // Mock useSelectedModel hook
 vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		id: "test-model",
 		info: mockModelInfo,
 		isLoading: false,

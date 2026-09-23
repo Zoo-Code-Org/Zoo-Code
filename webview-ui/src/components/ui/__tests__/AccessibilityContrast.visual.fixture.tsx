@@ -33,7 +33,7 @@ export function AccessibilityContrastGallery() {
 					<IconButton iconClass="codicon-settings-gear" title="Chat settings" tooltip={false} />
 				</div>
 				<Textarea aria-label="Task message" defaultValue="Audit contrast across the webview" rows={2} />
-				<div className="flex items-center justify-between gap-3">
+				<div data-testid="chat-actions" className="flex items-center justify-between gap-3">
 					<label className="flex items-center gap-2 text-sm">
 						<Checkbox aria-label="Include context" variant="description" defaultChecked />
 						Include workspace context
@@ -79,7 +79,7 @@ export function AccessibilityContrastGallery() {
 				<p data-testid="error-message" className="m-0 text-sm text-vscode-errorForeground">
 					API key is required before this provider can be used.
 				</p>
-				<div className="flex justify-end gap-2">
+				<div data-testid="settings-actions" className="flex flex-wrap justify-end gap-2">
 					<Button variant="outline">Reset</Button>
 					<Button variant="primary">Save settings</Button>
 					<Button disabled>Unavailable</Button>

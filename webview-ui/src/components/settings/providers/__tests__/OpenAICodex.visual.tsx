@@ -1,7 +1,5 @@
-import React from "react"
-
 import { expect, test } from "../../../../../playwright/coverage-fixture"
-import { OpenAICodexFixture } from "./OpenAICodex.visual.fixture"
+import { mountedStory } from "../../../../../playwright/mounted-story"
 
 const themes = [
 	{
@@ -24,7 +22,7 @@ const themes = [
 
 for (const theme of themes) {
 	test(`renders both OpenAI Codex speeds in the VS Code ${theme.name} theme`, async ({ mount }) => {
-		const component = await mount(<OpenAICodexFixture />)
+		const component = mountedStory(await mount("openai-codex"))
 		const selectors = component.getByTestId("openai-codex-service-tier")
 		const comboboxes = component.getByRole("combobox", { name: "Speed" })
 		const selector = selectors.first()

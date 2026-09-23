@@ -20,7 +20,7 @@ const validFixture: WebviewThemeFixture = {
 	},
 }
 
-test("serializeThemeFixture sorts variables and emits stable metadata", () => {
+void test("serializeThemeFixture sorts variables and emits stable metadata", () => {
 	const fixture: WebviewThemeFixture = {
 		themeId: "Default Dark Modern",
 		bodyClass: "vscode-dark",
@@ -45,7 +45,7 @@ test("serializeThemeFixture sorts variables and emits stable metadata", () => {
 	)
 })
 
-test("findDriftedFixtures reports missing and changed files in sorted order", () => {
+void test("findDriftedFixtures reports missing and changed files in sorted order", () => {
 	const expected = new Map([
 		["vscode-theme-light.css", "light"],
 		["vscode-theme-dark.css", "dark"],
@@ -55,7 +55,7 @@ test("findDriftedFixtures reports missing and changed files in sorted order", ()
 	assert.deepEqual(findDriftedFixtures(expected, actual), ["vscode-theme-dark.css", "vscode-theme-light.css"])
 })
 
-test("createSerializedFixtures rejects incomplete captures", () => {
+void test("createSerializedFixtures rejects incomplete captures", () => {
 	const fixture: WebviewThemeFixture = {
 		...validFixture,
 		variables: {
@@ -71,7 +71,7 @@ test("createSerializedFixtures rejects incomplete captures", () => {
 	)
 })
 
-test("createSerializedFixtures rejects an empty capture", () => {
+void test("createSerializedFixtures rejects an empty capture", () => {
 	assert.throws(
 		() =>
 			createSerializedFixtures(new Map([["dark", { ...validFixture, variables: {} }]]), "1.100.0", [
@@ -81,7 +81,7 @@ test("createSerializedFixtures rejects an empty capture", () => {
 	)
 })
 
-test("createSerializedFixtures rejects the wrong theme identity", () => {
+void test("createSerializedFixtures rejects the wrong theme identity", () => {
 	assert.throws(
 		() =>
 			createSerializedFixtures(

@@ -76,6 +76,50 @@ describe("OpenRouter API", () => {
 
 			nockDone()
 		})
+
+		it("passes the caller's abort signal to the catalog request", async () => {
+			const controller = new AbortController()
+
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: [] } })
+
+			await getOpenRouterModels(undefined, { signal: controller.signal })
+
+			expect(getSpy).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", { signal: controller.signal })
+
+			getSpy.mockRestore()
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockImplementation((_url, config) => {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getOpenRouterModels(undefined, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+
+			getSpy.mockRestore()
+		})
+
+		it("requests the catalog without a signal when none is provided", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: [] } })
+
+			const models = await getOpenRouterModels()
+
+			expect(getSpy).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", { signal: undefined })
+			expect(models).toEqual({})
+
+			getSpy.mockRestore()
+		})
 	})
 
 	describe("getOpenRouterModelEndpoints", () => {
@@ -266,6 +310,33 @@ describe("OpenRouter API", () => {
 	})
 
 	describe("parseOpenRouterModel", () => {
+		it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])(
+			"applies required Astra request constraints to %s",
+			(id) => {
+				const result = parseOpenRouterModel({
+					id,
+					model: {
+						name: "GPT-6 Astra",
+						description: "Test model",
+						context_length: 1_050_000,
+						max_completion_tokens: 128_000,
+						pricing: { prompt: "0.00001", completion: "0.00005" },
+					},
+					inputModality: ["text", "image"],
+					outputModality: ["text"],
+					maxTokens: 128_000,
+					supportedParameters: ["reasoning", "reasoning_effort", "tools"],
+				})
+
+				expect(result).toMatchObject({
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+					supportsTemperature: false,
+				})
+			},
+		)
+
 		it("sets claude-sonnet-4.6 model to Anthropic max tokens", () => {
 			const mockModel = {
 				name: "Claude Sonnet 4.6",
@@ -313,6 +384,35 @@ describe("OpenRouter API", () => {
 
 			expect(result.maxTokens).toBe(128000)
 			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsReasoningBudget).toBe(true)
+			expect(result.supportsReasoningBinary).toBe(true)
+		})
+
+		it("sets claude-fable-5.1 model to Anthropic max tokens and omits temperature", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-fable-5.1",
+				model: {
+					name: "Claude Fable 5.1",
+					description: "Test model",
+					context_length: 1000000,
+					max_completion_tokens: 128000,
+					pricing: {
+						prompt: "0.00001",
+						completion: "0.00005",
+						input_cache_read: "0.00000025",
+						input_cache_write: "0.0000125",
+					},
+				},
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: 128000,
+				supportedParameters: ["reasoning", "reasoning_effort", "include_reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.cacheReadsPrice).toBe(0.25)
 			expect(result.supportsTemperature).toBe(false)
 			expect(result.supportsReasoningBudget).toBe(true)
 			expect(result.supportsReasoningBinary).toBe(true)

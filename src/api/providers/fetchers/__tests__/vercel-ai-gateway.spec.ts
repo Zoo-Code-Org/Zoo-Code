@@ -77,7 +77,9 @@ describe("Vercel AI Gateway Fetchers", () => {
 
 			const models = await getVercelAiGatewayModels()
 
-			expect(mockedAxios.get).toHaveBeenCalledWith("https://ai-gateway.vercel.sh/v1/models")
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://ai-gateway.vercel.sh/v1/models", {
+				signal: undefined,
+			})
 			expect(Object.keys(models)).toHaveLength(2) // Only language models
 			expect(models["anthropic/claude-sonnet-4"]).toBeDefined()
 			expect(models["anthropic/claude-3.5-haiku"]).toBeDefined()
@@ -110,6 +112,37 @@ describe("Vercel AI Gateway Fetchers", () => {
 			expect(models).toEqual({})
 			expect(consoleErrorSpy).toHaveBeenCalled()
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("passes the caller's abort signal to the catalog request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockResolvedValueOnce({ data: { object: "list", data: [] } })
+
+			await getVercelAiGatewayModels(undefined, { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://ai-gateway.vercel.sh/v1/models", {
+				signal: controller.signal,
+			})
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a request rejects when its signal fires,
+				// including when the signal was already aborted when the request started.
+				return new Promise<never>((_resolve, reject) => {
+					if (config?.signal?.aborted) {
+						reject(new Error("canceled"))
+						return
+					}
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getVercelAiGatewayModels(undefined, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 		})
 
 		it("continues processing with partially valid schema", async () => {
@@ -162,6 +195,31 @@ describe("Vercel AI Gateway Fetchers", () => {
 				output: "10.00",
 			},
 		}
+
+		it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-fast"])(
+			"applies required Astra request constraints to %s",
+			(id) => {
+				const result = parseVercelAiGatewayModel({
+					id,
+					model: {
+						...baseModel,
+						id,
+						name: "GPT-6 Astra",
+						owned_by: "openai",
+						context_window: 1_050_000,
+						max_tokens: 128_000,
+						tags: ["reasoning", "tool-use", "vision"],
+					},
+				})
+
+				expect(result).toMatchObject({
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+					supportsTemperature: false,
+				})
+			},
+		)
 
 		it("parses basic model info correctly", () => {
 			const result = parseVercelAiGatewayModel({
@@ -218,6 +276,29 @@ describe("Vercel AI Gateway Fetchers", () => {
 
 			expect(result.maxTokens).toBe(128000)
 			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+		})
+
+		it("marks Claude Fable 5.1 as not supporting temperature and parses its cache pricing", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-fable-5.1",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-fable-5.1",
+					context_window: 1000000,
+					max_tokens: 128000,
+					pricing: {
+						input: "0.00001",
+						output: "0.00005",
+						input_cache_write: "0.0000125",
+						input_cache_read: "0.00000025",
+					},
+				},
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.cacheReadsPrice).toBe(0.25)
 			expect(result.supportsTemperature).toBe(false)
 		})
 

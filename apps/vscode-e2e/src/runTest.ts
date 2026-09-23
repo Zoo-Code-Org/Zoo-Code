@@ -231,4 +231,7 @@ async function main() {
 	}
 }
 
-main()
+main().catch((error) => {
+	console.error("Failed to initialize or clean up tests", error)
+	process.exitCode = 1
+})

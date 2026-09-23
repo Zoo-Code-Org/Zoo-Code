@@ -1,3 +1,5 @@
+import { providerIdentifiers } from "./provider-identifiers.js"
+
 /**
  * Image generation model constants
  */
@@ -16,12 +18,28 @@ export interface ImageGenerationModel {
 
 export const IMAGE_GENERATION_MODELS: ImageGenerationModel[] = [
 	// OpenRouter models
-	{ value: "google/gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "openrouter" },
-	{ value: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview", provider: "openrouter" },
-	{ value: "openai/gpt-5-image", label: "GPT-5 Image", provider: "openrouter" },
-	{ value: "openai/gpt-5-image-mini", label: "GPT-5 Image Mini", provider: "openrouter" },
-	{ value: "black-forest-labs/flux.2-flex", label: "Black Forest Labs FLUX.2 Flex", provider: "openrouter" },
-	{ value: "black-forest-labs/flux.2-pro", label: "Black Forest Labs FLUX.2 Pro", provider: "openrouter" },
+	{
+		value: "google/gemini-2.5-flash-image",
+		label: "Gemini 2.5 Flash Image",
+		provider: providerIdentifiers.openrouter,
+	},
+	{
+		value: "google/gemini-3-pro-image-preview",
+		label: "Gemini 3 Pro Image Preview",
+		provider: providerIdentifiers.openrouter,
+	},
+	{ value: "openai/gpt-5-image", label: "GPT-5 Image", provider: providerIdentifiers.openrouter },
+	{ value: "openai/gpt-5-image-mini", label: "GPT-5 Image Mini", provider: providerIdentifiers.openrouter },
+	{
+		value: "black-forest-labs/flux.2-flex",
+		label: "Black Forest Labs FLUX.2 Flex",
+		provider: providerIdentifiers.openrouter,
+	},
+	{
+		value: "black-forest-labs/flux.2-pro",
+		label: "Black Forest Labs FLUX.2 Pro",
+		provider: providerIdentifiers.openrouter,
+	},
 ]
 
 /**
@@ -32,7 +50,7 @@ export const IMAGE_GENERATION_MODEL_IDS = IMAGE_GENERATION_MODELS.map((m) => m.v
 /**
  * Image generation provider type
  */
-export type ImageGenerationProvider = "openrouter"
+export type ImageGenerationProvider = typeof providerIdentifiers.openrouter
 
 /**
  * Get the image generation provider with backwards compatibility
@@ -44,5 +62,5 @@ export function getImageGenerationProvider(
 	explicitProvider: ImageGenerationProvider | undefined,
 	_hasExistingModel: boolean,
 ): ImageGenerationProvider {
-	return explicitProvider !== undefined ? explicitProvider : "openrouter"
+	return explicitProvider !== undefined ? explicitProvider : providerIdentifiers.openrouter
 }

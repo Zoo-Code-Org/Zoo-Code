@@ -1,8 +1,5 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { Checkbox } from "@/components/ui/checkbox"
-import { enabledChatControlClassName } from "../chatControlStyles"
+import { mountedStory } from "../../../../playwright/mounted-story"
 
 const themes = [
 	{
@@ -31,20 +28,12 @@ const themes = [
 
 for (const theme of themes) {
 	test(`renders remaining controls in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("theme-token-cleanup"))
 		await page.evaluate(({ bodyClass, themeId }) => {
 			document.documentElement.className = bodyClass
 			document.body.className = bodyClass
 			document.body.dataset.vscodeThemeId = themeId
 		}, theme)
-
-		const component = await mount(
-			<div className="flex flex-col gap-3 w-96">
-				<button aria-label="Settings" className={enabledChatControlClassName}>
-					Settings
-				</button>
-				<Checkbox aria-label="Include optional context" variant="description" checked />
-			</div>,
-		)
 
 		await component.evaluate(async () => {
 			await document.fonts.ready
