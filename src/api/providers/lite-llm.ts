@@ -22,7 +22,13 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	throwIfAborted,
+} from "./utils/abort-signal"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { getRequestTimeoutMs } from "./utils/request-timeout"
 
@@ -141,7 +147,29 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// discovery (getModels/refreshModels) begins.
 		throwIfAborted(metadata?.abortSignal)
 
-		const { id: modelId, info } = await this.fetchModel()
+		// Model discovery is shared single-flight (RouterProvider.fetchModel):
+		// concurrent callers join one in-flight fetch, so the fetch itself
+		// carries no request signal — one caller's abort would reject other
+		// requests' shared discovery. Cancellation during discovery is a
+		// rejectOnAbort race: this request settles promptly with AbortError
+		// while the shared fetch keeps running.
+		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
+		try {
+			if (metadata?.abortSignal) {
+				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes abort errors via createAbortError("LiteLLM"), so no observable outcome can depend on the parameter value.
+				model = await rejectOnAbort(this.fetchModel(), metadata.abortSignal, "LiteLLM")
+			} else {
+				model = await this.fetchModel()
+			}
+		} catch (error) {
+			// An abort landing while discovery fails must still surface as the
+			// standard AbortError, not the fetcher's generic model-fetch error.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
+			throw error
+		}
+		const { id: modelId, info } = model
 
 		// Models that require reasoning_content to be echoed back during tool-call
 		// continuations (see LITELLM_PRESERVE_REASONING_MODEL_IDS) need convertToR1Format:
@@ -390,7 +418,35 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// discovery (getModels/refreshModels) begins.
 		throwIfAborted(options?.abortSignal)
 
-		const { id: modelId, info } = await this.fetchModel()
+		// Per the abort-signal series contract, the merged signal (external
+		// abort + per-request timeout, timeoutMs <= 0 disabling the timeout)
+		// also bounds model discovery: a stalled cold-cache fetch must settle
+		// with AbortError when the caller cancels or the timeout elapses.
+		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
+		// Model discovery is shared single-flight (RouterProvider.fetchModel):
+		// concurrent callers join one in-flight fetch, so the fetch itself
+		// carries no request signal — one caller's abort would reject other
+		// requests' shared discovery. Cancellation during discovery is a
+		// rejectOnAbort race: this request settles promptly with AbortError
+		// while the shared fetch keeps running.
+		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
+		try {
+			if (requestAbortSignal) {
+				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes abort errors via createAbortError("LiteLLM"), so no observable outcome can depend on the parameter value.
+				model = await rejectOnAbort(this.fetchModel(), requestAbortSignal, "LiteLLM")
+			} else {
+				model = await this.fetchModel()
+			}
+		} catch (error) {
+			// An abort landing while discovery fails must still surface as the
+			// standard AbortError, not the fetcher's generic model-fetch error.
+			if (isRequestAborted(error, requestAbortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
+			throw error
+		}
+		const { id: modelId, info } = model
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
 		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi

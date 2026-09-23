@@ -2,8 +2,9 @@ import OpenAI from "openai"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import { LiteLLMHandler } from "../lite-llm"
+import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
-import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
+import { type ModelRecord, litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
@@ -1446,10 +1447,18 @@ describe("LiteLLMHandler", () => {
 
 		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {
 			const controller = new AbortController()
+			// Readiness barrier: resolves once the SDK call has started, so the
+			// abort lands while the request is in flight — not during model
+			// discovery, which now settles via the rejectOnAbort race first.
+			let requestStartedResolve!: () => void
+			const requestStarted = new Promise<void>((resolve) => {
+				requestStartedResolve = resolve
+			})
 			// The request stays pending until the external signal aborts it; the
 			// mock rejects with a plain (non-abort) error once the signal has
 			// aborted, so the catch block must classify it via signal.aborted.
 			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				requestStartedResolve()
 				const signal = options?.signal
 				return new Promise<string>((_resolve, reject) => {
 					const fail = () => reject(new Error("LiteLLM API error"))
@@ -1461,8 +1470,10 @@ describe("LiteLLMHandler", () => {
 				})
 			})
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
-			// Abort while the (pending) request is in flight — after entry, so the
-			// pre-abort fast-fail does not apply and the catch block handles it.
+			// Abort while the (pending) request is in flight — after discovery and
+			// entry, so the pre-abort fast-fail and the discovery race do not
+			// settle it first and the catch block handles the SDK rejection.
+			await requestStarted
 			controller.abort()
 			const error = await promise.catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
@@ -1594,10 +1605,16 @@ describe("LiteLLMHandler", () => {
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
 			expect(capturedSignal).toBeDefined()
 			expect(capturedSignal?.aborted).toBe(true)
-			// The bridge (RequestConfigBuilder.addMergedSignal) uses AbortSignal.any,
-			// so the external signal must never be managed with manual listeners.
-			expect(addEventListenerSpy).not.toHaveBeenCalled()
-			expect(removeEventListenerSpy).not.toHaveBeenCalled()
+			// The streaming bridge (RequestConfigBuilder.addMergedSignal) uses
+			// AbortSignal.any. The only manual listener on the external signal is
+			// the transient discovery-race listener (rejectOnAbort); it must be
+			// detached by the time the request settles — no listener may outlive
+			// the request. Exactly one registration proves the streaming bridge
+			// itself adds no manual listeners of its own.
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const registeredListener = addEventListenerSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(typeof registeredListener).toBe("function")
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", registeredListener)
 		})
 
 		it("should wrap a non-abort stream failure with the i18n-free provider message and no metadata", async () => {
@@ -1621,6 +1638,283 @@ describe("LiteLLMHandler", () => {
 				handler.createMessage("system", messages, makeCreateMessageMetadata()),
 			).catch((e: unknown) => e)
 			expect((error as Error).message).toBe("LiteLLM streaming error: boom")
+		})
+	})
+
+	describe("model discovery cancellation (rejectOnAbort)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("settles with AbortError when the external signal aborts during model discovery", async () => {
+			// The shared single-flight discovery fetch is in flight (a cold-cache
+			// model fetch that never settles): the request must not wait for it.
+			const discoveryStarted = new Promise<void>((resolve) => {
+				vi.mocked(getModels).mockImplementationOnce(
+					() =>
+						new Promise<ModelRecord>(() => {
+							resolve()
+						}),
+				)
+			})
+			const controller = new AbortController()
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await discoveryStarted
+			controller.abort()
+
+			// Bound the wait so a broken discovery race fails this test fast
+			// (and fails the Stryker mutant) instead of hanging.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("discovery abort deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("preserves the model-fetch error when discovery fails without an abort", async () => {
+			const boom = new Error(
+				"Failed to fetch LiteLLM models: No response from server. Check LiteLLM server status and base URL.",
+			)
+			vi.mocked(getModels).mockRejectedValueOnce(boom)
+
+			const error = await collectStream(
+				handler.createMessage(
+					"system",
+					messages,
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				),
+			).catch((e: unknown) => e)
+			// Exact identity: a non-abort discovery failure must not be wrapped
+			// or misclassified as a cancellation.
+			expect(error).toBe(boom)
+		})
+
+		it("preserves the model-fetch error when discovery fails and no metadata is passed", async () => {
+			const boom = new Error(
+				"Failed to fetch LiteLLM models: No response from server. Check LiteLLM server status and base URL.",
+			)
+			vi.mocked(getModels).mockRejectedValueOnce(boom)
+
+			const error = await collectStream(handler.createMessage("system", messages)).catch((e: unknown) => e)
+			// The catch's re-classification must read the signal through the
+			// optional chain: a bare `metadata.abortSignal` would throw a
+			// TypeError here instead of surfacing the fetcher's error.
+			expect(error).toBe(boom)
+		})
+
+		it("normalizes a fetcher AbortError-shaped discovery failure to the standard AbortError", async () => {
+			// A low-level transport can reject with an AbortError-named error that
+			// is not the standard abort message (the SDK's DOMException shape).
+			// The catch must normalize it via the isRequestAborted error-name
+			// branch even though the signal never aborted.
+			vi.mocked(getModels).mockRejectedValueOnce(
+				Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+			)
+
+			const error = await collectStream(
+				handler.createMessage(
+					"system",
+					messages,
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				),
+			).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("normalizes to AbortError when the signal aborts while discovery is failing", async () => {
+			// Discovery rejects only once the signal aborts: whichever settles the
+			// race first (the abort listener or the forwarded failure), the
+			// surfaced error must be the standard AbortError.
+			const controller = new AbortController()
+			const discoveryStarted = new Promise<void>((resolve) => {
+				vi.mocked(getModels).mockImplementationOnce(
+					() =>
+						new Promise<ModelRecord>((_resolve, reject) => {
+							resolve()
+							controller.signal.addEventListener(
+								"abort",
+								() => reject(new Error("Failed to fetch LiteLLM models: 503 Service Unavailable.")),
+								{ once: true },
+							)
+						}),
+				)
+			})
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await discoveryStarted
+			controller.abort()
+
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("discovery abort deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("does not let one request's abort settle a concurrent request sharing the discovery fetch", async () => {
+			// One handler: both requests join the same single-flight fetchModel.
+			let discoveryResolve!: (models: ModelRecord) => void
+			const discoveryStarted = new Promise<void>((resolve) => {
+				vi.mocked(getModels).mockImplementationOnce(
+					() =>
+						new Promise<ModelRecord>((resolveModels) => {
+							discoveryResolve = resolveModels
+							resolve()
+						}),
+				)
+			})
+			const abortedController = new AbortController()
+			const siblingController = new AbortController()
+
+			const aborted = collectStream(
+				handler.createMessage(
+					"system",
+					messages,
+					makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+				),
+			).catch((e: unknown) => e)
+			// The sibling request must keep flowing normally once the shared
+			// discovery settles.
+			mockCreate.mockImplementationOnce(() => ({
+				withResponse: vi.fn().mockResolvedValue({
+					data: asyncStreamFrom([{ choices: [{ delta: { content: "sibling" } }], usage: undefined }]),
+				}),
+			}))
+			const sibling = collectStream(
+				handler.createMessage(
+					"system",
+					messages,
+					makeCreateMessageMetadata({ abortSignal: siblingController.signal }),
+				),
+			).catch((e: unknown) => e)
+
+			await discoveryStarted
+			abortedController.abort()
+
+			const abortedError = await aborted
+			expect((abortedError as Error).name).toBe("AbortError")
+
+			// The shared fetch still runs (the discovery promise is still
+			// pending, which this test owns), so the sibling request cannot
+			// have settled yet.
+			let siblingSettled = false
+			void sibling.then(() => {
+				siblingSettled = true
+			})
+			expect(siblingSettled).toBe(false)
+
+			// ...and settles normally once the shared discovery resolves.
+			discoveryResolve({ [litellmDefaultModelId]: litellmDefaultModelInfo })
+			const siblingResult = await sibling
+			expect(siblingResult).toBeInstanceOf(Array)
+			const siblingStream = siblingResult as Array<{ type: string; text?: string }>
+			expect(siblingStream.filter((chunk) => chunk.type === "text").map((chunk) => chunk.text)).toEqual([
+				"sibling",
+			])
+		})
+
+		it("settles completePrompt with AbortError when the signal aborts during model discovery", async () => {
+			const discoveryStarted = new Promise<void>((resolve) => {
+				vi.mocked(getModels).mockImplementationOnce(
+					() =>
+						new Promise<ModelRecord>(() => {
+							resolve()
+						}),
+				)
+			})
+			const controller = new AbortController()
+
+			const collector = handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			await discoveryStarted
+			controller.abort()
+
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("discovery abort deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("settles completePrompt with AbortError when timeoutMs elapses during model discovery", async () => {
+			// A per-request timeout bounds discovery as well: a stalled cold-cache
+			// fetch must not outlive the requested timeout.
+			vi.mocked(getModels).mockImplementationOnce(() => new Promise<ModelRecord>(() => {}))
+
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("timeout deadline exceeded")), 3000)
+				handler.completePrompt("test prompt", { timeoutMs: 50 }).then(
+					() => {
+						clearTimeout(deadline)
+						resolve(new Error("completePrompt unexpectedly resolved"))
+					},
+					(e) => {
+						clearTimeout(deadline)
+						resolve(e)
+					},
+				)
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+		})
+
+		it("preserves the model-fetch error when completePrompt's discovery fails without a signal", async () => {
+			// No abort signal and no timeout: a plain fetcher failure surfaces
+			// unwrapped (the SDK section's completion-error wrap does not cover
+			// discovery) and must never be reclassified as a cancellation.
+			const boom = new Error("Failed to fetch LiteLLM models: No response from server.")
+			vi.mocked(getModels).mockRejectedValueOnce(boom)
+
+			const error = await handler.completePrompt("test prompt").catch((e: unknown) => e)
+			expect(error).toBe(boom)
+		})
+
+		it("normalizes a fetcher AbortError-shaped discovery failure in completePrompt", async () => {
+			// As in createMessage: the discovery catch is the only re-classifier
+			// on this path (the SDK section's catch does not cover discovery), so
+			// an AbortError-named fetcher failure must normalize to the standard
+			// AbortError even though the signal never aborted.
+			vi.mocked(getModels).mockRejectedValueOnce(
+				Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+			)
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
 		})
 	})
 
