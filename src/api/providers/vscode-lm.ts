@@ -14,7 +14,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared/vsCodeSelectorUtils"
 import { normalizeToolSchema } from "../../utils/json-schema"
 
-import { ApiStream } from "../transform/stream"
+import { ApiStream, ApiStreamChunk } from "../transform/stream"
 import { convertToVsCodeLmMessages, extractTextCountFromMessage } from "../transform/vscode-lm-format"
 
 import { BaseProvider } from "./base-provider"
@@ -66,6 +66,450 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * }
  * ```
  */
+/**
+ * Recovery for leaked tool calls
+ * ------------------------------
+ * Some VS Code LM backends — notably GitHub Copilot serving Anthropic Claude models —
+ * intermittently stream a tool call as PLAIN TEXT using Anthropic's internal function-call
+ * XML instead of emitting a structured `LanguageModelToolCallPart`. When this happens the
+ * assistant turn contains no tool_use block, so Zoo reports "no tools used" and the task stalls
+ * in a retry loop. The helpers below detect the leaked markup mid-stream and replay it as a real
+ * tool call. Recovery is deliberately conservative: only `<invoke>` blocks whose name matches a
+ * tool we actually offered this turn are treated as calls; everything else is passed through
+ * unchanged as text.
+ *
+ * SCOPE: only the WRAPPED variant — an `<invoke>` inside an open `<function_calls>` wrapper — is
+ * recovered. A bare, unwrapped `<invoke>` is deliberately left as text: we have no observation of
+ * this backend emitting one, while quoted examples and prompt-injected file content routinely
+ * contain bare markup, so passing it through is the safer default rather than a security boundary.
+ * Widening to the bare case needs a reproduction first.
+ */
+/** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
+const MAX_PARTIAL_INVOKE_CARRY = 64
+
+/**
+ * Left-to-right scan state behind the quoting heuristics: open code fence, current line start,
+ * backticks seen on the current line, and whether a `<function_calls>` wrapper is open.
+ *
+ * State is threaded through the match loop and advanced only over newly consumed text. Rebuilding
+ * each candidate's prefix and re-walking it was quadratic in message length on ordinary output.
+ */
+class QuotingScanState {
+	private openFence: { marker: string; width: number } | null = null
+	private wrapperOpen = false
+	/** Text of the line now being scanned, up to the point the scan has reached. */
+	sameLineBefore = ""
+
+	/** Consumes the next contiguous span of the stream. Spans must not overlap or skip text. */
+	advance(span: string): void {
+		const lines = span.split("\n")
+		for (const [index, line] of lines.entries()) {
+			const lineStart = this.sameLineBefore.length
+			const fenceBeforeLine = this.openFence
+			this.sameLineBefore += line
+			// A wrapper opener shown as an example must not arm wrapped-only recovery for a later
+			// bare invoke, so tags are read in source order and openers are ignored in quoted code.
+			// A wrapper tag admits only whitespace before its `>`, so it never straddles a span
+			// boundary, which always falls on the `<` of an `<invoke>` marker.
+			for (const wrapperTag of line.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
+				const textBeforeTag = this.sameLineBefore.slice(0, lineStart + wrapperTag.index)
+				if (this.insideInlineSpanAt(textBeforeTag)) {
+					continue
+				}
+				// A closer can only ever suppress recovery, so honour it even inside a fence.
+				if (wrapperTag[1] !== "") {
+					this.wrapperOpen = false
+				} else if (fenceBeforeLine === null && !/^ {0,3}(?:`{3,}|~{3,})/.test(this.sameLineBefore)) {
+					this.wrapperOpen = true
+				}
+			}
+			if (index < lines.length - 1) {
+				this.openFence = this.fenceAfterCurrentLine()
+				this.sameLineBefore = ""
+			}
+		}
+	}
+
+	/** True when the stream so far ends inside an open Markdown code fence. */
+	isInsideCodeFence(): boolean {
+		return this.fenceAfterCurrentLine() !== null
+	}
+
+	/** True when the stream so far ends inside an inline code span. */
+	hasOddBacktickCountOnLine(): boolean {
+		return this.insideInlineSpanAt(this.sameLineBefore)
+	}
+
+	/** CommonMark: a code span closes only on a backtick run of the SAME width that opened it. */
+	private insideInlineSpanAt(prefix: string): boolean {
+		let activeWidth = 0
+		for (const run of prefix.matchAll(/`+/g)) {
+			const width = run[0].length
+			if (activeWidth === 0) {
+				activeWidth = width
+			} else if (width === activeWidth) {
+				activeWidth = 0
+			}
+		}
+		return activeWidth !== 0
+	}
+
+	isInsideFunctionCallsWrapper(): boolean {
+		return this.wrapperOpen
+	}
+
+	/** Fence state including the partial line now being scanned, which may itself open a fence. */
+	private fenceAfterCurrentLine(): { marker: string; width: number } | null {
+		// The scanned line never contains a newline, so the run's suffix is simply the rest of it.
+		const fenceMatch = this.sameLineBefore.match(/^ {0,3}(`{3,}|~{3,})/)
+		if (!fenceMatch) {
+			return this.openFence
+		}
+		const marker = fenceMatch[1][0]
+		const width = fenceMatch[1].length
+		const suffix = this.sameLineBefore.slice(fenceMatch[0].length)
+		if (!this.openFence) {
+			// CommonMark: a backtick opening fence's info string may not contain a backtick.
+			return marker === "`" && suffix.includes("`") ? null : { marker, width }
+		}
+		// CommonMark allows an info string only on an opening fence, never a closing one.
+		const closesFence = marker === this.openFence.marker && width >= this.openFence.width && suffix.trim() === ""
+		return closesFence ? null : this.openFence
+	}
+}
+
+/**
+ * Strips well-formed tags, including nested ones. Removing a tag can reassemble a live-looking tag
+ * from the characters around it (`<<invoke>>`), so tags are matched with a single-pass stack rather
+ * than by re-replacing until the text stops changing.
+ */
+function stripTagsCompletely(text: string): string {
+	let output = ""
+	// Bodies of `<` runs still awaiting a `>`; an unterminated one is never a tag, so it is emitted verbatim.
+	const pendingTags: string[] = []
+	for (let iter = 0; iter < text.length; iter += 1) {
+		const character = text[iter]
+		if (character === "<") {
+			pendingTags.push("")
+		} else if (character === ">" && pendingTags.length > 0) {
+			pendingTags.pop()
+		} else if (pendingTags.length > 0) {
+			pendingTags[pendingTags.length - 1] += character
+		} else {
+			output += character
+		}
+	}
+	for (const pending of pendingTags) {
+		output += `<${pending}`
+	}
+	return output
+}
+
+/**
+ * Returns the length of a trailing fragment that might be the start of a leaked tool-call marker
+ * split across stream chunks. Such a tail is held back until more text arrives so the marker can
+ * be detected intact.
+ */
+export function trailingPartialToolMarkerLength(text: string): number {
+	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
+	if (partialTag) {
+		return partialTag[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialTag[0].length : 0
+	}
+	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
+	// latch on the next chunk, bounded so ordinary prose is never swallowed.
+	const partialInvoke = text.match(/<(?:antml:)?invoke\b[^<>]*$/i)
+	return partialInvoke && partialInvoke[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialInvoke[0].length : 0
+}
+
+/**
+ * Words that mark nearby markup as being talked about rather than invoked.
+ */
+const QUOTING_CUE_PATTERN =
+	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b/gi
+
+/**
+ * True when a quoting cue falls in the unterminated final sentence of `sameLineBefore`. Pairing the
+ * cue with a terminator-free tail in one pattern re-scanned that tail once per cue.
+ */
+function hasQuotingCue(sameLineBefore: string): boolean {
+	const lastTerminator = Math.max(
+		sameLineBefore.lastIndexOf("."),
+		sameLineBefore.lastIndexOf("!"),
+		sameLineBefore.lastIndexOf("?"),
+	)
+	for (const cue of sameLineBefore.matchAll(QUOTING_CUE_PATTERN)) {
+		if (cue.index + cue[0].length > lastTerminator) {
+			return true
+		}
+	}
+	return false
+}
+
+/**
+ * True when the block ending at `endIndex` is being quoted — inside a fenced code block, inside an
+ * inline code span, or embedded mid-sentence in plain prose — rather than invoked.
+ *
+ * `scan` must already be advanced to the start of the block.
+ */
+function isQuotedAsCode(text: string, endIndex: number, scan: QuotingScanState): boolean {
+	if (scan.isInsideCodeFence() || scan.hasOddBacktickCountOnLine()) {
+		return true
+	}
+	// Narrative words after the block on the same line mean the markup is being talked about
+	// (e.g. "never emit <invoke ...> directly"), which must not be replayed as a live call.
+	const lineEnd = text.indexOf("\n", endIndex)
+	const restOfLine = text.slice(endIndex, lineEnd === -1 ? undefined : lineEnd)
+	if (stripTagsCompletely(restOfLine).trim().length > 0) {
+		return true
+	}
+	// A quoted invoke that ENDS its line leaves no trailing text to judge, and a real leak is
+	// commonly narrated too — keying off leading prose alone regressed genuine recoveries, so only
+	// this narrow cue suppresses it.
+	return hasQuotingCue(stripTagsCompletely(scan.sameLineBefore))
+}
+
+/**
+ * JSON Schema (draft 2020-12 subset) for one tool's parameters, keyed by tool name. Supplied by
+ * `createMessage` from the very schemas offered to the model, so recovery converts a leaked
+ * parameter to the type the tool actually declares.
+ */
+export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | undefined>
+
+/**
+ * Non-string JSON Schema types a leaked parameter may be converted into, each paired with the
+ * check that a parsed value must satisfy. A null-only declaration is settled by its own branch in
+ * `convertLeakedParamValue` and so has no entry here.
+ */
+function structuredParamCheck(declaredType: string): ((parsed: unknown) => boolean) | undefined {
+	const checks: Record<string, (parsed: unknown) => boolean> = {
+		object: (parsed) => typeof parsed === "object" && !Array.isArray(parsed),
+		array: (parsed) => Array.isArray(parsed),
+		number: (parsed) => Number.isFinite(parsed),
+		integer: (parsed) => Number.isInteger(parsed),
+		boolean: (parsed) => typeof parsed === "boolean",
+	}
+	// Own-property only: a schema declaring `"toString"` would otherwise inherit a live function
+	// from Object.prototype and be treated as a supported type.
+	return Object.hasOwn(checks, declaredType) ? checks[declaredType] : undefined
+}
+
+/** A resolved declaration, or `undefined` when the schema does not pin down a single type. */
+type DeclaredType = { type: string; nullable: boolean }
+
+/** Resolves a `["T","null"]` type union to `T` while reporting that null is permitted. */
+function resolveTypeUnion(types: string[]): DeclaredType | undefined {
+	const nullable = types.includes("null")
+	const nonNullTypes = types.filter((entry) => entry !== "null")
+	// A null-only union has no non-null member; leaving the type unresolved would fall back to the
+	// raw string "null", so name the null type and let convertLeakedParamValue settle it.
+	if (nonNullTypes.length === 0) {
+		return nullable ? { type: "null", nullable } : undefined
+	}
+	// Two or more non-null members leave the intended type ambiguous; picking one would coerce the
+	// value to a type the tool may not accept, so the raw string is kept instead.
+	return nonNullTypes.length === 1 ? { type: nonNullTypes[0], nullable } : undefined
+}
+
+/**
+ * Declared type of `paramName`, resolving a nullable `["T","null"]` union to `T` while reporting
+ * that null is permitted, so an explicit null is not mistaken for a wrong-typed value.
+ *
+ * MCP schemas reach this provider already rewritten by `normalizeToolSchema`, which turns such a
+ * union into typed `anyOf` branches. Without reading that form a declared array or object would
+ * fall through to the raw string, and the tool would receive `'["a","b"]'` instead of a list.
+ */
+function declaredParamType(schema: Record<string, unknown> | undefined, paramName: string): DeclaredType | undefined {
+	const properties = schema?.["properties"] as Record<string, unknown> | undefined
+	const property = properties?.[paramName] as Record<string, unknown> | undefined
+	const type = property?.["type"]
+	if (typeof type === "string") {
+		// A bare declaration permits null only when the type IS "null", which convertLeakedParamValue
+		// settles on its own before reading this flag.
+		return { type, nullable: false }
+	}
+	if (Array.isArray(type)) {
+		return resolveTypeUnion(type.filter((entry): entry is string => typeof entry === "string"))
+	}
+	const alternatives = property?.["anyOf"]
+	if (Array.isArray(alternatives)) {
+		const branchTypes: string[] = []
+		for (const alternative of alternatives) {
+			const branchType = (alternative as Record<string, unknown> | null)?.["type"]
+			// Any branch that is not a simple named type (nested composition, $ref, enum-only) makes
+			// the union unsupported here; bail out rather than guess at a partial reading.
+			if (typeof branchType !== "string") {
+				return undefined
+			}
+			branchTypes.push(branchType)
+		}
+		return resolveTypeUnion(branchTypes)
+	}
+	return undefined
+}
+
+/**
+ * Converts one leaked parameter's raw text to the type its schema declares.
+ *
+ * Leaked markup carries no types — every value arrives as text — so a tool declaring an object or
+ * array (`update_todo_list.todos`, `read_file.indentation`) would otherwise receive a flat string
+ * and fail downstream. Only declared non-string types are JSON-parsed; a declared (or unknown)
+ * string stays literal, because parsing every value would silently turn the text `"123"` or
+ * `"null"` into a number or null. A value that does not parse, or parses to the wrong type, is
+ * reported as a failure so the caller can pass the block through as text rather than dispatch a
+ * malformed call.
+ */
+function convertLeakedParamValue(raw: string, declared: DeclaredType | undefined): { value: unknown } | undefined {
+	if (declared === undefined || declared.type === "string") {
+		return { value: raw }
+	}
+	// A null-only declaration admits the literal null and nothing else, so no parse is needed.
+	if (declared.type === "null") {
+		return raw === "null" ? { value: null } : undefined
+	}
+	const matchesDeclaredType = structuredParamCheck(declared.type)
+	if (!matchesDeclaredType) {
+		return undefined
+	}
+
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch {
+		return undefined
+	}
+
+	// Must precede the table, whose object check would otherwise accept a null.
+	if (parsed === null) {
+		return declared.nullable ? { value: null } : undefined
+	}
+
+	return matchesDeclaredType(parsed) ? { value: parsed } : undefined
+}
+
+/**
+ * Parses the parameters of a leaked `<invoke>` body against the tool's schema. Returns `undefined`
+ * when any parameter cannot be converted, so the whole block is failed closed to unchanged text.
+ */
+function parseLeakedInvokeParams(
+	body: string,
+	schema: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const input: Record<string, unknown> = {}
+	const paramPattern = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
+	let consumedUpTo = 0
+	for (const match of body.matchAll(paramPattern)) {
+		const name = match[1]
+		// A `<parameter` token in the gap before this match is an opener the pattern could not
+		// parse, so recovering would dispatch a call missing an argument the model wrote.
+		if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo, match.index ?? 0))) {
+			return undefined
+		}
+		// A nested unclosed `<parameter` inside the captured value means the lazy pattern swallowed
+		// markup as data and dropped the inner parameter, so fail closed rather than dispatch it.
+		if (/<(?:antml:)?parameter\b/i.test(match[2])) {
+			return undefined
+		}
+		// A repeated name means injected markup split the block into adjacent well-formed matches,
+		// which would silently rebind an argument to an attacker-chosen value.
+		if (Object.hasOwn(input, name)) {
+			return undefined
+		}
+		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
+		if (!converted) {
+			return undefined
+		}
+		input[name] = converted.value
+		consumedUpTo = (match.index ?? 0) + match[0].length
+	}
+	// An unclosed parameter tag is skipped by the pattern above, so recovering would dispatch a
+	// call missing an argument the model wrote; fail closed instead.
+	if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo))) {
+		return undefined
+	}
+	if (schema !== undefined) {
+		const props = schema.properties
+		if (props === null || props === undefined || typeof props !== "object" || Array.isArray(props)) {
+			return undefined
+		}
+		for (const k of Object.keys(input)) {
+			if (!Object.hasOwn(props as Record<string, unknown>, k)) {
+				return undefined
+			}
+		}
+	}
+	return input
+}
+
+/**
+ * Extracts complete leaked `<invoke>` tool-call blocks from `text`. Only blocks whose name
+ * is present in `validTools` are returned as calls; all other text (including `<invoke>`
+ * blocks for unknown names) is returned as `leftoverText` so legitimate prose is preserved.
+ *
+ * `validTools` may be a bare name set (no schemas, so every parameter stays a literal string) or a
+ * map from tool name to its parameter schema, which enables typed conversion.
+ */
+export function extractLeakedToolCalls(
+	text: string,
+	validTools: ReadonlySet<string> | LeakedToolSchemas,
+	precedingText = "",
+): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
+	const schemaFor = (name: string) =>
+		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
+	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
+	// Text outside recovered blocks, in stream order.
+	let leftover = ""
+	let lastIndex = 0
+
+	// Quote detection needs the text streamed before the buffer, since a fence may have opened
+	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	let scannedUpTo = 0
+
+	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
+	const closePattern = /<\/(?:antml:)?invoke\s*>/gi
+	for (let open = openPattern.exec(text); open !== null; open = openPattern.exec(text)) {
+		const bodyStart = open.index + open[0].length
+		closePattern.lastIndex = bodyStart
+		const close = closePattern.exec(text)
+		// With no closing tag after this open there is none after any later open either.
+		if (!close) {
+			break
+		}
+		const blockEnd = close.index + close[0].length
+		leftover += text.slice(lastIndex, open.index)
+		const name = open[1]
+		scan.advance(text.slice(scannedUpTo, open.index))
+		// Only text outside invoke bodies may move parser state, otherwise markup quoted in one
+		// block could open a wrapper or fence that changes the verdict on a later block.
+		scannedUpTo = blockEnd
+		const recoverable =
+			validTools.has(name) && scan.isInsideFunctionCallsWrapper() && !isQuotedAsCode(text, blockEnd, scan)
+		// Parsing may still fail closed when a parameter doesn't match its declared type.
+		const input = recoverable
+			? parseLeakedInvokeParams(text.slice(bodyStart, close.index), schemaFor(name))
+			: undefined
+		if (input) {
+			calls.push({ name, input })
+		} else {
+			// Not one of our tools, quoted as code, or un-convertible — keep the block as literal text.
+			leftover += text.slice(open.index, blockEnd)
+		}
+		lastIndex = blockEnd
+		openPattern.lastIndex = blockEnd
+	}
+	leftover += text.slice(lastIndex)
+
+	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
+	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
+	// With nothing recovered the same tags are user-visible prose and must survive verbatim.
+	if (calls.length > 0) {
+		leftover = leftover.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "")
+	}
+
+	return { calls, leftoverText: leftover }
+}
+
 export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: vscode.LanguageModelChat | null
