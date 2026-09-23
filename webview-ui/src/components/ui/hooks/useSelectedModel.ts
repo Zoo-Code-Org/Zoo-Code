@@ -453,11 +453,11 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.ioIntelligence: {
-			const id = getValidatedModelId(
-				apiConfiguration.ioIntelligenceModelId,
-				routerModels[providerIdentifiers.ioIntelligence],
-				defaultModelId,
-			)
+			// A configured id is the user's explicit selection (ModelPicker's
+			// "Use custom model" path stores ids absent from the fetched catalog)
+			// and the handler sends requests with it, so keep it instead of
+			// displaying a default model that requests do not use.
+			const id = apiConfiguration.ioIntelligenceModelId || defaultModelId
 			const info = routerModels[providerIdentifiers.ioIntelligence]?.[id] ?? ioIntelligenceDefaultModelInfo
 			return { id, info }
 		}

@@ -1163,12 +1163,41 @@ describe("useSelectedModel", () => {
 				() =>
 					useSelectedModel({
 						apiProvider: providerIdentifiers.ioIntelligence,
-						ioIntelligenceModelId: "missing-model",
+						// ioIntelligenceModelId intentionally omitted
 					}),
 				{ wrapper: createWrapper() },
 			)
 
 			expect(result.current.id).toBe(ioIntelligenceDefaultModelId)
+			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
+		})
+
+		it("preserves a configured model ID that is absent from the fetched catalog", () => {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					"io-intelligence": {
+						"meta-llama/Llama-3.3-70B-Instruct": {
+							maxTokens: 8_192,
+							contextWindow: 131_072,
+							supportsPromptCache: false,
+						},
+					},
+				}),
+			)
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.ioIntelligence,
+						ioIntelligenceModelId: "custom-org/custom-model",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			// The stored id is what requests are sent with, so the picker must show it
+			// rather than the default; only the metadata falls back.
+			expect(result.current.id).toBe("custom-org/custom-model")
 			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
 		})
 	})
