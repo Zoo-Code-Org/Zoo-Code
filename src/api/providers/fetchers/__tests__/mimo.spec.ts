@@ -132,6 +132,19 @@ describe("getMimoModels", () => {
 		)
 	})
 
+	it("omits the Authorization header when no apiKey is provided", async () => {
+		const fetchSpy = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: [] }),
+		})
+		globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+		await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1")
+
+		const fetchInit = fetchSpy.mock.calls[0]?.[1] as RequestInit
+		expect(fetchInit.headers).not.toHaveProperty("Authorization")
+	})
+
 	it("mixes known and unknown models in same response", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,

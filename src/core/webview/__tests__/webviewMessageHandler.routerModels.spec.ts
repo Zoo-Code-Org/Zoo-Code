@@ -636,6 +636,46 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
+	it("fetches only MiMo for a single-provider request with stored credentials", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options?: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.mimo) {
+				return { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+			}
+			return {}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.mimo },
+		})
+
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls).toHaveLength(1)
+		expect(mimoCalls[0][0]).toEqual({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		// Filtered responses carry only the requested provider's entry.
+		expect(Object.keys(response[0].routerModels)).toEqual([providerIdentifiers.mimo])
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
 	it("flushes MiMo cache when explicit credentials are provided via message values", async () => {
 		getModelsMock.mockResolvedValue({
 			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
