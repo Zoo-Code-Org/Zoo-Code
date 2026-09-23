@@ -52,12 +52,13 @@ export const bedrockModels = {
 		],
 	},
 	"anthropic.claude-sonnet-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
 		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
@@ -186,11 +187,13 @@ export const bedrockModels = {
 		],
 	},
 	"anthropic.claude-opus-4-7": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -210,11 +213,13 @@ export const bedrockModels = {
 		],
 	},
 	"anthropic.claude-opus-4-8": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -236,12 +241,13 @@ export const bedrockModels = {
 		],
 	},
 	"anthropic.claude-opus-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
@@ -259,6 +265,7 @@ export const bedrockModels = {
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		inputPrice: 10.0,
 		outputPrice: 50.0,
@@ -271,12 +278,13 @@ export const bedrockModels = {
 			"Claude Fable 5.1 extends Fable 5 with stronger long-running agentic coding, multistep research, and document work.",
 	},
 	"anthropic.claude-fable-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		inputPrice: 10.0,
 		outputPrice: 50.0,

@@ -1522,6 +1522,56 @@ describe("Context Management", () => {
 			expect(result).toBe(false)
 		})
 
+		// A raised output ceiling also raises the reserve subtracted from the context window,
+		// so it lowers the input budget and makes condensing trigger earlier.
+		it("keeps a workable input budget with the clamped 40k reserve on a 200K window", () => {
+			// allowedTokens = 200_000 * 0.9 - 40_000 = 140_000.
+			const options = {
+				contextWindow: 200_000,
+				maxTokens: 40_000,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 50,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			}
+
+			expect(willManageContext({ ...options, totalTokens: 139_999 })).toBe(false)
+			expect(willManageContext({ ...options, totalTokens: 140_001 })).toBe(true)
+		})
+
+		it("would collapse the input budget if the 200K reserve were left unclamped", () => {
+			// Reserving the full 128_000 on a 200K window leaves only 52_000 for input.
+			const unclampedReserve = willManageContext({
+				totalTokens: 139_999,
+				contextWindow: 200_000,
+				maxTokens: 128_000,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 50,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+
+			expect(unclampedReserve).toBe(true)
+		})
+
+		it("leaves the 1M-context models with a large input budget at the full 128k reserve", () => {
+			// allowedTokens = 900_000 - 128_000 = 772_000.
+			const result = willManageContext({
+				totalTokens: 700_000,
+				contextWindow: 1_000_000,
+				maxTokens: 128_000,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 50,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+
+			expect(result).toBe(false)
+		})
+
 		it("should treat a negative maxTokens (vscode-lm reports -1) as the default reserve, not -1", () => {
 			// A -1 reserve must be treated as unknown (default reserve), not kept as -1.
 			const result = willManageContext({

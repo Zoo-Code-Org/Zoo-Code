@@ -114,6 +114,16 @@ export const getModelMaxOutputTokens = ({
 	settings?: ProviderSettings
 	format?: "anthropic" | "openai" | "gemini" | "openrouter"
 }): number | undefined => {
+	// Binary-reasoning models think server-side even with reasoning off, so the hybrid
+	// defaults below leave no room for a thinking pass: resolve from their own ceiling.
+	if (model.supportsReasoningBinary && model.maxTokens) {
+		if (settings?.modelMaxTokens != null && settings.modelMaxTokens > 0) {
+			return Math.min(settings.modelMaxTokens, model.maxTokens)
+		}
+
+		return Math.min(model.maxTokens, Math.ceil(model.contextWindow * 0.2))
+	}
+
 	if (shouldUseReasoningBudget({ model, settings })) {
 		return settings?.modelMaxTokens || DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS
 	}

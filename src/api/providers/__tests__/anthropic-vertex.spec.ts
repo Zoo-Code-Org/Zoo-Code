@@ -984,7 +984,7 @@ describe("VertexHandler", () => {
 
 			const model = handler.getModel()
 			expect(model.id).toBe("claude-fable-5")
-			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.maxTokens).toBe(128_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
@@ -1019,7 +1019,7 @@ describe("VertexHandler", () => {
 
 			const model = handler.getModel()
 			expect(model.id).toBe("claude-sonnet-5")
-			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.maxTokens).toBe(128_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
@@ -1036,7 +1036,7 @@ describe("VertexHandler", () => {
 
 			const model = handler.getModel()
 			expect(model.id).toBe("claude-opus-5")
-			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.maxTokens).toBe(128_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
