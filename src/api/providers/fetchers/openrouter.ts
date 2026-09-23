@@ -207,8 +207,10 @@ export async function getOpenRouterModelEndpoints(
  * `moonshotai/kimi-k3` id.
  */
 export const applyOpenRouterMoonshotK3Profile = (modelId: string, modelInfo: ModelInfo): ModelInfo => {
-	const moonshotK3Models = new Set<string>(["moonshotai/kimi-k3", "~moonshotai/kimi-latest"])
-	if (!moonshotK3Models.has(modelId)) {
+	// Direct comparisons instead of a Set: this runs for every model record during parsing and
+	// again at consumption time, so the common non-K3 case must not pay a per-call allocation.
+	// Same shape as the gpt-6-astra guard in parseOpenRouterModel.
+	if (modelId !== "moonshotai/kimi-k3" && modelId !== "~moonshotai/kimi-latest") {
 		return modelInfo
 	}
 	const moonshotK3Profile: Partial<ModelInfo> = {

@@ -18,6 +18,9 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { providerIdentifiers } from "@roo-code/types"
+import type { ModelInfo } from "@roo-code/types"
+
+import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
@@ -335,6 +338,51 @@ describe("OpenRouterHandler", () => {
 		})
 	})
 
+	describe("applyOpenRouterMoonshotK3Profile", () => {
+		// Stale cache record shape: fabricated 0.2 context-window max_tokens and a
+		// boolean supportsReasoningEffort with no default effort (pre-profile).
+		const staleK3Record: ModelInfo = {
+			maxTokens: 209_716,
+			contextWindow: 1_000_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+			inputPrice: 0.6,
+			outputPrice: 3,
+			description: "Kimi K3 (stale cache)",
+			supportsReasoningEffort: true,
+		}
+
+		it("applies the profile to the exact moonshotai/kimi-k3 id", () => {
+			const result = applyOpenRouterMoonshotK3Profile("moonshotai/kimi-k3", { ...staleK3Record })
+
+			expect(result.maxTokens).toBe(32_768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1.0)
+			// Unprofiled fields pass through from the (stale) record
+			expect(result.contextWindow).toBe(1_000_000)
+			expect(result.description).toBe("Kimi K3 (stale cache)")
+		})
+
+		it("applies the profile to the tilde-prefixed rolling alias", () => {
+			const result = applyOpenRouterMoonshotK3Profile("~moonshotai/kimi-latest", { ...staleK3Record })
+
+			// The catalogue keeps the ~ prefix on the rolling alias id, so the profile
+			// must recognize the exact string rather than a stripped or bare alias
+			expect(result.maxTokens).toBe(32_768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1.0)
+		})
+
+		it("leaves non-K3 model records untouched", () => {
+			const record: ModelInfo = { ...staleK3Record }
+
+			expect(applyOpenRouterMoonshotK3Profile("moonshotai/kimi-k2-thinking", record)).toBe(record)
+		})
+	})
 	describe("createMessage", () => {
 		it("generates correct stream chunks", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
