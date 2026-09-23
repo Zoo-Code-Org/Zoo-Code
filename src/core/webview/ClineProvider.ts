@@ -3627,16 +3627,30 @@ export class ClineProvider
 					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!)
 
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
+						// Refresh the child after acquiring the parent transition lock. The pre-abort
+						// history snapshot can be stale if another serialized path interrupted it.
+						historyItem =
+							this.taskHistoryStore.get(task.taskId) ??
+							(await this.getTaskWithId(task.taskId)).historyItem
 						// Mark the child interrupted and leave parent delegated with awaitingChildId
 						// intact — the user can resume this child later and it will report back.
-						historyItem = interruptDelegatedChild(parentHistory, historyItem!)
-						await this.updateTaskHistory(historyItem)
+						// A previous cancellation may already have persisted the interrupted status
+						// before its caller lost the response. Treat that replay as success without
+						// weakening the lifecycle state machine's self-loop rejection.
+						if (historyItem!.status !== "interrupted") {
+							historyItem = interruptDelegatedChild(parentHistory, historyItem!)
+							await this.updateTaskHistory(historyItem)
+							this.log(
+								`[cancelTask] Marked child ${task.taskId} interrupted; parent ${task.parentTaskId} stays delegated`,
+							)
+						} else {
+							this.log(
+								`[cancelTask] Child ${task.taskId} is already interrupted; parent ${task.parentTaskId} stays delegated`,
+							)
+						}
 						// Clear any stale fail-closed entry from a prior failed cancel attempt so
 						// reopenParentFromDelegation is not incorrectly blocked on resume.
 						this.cancelledDelegationChildIds.delete(task.taskId)
-						this.log(
-							`[cancelTask] Marked child ${task.taskId} interrupted; parent ${task.parentTaskId} stays delegated`,
-						)
 					}
 				})
 			} catch (error) {

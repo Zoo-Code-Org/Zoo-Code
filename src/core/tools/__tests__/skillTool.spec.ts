@@ -18,6 +18,7 @@ describe("skillTool", () => {
 		}
 
 		mockTask = {
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			didToolFailInCurrentTurn: false,
@@ -67,11 +68,19 @@ describe("skillTool", () => {
 				skill: "non-existent",
 			},
 		}
+		mockTask.getTaskMode.mockResolvedValue("code")
+		mockTask.providerRef.deref = vi.fn().mockReturnValue({
+			getState: vi.fn().mockResolvedValue({ mode: "orchestrator" }),
+			getSkillsManager: vi.fn().mockReturnValue(mockSkillsManager),
+		})
 
 		mockSkillsManager.getSkillContent.mockResolvedValue(null)
 		mockSkillsManager.getSkillsForMode.mockReturnValue([{ name: "create-mcp-server" }])
 
 		await skillTool.handle(mockTask as Task, block, mockCallbacks)
+
+		expect(mockSkillsManager.getSkillContent).toHaveBeenCalledWith("non-existent", "code")
+		expect(mockSkillsManager.getSkillsForMode).toHaveBeenCalledWith("code")
 
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
 			formatResponse.toolError("Skill 'non-existent' not found. Available skills: create-mcp-server"),
@@ -109,6 +118,11 @@ describe("skillTool", () => {
 				skill: "create-mcp-server",
 			},
 		}
+		mockTask.getTaskMode.mockResolvedValue("code")
+		mockTask.providerRef.deref = vi.fn().mockReturnValue({
+			getState: vi.fn().mockResolvedValue({ mode: "orchestrator" }),
+			getSkillsManager: vi.fn().mockReturnValue(mockSkillsManager),
+		})
 
 		const mockSkillContent = {
 			name: "create-mcp-server",
@@ -120,6 +134,8 @@ describe("skillTool", () => {
 		mockSkillsManager.getSkillContent.mockResolvedValue(mockSkillContent)
 
 		await skillTool.handle(mockTask as Task, block, mockCallbacks)
+
+		expect(mockSkillsManager.getSkillContent).toHaveBeenCalledWith("create-mcp-server", "code")
 
 		expect(mockCallbacks.askApproval).toHaveBeenCalledWith(
 			"tool",

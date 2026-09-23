@@ -12,6 +12,8 @@ import {
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { parseApiPrice } from "../../../shared/cost"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 /**
  * OpenRouterBaseModel
  */
@@ -94,12 +96,15 @@ type OpenRouterModelEndpointsResponse = z.infer<typeof openRouterModelEndpointsR
  * getOpenRouterModels
  */
 
-export async function getOpenRouterModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export async function getOpenRouterModels(
+	options?: ApiHandlerOptions,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
 
 	try {
-		const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models`)
+		const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models`, { signal: opts?.signal })
 		const result = openRouterModelsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 
@@ -127,6 +132,10 @@ export async function getOpenRouterModels(options?: ApiHandlerOptions): Promise<
 			models[id] = parsedModel
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(
 			`Error fetching OpenRouter models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 		)
