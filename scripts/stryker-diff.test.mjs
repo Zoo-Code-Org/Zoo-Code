@@ -10,11 +10,13 @@ import {
 	MAX_CHANGED_LINES,
 	MAX_MUTANTS,
 	PACKAGE_CONFIGS,
+	appendSummary,
 	buildManifest,
 	discoverRelatedTestFiles,
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
+	formatAdvisoryCommand,
 	formatAnnotationCommand,
 	formatBlockingMutants,
 	formatSummary,
@@ -36,8 +38,12 @@ import {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 describe("mutation testing workflow", () => {
+	const readWorkflow = () =>
+		fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+	const shouldRun = ({ eventName, draft }) => eventName === "merge_group" || draft === false
+
 	it("checks out the pull request merge result from the base repository", () => {
-		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+		const workflow = readWorkflow()
 
 		assert.ok(workflow.includes("    pull_request:"))
 		assert.ok(!workflow.includes("pull_request_target:"))
@@ -51,8 +57,121 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
 		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
+		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
+		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
+		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
+		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
+		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
+		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
+	})
+
+	it("waits until a draft pull request is ready before emitting mutation annotations", () => {
+		const workflow = readWorkflow()
+
+		assert.ok(workflow.includes("types: [edited, opened, reopened, ready_for_review, synchronize]"))
+		assert.ok(
+			workflow.includes("if: github.event_name == 'merge_group' || github.event.pull_request.draft == false"),
+		)
+
+		const draftToReadyRuns = [
+			{ eventName: "pull_request", action: "opened", draft: true },
+			{ eventName: "pull_request", action: "ready_for_review", draft: false },
+		].filter(shouldRun)
+
+		assert.deepEqual(
+			draftToReadyRuns.map(({ action }) => action),
+			["ready_for_review"],
+		)
+	})
+
+	it("retains mutation testing for reviewable pull request updates and the merge queue", () => {
+		for (const action of ["opened", "ready_for_review", "synchronize", "reopened"]) {
+			assert.equal(shouldRun({ eventName: "pull_request", draft: false }), true, action)
+		}
+		assert.equal(shouldRun({ eventName: "merge_group" }), true, "merge queue")
+	})
+})
+
+function createSyntheticPullRequestRepository() {
+	const repository = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-diff-revision-"))
+	const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+	const write = (filePath, contents) => {
+		fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+		fs.writeFileSync(path.join(repository, filePath), contents)
+	}
+
+	run("init", "--quiet", "--initial-branch", "main")
+	run("config", "user.email", "gate@example.com")
+	run("config", "user.name", "Gate")
+	run("config", "commit.gpgsign", "false")
+
+	write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
+	write("packages/core/src/feature.ts", "export const feature = () => 1\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "initial")
+	const eventBaseSha = run("rev-parse", "HEAD")
+
+	run("checkout", "--quiet", "-b", "pull-request")
+	write("packages/core/src/feature.ts", "export const feature = () => 2\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "pull request change")
+
+	// The upstream change lands after the pull_request event recorded its base SHA, which is what
+	// made the stale event base attribute unrelated main-only lines to the pull request.
+	run("checkout", "--quiet", "main")
+	write("packages/core/src/unrelated.ts", "export const unrelated = () => 99\n")
+	run("add", ".")
+	run("commit", "--quiet", "-m", "unrelated upstream change")
+	const upstreamSha = run("rev-parse", "HEAD")
+
+	run("merge", "--quiet", "--no-ff", "-m", "merge pull request", "pull-request")
+	const mergeSha = run("rev-parse", "HEAD")
+
+	return { repository, eventBaseSha, upstreamSha, mergeSha }
+}
+
+describe("pull request revision selection", () => {
+	it("excludes unrelated upstream files by diffing from the merge commit's first parent", () => {
+		const { repository, eventBaseSha, upstreamSha, mergeSha } = createSyntheticPullRequestRepository()
+
+		// A failed assertion must still remove the temporary repository, or a failing run leaks it.
+		try {
+			const manifest = selectFromGit(repository, eventBaseSha, mergeSha)
+			const changedPaths = manifest.packages.flatMap((entry) => entry.files.map((file) => file.path))
+
+			assert.deepEqual(changedPaths, ["packages/core/src/feature.ts"])
+			assert.equal(manifest.baseSha, upstreamSha)
+			assert.equal(manifest.mergeBase, upstreamSha)
+
+			// Selectors must stay aligned with the checked-out head content.
+			assert.equal(manifest.headSha, mergeSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.selectors),
+				["src/feature.ts:1-1"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the supplied base for non-merge heads such as manual runs", () => {
+		const { repository, eventBaseSha, upstreamSha } = createSyntheticPullRequestRepository()
+
+		try {
+			const manifest = selectFromGit(repository, eventBaseSha, upstreamSha)
+
+			assert.equal(manifest.baseSha, eventBaseSha)
+			assert.equal(manifest.mergeBase, eventBaseSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unrelated.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
 	})
 })
 
@@ -154,7 +273,7 @@ describe("buildManifest", () => {
 			() => "@@ -1 +1 @@\n",
 		)
 
-		assert.deepEqual(manifest, { packages: [] })
+		assert.deepEqual(manifest, { packages: [], advisories: [] })
 	})
 
 	it("fails rather than skipping a package over the changed-line cap", () => {
@@ -168,6 +287,17 @@ describe("buildManifest", () => {
 				),
 			/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
 		)
+	})
+
+	it("reports invalid mutation exclusions without bypassing executable-line accounting", () => {
+		const manifest = buildManifest(
+			[{ status: "A", path: "packages/core/src/value.ts" }],
+			() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
+			() => "",
+		)
+
+		assert.equal(manifest.packages[0].changedExecutableLines, 1)
+		assert.match(manifest.advisories.join("\n"), /broad or unreasoned exclusions are not allowed/)
 	})
 })
 
@@ -248,7 +378,6 @@ describe("shouldUseVitestRelated", () => {
 		assert.equal(shouldUseVitestRelated({ testFiles: [] }), true)
 	})
 })
-
 
 describe("related-test discovery", () => {
 	it("keeps Stryker's temp directory relative to each run root", () => {
@@ -397,6 +526,51 @@ describe("selectFromGit", () => {
 			fs.rmSync(repo, { recursive: true, force: true })
 		}
 	})
+
+	it("does not charge intervening base-branch changes to the pull request", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-stale-base-"))
+		const runGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim()
+
+		try {
+			runGit("init", "--initial-branch=main")
+			runGit("config", "user.name", "Mutation Test")
+			runGit("config", "user.email", "mutation@example.com")
+			fs.mkdirSync(path.join(repo, "packages/core/src"), { recursive: true })
+			fs.writeFileSync(path.join(repo, "packages/core/src/pr.ts"), "export const pr = false\n")
+			fs.writeFileSync(path.join(repo, "packages/core/src/base.ts"), "export const base = false\n")
+			runGit("add", ".")
+			runGit("commit", "-m", "initial")
+			const staleBaseSha = runGit("rev-parse", "HEAD")
+
+			runGit("checkout", "-b", "feature")
+			fs.writeFileSync(path.join(repo, "packages/core/src/pr.ts"), "export const pr = true\n")
+			runGit("commit", "-am", "change pull request")
+
+			runGit("checkout", "main")
+			fs.writeFileSync(path.join(repo, "packages/core/src/base.ts"), "export const base = true\n")
+			runGit("commit", "-am", "advance base branch")
+			const currentBaseSha = runGit("rev-parse", "HEAD")
+			runGit("merge", "--no-ff", "feature", "-m", "synthetic pull request merge")
+			const mergeSha = runGit("rev-parse", "HEAD")
+			const mergeResultBaseSha = runGit("rev-parse", `${mergeSha}^1`)
+			assert.equal(mergeResultBaseSha, currentBaseSha)
+
+			// A stale base is normalized to the merge's first parent, so the advanced base branch
+			// file is not charged to the pull request.
+			assert.deepEqual(
+				selectFromGit(repo, staleBaseSha, mergeSha).packages[0].files.map(({ path: filePath }) => filePath),
+				["packages/core/src/pr.ts"],
+			)
+			assert.deepEqual(
+				selectFromGit(repo, mergeResultBaseSha, mergeSha).packages[0].files.map(
+					({ path: filePath }) => filePath,
+				),
+				["packages/core/src/pr.ts"],
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
 })
 
 describe("mutation exclusions", () => {
@@ -457,7 +631,7 @@ describe("failure output", () => {
 		},
 	]
 
-	it("lists every blocking mutant with tests, reproduction, exclusion, and report guidance", () => {
+	it("lists every advisory mutant with tests, reproduction, exclusion, and report guidance", () => {
 		const baseSha = "a".repeat(40)
 		const headSha = "b".repeat(40)
 		const summary = formatSummary(
@@ -475,10 +649,10 @@ describe("failure output", () => {
 					survived: 2,
 					noCoverage: 1,
 					blocking,
-					result: "Failed",
+					result: "Advisory findings",
 				},
 			],
-			["extension has blocking mutants"],
+			["extension has advisory mutants"],
 			{ baseSha, headSha },
 		)
 
@@ -491,6 +665,7 @@ describe("failure output", () => {
 		assert.ok(summary.includes("Stryker disable next-line ConditionalExpression:"))
 		assert.ok(summary.includes("`reports/mutation/extension/mutation.html`"))
 		assert.ok(summary.includes("`changed-code-mutation-report` artifact"))
+		assert.ok(summary.includes("### Advisory findings"))
 	})
 
 	it("caps annotations without truncating the grouped summary", () => {
@@ -509,6 +684,43 @@ describe("failure output", () => {
 			assert.ok(annotations.filter((annotation) => annotation.file === file).length <= 7)
 		}
 		for (const mutant of manyMutants) assert.ok(grouped.includes(mutant.mutatorName))
+	})
+
+	it("emits one distinguishable annotation per source location", () => {
+		const mutants = [
+			blocking[2],
+			blocking[1],
+			{
+				filePath: "utils/other.ts",
+				status: "NoCoverage",
+				mutatorName: "ConditionalExpression",
+				replacement: "true",
+				location: { start: { line: 9 } },
+			},
+			blocking[0],
+		]
+		const originalOrder = [...mutants]
+		const annotations = formatAnnotations(mutants, "src")
+
+		assert.equal(annotations.length, 2)
+		assert.deepEqual(mutants, originalOrder)
+		assert.match(
+			annotations[0].message,
+			/^src\/core\/value\.ts:4: 2 mutation test gaps; example: NoCoverage StringLiteral mutant \(replacement: "left \| right"\)/,
+		)
+		assert.match(
+			annotations[1].message,
+			/^src\/utils\/other\.ts:9: 2 mutation test gaps; example: Survived BooleanLiteral mutant \(replacement: false\)/,
+		)
+	})
+
+	it("prefixes singleton annotations with their source location", () => {
+		const [annotation] = formatAnnotations([blocking[2]], "src")
+
+		assert.equal(
+			annotation.message,
+			"src/utils/other.ts:9: Survived BooleanLiteral mutant (replacement: false). See the job summary for the complete list and resolution guidance.",
+		)
 	})
 
 	it("shares annotation limits across packages", () => {
@@ -548,7 +760,14 @@ describe("failure output", () => {
 
 		assert.equal(
 			command,
-			"::error file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test gap::Survived mutant (replacement: left, right). 100%25 reproducible.",
+			"::warning file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test advisory::Survived mutant (replacement: left, right). 100%25 reproducible.",
+		)
+	})
+
+	it("escapes aggregated advisory warnings", () => {
+		assert.equal(
+			formatAdvisoryCommand("preflight failed: 100%\nretry"),
+			"::warning title=Mutation test advisory::preflight failed: 100%25%0Aretry",
 		)
 	})
 
@@ -558,27 +777,100 @@ describe("failure output", () => {
 
 		try {
 			fs.mkdirSync(path.join(repo, "packages/core"), { recursive: true })
-			assert.throws(
-				() =>
-					runManifest(
-						repo,
-						{
-							packages: [
-								{
-									id: "core",
-									root: "packages/core",
-									vitestConfig: "vitest.unit.config.ts",
-									selectors: ["src/value.ts:1-1"],
-									changedExecutableLines: 1,
-								},
-							],
-						},
-						reportRoot,
-					),
-				/core Stryker preflight could not start:.*ENOENT/,
+			assert.doesNotThrow(() =>
+				runManifest(
+					repo,
+					{
+						packages: [
+							{
+								id: "core",
+								root: "packages/core",
+								vitestConfig: "vitest.unit.config.ts",
+								selectors: ["src/value.ts:1-1"],
+								changedExecutableLines: 1,
+							},
+						],
+					},
+					reportRoot,
+				),
 			)
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("classifies successful package rows from blocking mutants", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-success-"))
+		const packageEntry = {
+			id: "core",
+			root: "packages/core",
+			vitestConfig: "vitest.unit.config.ts",
+			selectors: ["src/value.ts:1-1"],
+			changedExecutableLines: 1,
+		}
+		const execute = (report) =>
+			runManifest(repo, { packages: [{ ...packageEntry }] }, path.join(repo, "reports"), {
+				runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) =>
+					dryRunOnly ? "Instrumented 1 source file(s) with 1 mutant(s)" : "",
+				readMutationReport: () => report,
+			})[0]
+
+		try {
+			const advisoryRow = execute({
+				files: {
+					"src/value.ts": {
+						mutants: [
+							{
+								status: "Survived",
+								mutatorName: "BooleanLiteral",
+								replacement: "false",
+								location: { start: { line: 1 } },
+							},
+						],
+					},
+				},
+			})
+			assert.equal(advisoryRow.result, "Advisory findings")
+			assert.deepEqual(advisoryRow.advisories, [])
+
+			const passedRow = execute({
+				files: { "src/value.ts": { mutants: [{ status: "Killed", location: { start: { line: 1 } } }] } },
+			})
+			assert.equal(passedRow.result, "Passed")
+			assert.deepEqual(passedRow.advisories, [])
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("does not fail when the GitHub job summary cannot be written", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const summaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-summary-"))
+		process.env.GITHUB_STEP_SUMMARY = summaryDirectory
+
+		try {
+			assert.doesNotThrow(() => appendSummary([], ["advisory"], {}))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(summaryDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("emits aggregated warnings when the GitHub job summary is unavailable", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		delete process.env.GITHUB_STEP_SUMMARY
+		console.warn = (warning) => warnings.push(warning)
+
+		try {
+			appendSummary([], ["manifest invalid\nreview it"], {})
+			assert.deepEqual(warnings, ["::warning title=Mutation test advisory::manifest invalid%0Areview it"])
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
 		}
 	})
 
@@ -612,7 +904,7 @@ describe("failure output", () => {
 				replacement: "x".repeat(1_000),
 				location: { start: { line: 1 } },
 			})),
-			result: "Failed",
+			result: "Advisory findings",
 		}))
 		const summary = formatSummary(rows, ["mutation failure"], {
 			baseSha: "a".repeat(40),
@@ -627,7 +919,7 @@ describe("failure output", () => {
 describe("report evaluation", () => {
 	const packageEntry = { id: "core", root: "packages/core" }
 
-	it("fails on surviving and uncovered changed-code mutants", () => {
+	it("reports surviving and uncovered mutants through detailed annotations without a redundant aggregate", () => {
 		const report = {
 			files: {
 				"src/value.ts": {
@@ -649,37 +941,39 @@ describe("report evaluation", () => {
 			},
 		}
 
-		assert.throws(() => evaluateReport(report, packageEntry), /1 surviving and 1 uncovered/)
+		const result = evaluateReport(report, packageEntry)
+		assert.deepEqual(result.advisories, [])
 		assert.equal(formatAnnotations(mutantCounts(report).blocking, packageEntry.root).length, 2)
 	})
 
-	it("passes only killed or timed-out mutants within the cap", () => {
+	it("has no advisories for killed or limited timed-out mutants within the cap", () => {
 		const mutants = Array.from({ length: MAX_MUTANTS }, (_, index) => ({
 			status: index === 0 ? "Timeout" : "Killed",
 			location: { start: { line: index + 1 } },
 		}))
 		const counts = evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry)
 		assert.equal(counts.valid, MAX_MUTANTS)
+		assert.deepEqual(counts.advisories, [])
 	})
 
-	it("fails when valid mutants exceed the cap", () => {
+	it("reports valid mutants over the cap as advisory", () => {
 		const mutants = Array.from({ length: MAX_MUTANTS + 1 }, (_, index) => ({
 			status: "Killed",
 			location: { start: { line: index + 1 } },
 		}))
-		assert.throws(
-			() => evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry),
+		assert.match(
+			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
 		)
 	})
 
-	it("fails when timeouts could create false confidence", () => {
+	it("reports excessive timeouts as advisory", () => {
 		const mutants = Array.from({ length: 10 }, (_, index) => ({
 			status: index < 2 ? "Timeout" : "Killed",
 			location: { start: { line: index + 1 } },
 		}))
-		assert.throws(
-			() => evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry),
+		assert.match(
+			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/result is inconclusive/,
 		)
 	})
