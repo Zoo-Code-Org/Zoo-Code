@@ -452,6 +452,31 @@ describe("ClineProvider - Sticky Mode", () => {
 				}),
 			)
 		})
+
+		it("should sync the view-local mode buffer when switching modes after a restored view state", async () => {
+			// Simulate the history-restore path: saveViewState is what
+			// createTaskWithHistoryItem uses to pin a saved mode into the
+			// view-local buffer, leaving a stale mode there until the next mutation.
+			await provider.saveViewState("mode", "code")
+
+			// Global-only mode switch with no active task.
+			await provider.handleModeSwitch("architect")
+
+			// The durable global write still happens...
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+
+			// ...and the in-memory buffer must not keep serving the stale restored
+			// mode: getValues() merges viewLocalState on top of the ContextProxy
+			// values, so an unsynced buffer would hide the fresh mode from consumers.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			// The durable per-view write must land too: a regression that left the
+			// persisted entry on the stale restored mode would reload it on restart.
+			// setValue awaits the serialized write queue, so the entry is settled here.
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted.mode).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
+		})
 	})
 
 	describe("createTaskWithHistoryItem", () => {
@@ -472,14 +497,15 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Saved mode
 			}
 
-			// Mock updateGlobalState to track mode updates
-			const updateGlobalStateSpy = vi.spyOn(provider as any, "updateGlobalState").mockResolvedValue(undefined)
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
 
 			// Initialize task with history item
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify mode was restored via updateGlobalState
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was restored into the view-local pin (no shared global write)
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
 		it("should use current mode if history item has no saved mode", async () => {
@@ -760,7 +786,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify that the mode was restored
+			// Verify that history restoration reaches both the view-local pin and public state.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
 			const state = await provider.getState()
 			expect(state.mode).toBe("architect")
 
