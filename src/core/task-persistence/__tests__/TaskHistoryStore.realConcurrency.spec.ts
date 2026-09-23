@@ -4,6 +4,7 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
+import { acquireFileLock } from "../../../utils/fileLock"
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
 type WriteTaskFile = (item: HistoryItem, delta?: Partial<HistoryItem>) => Promise<HistoryItem>
@@ -363,6 +364,106 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			expect(writeBarrier.arrivals()).toBe(1)
 		} finally {
 			writeBarrier?.dispose()
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("serializes deletion with an external history-write guard holder and removes the task directory", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-guard-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const tasksDir = path.join(storagePath, "tasks")
+		const guardPath = path.join(tasksDir, ".guards", "shared-task.guard")
+		const filePath = path.join(tasksDir, "shared-task", "history_item.json")
+		const taskDir = path.join(tasksDir, "shared-task")
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+
+			// Hold the same guard that history writes hold, so the deletion
+			// must wait instead of unlinking underneath a writer.
+			const guard = await acquireFileLock(guardPath)
+			const deletion = storeB.delete("shared-task")
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			await expect(fs.access(filePath)).resolves.toBeUndefined()
+
+			await guard.release()
+			await expect(deletion).resolves.toBeUndefined()
+
+			// The guard spans the history-file unlink and the recursive
+			// directory removal.
+			await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" })
+			await expect(fs.access(taskDir)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(storeB.get("shared-task")).toBeUndefined()
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("lets a write that starts during deletion run only after the removal window", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-write-during-delete-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+
+			const deletion = storeB.delete("shared-task")
+			await vi.waitFor(() => expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" }), {
+				interval: 1,
+				timeout: 2_000,
+			})
+
+			// The write starts while the deletion still owns the task guard,
+			// so it cannot interleave with the removal of the task directory.
+			const write = storeA.upsert({ ...item("shared-task"), ts: 2000, task: "rewritten after deletion" })
+
+			await expect(deletion).resolves.toBeUndefined()
+			await expect(write).resolves.toBeDefined()
+
+			const persisted = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+			expect(persisted).toMatchObject({ id: "shared-task", task: "rewritten after deletion" })
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("deletes a task whose file lock is held live beyond the legacy retry window", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-contention-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const tasksDir = path.join(storagePath, "tasks")
+		const filePath = path.join(tasksDir, "shared-task", "history_item.json")
+		const taskDir = path.join(tasksDir, "shared-task")
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+
+			// A live holder keeps the lock mtime fresh, so staleness never
+			// breaks it. The deletion must wait out the hold instead of failing
+			// once the legacy retry budget of roughly 2.5 seconds is spent.
+			const holder = await acquireFileLock(filePath)
+			const deletion = storeB.delete("shared-task")
+			await new Promise((resolve) => setTimeout(resolve, 3_000))
+			await holder.release()
+
+			await expect(deletion).resolves.toBeUndefined()
+			await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" })
+			await expect(fs.access(taskDir)).rejects.toMatchObject({ code: "ENOENT" })
+		} finally {
 			storeA.dispose()
 			storeB.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
