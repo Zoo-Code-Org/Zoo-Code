@@ -38,6 +38,7 @@ import { getModels } from "../api/providers/fetchers/modelCache"
 
 type TaskAskController = {
 	approveAsk(): void
+	denyAsk(): void
 	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
 }
 
@@ -393,6 +394,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 
 		entry.task.approveAsk()
+		return true
+	}
+
+	/**
+	 * Denies the pending ask for a specific task by its ID.
+	 *
+	 * @returns Whether a registered task with the given ID was found and denied.
+	 */
+	public async denyTaskAsk(taskId: string): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		entry.task.denyAsk()
 		return true
 	}
 

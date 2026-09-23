@@ -547,9 +547,13 @@ export class ClineProvider
 	}
 
 	/**
-	 * Reads the registered viewStates map, returning a defensive copy.
+	 * Reads the registered viewStates map, returning a defensive copy with corrupt
+	 * entries dropped.
 	 * When fresh is set, the map is read directly from globalState (bypassing the
 	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
+	 * A corrupt entry (null or a non-object) is dropped here rather than reaching the
+	 * prune sort (which dereferences updatedAt) or the repoint destructuring, both of
+	 * which would throw and reject the surrounding mutation.
 	 */
 	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
 		const viewStates = options.fresh
@@ -560,7 +564,24 @@ export class ClineProvider
 			return {}
 		}
 
-		return { ...viewStates }
+		const states: Record<string, PersistedViewState> = {}
+		let dropped = 0
+
+		for (const [viewId, entry] of Object.entries(viewStates)) {
+			if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+				states[viewId] = entry
+			} else {
+				dropped++
+			}
+		}
+
+		if (dropped > 0) {
+			this.log(
+				`[getPersistedViewStates] dropped ${dropped} invalid viewStates ${dropped === 1 ? "entry" : "entries"}`,
+			)
+		}
+
+		return states
 	}
 
 	/**
@@ -2367,8 +2388,12 @@ export class ClineProvider
 		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 		const viewPinsDeletedProfile =
-			this.viewLocalState.currentApiConfigName === undefined ||
-			this.viewLocalState.currentApiConfigName === profileToDelete.name
+			this.viewLocalState.currentApiConfigName === profileToDelete.name ||
+			// No view-local pin: the view follows the shared selection, so it only needs the
+			// replacement activation when that shared selection referenced the deleted profile;
+			// an unrelated deletion must not rebuild this view's task handler.
+			(this.viewLocalState.currentApiConfigName === undefined &&
+				globalSettings.currentApiConfigName === profileToDelete.name)
 
 		if (viewPinsDeletedProfile) {
 			// Apply the replacement through the activation path so this view's
@@ -2380,20 +2405,14 @@ export class ClineProvider
 		}
 
 		// This view pins an unrelated profile, which must survive the deletion: sync the
-		// shared profile list and post the updated state only. The buffer already holds
-		// the surviving pin, so the current-profile slot is left untouched here: a
-		// setValue would only trigger a viewStates prune write and could clobber the pin
-		// with the shared slot's value.
+		// shared profile list and post the updated state only.
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
-		// Write the other settings in one bulk call, excluding the current-profile slot
-		// so the view-local buffer keeps the surviving pin.
-		const { currentApiConfigName: _previousApiConfigName, ...globalSettingsWithoutCurrent } = globalSettings
-
-		await this.contextProxy.setValues({
-			...globalSettingsWithoutCurrent,
-			listApiConfigMeta: entries,
-		})
+		// Write only the changed key: the shared current-profile slot is left untouched so
+		// the view-local buffer keeps the surviving pin, and the other keys (including
+		// viewStates, which concurrent views mutate directly in storage) are not replayed
+		// from the snapshot captured before the awaits above.
+		await this.contextProxy.setValue("listApiConfigMeta", entries)
 
 		await this.postStateToWebview()
 	}
@@ -3650,6 +3669,23 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		// Mirror the setValues guard for the single-key write path: the updateSettings
+		// webview handler routes every key through setValue, so an unknown mode must not
+		// bypass the shared validation and reach persistence via the viewStates write.
+		if (key === "mode" && value !== undefined) {
+			// The generic signature keeps the nominal RooCodeSettings[K] even after K is
+			// narrowed to "mode" (runtime type string | undefined); one assertion to the
+			// narrowed shape lets the shared guard type-check, mirroring setValues.
+			const modeValue = value as string | undefined
+			if (
+				typeof modeValue !== "string" ||
+				!getModeBySlug(modeValue, await this.customModesManager.getCustomModes())
+			) {
+				this.log(`[ClineProvider#setValue] Ignoring invalid mode "${String(value)}"`)
+				return
+			}
+		}
+
 		await this.contextProxy.setValue(key, value)
 		await this._saveViewLocalStateFromMutation({ [key]: value })
 	}
@@ -3776,15 +3812,37 @@ export class ClineProvider
 	 * Broadcast a reset/import invalidation to all live ClineProvider instances, clearing
 	 * both in-memory view-local caches and durable per-view selections so stale view state
 	 * cannot mask imported/reset shared state after reload.
+	 *
+	 * The durable clear runs on the serialized viewStates write queue so it is ordered
+	 * against every in-flight savePersistedViewState: a queued save that ran after a
+	 * direct clear would re-read the emptied map and re-create its captured per-view pin,
+	 * leaving a stale selection that rehydrates after a reload.
 	 */
 	async broadcastResetToAllInstances(): Promise<void> {
 		const allInstances = ClineProvider.getAllInstances()
 		for (const instance of allInstances) {
 			instance._clearViewLocalState()
-			await instance.contextProxy.setValue("viewStates", undefined)
+
+			const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+				await instance.contextProxy.setValue("viewStates", undefined)
+			})
+			ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+			await write
 
 			if (instance !== this) {
-				await instance.postStateToWebview()
+				// A sibling's post can throw mid-reset (state generation reaches the
+				// settings file through customModesManager.getCustomModes): the failure
+				// must not stop the reset from reaching the remaining instances, whose
+				// buffers are already cleared above.
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[broadcastResetToAllInstances] failed to post reset state to a sibling view: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}
 		}
 	}

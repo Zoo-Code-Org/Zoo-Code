@@ -60,6 +60,7 @@ type TaskDouble = EventEmitter & {
 	taskId: string
 	parentTaskId?: string
 	approveAsk: Mock<() => void>
+	denyAsk: Mock<() => void>
 	handleWebviewAskResponse: Mock<(response: "messageResponse", text?: string, images?: string[]) => void>
 }
 
@@ -89,6 +90,7 @@ function createTask(taskId: string): TaskDouble {
 	const task = new EventEmitter() as TaskDouble
 	task.taskId = taskId
 	task.approveAsk = vi.fn()
+	task.denyAsk = vi.fn()
 	task.handleWebviewAskResponse = vi.fn()
 	return task
 }
@@ -168,6 +170,24 @@ describe("API task controls", () => {
 
 			await expect(api.approveTaskAsk(task.taskId)).resolves.toBe(true)
 			expect(task.approveAsk).toHaveBeenCalledOnce()
+		})
+		it("denies a registered task by id", async () => {
+			const task = createTask("task-to-deny")
+
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(api.denyTaskAsk(task.taskId)).resolves.toBe(true)
+			expect(task.denyAsk).toHaveBeenCalledOnce()
+		})
+
+		it("returns false when denying an unknown or de-registered task", async () => {
+			const task = createTask("task-denied-lifecycle")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+			task.emit(RooCodeEventName.TaskCompleted, task.taskId, {}, {})
+
+			// Unknown id, and an id whose registry entry was removed on completion.
+			await expect(api.denyTaskAsk("missing-task")).resolves.toBe(false)
+			await expect(api.denyTaskAsk(task.taskId)).resolves.toBe(false)
 		})
 
 		it("removes completed, aborted, and unfocused tasks from the registry", async () => {
