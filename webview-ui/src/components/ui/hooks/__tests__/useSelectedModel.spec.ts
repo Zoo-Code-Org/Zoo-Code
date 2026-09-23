@@ -754,6 +754,7 @@ describe("useSelectedModel", () => {
 						: provider === providerIdentifiers.moonshot
 							? moonshotDefaultModelId
 							: mimoDefaultModelId
+				expect(result.current.isError).toBe(true)
 				expect(result.current.id).toBe(expectedId)
 				expect(result.current.info).toBeDefined()
 				expect(result.current.info?.contextWindow).toBeGreaterThan(0)
