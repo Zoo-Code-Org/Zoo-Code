@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import {
 	type OrganizationAllowList,
@@ -99,6 +99,8 @@ describe("IOIntelligence", () => {
 
 	beforeEach(() => vi.clearAllMocks())
 
+	afterEach(() => vi.useRealTimers())
+
 	it("renders the secret key input, CTA, and dynamic model picker", () => {
 		renderComponent({ ioIntelligenceApiKey: "stored" })
 
@@ -129,25 +131,51 @@ describe("IOIntelligence", () => {
 		expect(setApiConfigurationField).toHaveBeenCalledWith("ioIntelligenceApiKey", "new-secret")
 	})
 
-	it("refreshes models with the unsaved cached key whenever it changes", () => {
+	it("refreshes models with the unsaved cached key 250ms after it stops changing", () => {
+		vi.useFakeTimers()
+		const rerenderWithKey = (rerender: ReturnType<typeof render>["rerender"], ioIntelligenceApiKey: string) =>
+			rerender(
+				<IOIntelligence
+					apiConfiguration={{ ioIntelligenceApiKey }}
+					setApiConfigurationField={setApiConfigurationField}
+					routerModels={{ ...routerModels, "io-intelligence": {} }}
+					organizationAllowList={organizationAllowList}
+				/>,
+			)
+
 		const { rerender } = renderComponent({ ioIntelligenceApiKey: "first-key" })
+
+		act(() => vi.advanceTimersByTime(249))
+		expect(postMessageMock).not.toHaveBeenCalled()
+		act(() => vi.advanceTimersByTime(1))
+		expect(postMessageMock).toHaveBeenCalledTimes(1)
 		expect(postMessageMock).toHaveBeenLastCalledWith({
 			type: RouterModelsMessageType.requestRouterModels,
 			values: { provider: providerIdentifiers.ioIntelligence, ioIntelligenceApiKey: "first-key" },
 		})
 
-		rerender(
-			<IOIntelligence
-				apiConfiguration={{ ioIntelligenceApiKey: "unsaved-key" }}
-				setApiConfigurationField={setApiConfigurationField}
-				routerModels={{ ...routerModels, "io-intelligence": {} }}
-				organizationAllowList={organizationAllowList}
-			/>,
-		)
+		// Each edit restarts the timer, so intermediate values never reach the host.
+		rerenderWithKey(rerender, "unsaved-")
+		act(() => vi.advanceTimersByTime(200))
+		rerenderWithKey(rerender, "unsaved-key")
+		act(() => vi.advanceTimersByTime(249))
+		expect(postMessageMock).toHaveBeenCalledTimes(1)
 
+		act(() => vi.advanceTimersByTime(1))
+		expect(postMessageMock).toHaveBeenCalledTimes(2)
 		expect(postMessageMock).toHaveBeenLastCalledWith({
 			type: RouterModelsMessageType.requestRouterModels,
 			values: { provider: providerIdentifiers.ioIntelligence, ioIntelligenceApiKey: "unsaved-key" },
 		})
+	})
+
+	it("drops a pending model refresh when it unmounts", () => {
+		vi.useFakeTimers()
+		const { unmount } = renderComponent({ ioIntelligenceApiKey: "first-key" })
+
+		unmount()
+		act(() => vi.advanceTimersByTime(250))
+
+		expect(postMessageMock).not.toHaveBeenCalled()
 	})
 })

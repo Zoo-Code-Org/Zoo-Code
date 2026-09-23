@@ -1,4 +1,5 @@
-import { useCallback, useEffect } from "react"
+import { useCallback } from "react"
+import { useDebounce } from "react-use"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
@@ -47,15 +48,22 @@ export const IOIntelligence = ({
 		[setApiConfigurationField],
 	)
 
-	useEffect(() => {
-		vscode.postMessage({
-			type: RouterModelsMessageType.requestRouterModels,
-			values: {
-				provider: providerIdentifiers.ioIntelligence,
-				ioIntelligenceApiKey: apiConfiguration.ioIntelligenceApiKey,
-			},
-		})
-	}, [apiConfiguration.ioIntelligenceApiKey])
+	// Debounced model refresh, only executed 250ms after the user stops
+	// typing the key (same cadence as the provider refreshes in ApiOptions),
+	// so each keystroke does not trigger a catalog request.
+	useDebounce(
+		() => {
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.ioIntelligence,
+					ioIntelligenceApiKey: apiConfiguration.ioIntelligenceApiKey,
+				},
+			})
+		},
+		250,
+		[apiConfiguration.ioIntelligenceApiKey],
+	)
 
 	return (
 		<>
