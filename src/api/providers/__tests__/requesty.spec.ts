@@ -203,6 +203,7 @@ describe("RequestyHandler", () => {
 				...mockOptions,
 				requestyModelId: modelId,
 				customModelInfo: {
+					supportsPromptCache: false,
 					contextWindow: 100_000,
 					maxTokens: 10_000,
 				},

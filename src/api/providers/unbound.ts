@@ -84,13 +84,11 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 
 	override getModel() {
 		const id = this.options.unboundModelId ?? unboundDefaultModelId
-		const discoveredInfo = this.models[id]
-		const cachedInfo = discoveredInfo ?? unboundDefaultModelInfo
-		let info: ModelInfo = cachedInfo
+		let info: ModelInfo = this.models[id] ?? unboundDefaultModelInfo
 
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)
-		info = applyCustomModelInfo(discoveredInfo ? info : undefined, this.options) ?? info
+		info = applyCustomModelInfo(info, this.options) ?? info
 
 		const params = getModelParams({
 			format: "openai",

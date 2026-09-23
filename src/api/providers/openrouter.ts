@@ -560,19 +560,16 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	override getModel() {
 		const id = this.options.openRouterModelId ?? openRouterDefaultModelId
-		const discoveredInfo = this.models[id]
-		let hasDiscoveredInfo = discoveredInfo !== undefined
-		let info = discoveredInfo ?? openRouterDefaultModelInfo
+		let info = this.models[id] ?? openRouterDefaultModelInfo
 
 		// If a specific provider is requested, use the endpoint for that provider.
 		if (this.options.openRouterSpecificProvider && this.endpoints[this.options.openRouterSpecificProvider]) {
 			info = this.endpoints[this.options.openRouterSpecificProvider]
-			hasDiscoveredInfo = true
 		}
 
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)
-		info = applyCustomModelInfo(hasDiscoveredInfo ? info : undefined, this.options) ?? info
+		info = applyCustomModelInfo(info, this.options) ?? info
 
 		const isDeepSeekR1 = id.startsWith("deepseek/deepseek-r1") || id === "perplexity/sonar-reasoning"
 

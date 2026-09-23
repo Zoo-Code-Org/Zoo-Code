@@ -682,7 +682,7 @@
 		"customModelInfo": {
 			"title": "Custom model metadata",
 			"description": "Override context and capability metadata when the provider cannot detect your model accurately.",
-			"unresolved": "Model metadata is unavailable. Enter the context window to enable accurate token tracking.",
+			"unresolved": "This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
 			"contextWindow": {
 				"label": "Context window",
 				"description": "Total tokens the model can process, including input and output."

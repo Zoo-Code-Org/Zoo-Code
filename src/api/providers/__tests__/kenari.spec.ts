@@ -84,7 +84,7 @@ describe("KenariHandler", () => {
 		it("does not apply gateway-only custom metadata overrides", async () => {
 			const handler = new KenariHandler({
 				...mockOptions,
-				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsPromptCache: false },
 			})
 			const result = await handler.fetchModel()
 

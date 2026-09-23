@@ -190,7 +190,7 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler({
 				...mockOptions,
 				openRouterSpecificProvider: "test-provider",
-				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsPromptCache: false },
 			})
 
 			const result = await handler.fetchModel()
@@ -205,6 +205,7 @@ describe("OpenRouterHandler", () => {
 				...mockOptions,
 				openRouterModelId: modelId,
 				customModelInfo: {
+					supportsPromptCache: false,
 					contextWindow: 100_000,
 					maxTokens: 10_000,
 				},

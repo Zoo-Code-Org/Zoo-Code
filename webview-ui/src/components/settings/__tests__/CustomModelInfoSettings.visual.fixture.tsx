@@ -19,7 +19,7 @@ const translations: Record<string, string> = {
 	"settings:providers.customModelInfo.description":
 		"Override context and capability metadata when the provider cannot detect your model accurately.",
 	"settings:providers.customModelInfo.unresolved":
-		"Model metadata is unavailable. Enter the context window to enable accurate token tracking.",
+		"This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
 	"settings:providers.customModelInfo.contextWindow.label": "Context window",
 	"settings:providers.customModelInfo.contextWindow.description":
 		"Total tokens the model can process, including input and output.",
@@ -61,7 +61,7 @@ export const ExpandedWithOverridesFixture = () => (
 			<CustomModelInfoSettings
 				apiConfiguration={{
 					apiProvider: providerIdentifiers.zooGateway,
-					customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsImages: false },
+					customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsImages: false, supportsPromptCache: false },
 				}}
 				setApiConfigurationField={() => {}}
 				selectedModelInfo={selectedModelInfo}
@@ -77,7 +77,7 @@ export const WarningFixture = () => (
 			<CustomModelInfoSettings
 				apiConfiguration={{
 					apiProvider: providerIdentifiers.zooGateway,
-					customModelInfo: { contextWindow: 1000, maxTokens: 2000 },
+					customModelInfo: { contextWindow: 1000, maxTokens: 2000, supportsPromptCache: false },
 				}}
 				setApiConfigurationField={() => {}}
 				selectedModelInfo={selectedModelInfo}

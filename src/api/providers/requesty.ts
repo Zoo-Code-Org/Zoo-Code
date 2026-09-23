@@ -87,13 +87,11 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 
 	override getModel() {
 		const id = this.options.requestyModelId ?? requestyDefaultModelId
-		const discoveredInfo = this.models[id]
-		const cachedInfo = discoveredInfo ?? requestyDefaultModelInfo
-		let info: ModelInfo = cachedInfo
+		let info: ModelInfo = this.models[id] ?? requestyDefaultModelInfo
 
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)
-		info = applyCustomModelInfo(discoveredInfo ? info : undefined, this.options) ?? info
+		info = applyCustomModelInfo(info, this.options) ?? info
 
 		const params = getModelParams({
 			format: "anthropic",

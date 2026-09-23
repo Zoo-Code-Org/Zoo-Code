@@ -64,7 +64,7 @@ describe("UnboundHandler", () => {
 		expect(result.maxTokens).toBe(10_000)
 	})
 
-	it("synthesizes metadata for an unlisted configured model", async () => {
+	it("resolves an unlisted configured model from the custom snapshot", async () => {
 		const modelId = "provider/unlisted-model"
 		const handler = new UnboundHandler({
 			unboundApiKey: "test-key",
@@ -72,6 +72,7 @@ describe("UnboundHandler", () => {
 			customModelInfo: {
 				contextWindow: 100_000,
 				maxTokens: 10_000,
+				supportsPromptCache: false,
 			},
 		})
 
@@ -80,7 +81,6 @@ describe("UnboundHandler", () => {
 		expect(result.id).toBe(modelId)
 		expect(result.info.contextWindow).toBe(100_000)
 		expect(result.info.maxTokens).toBe(10_000)
-		expect(result.info.supportsImages).toBe(false)
 		expect(result.info.supportsPromptCache).toBe(false)
 		expect(result.maxTokens).toBe(10_000)
 	})

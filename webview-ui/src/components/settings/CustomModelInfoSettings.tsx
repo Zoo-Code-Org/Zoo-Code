@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { VSCodeCheckbox, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
-import { type CustomModelInfo, type ModelInfo, type ProviderSettings } from "@roo-code/types"
+import {
+	openAiModelInfoSaneDefaults,
+	toCustomModelInfo,
+	type CustomModelInfo,
+	type ModelInfo,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@src/components/ui"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -27,66 +33,52 @@ const parsePositiveInteger = (value: string): number | undefined => {
 	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-const getEventValue = (event: ValueChangeEvent): string => {
-	const target = event.target
-
-	return target && "value" in target && typeof target.value === "string" ? target.value : ""
-}
-
-const getCheckboxValue = (event: ValueChangeEvent): boolean => {
-	const target = event.target
-
-	return target && "checked" in target && typeof target.checked === "boolean" ? target.checked : false
-}
-
-const getInputBorderColor = (value: string): string | undefined => {
-	if (!value.trim()) {
-		return undefined
-	}
-
-	return parsePositiveInteger(value)
-		? "var(--vscode-testing-iconPassed)"
-		: "var(--vscode-inputValidation-errorBorder)"
-}
-
 export const CustomModelInfoSettings = ({
 	apiConfiguration,
 	setApiConfigurationField,
 	selectedModelInfo,
 }: CustomModelInfoSettingsProps) => {
 	const { t } = useAppTranslation()
+	const override = apiConfiguration.customModelInfo
+	const hasOverride = !!override
+
+	// The stored value is a complete snapshot, so editing always starts from the
+	// discovered catalog entry (or the shared sane defaults when the model is
+	// unlisted). The editor never presents an empty field that silently resolves
+	// to something else at request time.
+	const seeded: CustomModelInfo = toCustomModelInfo(selectedModelInfo ?? openAiModelInfoSaneDefaults)
+	// `openAiModelInfoSaneDefaults.maxTokens` is the `-1` "provider decides"
+	// sentinel, which must not surface as a literal value in the editor.
+	const baseline: CustomModelInfo = {
+		...seeded,
+		maxTokens: typeof seeded.maxTokens === "number" && seeded.maxTokens > 0 ? seeded.maxTokens : undefined,
+	}
+	const effective: CustomModelInfo = override ?? baseline
+
 	const [isOpen, setIsOpen] = useState(!selectedModelInfo)
-	const [contextWindowInput, setContextWindowInput] = useState(
-		apiConfiguration.customModelInfo?.contextWindow?.toString() ?? "",
-	)
-	const [maxTokensInput, setMaxTokensInput] = useState(apiConfiguration.customModelInfo?.maxTokens?.toString() ?? "")
+	const [contextWindowInput, setContextWindowInput] = useState(effective.contextWindow.toString())
+	const [maxTokensInput, setMaxTokensInput] = useState(effective.maxTokens?.toString() ?? "")
 
-	const configuredContextWindow = apiConfiguration.customModelInfo?.contextWindow
-	const configuredMaxTokens = apiConfiguration.customModelInfo?.maxTokens
-	const customModelInfo = apiConfiguration.customModelInfo ?? {}
-
-	// Mirror an externally changed persisted value into the input. Comparing the
-	// parsed input against the persisted value cannot distinguish "user typed
-	// invalid text" from "no override configured" (both parse to undefined), so
-	// track the value each input was last synced from instead. Without this, the
-	// stale text of a half-typed override survives a switch to a profile that
-	// has no override at all.
-	const syncedContextWindow = useRef(configuredContextWindow)
-	const syncedMaxTokens = useRef(configuredMaxTokens)
+	// Mirror externally changed values into the inputs. Comparing parsed text
+	// against the stored value cannot distinguish "user typed invalid text" from
+	// "no value stored" (both parse to undefined), so track what each input was
+	// last synced from instead.
+	const syncedContextWindow = useRef(effective.contextWindow)
+	const syncedMaxTokens = useRef(effective.maxTokens)
 
 	useEffect(() => {
-		if (syncedContextWindow.current !== configuredContextWindow) {
-			syncedContextWindow.current = configuredContextWindow
-			setContextWindowInput(configuredContextWindow?.toString() ?? "")
+		if (syncedContextWindow.current !== effective.contextWindow) {
+			syncedContextWindow.current = effective.contextWindow
+			setContextWindowInput(effective.contextWindow.toString())
 		}
-	}, [configuredContextWindow])
+	}, [effective.contextWindow])
 
 	useEffect(() => {
-		if (syncedMaxTokens.current !== configuredMaxTokens) {
-			syncedMaxTokens.current = configuredMaxTokens
-			setMaxTokensInput(configuredMaxTokens?.toString() ?? "")
+		if (syncedMaxTokens.current !== effective.maxTokens) {
+			syncedMaxTokens.current = effective.maxTokens
+			setMaxTokensInput(effective.maxTokens?.toString() ?? "")
 		}
-	}, [configuredMaxTokens])
+	}, [effective.maxTokens])
 
 	useEffect(() => {
 		if (!selectedModelInfo) {
@@ -94,66 +86,63 @@ export const CustomModelInfoSettings = ({
 		}
 	}, [selectedModelInfo])
 
-	const updateOverride = <K extends keyof CustomModelInfo>(field: K, value: CustomModelInfo[K] | undefined) => {
-		const next: CustomModelInfo = { ...customModelInfo }
-
-		if (value === undefined) {
-			delete next[field]
-		} else {
-			next[field] = value
-		}
-
-		setApiConfigurationField("customModelInfo", Object.keys(next).length > 0 ? next : undefined)
-	}
+	const commit = (patch: Partial<CustomModelInfo>) =>
+		setApiConfigurationField("customModelInfo", { ...effective, ...patch })
 
 	const handleContextWindowInput = (event: ValueChangeEvent) => {
-		const value = getEventValue(event)
+		const target = event.target
+		const value = target && "value" in target && typeof target.value === "string" ? target.value : ""
 		setContextWindowInput(value)
 
 		const parsed = parsePositiveInteger(value)
 
-		// Only persist when the input is valid OR deliberately empty (= user
-		// cleared the field). Non-empty invalid input (e.g. "12abc") stays in
-		// local state without deleting an existing valid override.
-		if (parsed !== undefined || value.trim() === "") {
-			// This value originates from the user's own keystroke, so record it as
-			// already mirrored; otherwise the sync effect would overwrite the text
-			// they are still editing.
+		// Context window is required for token accounting, so invalid or empty
+		// text is kept on screen without persisting a broken snapshot.
+		if (parsed !== undefined) {
 			syncedContextWindow.current = parsed
-			updateOverride("contextWindow", parsed)
+			commit({ contextWindow: parsed })
 		}
 	}
 
 	const handleMaxTokensInput = (event: ValueChangeEvent) => {
-		const value = getEventValue(event)
+		const target = event.target
+		const value = target && "value" in target && typeof target.value === "string" ? target.value : ""
 		setMaxTokensInput(value)
 
 		const parsed = parsePositiveInteger(value)
 
+		// An empty field means "let the provider decide", which is a valid state.
 		if (parsed !== undefined || value.trim() === "") {
 			syncedMaxTokens.current = parsed
-			updateOverride("maxTokens", parsed)
+			commit({ maxTokens: parsed })
 		}
 	}
 
+	const handleCapabilityChange = (field: "supportsImages" | "supportsPromptCache") => (event: ValueChangeEvent) => {
+		const target = event.target
+		const checked = target && "checked" in target && typeof target.checked === "boolean" ? target.checked : false
+		commit({ [field]: checked })
+	}
+
 	const resetOverrides = () => {
-		setContextWindowInput("")
-		setMaxTokensInput("")
-		syncedContextWindow.current = undefined
-		syncedMaxTokens.current = undefined
+		setContextWindowInput(baseline.contextWindow.toString())
+		setMaxTokensInput(baseline.maxTokens?.toString() ?? "")
+		syncedContextWindow.current = baseline.contextWindow
+		syncedMaxTokens.current = baseline.maxTokens
 		setApiConfigurationField("customModelInfo", undefined)
 	}
 
-	const supportsImages = customModelInfo.supportsImages ?? selectedModelInfo?.supportsImages ?? false
-	const supportsPromptCache = customModelInfo.supportsPromptCache ?? selectedModelInfo?.supportsPromptCache ?? false
 	const contextWindowOverride = parsePositiveInteger(contextWindowInput)
 	const maxTokensOverride = parsePositiveInteger(maxTokensInput)
-	const hasInvalidContextWindow = contextWindowInput.trim().length > 0 && contextWindowOverride === undefined
+	const hasInvalidContextWindow = contextWindowOverride === undefined
 	const hasInvalidMaxTokens = maxTokensInput.trim().length > 0 && maxTokensOverride === undefined
 	const hasInvalidRange =
 		contextWindowOverride !== undefined &&
 		maxTokensOverride !== undefined &&
 		maxTokensOverride > contextWindowOverride
+
+	const borderFor = (invalid: boolean) =>
+		invalid ? "var(--vscode-inputValidation-errorBorder)" : "var(--vscode-input-border)"
 
 	return (
 		<div className="mt-3 border-t border-vscode-panel-border pt-3">
@@ -178,8 +167,7 @@ export const CustomModelInfoSettings = ({
 								id="custom-context-window"
 								value={contextWindowInput}
 								onInput={handleContextWindowInput}
-								placeholder={selectedModelInfo?.contextWindow?.toString() ?? "0"}
-								style={{ borderColor: getInputBorderColor(contextWindowInput), width: "100%" }}
+								style={{ borderColor: borderFor(hasInvalidContextWindow), width: "100%" }}
 								aria-invalid={hasInvalidContextWindow}
 								aria-describedby="custom-context-window-desc"
 							/>
@@ -196,8 +184,7 @@ export const CustomModelInfoSettings = ({
 								id="custom-max-tokens"
 								value={maxTokensInput}
 								onInput={handleMaxTokensInput}
-								placeholder={selectedModelInfo?.maxTokens?.toString() ?? "0"}
-								style={{ borderColor: getInputBorderColor(maxTokensInput), width: "100%" }}
+								style={{ borderColor: borderFor(hasInvalidMaxTokens), width: "100%" }}
 								aria-invalid={hasInvalidMaxTokens}
 								aria-describedby="custom-max-tokens-desc"
 							/>
@@ -215,8 +202,8 @@ export const CustomModelInfoSettings = ({
 
 					<div className="flex flex-col gap-2">
 						<VSCodeCheckbox
-							checked={supportsImages}
-							onChange={(event) => updateOverride("supportsImages", getCheckboxValue(event))}>
+							checked={effective.supportsImages ?? false}
+							onChange={handleCapabilityChange("supportsImages")}>
 							{t("settings:providers.customModelInfo.supportsImages.label")}
 						</VSCodeCheckbox>
 						<span className="-mt-1 pl-5 text-xs text-vscode-descriptionForeground">
@@ -224,8 +211,8 @@ export const CustomModelInfoSettings = ({
 						</span>
 
 						<VSCodeCheckbox
-							checked={supportsPromptCache}
-							onChange={(event) => updateOverride("supportsPromptCache", getCheckboxValue(event))}>
+							checked={effective.supportsPromptCache}
+							onChange={handleCapabilityChange("supportsPromptCache")}>
 							{t("settings:providers.customModelInfo.supportsPromptCache.label")}
 						</VSCodeCheckbox>
 						<span className="-mt-1 pl-5 text-xs text-vscode-descriptionForeground">
@@ -233,9 +220,11 @@ export const CustomModelInfoSettings = ({
 						</span>
 					</div>
 
-					<Button type="button" variant="ghost" size="sm" onClick={resetOverrides} className="px-0">
-						{t("settings:providers.customModelInfo.reset")}
-					</Button>
+					{hasOverride && (
+						<Button type="button" variant="ghost" size="sm" onClick={resetOverrides} className="px-0">
+							{t("settings:providers.customModelInfo.reset")}
+						</Button>
+					)}
 				</CollapsibleContent>
 			</Collapsible>
 		</div>

@@ -186,39 +186,62 @@ export const modelInfoSchema = z.object({
 export type ModelInfo = z.infer<typeof modelInfoSchema>
 
 /**
- * User-supplied metadata for a model whose discovered metadata is incomplete
- * or unavailable. This is intentionally narrower than ModelInfo: prices and
- * other accounting fields must remain provider-owned.
+ * User-supplied model metadata for a model whose discovered metadata is
+ * incomplete or unavailable.
+ *
+ * This mirrors the long-standing `openAiCustomModelInfo` contract: the stored
+ * value is a complete snapshot that the settings UI prefills from the
+ * discovered catalog entry. Resolution therefore stays a single expression at
+ * every call site and a configured override can never resolve to `undefined`.
+ *
+ * Pricing is deliberately excluded. Router catalogs own prices and refresh
+ * them, so a user-held price snapshot would go stale and silently corrupt cost
+ * reporting.
  */
-const positiveSafeIntegerSchema = z
-	.number()
-	.int()
-	.positive()
-	.refine(Number.isSafeInteger, { message: "Expected a safe integer" })
-
-export const customModelInfoSchema = z
-	.object({
-		maxTokens: positiveSafeIntegerSchema.optional(),
-		contextWindow: positiveSafeIntegerSchema.optional(),
-		supportsImages: z.boolean().optional(),
-		supportsPromptCache: z.boolean().optional(),
+export const customModelInfoSchema = modelInfoSchema
+	.omit({
+		inputPrice: true,
+		outputPrice: true,
+		cacheWritesPrice: true,
+		cacheReadsPrice: true,
+		longContextPricing: true,
+		tiers: true,
 	})
+	// `strict()` is what actually rejects a pricing field: omitting a key only
+	// drops it from the shape, it does not make the value invalid.
 	.strict()
 
 export type CustomModelInfo = z.infer<typeof customModelInfoSchema>
 
 export type CustomModelInfoSettings = {
-	customModelInfo?: Partial<CustomModelInfo> | null
+	customModelInfo?: CustomModelInfo | null
 }
 
-const isPositiveInteger = (value: unknown): value is number =>
-	typeof value === "number" && Number.isSafeInteger(value) && value > 0
+/**
+ * Strips provider-owned pricing so the settings UI can prefill the editor from
+ * a discovered catalog entry.
+ */
+export const toCustomModelInfo = (info: ModelInfo): CustomModelInfo => {
+	const {
+		inputPrice: _inputPrice,
+		outputPrice: _outputPrice,
+		cacheWritesPrice: _cacheWritesPrice,
+		cacheReadsPrice: _cacheReadsPrice,
+		longContextPricing: _longContextPricing,
+		tiers: _tiers,
+		...rest
+	} = info
+
+	return rest
+}
 
 /**
- * Applies the user metadata overlay without allowing invalid values to enter
- * model arithmetic or cost/capability fields outside the supported override.
- * When no discovered info exists, a context-window override is required to
- * synthesize a usable ModelInfo.
+ * Resolves the effective model metadata for providers that expose the custom
+ * model info editor.
+ *
+ * A configured override replaces the discovered metadata wholesale; pricing is
+ * always read back from the catalog entry. Without an override the discovered
+ * metadata passes through untouched.
  */
 export const applyCustomModelInfo = (
 	info: ModelInfo | undefined,
@@ -230,38 +253,16 @@ export const applyCustomModelInfo = (
 		return info
 	}
 
-	const validOverride: CustomModelInfo = {}
-
-	if (isPositiveInteger(override.contextWindow)) {
-		validOverride.contextWindow = override.contextWindow
-	}
-
-	if (isPositiveInteger(override.maxTokens)) {
-		validOverride.maxTokens = override.maxTokens
-	}
-
-	if (typeof override.supportsImages === "boolean") {
-		validOverride.supportsImages = override.supportsImages
-	}
-
-	if (typeof override.supportsPromptCache === "boolean") {
-		validOverride.supportsPromptCache = override.supportsPromptCache
-	}
-
-	if (info) {
-		return Object.keys(validOverride).length > 0 ? { ...info, ...validOverride } : info
-	}
-
-	if (!validOverride.contextWindow) {
-		return undefined
-	}
-
+	// Copy only the price keys the catalog actually carries, so the result never
+	// gains explicit `undefined` pricing fields.
 	return {
-		maxTokens: undefined,
-		contextWindow: validOverride.contextWindow,
-		supportsImages: false,
-		supportsPromptCache: false,
-		...validOverride,
+		...override,
+		...(info?.inputPrice !== undefined && { inputPrice: info.inputPrice }),
+		...(info?.outputPrice !== undefined && { outputPrice: info.outputPrice }),
+		...(info?.cacheWritesPrice !== undefined && { cacheWritesPrice: info.cacheWritesPrice }),
+		...(info?.cacheReadsPrice !== undefined && { cacheReadsPrice: info.cacheReadsPrice }),
+		...(info?.longContextPricing !== undefined && { longContextPricing: info.longContextPricing }),
+		...(info?.tiers !== undefined && { tiers: info.tiers }),
 	}
 }
 

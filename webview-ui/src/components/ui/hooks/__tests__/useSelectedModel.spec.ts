@@ -745,6 +745,7 @@ describe("useSelectedModel", () => {
 				const apiConfiguration: ProviderSettings = {
 					...settings,
 					customModelInfo: {
+						supportsPromptCache: false,
 						contextWindow: 100_000,
 						maxTokens: 10_000,
 						supportsImages: true,
@@ -784,6 +785,7 @@ describe("useSelectedModel", () => {
 				const apiConfiguration: ProviderSettings = {
 					...settings,
 					customModelInfo: {
+						supportsPromptCache: false,
 						contextWindow: 100_000,
 						maxTokens: 10_000,
 						supportsImages: true,
@@ -816,6 +818,7 @@ describe("useSelectedModel", () => {
 					contextWindow: 100_000,
 					maxTokens: 10_000,
 					supportsImages: true,
+					supportsPromptCache: false,
 				},
 			}
 

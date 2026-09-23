@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 
-import { applyCustomModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
+import { applyCustomModelInfo, isCustomModelInfoProvider, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
@@ -56,29 +56,25 @@ export abstract class RouterProvider extends BaseProvider {
 	private static readonly MISSING_MODEL_RETRY_MS = 5 * 60 * 1000
 
 	/**
-	 * Apply user-supplied `customModelInfo` overrides for gateway providers.
+	 * Resolve the effective model metadata, applying the user's `customModelInfo`
+	 * snapshot for providers whose settings UI exposes the editor.
 	 *
-	 * Only vercel-ai-gateway and zoo-gateway opt in here because the other
-	 * RouterProvider subclasses (openrouter, requesty, unbound) apply overrides
-	 * in their own `getModel()` methods — they need to merge with provider-
-	 * specific logic (e.g. specific-provider endpoints, tool preferences) that
-	 * runs before the overlay.  LiteLLM, Kenari, and OpenCode Go don't support
-	 * `customModelInfo` because they have their own discovery mechanisms and
-	 * are not exposed in the settings UI.
-	 *
-	 * See also: `customModelInfoProviders` in @roo-code/types for the full set
-	 * of providers whose UI exposes the override panel.
+	 * openrouter, requesty and unbound resolve overrides in their own
+	 * `getModel()` because they first merge provider-specific metadata (endpoint
+	 * selection, router tool preferences) that must run before the override wins.
 	 */
 	private resolveModelInfo(info: ModelInfo | undefined, fallback: ModelInfo): ModelInfo {
-		if (this.name !== "vercel-ai-gateway" && this.name !== "zoo-gateway") {
+		if (!isCustomModelInfoProvider(this.name)) {
 			return info ?? fallback
 		}
 
 		const resolvedInfo = applyCustomModelInfo(info, this.options) ?? fallback
 
-		// Gateway request builders forward `info.maxTokens` as max_completion_tokens.
-		// Keep that value within the effective context window so a persisted override
-		// cannot create a request the gateway will reject.
+		// The gateway request builders forward `info.maxTokens` verbatim as
+		// max_completion_tokens, with no clamp of their own, so a user-supplied
+		// value above the context window would produce a rejected request.
+		// openrouter/requesty/unbound instead go through `getModelParams()`, which
+		// already clamps, so they must not be clamped twice.
 		if (
 			typeof resolvedInfo.maxTokens === "number" &&
 			Number.isFinite(resolvedInfo.maxTokens) &&

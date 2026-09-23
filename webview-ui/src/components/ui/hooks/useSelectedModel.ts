@@ -166,9 +166,11 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 					}
 
 	const { id } = selectedModel
+	// Mirrors the extension-side resolution so the settings UI and the outgoing
+	// request never disagree about the effective metadata.
 	const info =
 		activeProvider && isCustomModelInfoProvider(activeProvider)
-			? applyCustomModelInfo(selectedModel.info, apiConfiguration)
+			? (applyCustomModelInfo(selectedModel.info, apiConfiguration) ?? selectedModel.info)
 			: selectedModel.info
 
 	return {

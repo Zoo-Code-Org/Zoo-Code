@@ -247,7 +247,7 @@ describe("ZooGatewayHandler", () => {
 
 			const handler = new ZooGatewayHandler({
 				...mockOptions,
-				customModelInfo: { contextWindow: 1_000, maxTokens: 2_000 },
+				customModelInfo: { contextWindow: 1_000, maxTokens: 2_000, supportsPromptCache: false },
 			})
 			const result = await handler.fetchModel()
 
@@ -264,7 +264,7 @@ describe("ZooGatewayHandler", () => {
 
 			const handler = new ZooGatewayHandler({
 				...mockOptions,
-				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsPromptCache: false },
 			})
 			await handler.completePrompt("test")
 
