@@ -658,6 +658,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
 		expect(mimoCalls).toHaveLength(1)
+		// The single-provider filter must not dispatch fetches for other providers.
+		expect(getModelsMock).toHaveBeenCalledTimes(1)
 		expect(mimoCalls[0][0]).toEqual({
 			provider: providerIdentifiers.mimo,
 			apiKey: "stored-mimo-key",

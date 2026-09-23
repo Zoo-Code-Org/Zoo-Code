@@ -241,6 +241,34 @@ describe("getMimoModels", () => {
 		expect(fetchSpy).toHaveBeenCalledWith(`${allowedUrl}/models`, expect.any(Object))
 	})
 
+	it("accepts every independently defined persisted Xiaomi endpoint", async () => {
+		// Independent literal list (NOT iterated from ALLOWED_BASE_URLS) so the
+		// test fails if a legitimate endpoint is ever removed from the allowlist.
+		const expectedAllowedUrls = [
+			"https://api.xiaomimimo.com/v1",
+			"https://token-plan-cn.xiaomimimo.com/v1",
+			"https://token-plan-sgp.xiaomimimo.com/v1",
+			"https://token-plan-ams.xiaomimimo.com/v1",
+		]
+
+		expect([...ALLOWED_BASE_URLS].sort()).toEqual([...expectedAllowedUrls].sort())
+
+		const fetchSpy = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: [] }),
+		})
+		globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+		for (const baseUrl of expectedAllowedUrls) {
+			await expect(getMimoModels(baseUrl, "mock-key")).resolves.toEqual({})
+		}
+
+		expect(fetchSpy).toHaveBeenCalledTimes(expectedAllowedUrls.length)
+		for (const baseUrl of expectedAllowedUrls) {
+			expect(fetchSpy).toHaveBeenCalledWith(`${baseUrl}/models`, expect.any(Object))
+		}
+	})
+
 	it("keeps the fetcher allowlist in sync with the persisted settings schema", () => {
 		// The fetcher mirrors the zod literal union from
 		// packages/types/src/provider-settings/mimo.ts because the definition is

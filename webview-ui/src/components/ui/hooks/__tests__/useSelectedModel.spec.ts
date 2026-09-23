@@ -739,6 +739,26 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.contextWindow).toBe(1_048_576)
 			expect(result.current.info?.maxTokens).toBe(131_072)
 		})
+
+		it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot, providerIdentifiers.mimo])(
+			"keeps the static %s catalog when the router query has errored",
+			(provider) => {
+				mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isError: true }))
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel({ apiProvider: provider }), { wrapper })
+
+				const expectedId =
+					provider === providerIdentifiers.deepseek
+						? deepSeekDefaultModelId
+						: provider === providerIdentifiers.moonshot
+							? moonshotDefaultModelId
+							: mimoDefaultModelId
+				expect(result.current.id).toBe(expectedId)
+				expect(result.current.info).toBeDefined()
+				expect(result.current.info?.contextWindow).toBeGreaterThan(0)
+			},
+		)
 	})
 
 	describe("default behavior", () => {
