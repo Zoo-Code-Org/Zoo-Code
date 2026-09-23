@@ -678,6 +678,31 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
+	it("echoes the request ID in the routerModels response when one was provided", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+			},
+		})
+
+		getModelsMock.mockResolvedValue({})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.mimo, requestId: "req-123" },
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].values).toEqual({
+			requestId: "req-123",
+			provider: providerIdentifiers.mimo,
+		})
+	})
+
 	it("flushes MiMo cache when explicit credentials are provided via message values", async () => {
 		getModelsMock.mockResolvedValue({
 			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },

@@ -1440,16 +1440,20 @@ export const webviewMessageHandler = async (
 				}
 			})
 
+			// Echo the webview's request ID when one was provided so
+			// fetchRouterModels can correlate the response to the exact pending
+			// request (a remount may re-issue the same provider request while a
+			// stale response is in flight). Requests without an ID keep the
+			// previous response shape.
+			const requestId = message?.values?.requestId
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				// Echo the webview's request ID so fetchRouterModels can correlate
-				// the response to the exact pending request (a remount may re-issue
-				// the same provider request while a stale response is in flight).
-				values: {
-					requestId: message?.values?.requestId,
-					...(providerFilter ? { provider: requestedProvider } : {}),
-				},
+				values: requestId
+					? { requestId, ...(providerFilter ? { provider: requestedProvider } : {}) }
+					: providerFilter
+						? { provider: requestedProvider }
+						: undefined,
 			})
 			break
 		}
