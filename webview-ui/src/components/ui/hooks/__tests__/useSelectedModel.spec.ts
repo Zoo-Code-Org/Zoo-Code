@@ -695,6 +695,52 @@ describe("useSelectedModel", () => {
 		})
 	})
 
+	describe("static-catalog dynamic providers while router models are unavailable", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		// The extension host answers single-provider router requests with `{}`
+		// when the provider has no fetch candidate (e.g. no API key saved yet),
+		// so the response carries no entry for that provider and the hook stays
+		// not-ready. The selection must still resolve from the shipped static
+		// catalog: TaskHeader renders `contextWindow || 1` and showed "… / 1"
+		// while `info` was undefined.
+		it.each([
+			[providerIdentifiers.deepseek, deepSeekDefaultModelId, deepSeekModels[deepSeekDefaultModelId]],
+			[providerIdentifiers.moonshot, moonshotDefaultModelId, moonshotModels[moonshotDefaultModelId]],
+			[providerIdentifiers.mimo, mimoDefaultModelId, mimoModels[mimoDefaultModelId]],
+		])(
+			"falls back to the static %s catalog when the router response has no entry",
+			(provider, expectedId, expectedInfo) => {
+				mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel({ apiProvider: provider }), { wrapper })
+
+				expect(result.current.id).toBe(expectedId)
+				expect(result.current.info).toEqual(expectedInfo)
+			},
+		)
+
+		it("keeps the configured MiMo V2.6 model specs while router models are still loading", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.mimo,
+				apiModelId: "mimo-v2.6-flash",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("mimo-v2.6-flash")
+			expect(result.current.info).toEqual(mimoModels["mimo-v2.6-flash"])
+			expect(result.current.info?.contextWindow).toBe(1_048_576)
+			expect(result.current.info?.maxTokens).toBe(131_072)
+		})
+	})
+
 	describe("default behavior", () => {
 		it("should return OpenRouter default when no configuration is provided", () => {
 			mockUseRouterModels.mockReturnValue({
