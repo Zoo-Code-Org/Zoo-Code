@@ -1580,9 +1580,11 @@ describe("ReadFileTool", () => {
 				// Cast: the mock task only implements the members ReadFileTool.execute touches.
 				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
 
-				// The read itself succeeded: no failure flag and the result carries the file.
+				// The read itself succeeded: no failure flag and the result carries the file
+				// and its content (not just the path).
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("existing.ts"))
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("content"))
 
 				// The failed token lookup never observes: the registry stays empty.
 				expect(mockTask.observationRegistry!.size).toBe(0)
@@ -1609,6 +1611,15 @@ describe("ReadFileTool", () => {
 				mockedFsStat.mockRejectedValueOnce(new Error("EACCES"))
 				mockedIsBinaryFile.mockResolvedValue(false)
 				mockedFsReadFile.mockResolvedValue("legacy content")
+				// The legacy path slices the raw content through readWithSlice, so the slice
+				// mock must carry the legacy content for the result assertion below.
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | legacy content",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
 
 				// Typed legacy (pre-refactor) params: the multi-file format with the
 				// _legacyFormat discriminant (see LegacyReadFileParams).
@@ -1620,9 +1631,11 @@ describe("ReadFileTool", () => {
 				// Cast: the mock task only implements the members ReadFileTool.execute touches.
 				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
 
-				// The legacy read succeeded: no failure flag and the result carries the file.
+				// The legacy read succeeded: no failure flag and the result carries the file
+				// and its content (not just the path).
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy.ts"))
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy content"))
 
 				// The failed token lookup never observes: the registry stays empty.
 				expect(mockTask.observationRegistry!.size).toBe(0)
