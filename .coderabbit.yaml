@@ -60,7 +60,10 @@ reviews:
               comments, or unrelated refactors. When changed code introduces a local implementation of a
               cross-cutting concern, check whether it bypasses or duplicates an established repository
               abstraction or nearby convention. Report only a concrete inconsistency with behavioral or
-              maintenance impact, and allow intentional deviations.
+              maintenance impact, and allow intentional deviations. Treat the linked issue and this PR
+              description as the scope boundary. When a confirmed defect needs work beyond that boundary
+              and this PR does not create the hazard, do not request changes for it. List it once in the
+              walkthrough under follow-up candidates, with one line for the trigger.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
