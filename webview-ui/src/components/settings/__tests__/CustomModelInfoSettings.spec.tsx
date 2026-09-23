@@ -189,4 +189,39 @@ describe("CustomModelInfoSettings", () => {
 
 		expect(screen.getByLabelText("settings:providers.customModelInfo.maxTokens.label")).toHaveValue("200")
 	})
+
+	it("clears half-typed invalid input when switching to a profile without overrides", () => {
+		const setApiConfigurationField = vi.fn()
+
+		const { rerender } = render(
+			<CustomModelInfoSettings
+				apiConfiguration={{
+					apiProvider: providerIdentifiers.openrouter,
+					customModelInfo: { contextWindow: 64_000 },
+				}}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.title"))
+
+		const contextWindowInput = screen.getByLabelText("settings:providers.customModelInfo.contextWindow.label")
+		fireEvent.input(contextWindowInput, { target: { value: "12abc" } })
+		expect(contextWindowInput).toHaveValue("12abc")
+		expect(setApiConfigurationField).not.toHaveBeenCalled()
+
+		// Switching profiles drops the override entirely. Both the invalid text and
+		// the absent override parse to undefined, so the input must still reset.
+		rerender(
+			<CustomModelInfoSettings
+				apiConfiguration={{ apiProvider: providerIdentifiers.unbound }}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		expect(contextWindowInput).toHaveValue("")
+		expect(contextWindowInput).toHaveAttribute("aria-invalid", "false")
+	})
 })

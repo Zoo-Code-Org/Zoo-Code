@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { VSCodeCheckbox, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import { type CustomModelInfo, type ModelInfo, type ProviderSettings } from "@roo-code/types"
@@ -65,18 +65,27 @@ export const CustomModelInfoSettings = ({
 	const configuredMaxTokens = apiConfiguration.customModelInfo?.maxTokens
 	const customModelInfo = apiConfiguration.customModelInfo ?? {}
 
+	// Mirror an externally changed persisted value into the input. Comparing the
+	// parsed input against the persisted value cannot distinguish "user typed
+	// invalid text" from "no override configured" (both parse to undefined), so
+	// track the value each input was last synced from instead. Without this, the
+	// stale text of a half-typed override survives a switch to a profile that
+	// has no override at all.
+	const syncedContextWindow = useRef(configuredContextWindow)
+	const syncedMaxTokens = useRef(configuredMaxTokens)
+
 	useEffect(() => {
-		if (parsePositiveInteger(contextWindowInput) !== configuredContextWindow) {
+		if (syncedContextWindow.current !== configuredContextWindow) {
+			syncedContextWindow.current = configuredContextWindow
 			setContextWindowInput(configuredContextWindow?.toString() ?? "")
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- Sync external config into local state only when the persisted value changes, not on every keystroke.
 	}, [configuredContextWindow])
 
 	useEffect(() => {
-		if (parsePositiveInteger(maxTokensInput) !== configuredMaxTokens) {
+		if (syncedMaxTokens.current !== configuredMaxTokens) {
+			syncedMaxTokens.current = configuredMaxTokens
 			setMaxTokensInput(configuredMaxTokens?.toString() ?? "")
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- Sync external config into local state only when the persisted value changes, not on every keystroke.
 	}, [configuredMaxTokens])
 
 	useEffect(() => {
@@ -107,6 +116,10 @@ export const CustomModelInfoSettings = ({
 		// cleared the field). Non-empty invalid input (e.g. "12abc") stays in
 		// local state without deleting an existing valid override.
 		if (parsed !== undefined || value.trim() === "") {
+			// This value originates from the user's own keystroke, so record it as
+			// already mirrored; otherwise the sync effect would overwrite the text
+			// they are still editing.
+			syncedContextWindow.current = parsed
 			updateOverride("contextWindow", parsed)
 		}
 	}
@@ -118,6 +131,7 @@ export const CustomModelInfoSettings = ({
 		const parsed = parsePositiveInteger(value)
 
 		if (parsed !== undefined || value.trim() === "") {
+			syncedMaxTokens.current = parsed
 			updateOverride("maxTokens", parsed)
 		}
 	}
@@ -125,6 +139,8 @@ export const CustomModelInfoSettings = ({
 	const resetOverrides = () => {
 		setContextWindowInput("")
 		setMaxTokensInput("")
+		syncedContextWindow.current = undefined
+		syncedMaxTokens.current = undefined
 		setApiConfigurationField("customModelInfo", undefined)
 	}
 
