@@ -26,6 +26,7 @@ describe("ProfileValidator", () => {
 			["ollama", { ollamaModelId: "model" }],
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
+			["ioIntelligence", { ioIntelligenceModelId: "model" }],
 		])("resolves %s model fields through canonical identifiers", (identifierKey, profileSettings) => {
 			const canonicalIdentifier = providerIdentifiers[identifierKey as keyof typeof providerIdentifiers]
 			const modelId = "model"
@@ -295,6 +296,9 @@ describe("ProfileValidator", () => {
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed({ ...profile, ioIntelligenceModelId: "other-model" }, allowList),
+			).toBe(false)
 		})
 
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {
