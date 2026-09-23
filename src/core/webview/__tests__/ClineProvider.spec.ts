@@ -1448,8 +1448,9 @@ describe("ClineProvider", () => {
 	})
 
 	test("writeDelayMs defaults to DEFAULT_WRITE_DELAY_MS", async () => {
-		// Mock globalState.get to return undefined for writeDelayMs
-		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+		// Mock globalState.get to return undefined for writeDelayMs (typed reassignment,
+		// same pattern as the customModePrompts test below — Memento.get has no mock type)
+		mockContext.globalState.get = vi.fn((key: string) => {
 			return key === "writeDelayMs" ? undefined : null
 		})
 
