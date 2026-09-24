@@ -61,8 +61,11 @@ export function decodeUntrustedPathToStable(filePath: string, maxIterations = 8)
 }
 
 // Realpath of the deepest existing ancestor of `filePath` (the path itself
-// when it exists). Returns null on unexpected errors: containment for
-// untrusted paths fails closed.
+// when it exists). A dangling symlink — an entry that exists but whose target
+// cannot be resolved — fails realpath with ENOENT without being a
+// nonexistent path: creation flows (mkdir -p) would follow it and could
+// escape the workspace, so such entries fail closed. Returns null on
+// unexpected errors: containment for untrusted paths fails closed.
 async function realPathOfExistingAncestor(filePath: string): Promise<string | null> {
 	let current = filePath
 	for (;;) {
@@ -73,6 +76,24 @@ async function realPathOfExistingAncestor(filePath: string): Promise<string | nu
 			// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: ENOENT is the only expected code on a walk toward an existing ancestor; anything else (EACCES, EIO, ...) must fail closed
 			if (code !== "ENOENT") {
 				return null
+			}
+			// ENOENT from realpath is ambiguous: the entry may simply not exist
+			// yet, or it may be a dangling symlink whose target is missing.
+			// lstat does not follow the final entry, so it distinguishes the two.
+			// A dangling symlink must fail closed (a creation flow would follow
+			// it and could escape the workspace); a genuinely absent entry keeps
+			// walking to its deepest existing ancestor.
+			try {
+				const stat = await fs.promises.lstat(current)
+				if (stat.isSymbolicLink()) {
+					return null
+				}
+			} catch (lstatError) {
+				const lstatCode = (lstatError as NodeJS.ErrnoException).code
+				// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: only ENOENT means the entry is genuinely absent and the walk may continue; any other lstat error (EACCES, EIO, ...) must fail closed
+				if (lstatCode !== "ENOENT") {
+					return null
+				}
 			}
 			const parent = path.dirname(current)
 			// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: root guard against a non-terminating walk (path.dirname stabilizes at the filesystem root)

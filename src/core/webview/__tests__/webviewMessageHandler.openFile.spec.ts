@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as nodePath from "path"
 import * as nodeFs from "fs"
-import type { PathLike } from "fs"
+import type { PathLike, Stats } from "fs"
 import * as vscode from "vscode"
 import { openFile } from "../../../integrations/misc/open-file"
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -84,6 +84,11 @@ vi.mock("../../../integrations/misc/open-file", () => ({
 const realWorld = vi.hoisted(() => ({
 	existing: new Set<string>(),
 	symlinks: new Map<string, string>(),
+	// Existing entries whose symlink target is missing: realpath fails with
+	// ENOENT, lstat still reports them as symlinks.
+	dangling: new Set<string>(),
+	// Paths where lstat must throw a specific error code (fail-closed test).
+	lstatErrors: new Map<string, string>(),
 }))
 
 const mockProvider = {
@@ -119,10 +124,19 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		vscodeState.workspaceFolders = [{ uri: { fsPath: WORKSPACE_ROOT } }]
 		realWorld.existing.clear()
 		realWorld.symlinks.clear()
+		realWorld.dangling.clear()
+		realWorld.lstatErrors.clear()
 		realWorld.existing.add(WORKSPACE_ROOT)
 		realWorld.existing.add(MOCK_CWD)
 		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: PathLike) => {
 			const key = String(p)
+			// A dangling symlink's target is missing, so realpath fails with
+			// ENOENT exactly like a nonexistent path; lstat distinguishes it.
+			if (realWorld.dangling.has(key)) {
+				const err = new Error(`ENOENT: no such file or directory, realpath '${key}'`)
+				;(err as NodeJS.ErrnoException).code = "ENOENT"
+				throw err
+			}
 			const symlink = realWorld.symlinks.get(key)
 			if (symlink) {
 				return symlink
@@ -131,6 +145,25 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 				return key
 			}
 			const err = new Error(`ENOENT: no such file or directory, realpath '${key}'`)
+			;(err as NodeJS.ErrnoException).code = "ENOENT"
+			throw err
+		})
+		// lstat does not follow the final entry: a dangling symlink is still a
+		// directory entry and reports as a symlink, while a genuinely absent
+		// entry is ENOENT.
+		vi.spyOn(nodeFs.promises, "lstat").mockImplementation(async (p: PathLike) => {
+			const key = String(p)
+			const code = realWorld.lstatErrors.get(key)
+			if (code) {
+				const err = new Error(`${code}: error, lstat '${key}'`)
+				;(err as NodeJS.ErrnoException).code = code
+				throw err
+			}
+			if (realWorld.dangling.has(key) || realWorld.symlinks.has(key) || realWorld.existing.has(key)) {
+				// Minimal test double; the containment code only reads isSymbolicLink().
+				return { isSymbolicLink: () => realWorld.dangling.has(key) || realWorld.symlinks.has(key) } as Stats
+			}
+			const err = new Error(`ENOENT: no such file or directory, lstat '${key}'`)
 			;(err as NodeJS.ErrnoException).code = "ENOENT"
 			throw err
 		})
@@ -239,6 +272,56 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 
 		expect(openFile).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("link.txt"))
+	})
+
+	// A dangling symlink inside the workspace — an existing entry whose target
+	// is missing — must be rejected fail-closed: a creation flow (mkdir -p)
+	// would follow it and could escape the workspace.
+	it("rejects a tagged path that is a dangling symlink inside the workspace", async () => {
+		realWorld.dangling.add(nodePath.join(MOCK_CWD, "link-out"))
+
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "link-out",
+			values: { create: true, fromMarkdown: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("link-out"))
+	})
+
+	// A workspace root that is itself a symlink must be realized before the
+	// containment test: a target whose deepest existing ancestor resolves
+	// inside the real root is inside the workspace.
+	it("opens a markdown file when the workspace root is a symlink to the real root", async () => {
+		const realRoot = IS_WIN ? "C:\\mock\\workspace-real" : "/mock/workspace-real"
+		realWorld.existing.clear()
+		realWorld.existing.add(realRoot)
+		realWorld.symlinks.set(WORKSPACE_ROOT, realRoot)
+		realWorld.symlinks.set(MOCK_CWD, nodePath.join(realRoot, "project"))
+
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "src/index.ts",
+			values: { line: 3, fromMarkdown: true },
+		})
+
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "src/index.ts"), { line: 3, fromMarkdown: true })
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	// An unexpected lstat error on the containment walk fails closed.
+	it("fails closed when lstat errors during the realpath containment walk", async () => {
+		realWorld.lstatErrors.set(nodePath.join(MOCK_CWD, "note.txt"), "EACCES")
+
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "note.txt",
+			values: { fromMarkdown: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("note.txt"))
 	})
 
 	it("allows creating a new file under a new directory inside the workspace", async () => {
@@ -376,10 +459,19 @@ describe("utils/pathUtils containment helpers", () => {
 		vscodeState.workspaceFolders = [{ uri: { fsPath: WORKSPACE_ROOT } }]
 		realWorld.existing.clear()
 		realWorld.symlinks.clear()
+		realWorld.dangling.clear()
+		realWorld.lstatErrors.clear()
 		realWorld.existing.add(WORKSPACE_ROOT)
 		realWorld.existing.add(MOCK_CWD)
 		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: PathLike) => {
 			const key = String(p)
+			// A dangling symlink's target is missing, so realpath fails with
+			// ENOENT exactly like a nonexistent path; lstat distinguishes it.
+			if (realWorld.dangling.has(key)) {
+				const err = new Error(`ENOENT: no such file or directory, realpath '${key}'`)
+				;(err as NodeJS.ErrnoException).code = "ENOENT"
+				throw err
+			}
 			const symlink = realWorld.symlinks.get(key)
 			if (symlink) {
 				return symlink
@@ -388,6 +480,25 @@ describe("utils/pathUtils containment helpers", () => {
 				return key
 			}
 			const err = new Error(`ENOENT: no such file or directory, realpath '${key}'`)
+			;(err as NodeJS.ErrnoException).code = "ENOENT"
+			throw err
+		})
+		// lstat does not follow the final entry: a dangling symlink is still a
+		// directory entry and reports as a symlink, while a genuinely absent
+		// entry is ENOENT.
+		vi.spyOn(nodeFs.promises, "lstat").mockImplementation(async (p: PathLike) => {
+			const key = String(p)
+			const code = realWorld.lstatErrors.get(key)
+			if (code) {
+				const err = new Error(`${code}: error, lstat '${key}'`)
+				;(err as NodeJS.ErrnoException).code = code
+				throw err
+			}
+			if (realWorld.dangling.has(key) || realWorld.symlinks.has(key) || realWorld.existing.has(key)) {
+				// Minimal test double; the containment code only reads isSymbolicLink().
+				return { isSymbolicLink: () => realWorld.dangling.has(key) || realWorld.symlinks.has(key) } as Stats
+			}
+			const err = new Error(`ENOENT: no such file or directory, lstat '${key}'`)
 			;(err as NodeJS.ErrnoException).code = "ENOENT"
 			throw err
 		})
@@ -435,6 +546,16 @@ describe("utils/pathUtils containment helpers", () => {
 		it("rejects a symlink whose target is outside the workspace", async () => {
 			realWorld.symlinks.set(nodePath.join(MOCK_CWD, "link.txt"), nodePath.join(OUTSIDE_ROOT, "secret.txt"))
 			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "link.txt"))).resolves.toBe(true)
+		})
+
+		it("counts a dangling symlink as outside the workspace (fail-closed)", async () => {
+			realWorld.dangling.add(nodePath.join(MOCK_CWD, "gone"))
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "gone"))).resolves.toBe(true)
+		})
+
+		it("fails closed when lstat returns an unexpected error", async () => {
+			realWorld.lstatErrors.set(nodePath.join(MOCK_CWD, "blocked"), "EACCES")
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "blocked"))).resolves.toBe(true)
 		})
 
 		it("fails closed on an unexpected filesystem error", async () => {
