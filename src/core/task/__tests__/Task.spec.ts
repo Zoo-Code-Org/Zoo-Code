@@ -4933,6 +4933,90 @@ describe("Cline", () => {
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})
 
+		// Regression: the outer catch of the request loop used to discard the error and
+		// return, making a real fault indistinguishable from a task that just stopped.
+		describe("terminating error reporting", () => {
+			const setupThrowingRequest = (task: Task, thrown: Error) => {
+				Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "hello" }],
+					mode: undefined,
+				})
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw thrown
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+
+				const sayCalls: Array<{ type: string; text?: string }> = []
+				vi.spyOn(task, "say").mockImplementation(async (type, text) => {
+					if (type === "api_req_started") {
+						task.clineMessages.push({
+							ts: Date.now(),
+							type: "say",
+							say: "api_req_started",
+							text: "{}",
+						})
+					}
+					sayCalls.push({ type, text })
+					return undefined as never
+				})
+
+				return sayCalls
+			}
+
+			it("reports the terminating error instead of swallowing it", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const sayCalls = setupThrowingRequest(task, new Error("history shaping blew up"))
+
+				const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
+
+				// Still ends the task, exactly as before.
+				expect(result).toBe(true)
+
+				const errorSay = sayCalls.find((call) => call.type === "error")
+				expect(errorSay).toBeDefined()
+				// The thrown message must survive verbatim so the row names the real cause.
+				expect(errorSay!.text).toContain("history shaping blew up")
+			})
+
+			it("stays quiet when the task was abandoned on purpose", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const sayCalls = setupThrowingRequest(task, new Error("teardown during delegation"))
+				task.abandoned = true
+
+				const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
+
+				expect(result).toBe(true)
+				expect(sayCalls.some((call) => call.type === "error")).toBe(false)
+			})
+		})
+
 		it("stays silent when the api handler lacks ensureModelFetched", async () => {
 			const task = new Task({
 				provider: mockProvider,

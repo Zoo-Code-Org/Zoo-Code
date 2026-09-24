@@ -93,6 +93,7 @@ import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/
 import { getWorkspacePath } from "../../utils/path"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { logger } from "../../utils/logging"
 
 // prompts
 import { formatResponse } from "../prompts/responses"
@@ -4255,12 +4256,38 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// If we reach here without continuing, return false (will always be false for now)
 				return false
 			} catch (error) {
-				// This should never happen since the only thing that can throw an
-				// error is the attemptApiRequest, which is wrapped in a try catch
-				// that sends an ask where if noButtonClicked, will clear current
-				// task and destroy this instance. However to avoid unhandled
-				// promise rejection, we will end this loop which will end execution
-				// of this instance (see `startTask`).
+				// Reaching here ends the task. The error used to be discarded on the
+				// assumption it could not happen, which made a failure indistinguishable
+				// from a task that simply stopped.
+				const wasIntentional = this.abort || this.abandoned
+
+				if (!wasIntentional) {
+					const rawErrorMessage =
+						error instanceof Error
+							? (error.stack ?? error.message)
+							: JSON.stringify(serializeError(error), null, 2)
+
+					logger.error("Task request loop terminated by an unhandled error", {
+						ctx: "task",
+						taskId: this.taskId,
+						// Explicit strings: an Error serializes to {} in JSON transports.
+						errorMessage: error instanceof Error ? error.message : String(error),
+						...(error instanceof Error && error.stack ? { errorStack: error.stack } : {}),
+					})
+					console.error(
+						`[Task#${this.taskId}.${this.instanceId}] Request loop terminated by an unhandled error: ${rawErrorMessage}`,
+					)
+
+					try {
+						await this.say("error", `The task stopped because of an unexpected error. ${rawErrorMessage}`)
+					} catch (sayError) {
+						console.error(
+							`[Task#${this.taskId}.${this.instanceId}] Failed to report the terminating error:`,
+							sayError,
+						)
+					}
+				}
+
 				return true // Needs to be true so parent loop knows to end task.
 			}
 		}
