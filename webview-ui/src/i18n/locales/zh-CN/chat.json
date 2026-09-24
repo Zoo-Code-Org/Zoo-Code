@@ -1,5 +1,8 @@
 {
 	"greeting": "欢迎使用 Zoo Code！",
+	"searchModel": "搜索模型...",
+	"modelListEmpty": "此提供商没有可用的模型",
+	"useCustomModel": "使用自定义模型：{{modelId}}",
 	"task": {
 		"title": "任务",
 		"expand": "展开任务",

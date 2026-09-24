@@ -1,5 +1,8 @@
 {
 	"greeting": "Benvingut a Zoo Code!",
+	"searchModel": "Cerca models...",
+	"modelListEmpty": "Aquest proveïdor no té models disponibles",
+	"useCustomModel": "Utilitza el model personalitzat: {{modelId}}",
 	"task": {
 		"title": "Tasca",
 		"expand": "Expandir tasca",

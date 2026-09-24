@@ -1,5 +1,8 @@
 {
 	"greeting": "Chào mừng đến với Zoo Code!",
+	"searchModel": "Tìm kiếm mô hình...",
+	"modelListEmpty": "Không có mô hình nào khả dụng cho nhà cung cấp này",
+	"useCustomModel": "Sử dụng mô hình tùy chỉnh: {{modelId}}",
 	"task": {
 		"title": "Nhiệm vụ",
 		"expand": "Mở rộng nhiệm vụ",

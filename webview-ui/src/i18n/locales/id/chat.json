@@ -1,5 +1,8 @@
 {
 	"greeting": "Selamat datang di Zoo Code!",
+	"searchModel": "Cari model...",
+	"modelListEmpty": "Tidak ada model yang tersedia untuk penyedia ini",
+	"useCustomModel": "Gunakan model kustom: {{modelId}}",
 	"task": {
 		"title": "Tugas",
 		"expand": "Perluas tugas",

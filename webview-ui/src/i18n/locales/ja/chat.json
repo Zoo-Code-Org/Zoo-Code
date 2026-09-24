@@ -1,5 +1,8 @@
 {
 	"greeting": "Zoo Code へようこそ！",
+	"searchModel": "モデルを検索...",
+	"modelListEmpty": "このプロバイダーで利用可能なモデルはありません",
+	"useCustomModel": "カスタムモデルを使用: {{modelId}}",
 	"task": {
 		"title": "タスク",
 		"expand": "タスクを展開",

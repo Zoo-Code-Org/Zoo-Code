@@ -1,5 +1,8 @@
 {
 	"greeting": "Witamy w Zoo Code!",
+	"searchModel": "Szukaj modeli...",
+	"modelListEmpty": "Brak dostępnych modeli dla tego dostawcy",
+	"useCustomModel": "Użyj niestandardowego modelu: {{modelId}}",
 	"task": {
 		"title": "Zadanie",
 		"expand": "Rozwiń zadanie",
