@@ -1318,6 +1318,20 @@ export const ChatRowContent = ({
 					// Check if this is a model response error based on marker strings from backend
 					const isNoToolsUsedError = message.text === "MODEL_NO_TOOLS_USED"
 					const isNoAssistantMessagesError = message.text === "MODEL_NO_ASSISTANT_MESSAGES"
+					const isOutputTokenCapError = message.text === "MODEL_OUTPUT_TOKEN_CAP"
+
+					// Checked first: the provider named the cause, so the actionable message
+					// must win over the generic "may indicate an issue with the API".
+					if (isOutputTokenCapError) {
+						return (
+							<ErrorRow
+								type="error"
+								title={t("chat:modelResponseIncomplete")}
+								message={t("chat:modelResponseErrors.outputTokenCap")}
+								errorDetails={t("chat:modelResponseErrors.outputTokenCapDetails")}
+							/>
+						)
+					}
 
 					if (isNoToolsUsedError) {
 						return (

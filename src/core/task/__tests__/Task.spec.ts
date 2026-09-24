@@ -45,6 +45,7 @@ type TaskTestAccess = {
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
+	backoffAndAnnounce: (retryAttempt: number, error: Error, streamingFailedMessage?: string) => Promise<void>
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
@@ -514,6 +515,142 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		// A `max_tokens` empty turn is a configuration problem the provider already named,
+		// not a transient fault: the request was fully billed, so retrying re-spends a whole
+		// output budget to reproduce it. Reported on the FIRST occurrence and never retried.
+		describe("output-token cap", () => {
+			async function createTaskWithAutoRetries() {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+				)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				return task
+			}
+
+			function spyOnSay(task: Task) {
+				const sayCalls: Array<{ type: string; text?: string }> = []
+				const originalSay = task.say.bind(task)
+				vi.spyOn(task, "say").mockImplementation(async (type, text, ...rest) => {
+					sayCalls.push({ type, text })
+					return originalSay(type, text, ...rest)
+				})
+				return sayCalls
+			}
+
+			it("reports the token cap on the first occurrence instead of retrying silently", async () => {
+				const task = await createTaskWithAutoRetries()
+				const sayCalls = spyOnSay(task)
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementation(() => stream([{ type: "stop_reason", reason: "max_tokens" }]))
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+
+				const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
+
+				expect(result).toBe(false)
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
+				expect(backoffSpy).not.toHaveBeenCalled()
+				expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(true)
+				// The generic marker would misattribute a config problem to the provider.
+				expect(sayCalls.some((call) => call.text === "MODEL_NO_ASSISTANT_MESSAGES")).toBe(false)
+			})
+
+			it("records a synthetic assistant turn so history stays alternating", async () => {
+				const task = await createTaskWithAutoRetries()
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+					stream([{ type: "stop_reason", reason: "max_tokens" }]),
+				)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
+
+				// The user message is kept, so an assistant turn must follow it or a later
+				// continuation would send two consecutive user messages.
+				expect(task.apiConversationHistory).toMatchObject([
+					{
+						role: "user",
+						content: expect.arrayContaining([
+							expect.objectContaining({ type: "text", text: "do the thing" }),
+						]),
+					},
+					{
+						role: "assistant",
+						content: [
+							{ type: "text", text: "Failure: I ran out of output tokens before producing a response." },
+						],
+					},
+				])
+				expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+			})
+
+			it("does not prompt the user to retry when auto-approval is off", async () => {
+				const task = await createTaskWithManualRetries()
+				const askSpy = vi
+					.spyOn(task, "ask")
+					.mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementation(() => stream([{ type: "stop_reason", reason: "max_tokens" }]))
+
+				const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
+
+				expect(result).toBe(false)
+				expect(askSpy).not.toHaveBeenCalledWith("api_req_failed", expect.anything())
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
+			})
+
+			it.each(["MAX_TOKENS", "maxTokens", "max_output_tokens"])(
+				"recognizes the provider spelling %s",
+				async (reason) => {
+					const task = await createTaskWithAutoRetries()
+					const sayCalls = spyOnSay(task)
+					vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+						stream([{ type: "stop_reason", reason }]),
+					)
+
+					await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
+
+					expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(true)
+				},
+			)
+
+			it("keeps a stop reason from making an empty turn look answered", async () => {
+				// If `stop_reason` ever counted as assistant content the empty-response path
+				// would go silent and this whole branch would stop being reachable.
+				const task = await createTaskWithAutoRetries()
+				const sayCalls = spyOnSay(task)
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+					stream([{ type: "stop_reason", reason: "max_tokens" }]),
+				)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
+
+				expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(true)
+			})
+
+			it("leaves the grace retry intact for an empty turn with another stop reason", async () => {
+				const task = await createTaskWithAutoRetries()
+				const sayCalls = spyOnSay(task)
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(() => stream([{ type: "stop_reason", reason: "end_turn" }]))
+					.mockImplementationOnce(() => stream([{ type: "text", text: "retry succeeded" }]))
+					.mockImplementation(() => {
+						throw new Error("stop after retry response")
+					})
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
+
+				expect(attemptApiRequestSpy.mock.calls.length).toBeGreaterThan(1)
+				expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(false)
+			})
 		})
 	})
 

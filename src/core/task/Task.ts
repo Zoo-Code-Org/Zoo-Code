@@ -499,6 +499,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Native tool call streaming state (track which index each tool is at)
 	private streamingToolCallIndices: Map<string, number> = new Map()
 
+	// Stop reasons the provider reported for the current request
+	private stopReasons: string[] = []
+
+	/**
+	 * Whether the provider ended the turn because it hit the output-token cap.
+	 *
+	 * Unlike other empty-turn causes this is a configuration problem, not a transient
+	 * fault: the request was fully billed, so resending identical input reproduces it
+	 * while spending another output budget. Callers report it and do not retry.
+	 */
+	private reportedOutputTokenCap(): boolean {
+		return this.stopReasons.some((reason) => {
+			// Providers spell it max_tokens, MAX_TOKENS, maxTokens or max_output_tokens.
+			const normalized = reason.toLowerCase().replace(/[^a-z]/g, "")
+			return normalized === "maxtokens" || normalized === "maxoutputtokens"
+		})
+	}
+
 	// Cached model info for current streaming session (set at start of each API request)
 	// This prevents excessive getModel() calls during tool execution
 	cachedStreamingModel?: { id: string; info: ModelInfo }
@@ -3244,6 +3262,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.presentAssistantMessageHasPendingUpdates = false
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
+				this.stopReasons = []
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
@@ -3309,6 +3328,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 
 						switch (chunk.type) {
+							case "stop_reason":
+								// Diagnostic only: must not make an empty turn look answered.
+								this.stopReasons.push(chunk.reason)
+								break
 							case "reasoning": {
 								reasoningMessage += chunk.text
 								// Only apply formatting if the message contains sentence-ending punctuation followed by **
@@ -4101,6 +4124,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Increment consecutive no-assistant-messages counter
 					this.consecutiveNoAssistantMessagesCount++
+
+					if (this.reportedOutputTokenCap()) {
+						// Reported on the FIRST occurrence and never retried: unlike a generic
+						// empty turn this cause is already conclusive, and a retry would resend
+						// identical input for another full output budget.
+						await this.say("error", "MODEL_OUTPUT_TOKEN_CAP")
+
+						// Nothing is retried, so the user message stays; a synthetic assistant
+						// turn keeps alternation valid for a later continuation.
+						await this.addToApiConversationHistory({
+							role: "assistant",
+							content: [
+								{
+									type: "text",
+									text: "Failure: I ran out of output tokens before producing a response.",
+								},
+							],
+						})
+						this.messageCounts.assistant++
+
+						return false
+					}
 
 					// Only show error and count toward mistake limit after 2 consecutive failures
 					// This provides a "grace retry" - first failure retries silently

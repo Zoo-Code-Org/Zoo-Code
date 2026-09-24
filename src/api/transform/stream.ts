@@ -11,12 +11,19 @@ export type ApiStreamChunk =
 	| ApiStreamToolCallDeltaChunk
 	| ApiStreamToolCallEndChunk
 	| ApiStreamToolCallPartialChunk
+	| ApiStreamStopReasonChunk
 	| ApiStreamError
 
 export interface ApiStreamError {
 	type: "error"
 	error: string
 	message: string
+}
+
+/** Diagnostic only: carries no assistant content, so it must never make a response count as non-empty. */
+export interface ApiStreamStopReasonChunk {
+	type: "stop_reason"
+	reason: string
 }
 
 export interface ApiStreamTextChunk {
