@@ -79,9 +79,11 @@ export abstract class RouterProvider extends BaseProvider {
 		// `contextWindow > 0` skips a catalog entry whose window is missing or
 		// nonsensical, because clamping to it would send 0 or a negative budget.
 		// The `typeof` check is required by the compiler (`maxTokens` is
-		// `number | null | undefined`); it is not separately observable, since a
-		// nullish value coerces to 0 and can never exceed a positive window.
-		// A negative or NaN `maxTokens` fails the comparison and passes through
+		// `number | null | undefined`); dropping it raises TS18049. It is not
+		// separately observable either, since a nullish value coerces to 0 and can
+		// never exceed a positive window. `>` rather than `>=` is the same: when
+		// the two are equal the clamp writes back the value already there. A
+		// negative or NaN `maxTokens` fails the comparison and passes through
 		// unchanged, which is what the provider asked for.
 		if (typeof maxTokens === "number" && contextWindow > 0 && maxTokens > contextWindow) {
 			return { ...resolvedInfo, maxTokens: contextWindow }
