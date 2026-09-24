@@ -69,21 +69,22 @@ export abstract class RouterProvider extends BaseProvider {
 		}
 
 		const resolvedInfo = applyCustomModelInfo(info, this.options) ?? fallback
+		const { maxTokens, contextWindow } = resolvedInfo
 
-		// The gateway request builders forward `info.maxTokens` verbatim as
-		// max_completion_tokens, with no clamp of their own, so a user-supplied
-		// value above the context window would produce a rejected request.
-		// openrouter/requesty/unbound instead go through `getModelParams()`, which
-		// already clamps, so they must not be clamped twice.
-		if (
-			typeof resolvedInfo.maxTokens === "number" &&
-			Number.isFinite(resolvedInfo.maxTokens) &&
-			resolvedInfo.maxTokens > 0 &&
-			Number.isFinite(resolvedInfo.contextWindow) &&
-			resolvedInfo.contextWindow > 0 &&
-			resolvedInfo.maxTokens > resolvedInfo.contextWindow
-		) {
-			return { ...resolvedInfo, maxTokens: resolvedInfo.contextWindow }
+		// These gateways forward `info.maxTokens` verbatim as max_completion_tokens
+		// with no clamp of their own, so a value above the context window produces a
+		// request the gateway rejects. openrouter/requesty/unbound instead go through
+		// `getModelParams()`, which already clamps, and must not be clamped twice.
+		//
+		// `contextWindow > 0` skips a catalog entry whose window is missing or
+		// nonsensical, because clamping to it would send 0 or a negative budget.
+		// The `typeof` check is required by the compiler (`maxTokens` is
+		// `number | null | undefined`); it is not separately observable, since a
+		// nullish value coerces to 0 and can never exceed a positive window.
+		// A negative or NaN `maxTokens` fails the comparison and passes through
+		// unchanged, which is what the provider asked for.
+		if (typeof maxTokens === "number" && contextWindow > 0 && maxTokens > contextWindow) {
+			return { ...resolvedInfo, maxTokens: contextWindow }
 		}
 
 		return resolvedInfo

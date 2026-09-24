@@ -237,6 +237,42 @@ describe("VercelAiGatewayHandler", () => {
 			)
 		})
 
+		// Same contract as the Zoo gateway: `info.maxTokens` is forwarded verbatim,
+		// so the clamp is the only guard on the outgoing token budget.
+		it("sends the catalog maxTokens unchanged when the context window is unusable", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"anthropic/claude-sonnet-4": {
+					maxTokens: 5_000,
+					contextWindow: 0,
+					supportsPromptCache: false,
+				},
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			await handler.completePrompt("test")
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 5_000 }))
+		})
+
+		it("clamps a catalog maxTokens above the context window", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"anthropic/claude-sonnet-4": {
+					maxTokens: 500_000,
+					contextWindow: 200_000,
+					supportsPromptCache: false,
+				},
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			await handler.completePrompt("test")
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 200_000 }))
+		})
+
 		it("returns default model info when options are not provided", async () => {
 			const handler = new VercelAiGatewayHandler({})
 			const result = await handler.fetchModel()

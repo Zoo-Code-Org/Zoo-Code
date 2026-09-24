@@ -98,4 +98,38 @@ describe("custom model info", () => {
 			true,
 		)
 	})
+
+	// `modelInfoSchema` accepts any number because a provider catalog is not ours
+	// to police. User input is, and these two values drive token accounting and the
+	// outgoing max_completion_tokens.
+	it.each([
+		{ label: "zero", contextWindow: 0 },
+		{ label: "negative", contextWindow: -1 },
+		{ label: "fractional", contextWindow: 1.5 },
+		{ label: "non-finite", contextWindow: Number.POSITIVE_INFINITY },
+		{ label: "beyond safe integer range", contextWindow: Number.MAX_SAFE_INTEGER + 2 },
+	])("rejects a $label context window override", ({ contextWindow }) => {
+		expect(customModelInfoSchema.safeParse({ contextWindow, supportsPromptCache: false }).success).toBe(false)
+	})
+
+	it.each([
+		{ label: "zero", maxTokens: 0 },
+		{ label: "negative", maxTokens: -1 },
+		{ label: "fractional", maxTokens: 1.5 },
+		{ label: "non-finite", maxTokens: Number.POSITIVE_INFINITY },
+	])("rejects a $label max output tokens override", ({ maxTokens }) => {
+		expect(
+			customModelInfoSchema.safeParse({ contextWindow: 64_000, maxTokens, supportsPromptCache: false }).success,
+		).toBe(false)
+	})
+
+	it("accepts an absent max output tokens as provider-decided", () => {
+		expect(customModelInfoSchema.safeParse({ contextWindow: 64_000, supportsPromptCache: false }).success).toBe(
+			true,
+		)
+		expect(
+			customModelInfoSchema.safeParse({ contextWindow: 64_000, maxTokens: null, supportsPromptCache: false })
+				.success,
+		).toBe(true)
+	})
 })

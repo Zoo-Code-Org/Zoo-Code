@@ -275,6 +275,92 @@ describe("ZooGatewayHandler", () => {
 			)
 		})
 
+		// This gateway forwards `info.maxTokens` verbatim as `max_completion_tokens`,
+		// so the clamp is the only thing keeping an out-of-range value out of the
+		// request. Catalog entries reach it unvalidated: `modelInfoSchema` does not
+		// constrain these numbers, only user-supplied overrides are constrained.
+		it.each([
+			{ label: "zero", contextWindow: 0 },
+			{ label: "negative", contextWindow: -1 },
+		])(
+			"sends the catalog maxTokens unchanged when the context window is $label",
+			async ({ contextWindow }) => {
+				const { getModels } = await import("../fetchers/modelCache")
+				vitest.mocked(getModels).mockResolvedValue({
+					"anthropic/claude-sonnet-4": {
+						...DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"],
+						contextWindow,
+						maxTokens: 5_000,
+					},
+				})
+				mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+				const handler = new ZooGatewayHandler(mockOptions)
+				await handler.completePrompt("test")
+
+				// Clamping to a meaningless window would send 0 or -1 as the token
+				// budget and the gateway would reject the request outright.
+				expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 5_000 }))
+			},
+		)
+
+		it("clamps a non-finite catalog maxTokens down to the context window", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValue({
+				"anthropic/claude-sonnet-4": {
+					...DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"],
+					contextWindow: 200_000,
+					maxTokens: Number.POSITIVE_INFINITY,
+				},
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			await handler.completePrompt("test")
+
+			// `Infinity` serializes to `null` in JSON, which the gateway rejects.
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 200_000 }))
+		})
+
+		it("preserves a null catalog maxTokens as the provider-decides sentinel", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValue({
+				"anthropic/claude-sonnet-4": {
+					...DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"],
+					contextWindow: 1_000,
+					maxTokens: null,
+				},
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const result = await handler.fetchModel()
+
+			// Substituting the context window here would cap a response the provider
+			// was asked to size itself.
+			expect(result.info.maxTokens).toBeNull()
+
+			await handler.completePrompt("test")
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: null }))
+		})
+
+		it("leaves a catalog maxTokens below the context window untouched", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValue({
+				"anthropic/claude-sonnet-4": {
+					...DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"],
+					contextWindow: 200_000,
+					maxTokens: 4_096,
+				},
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			await handler.completePrompt("test")
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4_096 }))
+		})
+
 		it("falls back to the default model when none is configured", async () => {
 			const handler = new ZooGatewayHandler({ zooSessionToken: "zoo_ext_test_token" })
 			const result = await handler.fetchModel()

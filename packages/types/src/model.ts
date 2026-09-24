@@ -207,6 +207,14 @@ export const customModelInfoSchema = modelInfoSchema
 		longContextPricing: true,
 		tiers: true,
 	})
+	.extend({
+		// `modelInfoSchema` accepts any number because a provider catalog is not
+		// ours to validate. User input is, and these two values drive token
+		// accounting and the outgoing max_completion_tokens, so reject the values
+		// that would produce NaN percentages or a request the gateway rejects.
+		contextWindow: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+		maxTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullish(),
+	})
 	// `strict()` is what actually rejects a pricing field: omitting a key only
 	// drops it from the shape, it does not make the value invalid.
 	.strict()
