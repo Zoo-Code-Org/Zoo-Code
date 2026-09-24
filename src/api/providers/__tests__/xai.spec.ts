@@ -14,16 +14,23 @@ const mockResponsesCreate = vitest.hoisted(() => vitest.fn())
 
 vitest.mock("openai", async () => {
 	const { mockOpenAiResponsesClient } = await import("../../../test-utils/api")
-	return mockOpenAiResponsesClient(mockResponsesCreate)
+	const actual = await vi.importActual<typeof import("openai")>("openai")
+	return {
+		...mockOpenAiResponsesClient(mockResponsesCreate),
+		// Expose the real SDK error class so the mock transport can throw it exactly
+		// the way the OpenAI SDK does when a request signal aborts.
+		APIUserAbortError: actual.APIUserAbortError,
+	}
 })
 
-import OpenAI from "openai"
+import OpenAI, { APIUserAbortError } from "openai"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
-import { asyncStreamFrom } from "../../../test-utils/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("XAIHandler", () => {
@@ -83,6 +90,7 @@ describe("XAIHandler", () => {
 				store: false,
 				include: ["reasoning.encrypted_content"],
 			}),
+			undefined,
 		)
 	})
 
@@ -212,7 +220,212 @@ describe("XAIHandler", () => {
 				tool_choice: "auto",
 				parallel_tool_calls: true,
 			}),
+			undefined,
 		)
+	})
+
+	it("createMessage should honor an explicit parallelToolCalls false", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test Tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			parallelToolCalls: false,
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				parallel_tool_calls: false,
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should map a forced tool_choice to the Responses API shape", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: { type: "function", function: { name: "test_tool" } },
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: { type: "function", name: "test_tool" },
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should flatten allowed_tools entries to the Responses API shape", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: {
+				type: "allowed_tools",
+				allowed_tools: {
+					mode: "required",
+					tools: [
+						{ type: "function", function: { name: "test_tool" } },
+						{ type: "mcp", server_label: "deepwiki" },
+					],
+				},
+			},
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: {
+					type: "allowed_tools",
+					mode: "required",
+					tools: [
+						{ type: "function", name: "test_tool" },
+						{ type: "mcp", server_label: "deepwiki" },
+					],
+				},
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should map a custom tool_choice to the Responses API shape", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: { type: "custom", custom: { name: "custom_tool" } },
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: { type: "custom", name: "custom_tool" },
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should pass through unmappable allowed_tools entries unchanged", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		// Entries that fail the function-name guard must pass through unchanged: a
+		// non-function type carrying a function ref, a null ref, a function value
+		// (typeof "function", not "object", whose .name is still a string), and an
+		// object whose name is not a string.
+		const probeFunction = () => 1
+		const entries = [
+			{ type: "mcp", function: { name: "leaky" } },
+			{ type: "function", function: null },
+			{ type: "function", function: probeFunction },
+			{ type: "function", function: { name: 123 } },
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: { type: "allowed_tools", allowed_tools: { mode: "auto", tools: entries } },
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: {
+					type: "allowed_tools",
+					mode: "auto",
+					tools: entries,
+				},
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should send max_output_tokens and temperature for the default model", async () => {
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [])
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				max_output_tokens: 65_536,
+				temperature: 0,
+			}),
+			undefined,
+		)
+	})
+
+	it("createMessage should omit tool parameters when no tools are provided", async () => {
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [])
+		await stream.next()
+
+		const callArgs = mockResponsesCreate.mock.calls[mockResponsesCreate.mock.calls.length - 1][0]
+		expect(callArgs).not.toHaveProperty("tools")
+		expect(callArgs).not.toHaveProperty("tool_choice")
+		expect(callArgs).not.toHaveProperty("parallel_tool_calls")
 	})
 
 	it("completePrompt should return text from Responses API", async () => {
@@ -232,6 +445,95 @@ describe("XAIHandler", () => {
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow(`xAI completion error: ${errorMessage}`)
 	})
 
+	it("completePrompt should surface the SDK APIUserAbortError unmodified on abort", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const sdkAbortError = new APIUserAbortError()
+		mockResponsesCreate.mockRejectedValueOnce(sdkAbortError)
+
+		// The error must surface as the same SDK instance, not wrapped by handleOpenAIError
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toBe(
+			sdkAbortError,
+		)
+	})
+
+	it("completePrompt should surface a native AbortError unmodified on abort", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const abortError = new Error("This operation was aborted")
+		abortError.name = "AbortError"
+		mockResponsesCreate.mockRejectedValueOnce(abortError)
+
+		// The error must surface as the same instance, not wrapped by handleOpenAIError
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toBe(abortError)
+	})
+
+	it("completePrompt should pass abort signal through to client", async () => {
+		const controller = new AbortController()
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			signal: controller.signal,
+		})
+	})
+
+	it("completePrompt should work without options (backward compatible)", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		const result = await handler.completePrompt("test prompt")
+		expect(result).toBe("response")
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			undefined,
+		)
+	})
+
+	it("completePrompt should send the full Responses API request body", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt")
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			{
+				model: xaiDefaultModelId,
+				input: [{ role: "user", content: [{ type: "input_text", text: "test prompt" }] }],
+				store: false,
+			},
+			undefined,
+		)
+	})
+
+	it("completePrompt should pass timeout through to client", async () => {
+		const controller = new AbortController()
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			signal: controller.signal,
+			timeout: 5000,
+		})
+	})
+
+	it("completePrompt should pass only timeoutMs when no signal provided", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { timeoutMs: 3000 })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			timeout: 3000,
+		})
+	})
+
+	it("completePrompt should pass timeout when timeoutMs=0 (defined check)", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { timeoutMs: 0 })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			{ timeout: 0 }, // !== undefined check means 0 is passed through
+		)
+	})
+
 	it("should include reasoning effort for mini models in Responses API format", async () => {
 		const miniModelHandler = new XAIHandler({
 			apiModelId: "grok-3-mini",
@@ -249,6 +551,7 @@ describe("XAIHandler", () => {
 					effort: "high",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -269,6 +572,7 @@ describe("XAIHandler", () => {
 					effort: "high",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -290,6 +594,7 @@ describe("XAIHandler", () => {
 					effort: "low",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -314,5 +619,133 @@ describe("XAIHandler", () => {
 
 		const stream = handler.createMessage("test prompt", [])
 		await expect(stream.next()).rejects.toThrow(`xAI completion error: ${errorMessage}`)
+	})
+
+	it("should capture createMessage failures in telemetry with operation context", async () => {
+		mockResponsesCreate.mockRejectedValueOnce(new Error("Stream error"))
+
+		const stream = handler.createMessage("test prompt", [])
+		await expect(stream.next()).rejects.toThrow("xAI completion error: Stream error")
+
+		expect(mockCaptureException).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: "ApiProviderError",
+				provider: "xAI",
+				modelId: xaiDefaultModelId,
+				operation: "createMessage",
+			}),
+		)
+	})
+
+	it("createMessage should surface the SDK APIUserAbortError unmodified on abort", async () => {
+		const abortedController = new AbortController()
+		abortedController.abort()
+		const sdkAbortError = new APIUserAbortError()
+
+		mockResponsesCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+			// Mimic the OpenAI SDK: reject with its own APIUserAbortError when the
+			// request signal is aborted.
+			if (options?.signal?.aborted) {
+				throw sdkAbortError
+			}
+			return asyncStreamFrom([])
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+		)
+
+		// The SDK error must surface as the same instance, not wrapped by handleOpenAIError
+		await expect(stream.next()).rejects.toBe(sdkAbortError)
+	})
+
+	it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
+		const abortedController = new AbortController()
+		abortedController.abort()
+
+		mockResponsesCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+			if (options?.signal?.aborted) {
+				const error = new Error("The operation was aborted")
+				error.name = "AbortError"
+				throw error
+			}
+			return asyncStreamFrom([])
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+		)
+
+		await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("should abort the request when the external signal aborts mid-flight", async () => {
+		const controller = new AbortController()
+
+		mockResponsesCreate.mockImplementation((_params: unknown, options?: { signal?: AbortSignal }) => {
+			return new Promise<void>((_resolve, reject) => {
+				const signal = options?.signal
+				if (!signal) {
+					return
+				}
+				if (signal.aborted) {
+					const error = new Error("The operation was aborted")
+					error.name = "AbortError"
+					reject(error)
+					return
+				}
+				signal.addEventListener(
+					"abort",
+					() => {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						reject(error)
+					},
+					{ once: true },
+				)
+			})
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+
+		const promise = stream.next()
+		controller.abort()
+		await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("should remove the external abort listener when the stream completes", async () => {
+		const controller = new AbortController()
+		const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+		const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+		mockResponsesCreate.mockResolvedValueOnce(
+			asyncStreamFrom([{ type: "response.output_text.delta", delta: "done" }]),
+		)
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+
+		const chunks = await collectStream(stream)
+		expect(chunks).toEqual([{ type: "text", text: "done" }])
+
+		expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+		const [event, listener] = addEventListenerSpy.mock.calls[0]
+		expect(event).toBe("abort")
+		// The listener is registered once so it detaches itself when the signal aborts.
+		expect(addEventListenerSpy.mock.calls[0][2]).toEqual({ once: true })
+		// The same retained callback must be detached once the stream is done.
+		expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+		expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
 	})
 })
