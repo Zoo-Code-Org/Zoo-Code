@@ -85,6 +85,7 @@ async function realPathOfExistingAncestor(filePath: string): Promise<string | nu
 			// walking to its deepest existing ancestor.
 			try {
 				const stat = await fs.promises.lstat(current)
+				// Stryker disable next-line ConditionalExpression: equivalent - lstat succeeding on an entry whose realpath just failed with ENOENT means the entry is a dangling symlink (a real non-symlink entry would make realpath succeed), so the condition is always true at every reachable point and the true/false replacements are unobservable; the symlink reject is pinned by the dangling-symlink tests
 				if (stat.isSymbolicLink()) {
 					return null
 				}
