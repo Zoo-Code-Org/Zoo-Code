@@ -73,6 +73,8 @@ vitest.mock("@anthropic-ai/sdk", () => {
 
 // Import after mock
 import { Anthropic } from "@anthropic-ai/sdk"
+import { TelemetryService } from "@roo-code/telemetry"
+import { ApiProviderError } from "@roo-code/types"
 
 const mockAnthropicConstructor = vitest.mocked(Anthropic)
 
@@ -501,6 +503,200 @@ describe("AnthropicHandler", () => {
 			expect(requestBody?.model).toBe("claude-sonnet-5-bf")
 			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
 		})
+
+		it("should attach cache breakpoints and the prompt-caching beta header for a custom model whose resolved info supports prompt caching", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+
+			// Not in the model registry; capabilities are guessed from the Sonnet 5 family.
+			expect(customHandler.getModel().info.supportsPromptCache).toBe(true)
+
+			const stream = customHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "First message" }],
+				},
+				{
+					role: "assistant",
+					content: [{ type: "text" as const, text: "Response" }],
+				},
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Second message" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.system?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestBody?.messages?.[0]?.content?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestBody?.messages?.[1]?.content?.[0]).not.toHaveProperty("cache_control")
+			expect(requestBody?.messages?.[2]?.content?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
+		it("should not attach cache breakpoints or the prompt-caching beta header when the model info does not support prompt caching", async () => {
+			const noCacheHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-5-sonnet-20241022",
+			})
+
+			// No registry model disables prompt caching, so override the resolved info.
+			const realModel = noCacheHandler.getModel()
+			vitest.spyOn(noCacheHandler, "getModel").mockReturnValue({
+				...realModel,
+				maxTokens: undefined,
+				info: { ...realModel.info, supportsPromptCache: false },
+			})
+
+			const stream = noCacheHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.system).toEqual([{ text: systemPrompt, type: "text" }])
+			expect(requestBody?.max_tokens).toBe(8192)
+			expect(requestBody?.messages?.[0]?.content?.[0]).not.toHaveProperty("cache_control")
+			expect(requestOptions).toBeUndefined()
+		})
+
+		it("should send the prompt-caching beta header and fall back to default max tokens when maxTokens is undefined", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-5-sonnet-20241022",
+			})
+			const realModel = customHandler.getModel()
+			vitest.spyOn(customHandler, "getModel").mockReturnValue({ ...realModel, maxTokens: undefined })
+
+			const stream = customHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.system?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestBody?.max_tokens).toBe(8192)
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
+		it("should attach cache control only to the last content block of a cached user message", async () => {
+			const stream = handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [
+						{ type: "text" as const, text: "First block" },
+						{ type: "text" as const, text: "Second block" },
+					],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const content = requestBody?.messages?.[0]?.content
+			expect(content?.[0]).not.toHaveProperty("cache_control")
+			expect(content?.[1]?.cache_control).toEqual({ type: "ephemeral" })
+		})
+
+		it("should cache the system prompt but no message when the request has no user message", async () => {
+			const stream = handler.createMessage(systemPrompt, [
+				{
+					role: "assistant",
+					content: [{ type: "text" as const, text: "Previous response" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.system?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+			expect(requestBody?.messages?.[0]?.content?.[0]).not.toHaveProperty("cache_control")
+		})
+
+		it.each([
+			["an Error", new Error("Anthropic API error")],
+			["a non-Error rejection", "Anthropic API error"],
+		])(
+			"should capture telemetry and rethrow when the request fails with %s for a cacheable model",
+			async (_, rejection) => {
+				mockCreate.mockRejectedValueOnce(rejection)
+
+				const stream = handler.createMessage(systemPrompt, [
+					{
+						role: "user",
+						content: [{ type: "text" as const, text: "Hello" }],
+					},
+				])
+
+				await expect(collectStream(stream)).rejects.toBe(rejection)
+				expect(TelemetryService.instance.captureException).toHaveBeenCalledTimes(1)
+				const capturedError = vitest.mocked(TelemetryService.instance.captureException).mock.calls[0]?.[0]
+				expect(capturedError).toBeInstanceOf(ApiProviderError)
+				if (!(capturedError instanceof ApiProviderError)) {
+					throw new Error("expected captureException to receive an ApiProviderError")
+				}
+				expect(capturedError.message).toBe("Anthropic API error")
+				expect(capturedError.provider).toBe("Anthropic")
+				expect(capturedError.modelId).toBe("claude-3-5-sonnet-20241022")
+				expect(capturedError.operation).toBe("createMessage")
+			},
+		)
+
+		it.each([
+			["an Error", new Error("Anthropic API error")],
+			["a non-Error rejection", "Anthropic API error"],
+		])(
+			"should capture telemetry and rethrow when the request fails with %s for a model without prompt cache support",
+			async (_, rejection) => {
+				const noCacheHandler = new AnthropicHandler({
+					apiKey: "test-api-key",
+					apiModelId: "claude-3-5-sonnet-20241022",
+				})
+
+				// No registry model disables prompt caching, so override the resolved info.
+				const realModel = noCacheHandler.getModel()
+				vitest.spyOn(noCacheHandler, "getModel").mockReturnValue({
+					...realModel,
+					info: { ...realModel.info, supportsPromptCache: false },
+				})
+
+				mockCreate.mockRejectedValueOnce(rejection)
+
+				const stream = noCacheHandler.createMessage(systemPrompt, [
+					{
+						role: "user",
+						content: [{ type: "text" as const, text: "Hello" }],
+					},
+				])
+
+				await expect(collectStream(stream)).rejects.toBe(rejection)
+				expect(TelemetryService.instance.captureException).toHaveBeenCalledTimes(1)
+				const capturedError = vitest.mocked(TelemetryService.instance.captureException).mock.calls[0]?.[0]
+				expect(capturedError).toBeInstanceOf(ApiProviderError)
+				if (!(capturedError instanceof ApiProviderError)) {
+					throw new Error("expected captureException to receive an ApiProviderError")
+				}
+				expect(capturedError.message).toBe("Anthropic API error")
+				expect(capturedError.provider).toBe("Anthropic")
+				expect(capturedError.modelId).toBe("claude-3-5-sonnet-20241022")
+				expect(capturedError.operation).toBe("createMessage")
+			},
+		)
 	})
 
 	describe("completePrompt", () => {
