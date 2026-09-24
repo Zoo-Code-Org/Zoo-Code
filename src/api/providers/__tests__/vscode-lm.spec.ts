@@ -397,6 +397,42 @@ describe("VsCodeLmHandler", () => {
 			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "get_user" })
 		})
 
+		it("preserves a tool name containing a non-marker u+hex sequence end to end", async () => {
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(
+				"You are a helpful assistant",
+				[{ role: "user", content: "hi" }],
+				{
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: { name: "queue1234", description: "d", parameters: { type: "object" } },
+						},
+					],
+				},
+			)) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("queue1234")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "queue1234" })
+		})
+
 		describe("system prompt sanitization", () => {
 			it("sanitizes lone surrogates in the system prompt", async () => {
 				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({

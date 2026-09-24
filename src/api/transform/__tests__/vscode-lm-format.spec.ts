@@ -855,6 +855,13 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		}
 	})
 
+	it("does not decode a non-marker u+hex sequence", () => {
+		// "queue1234" has "u" followed by hex but no preceding "_", so it must survive untouched.
+		const name = "queue1234"
+		expect(sanitizeToolNameSurrogates(name)).toBe(name)
+		expect(codeUnits(decodeToolNameSurrogates(name))).toEqual(codeUnits(name))
+	})
+
 	it("replays a tool call in history under the same name it was declared with", () => {
 		const originalName = `read${LONE_HIGH}file`
 		const messages: Anthropic.Messages.MessageParam[] = [
