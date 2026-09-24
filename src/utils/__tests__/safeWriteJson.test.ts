@@ -232,6 +232,17 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(data)
 	})
 
+	test("should reject without creating the parent directory when parent creation is disabled", async () => {
+		const subDir = path.join(tempDir, "missing-parent")
+		const filePath = path.join(subDir, "file.json")
+
+		await expect(safeWriteJson(filePath, { value: 1 }, { createParentDirectory: false })).rejects.toMatchObject({
+			code: "ENOENT",
+			path: `${filePath}.lock`,
+		})
+		await expect(fs.access(subDir)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
 	test("should handle multi-level directory creation", async () => {
 		// Create a new non-existent subdirectory path with multiple levels
 		const deepDir = path.join(tempDir, "level1", "level2", "level3")
@@ -486,11 +497,11 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ a: 1, b: 3, c: 4 })
 	})
 
-	test("should pass null to merge callback when file does not exist", async () => {
+	test("should pass null to merge callback under the lock when the parent exists but the file does not", async () => {
 		const newFilePath = path.join(tempDir, "nonexistent.json")
 		const mergeFn = vi.fn((existing, incoming) => incoming)
 
-		await safeWriteJson(newFilePath, { value: 42 }, { merge: mergeFn })
+		await safeWriteJson(newFilePath, { value: 42 }, { createParentDirectory: false, merge: mergeFn })
 
 		expect(mergeFn).toHaveBeenCalledWith(null, { value: 42 })
 		const content = await readFileContent(newFilePath)

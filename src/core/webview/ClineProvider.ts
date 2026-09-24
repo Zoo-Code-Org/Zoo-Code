@@ -4067,7 +4067,13 @@ export class ClineProvider
 			let settlementFailed = false
 			if (pendingActionId && err instanceof LifecycleTransitionError) {
 				try {
-					await this.taskHistoryStore.clearPendingActionIfMatching(parentTaskId, pendingActionId)
+					const authoritative = await this.taskHistoryStore.clearPendingActionIfMatching(
+						parentTaskId,
+						pendingActionId,
+					)
+					settlementFailed =
+						authoritative.pendingAction?.kind === "create_subtask" &&
+						authoritative.pendingAction.actionId === pendingActionId
 					this.recentTasksCache = undefined
 				} catch (settlementError) {
 					settlementFailed = true

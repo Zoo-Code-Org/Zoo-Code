@@ -1016,6 +1016,72 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
 	})
 
+	it("does not restore a completed parent when settlement preserves the rejected action", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const completedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "completed",
+			pendingAction,
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const clearPendingActionIfMatching = vi.fn().mockResolvedValue(completedParent)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: completedParent }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+					updater(interruptedParent)
+					return []
+				}),
+				clearPendingActionIfMatching,
+			},
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: pendingAction.message,
+				initialTodos: pendingAction.todos,
+				mode: pendingAction.mode,
+				pendingActionId: pendingAction.actionId,
+			}),
+		).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+		expect(clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", pendingAction.actionId)
+		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+	})
+
 	it("restores the authoritative parent record when settlement preserves a replacement action", async () => {
 		const pendingAction = {
 			kind: "create_subtask" as const,

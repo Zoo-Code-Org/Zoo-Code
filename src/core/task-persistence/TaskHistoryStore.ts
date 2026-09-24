@@ -1085,22 +1085,43 @@ export class TaskHistoryStore {
 			}
 			const filePath = await this.getTaskFilePath(taskId)
 			let authoritative: HistoryItem = cached
-			await safeWriteJson(filePath, cached, {
-				merge: (existing) => {
-					if (!existing || typeof existing !== "object" || !("id" in existing)) {
-						// Writing the cached record back would recreate a task
-						// another host deleted, so drop the stale entry first.
-						this.cache.delete(taskId)
-						this.taskFileMtimes.delete(taskId)
-						throw new Error(
-							`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
-						)
-					}
-					const disk = existing as HistoryItem
-					authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
-					return authoritative
-				},
-			})
+			let missingDiskRecord = false
+			try {
+				await safeWriteJson(filePath, cached, {
+					createParentDirectory: false,
+					merge: (existing) => {
+						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+							// Writing the cached record back would recreate a task
+							// another host deleted, so drop the stale entry first.
+							missingDiskRecord = true
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+							)
+						}
+						const disk = existing as HistoryItem
+						authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
+						return authoritative
+					},
+				})
+			} catch (error) {
+				const missingLockPath =
+					error &&
+					typeof error === "object" &&
+					"code" in error &&
+					error.code === "ENOENT" &&
+					"path" in error &&
+					error.path === `${filePath}.lock`
+				if (missingDiskRecord || missingLockPath) {
+					this.cache.delete(taskId)
+					this.taskFileMtimes.delete(taskId)
+					throw new Error(
+						`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+					)
+				}
+				throw error
+			}
 			this.cache.set(taskId, authoritative)
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())

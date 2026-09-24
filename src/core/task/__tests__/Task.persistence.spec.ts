@@ -1391,6 +1391,39 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
+		it("replays a create-subtask action for an active historical task without restart settlement", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },
+			])
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: "Previous response" }])
+			const clearRejectedAction = vi.fn()
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "parent-1",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "active",
+					pendingAction: createSubtaskAction,
+				},
+				startTask: false,
+			})
+			const replay = vi
+				.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+				.mockResolvedValue(undefined)
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(clearRejectedAction).not.toHaveBeenCalled()
+			expect(replay).toHaveBeenCalledWith(createSubtaskAction)
+		})
+
 		it("settles an interrupted create-subtask action before restart replay", async () => {
 			mockReadTaskMessages.mockResolvedValue([
 				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },

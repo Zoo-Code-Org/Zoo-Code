@@ -215,6 +215,29 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
+	it("rejects and evicts stale cache without recreating artifacts after full directory deletion", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-deleted-directory-settlement-"))
+		const store = new TaskHistoryStore(storagePath)
+		const action = createAction("action-a", "action A")
+		const taskDirectory = path.join(storagePath, "tasks", "shared-task")
+
+		try {
+			await store.initialize()
+			await store.upsert({ ...item("shared-task"), pendingAction: action })
+			await fs.rm(taskDirectory, { recursive: true })
+
+			await expect(store.clearPendingActionIfMatching("shared-task", action.actionId)).rejects.toThrow(
+				"task shared-task not found",
+			)
+			expect(store.get("shared-task")).toBeUndefined()
+			await expect(fs.access(taskDirectory)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(await fs.readdir(path.join(storagePath, "tasks"))).not.toContain("shared-task")
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("rejects settlement for a task absent from the cache without creating it", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-cache-miss-settlement-"))
 		const store = new TaskHistoryStore(storagePath)
