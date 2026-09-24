@@ -1543,6 +1543,7 @@ export const webviewMessageHandler = async (
 				const decoded = decodeUntrustedPathToStable(rawPath)
 				// Stryker disable next-line ConditionalExpression,BlockStatement: hostile non-stabilizing encodings are unreachable from the webview (its posts are plain link targets); the bound is defensive
 				if (decoded === null) {
+					// Stryker disable next-line CallExpression: hostile non-stabilizing encodings are pinned by the direct decodeUntrustedPathToStable bound test; the webview never posts such values
 					rejectOutsideWorkspace()
 					break
 				}

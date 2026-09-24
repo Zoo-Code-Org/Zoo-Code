@@ -6,6 +6,7 @@ import * as nodeFs from "fs"
 import * as vscode from "vscode"
 import { openFile } from "../../../integrations/misc/open-file"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../../utils/pathUtils"
 import type { ClineProvider } from "../ClineProvider"
 import type { Task } from "../../task/Task"
 
@@ -318,5 +319,138 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
 			'common:errors.could_not_open_file:{"errorMessage":"common:errors.no_workspace"}',
 		)
+	})
+
+	// The boundary decodes tagged requests only: untagged callers keep the
+	// legacy path exactly, so openFile's later decode applies exactly once.
+	it("keeps untagged percent-encoded paths undecoded at the boundary", async () => {
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "src/a%20b.txt",
+		})
+
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "src/a%20b.txt"), undefined)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	// Defense in depth: a lexically outside path whose symlinked ancestor
+	// resolves inside the workspace is still rejected by the lexical check.
+	it("rejects a lexically outside path even when its symlinked ancestor resolves inside the workspace", async () => {
+		realWorld.symlinks.set(nodePath.join(OUTSIDE_ROOT, "link-in"), MOCK_CWD)
+
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: nodePath.join(OUTSIDE_ROOT, "link-in", "f.txt"),
+			values: { fromMarkdown: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			cannotAccessPathError(nodePath.join(OUTSIDE_ROOT, "link-in", "f.txt")),
+		)
+	})
+})
+
+describe("utils/pathUtils containment helpers", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vscodeState.workspaceFolders = [{ uri: { fsPath: WORKSPACE_ROOT } }]
+		realWorld.existing.clear()
+		realWorld.symlinks.clear()
+		realWorld.existing.add(WORKSPACE_ROOT)
+		realWorld.existing.add(MOCK_CWD)
+		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: string | URL) => {
+			const key = String(p)
+			const symlink = realWorld.symlinks.get(key)
+			if (symlink) {
+				return symlink
+			}
+			if (realWorld.existing.has(key)) {
+				return key
+			}
+			const err = new Error(`ENOENT: no such file or directory, realpath '${key}'`)
+			;(err as NodeJS.ErrnoException).code = "ENOENT"
+			throw err
+		})
+	})
+
+	describe("decodeUntrustedPathToStable", () => {
+		it("returns a stable path unchanged", () => {
+			expect(decodeUntrustedPathToStable("src/index.ts")).toBe("src/index.ts")
+		})
+
+		it("decodes to a fixed point", () => {
+			expect(decodeUntrustedPathToStable("./%2e%2e/%2e%2e/.env")).toBe("./../../.env")
+			expect(decodeUntrustedPathToStable("%252e%252e")).toBe("..")
+		})
+
+		it("leaves a bare percent that is not a valid escape unchanged", () => {
+			expect(decodeUntrustedPathToStable("report 50%.md")).toBe("report 50%.md")
+		})
+
+		it("returns null when the value does not stabilize within the bound", () => {
+			const spy = vi.spyOn(globalThis, "decodeURIComponent").mockImplementation((s: string) => `${s}x`)
+			try {
+				expect(decodeUntrustedPathToStable("a")).toBeNull()
+			} finally {
+				spy.mockRestore()
+			}
+		})
+	})
+
+	describe("isRealPathOutsideWorkspace", () => {
+		it("fails closed when no workspace folders are configured", async () => {
+			vscodeState.workspaceFolders = []
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "x.ts"))).resolves.toBe(true)
+		})
+
+		it("accepts an existing path inside the workspace", async () => {
+			realWorld.existing.add(nodePath.join(MOCK_CWD, "x.ts"))
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "x.ts"))).resolves.toBe(false)
+		})
+
+		it("accepts a missing file via its deepest existing in-workspace ancestor", async () => {
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "newdir", "x.ts"))).resolves.toBe(false)
+		})
+
+		it("rejects a symlink whose target is outside the workspace", async () => {
+			realWorld.symlinks.set(nodePath.join(MOCK_CWD, "link.txt"), nodePath.join(OUTSIDE_ROOT, "secret.txt"))
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "link.txt"))).resolves.toBe(true)
+		})
+
+		it("fails closed on an unexpected filesystem error", async () => {
+			const err = new Error("EACCES: permission denied")
+			;(err as NodeJS.ErrnoException).code = "EACCES"
+			const spy = vi.spyOn(nodeFs.promises, "realpath").mockRejectedValue(err)
+			try {
+				await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "x.ts"))).resolves.toBe(true)
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
+		it("fails closed when a workspace folder cannot be realized", async () => {
+			realWorld.existing.add(nodePath.join(MOCK_CWD, "x.ts"))
+			const err = new Error("EACCES: permission denied")
+			;(err as NodeJS.ErrnoException).code = "EACCES"
+			vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: string | URL) => {
+				const key = String(p)
+				if (key === WORKSPACE_ROOT) {
+					throw err
+				}
+				const symlink = realWorld.symlinks.get(key)
+				if (symlink) {
+					return symlink
+				}
+				if (realWorld.existing.has(key)) {
+					return key
+				}
+				const enoent = new Error(`ENOENT: no such file or directory, realpath '${key}'`)
+				;(enoent as NodeJS.ErrnoException).code = "ENOENT"
+				throw enoent
+			})
+
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "x.ts"))).resolves.toBe(true)
+		})
 	})
 })
