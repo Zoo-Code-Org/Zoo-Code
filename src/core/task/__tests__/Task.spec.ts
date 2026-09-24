@@ -517,6 +517,74 @@ describe("Cline", () => {
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 		})
 
+		// An empty response is only actionable if the record says WHY the turn was empty.
+		// Chunk counts alone cannot separate "the provider sent nothing" from "the provider
+		// truncated or filtered the turn", so the stop reason and the reported token counts
+		// must reach the error text.
+		describe("stream diagnostics", () => {
+			/** Drives two empty responses so the marker fires, and returns its text. */
+			async function captureMarkerText(chunks: ApiStreamChunk[]): Promise<string> {
+				const task = await createTaskWithManualRetries()
+
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream(chunks))
+
+				const sayCalls: Array<{ type: string; text?: string }> = []
+				const originalSay = task.say.bind(task)
+				vi.spyOn(task, "say").mockImplementation(async (type, text, ...rest) => {
+					sayCalls.push({ type, text })
+					return originalSay(type, text, ...rest)
+				})
+
+				// The first empty response is a silent grace retry.
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "first" }])
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "second" }])
+
+				const marker = sayCalls.find((call) => call.text?.startsWith("MODEL_NO_ASSISTANT_MESSAGES"))
+				expect(marker).toBeDefined()
+				return marker!.text!
+			}
+
+			it("records the provider's stop reason for an empty turn", async () => {
+				// `content_filtered` rather than `max_tokens`, which routes to the dedicated
+				// MODEL_OUTPUT_TOKEN_CAP marker; this covers every other empty-turn reason.
+				const text = await captureMarkerText([
+					{ type: "stop_reason", reason: "content_filtered" },
+					{ type: "usage", inputTokens: 1200, outputTokens: 0 },
+				])
+
+				expect(text).toContain("Stop reason: content_filtered")
+				expect(text).toContain("Reported tokens: in=1200, out=0")
+				expect(text).toContain("stop_reason=1")
+			})
+
+			it("distinguishes content produced-and-lost from nothing generated", async () => {
+				// out > 0 with no text chunk means content was produced by the model and
+				// dropped before reaching the Task -- a different bug than an empty model.
+				const text = await captureMarkerText([{ type: "usage", inputTokens: 10, outputTokens: 4096 }])
+
+				expect(text).toContain("Reported tokens: in=10, out=4096")
+				expect(text).not.toContain("text=")
+			})
+
+			it("records an in-band stream error", async () => {
+				const text = await captureMarkerText([
+					{ type: "error", error: "upstream_error", message: "connection reset" },
+				])
+
+				expect(text).toContain("Stream errors: upstream_error: connection reset")
+			})
+
+			it("omits the optional lines when the provider reported neither", async () => {
+				// Providers that report nothing must still yield a readable record.
+				const text = await captureMarkerText([])
+
+				expect(text).toContain("Stream chunks: none")
+				expect(text).not.toContain("Stop reason:")
+				expect(text).not.toContain("Reported tokens:")
+			})
+		})
+
 		// A `max_tokens` empty turn is a configuration problem the provider already named,
 		// not a transient fault: the request was fully billed, so retrying re-spends a whole
 		// output budget to reproduce it. Reported on the FIRST occurrence and never retried.
@@ -548,9 +616,12 @@ describe("Cline", () => {
 			it("reports the token cap on the first occurrence instead of retrying silently", async () => {
 				const task = await createTaskWithAutoRetries()
 				const sayCalls = spyOnSay(task)
-				const attemptApiRequestSpy = vi
-					.spyOn(task, "attemptApiRequest")
-					.mockImplementation(() => stream([{ type: "stop_reason", reason: "max_tokens" }]))
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+					stream([
+						{ type: "stop_reason", reason: "max_tokens" },
+						{ type: "usage", inputTokens: 2, outputTokens: 8192 },
+					]),
+				)
 				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
 
 				const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
@@ -558,9 +629,13 @@ describe("Cline", () => {
 				expect(result).toBe(false)
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
 				expect(backoffSpy).not.toHaveBeenCalled()
-				expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(true)
+
+				const marker = sayCalls.find((call) => call.text?.startsWith("MODEL_OUTPUT_TOKEN_CAP"))
+				expect(marker).toBeDefined()
+				expect(marker!.text).toContain("Stop reason: max_tokens")
+				expect(marker!.text).toContain("Reported tokens: in=2, out=8192")
 				// The generic marker would misattribute a config problem to the provider.
-				expect(sayCalls.some((call) => call.text === "MODEL_NO_ASSISTANT_MESSAGES")).toBe(false)
+				expect(sayCalls.some((call) => call.text?.startsWith("MODEL_NO_ASSISTANT_MESSAGES"))).toBe(false)
 			})
 
 			it("records a synthetic assistant turn so history stays alternating", async () => {
@@ -617,7 +692,7 @@ describe("Cline", () => {
 
 					await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
 
-					expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(true)
+					expect(sayCalls.some((call) => call.text?.startsWith("MODEL_OUTPUT_TOKEN_CAP"))).toBe(true)
 				},
 			)
 
@@ -632,7 +707,7 @@ describe("Cline", () => {
 
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
 
-				expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(true)
+				expect(sayCalls.some((call) => call.text?.startsWith("MODEL_OUTPUT_TOKEN_CAP"))).toBe(true)
 			})
 
 			it("leaves the grace retry intact for an empty turn with another stop reason", async () => {
@@ -649,7 +724,7 @@ describe("Cline", () => {
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "do the thing" }])
 
 				expect(attemptApiRequestSpy.mock.calls.length).toBeGreaterThan(1)
-				expect(sayCalls.some((call) => call.text === "MODEL_OUTPUT_TOKEN_CAP")).toBe(false)
+				expect(sayCalls.some((call) => call.text?.startsWith("MODEL_OUTPUT_TOKEN_CAP"))).toBe(false)
 			})
 		})
 	})
@@ -4997,6 +5072,8 @@ describe("Cline", () => {
 				expect(errorSay).toBeDefined()
 				// The thrown message must survive verbatim so the row names the real cause.
 				expect(errorSay!.text).toContain("history shaping blew up")
+				// The per-request stream record rides along into errorDetails.
+				expect(errorSay!.text).toContain("Stream chunks:")
 			})
 
 			it("stays quiet when the task was abandoned on purpose", async () => {

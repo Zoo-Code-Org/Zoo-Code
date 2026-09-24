@@ -39,7 +39,7 @@ function renderErrorRow(text: string) {
 
 describe("ChatRow - output token cap", () => {
 	it("names the token limit and the setting instead of blaming the API", () => {
-		renderErrorRow("MODEL_OUTPUT_TOKEN_CAP")
+		renderErrorRow("MODEL_OUTPUT_TOKEN_CAP\nStop reason: max_tokens\nReported tokens: in=2, out=8192")
 
 		expect(screen.getByText(enChat.modelResponseIncomplete)).toBeInTheDocument()
 		expect(screen.getByText(enChat.modelResponseErrors.outputTokenCap)).toBeInTheDocument()
@@ -47,15 +47,25 @@ describe("ChatRow - output token cap", () => {
 		expect(screen.queryByText(enChat.modelResponseErrors.noAssistantMessages)).toBeNull()
 	})
 
-	it("offers the static explanation as the error details", () => {
+	it("carries the stream diagnostics as the error details", () => {
+		renderErrorRow("MODEL_OUTPUT_TOKEN_CAP\nStop reason: max_tokens\nReported tokens: in=2, out=8192")
+
+		// The details affordance only renders when errorDetails is non-empty, so its
+		// presence proves the diagnostic suffix survived the marker split.
+		expect(screen.getByText(enChat.errorDetails.link)).toBeInTheDocument()
+	})
+
+	it("falls back to the static explanation when the marker carries no diagnostics", () => {
+		// Persisted rows written before diagnostics existed are marker-only.
 		renderErrorRow("MODEL_OUTPUT_TOKEN_CAP")
 
+		expect(screen.getByText(enChat.modelResponseErrors.outputTokenCap)).toBeInTheDocument()
 		expect(screen.getByText(enChat.errorDetails.link)).toBeInTheDocument()
 	})
 
 	it("still renders the generic empty-response row for the other marker", () => {
 		// Keeps the new branch from swallowing the case it was carved out of.
-		renderErrorRow("MODEL_NO_ASSISTANT_MESSAGES")
+		renderErrorRow("MODEL_NO_ASSISTANT_MESSAGES\nStream chunks: none")
 
 		expect(screen.getByText(enChat.modelResponseErrors.noAssistantMessages)).toBeInTheDocument()
 		expect(screen.queryByText(enChat.modelResponseErrors.outputTokenCap)).toBeNull()

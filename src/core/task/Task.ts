@@ -500,8 +500,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Native tool call streaming state (track which index each tool is at)
 	private streamingToolCallIndices: Map<string, number> = new Map()
 
-	// Stop reasons the provider reported for the current request
-	private stopReasons: string[] = []
+	// Per-request diagnostic record, used to explain an empty assistant response
+	private streamDiagnostics: {
+		chunkCounts: Record<string, number>
+		streamErrors: string[]
+		stopReasons: string[]
+		usage?: { inputTokens: number; outputTokens: number }
+	} = Task.emptyStreamDiagnostics()
+
+	private static emptyStreamDiagnostics(): Task["streamDiagnostics"] {
+		return { chunkCounts: {}, streamErrors: [], stopReasons: [] }
+	}
+
+	/**
+	 * Human-readable summary of what the provider stream actually delivered.
+	 *
+	 * Chunk counts alone cannot separate "the provider sent nothing" from "the provider
+	 * sent events this handler failed to map", so the stop reason and token counts ride
+	 * along: a non-zero `out` with no text chunk means content was produced and lost
+	 * downstream, whereas `out=0` means the model itself emitted nothing.
+	 */
+	private formatStreamDiagnostics(): string {
+		const { chunkCounts, streamErrors, stopReasons, usage } = this.streamDiagnostics
+		const counts = Object.entries(chunkCounts)
+			.map(([type, count]) => `${type}=${count}`)
+			.join(", ")
+		const lines = [`Stream chunks: ${counts || "none"}`]
+		if (stopReasons.length > 0) {
+			lines.push(`Stop reason: ${stopReasons.join(" | ")}`)
+		}
+		if (usage) {
+			lines.push(`Reported tokens: in=${usage.inputTokens}, out=${usage.outputTokens}`)
+		}
+		if (streamErrors.length > 0) {
+			lines.push(`Stream errors: ${streamErrors.join(" | ")}`)
+		}
+		return lines.join("\n")
+	}
 
 	/**
 	 * Whether the provider ended the turn because it hit the output-token cap.
@@ -511,7 +546,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * while spending another output budget. Callers report it and do not retry.
 	 */
 	private reportedOutputTokenCap(): boolean {
-		return this.stopReasons.some((reason) => {
+		return this.streamDiagnostics.stopReasons.some((reason) => {
 			// Providers spell it max_tokens, MAX_TOKENS, maxTokens or max_output_tokens.
 			const normalized = reason.toLowerCase().replace(/[^a-z]/g, "")
 			return normalized === "maxtokens" || normalized === "maxoutputtokens"
@@ -3263,7 +3298,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.presentAssistantMessageHasPendingUpdates = false
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
-				this.stopReasons = []
+				this.streamDiagnostics = Task.emptyStreamDiagnostics()
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
@@ -3328,10 +3363,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							continue
 						}
 
+						this.streamDiagnostics.chunkCounts[chunk.type] =
+							(this.streamDiagnostics.chunkCounts[chunk.type] ?? 0) + 1
+
 						switch (chunk.type) {
+							case "error":
+								// Providers can report an in-band error without throwing.
+								this.streamDiagnostics.streamErrors.push(
+									[chunk.error, chunk.message].filter(Boolean).join(": "),
+								)
+								break
 							case "stop_reason":
 								// Diagnostic only: must not make an empty turn look answered.
-								this.stopReasons.push(chunk.reason)
+								this.streamDiagnostics.stopReasons.push(chunk.reason)
 								break
 							case "reasoning": {
 								reasoningMessage += chunk.text
@@ -3355,6 +3399,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
+								// Read from the accumulators, so a provider that splits usage
+								// across chunks still yields the total.
+								this.streamDiagnostics.usage = { inputTokens, outputTokens }
 								break
 							case "grounding":
 								// Handle grounding sources separately from regular content
@@ -4090,7 +4137,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						// Only show error and count toward mistake limit after 2 consecutive failures
 						if (this.consecutiveNoToolUseCount >= 2) {
-							await this.say("error", "MODEL_NO_TOOLS_USED")
+							await this.say("error", `MODEL_NO_TOOLS_USED\n${this.formatStreamDiagnostics()}`)
 							// Only count toward mistake limit after second consecutive failure
 							this.consecutiveMistakeCount++
 						}
@@ -4126,11 +4173,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Increment consecutive no-assistant-messages counter
 					this.consecutiveNoAssistantMessagesCount++
 
+					// Diagnostic suffix so the marker is not information-free
+					const streamDiagnosticsText = this.formatStreamDiagnostics()
+
 					if (this.reportedOutputTokenCap()) {
 						// Reported on the FIRST occurrence and never retried: unlike a generic
 						// empty turn this cause is already conclusive, and a retry would resend
 						// identical input for another full output budget.
-						await this.say("error", "MODEL_OUTPUT_TOKEN_CAP")
+						await this.say("error", `MODEL_OUTPUT_TOKEN_CAP\n${streamDiagnosticsText}`)
 
 						// Nothing is retried, so the user message stays; a synthetic assistant
 						// turn keeps alternation valid for a later continuation.
@@ -4151,7 +4201,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Only show error and count toward mistake limit after 2 consecutive failures
 					// This provides a "grace retry" - first failure retries silently
 					if (this.consecutiveNoAssistantMessagesCount >= 2) {
-						await this.say("error", "MODEL_NO_ASSISTANT_MESSAGES")
+						await this.say("error", `MODEL_NO_ASSISTANT_MESSAGES\n${streamDiagnosticsText}`)
 					}
 
 					// IMPORTANT: We already added the user message to
@@ -4180,7 +4230,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await this.backoffAndAnnounce(
 							currentItem.retryAttempt ?? 0,
 							new Error(
-								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
+								`Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.\n${streamDiagnosticsText}`,
 							),
 						)
 
@@ -4238,7 +4288,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							await this.say(
 								"error",
-								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
+								`Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.\n${streamDiagnosticsText}`,
 							)
 
 							// Synthetic assistant message recording the failure -- increment
@@ -4273,13 +4323,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Explicit strings: an Error serializes to {} in JSON transports.
 						errorMessage: error instanceof Error ? error.message : String(error),
 						...(error instanceof Error && error.stack ? { errorStack: error.stack } : {}),
+						streamDiagnostics: this.formatStreamDiagnostics(),
 					})
 					console.error(
 						`[Task#${this.taskId}.${this.instanceId}] Request loop terminated by an unhandled error: ${rawErrorMessage}`,
 					)
 
 					try {
-						await this.say("error", `The task stopped because of an unexpected error. ${rawErrorMessage}`)
+						await this.say(
+							"error",
+							`The task stopped because of an unexpected error. ${rawErrorMessage}\n${this.formatStreamDiagnostics()}`,
+						)
 					} catch (sayError) {
 						console.error(
 							`[Task#${this.taskId}.${this.instanceId}] Failed to report the terminating error:`,

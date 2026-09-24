@@ -310,7 +310,8 @@ async function runXAIToolProbe(
 		if (message.type === "say" && !message.partial) {
 			transcript.push(`${message.say}: ${message.text?.slice(0, 220) ?? ""}`)
 
-			if (message.say === "error" && message.text === "MODEL_NO_TOOLS_USED") {
+			// Prefix match: the marker carries a stream-diagnostics suffix.
+			if (message.say === "error" && message.text?.startsWith("MODEL_NO_TOOLS_USED")) {
 				noToolErrors++
 			}
 
