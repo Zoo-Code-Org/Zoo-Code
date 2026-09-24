@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as nodePath from "path"
 import * as nodeFs from "fs"
+import type { PathLike } from "fs"
 import * as vscode from "vscode"
 import { openFile } from "../../../integrations/misc/open-file"
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -120,7 +121,7 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		realWorld.symlinks.clear()
 		realWorld.existing.add(WORKSPACE_ROOT)
 		realWorld.existing.add(MOCK_CWD)
-		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: string | URL) => {
+		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: PathLike) => {
 			const key = String(p)
 			const symlink = realWorld.symlinks.get(key)
 			if (symlink) {
@@ -377,7 +378,7 @@ describe("utils/pathUtils containment helpers", () => {
 		realWorld.symlinks.clear()
 		realWorld.existing.add(WORKSPACE_ROOT)
 		realWorld.existing.add(MOCK_CWD)
-		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: string | URL) => {
+		vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: PathLike) => {
 			const key = String(p)
 			const symlink = realWorld.symlinks.get(key)
 			if (symlink) {
@@ -458,7 +459,7 @@ describe("utils/pathUtils containment helpers", () => {
 			realWorld.existing.add(nodePath.join(MOCK_CWD, "x.ts"))
 			const err = new Error("EACCES: permission denied")
 			;(err as NodeJS.ErrnoException).code = "EACCES"
-			vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: string | URL) => {
+			vi.spyOn(nodeFs.promises, "realpath").mockImplementation(async (p: PathLike) => {
 				const key = String(p)
 				if (key === WORKSPACE_ROOT) {
 					throw err
