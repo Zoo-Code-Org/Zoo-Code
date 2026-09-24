@@ -653,27 +653,13 @@
 			"resetDefaults": "Auf Standardwerte zurücksetzen"
 		},
 		"customModelInfo": {
-			"title": "Custom model metadata",
-			"description": "Override context and capability metadata when the provider cannot detect your model accurately.",
-			"unresolved": "This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
-			"contextWindow": {
-				"label": "Context window",
-				"description": "Total tokens the model can process, including input and output."
-			},
+			"title": "Benutzerdefinierte Modell-Metadaten",
+			"description": "Überschreibe die Kontext- und Fähigkeits-Metadaten, wenn der Anbieter dein Modell nicht korrekt erkennen kann.",
+			"unresolved": "Dieses Modell ist nicht im Anbieterkatalog enthalten. Die Werte unten beginnen mit sicheren Standardwerten – passe sie an das Modell an.",
 			"maxTokens": {
-				"label": "Max output tokens",
-				"description": "Maximum number of tokens the model can generate in one response."
+				"description": "Maximale Anzahl an Tokens, die das Modell in einer Antwort generieren kann."
 			},
-			"supportsImages": {
-				"label": "Supports images",
-				"description": "Override whether the model accepts image content."
-			},
-			"supportsPromptCache": {
-				"label": "Supports prompt caching",
-				"description": "Override whether prompt caching is supported."
-			},
-			"maxTokensWarning": "Max output tokens exceed the context window.",
-			"reset": "Reset to detected values"
+			"maxTokensWarning": "Maximale Ausgabe-Tokens überschreiten die Kontextfenstergröße"
 		},
 		"rateLimitSeconds": {
 			"label": "Ratenbegrenzung",

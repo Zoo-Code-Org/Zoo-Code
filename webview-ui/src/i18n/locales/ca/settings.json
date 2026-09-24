@@ -653,27 +653,13 @@
 			"resetDefaults": "Restablir als valors per defecte"
 		},
 		"customModelInfo": {
-			"title": "Custom model metadata",
-			"description": "Override context and capability metadata when the provider cannot detect your model accurately.",
-			"unresolved": "This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
-			"contextWindow": {
-				"label": "Context window",
-				"description": "Total tokens the model can process, including input and output."
-			},
+			"title": "Metadades del model personalitzat",
+			"description": "Sobreescriviu les metadades de context i capacitats quan el proveïdor no pugui detectar el vostre model amb precisió.",
+			"unresolved": "Aquest model no és al catàleg del proveïdor. Els valors següents parteixen de valors predeterminats segurs — ajusteu-los perquè coincideixin amb el model.",
 			"maxTokens": {
-				"label": "Max output tokens",
-				"description": "Maximum number of tokens the model can generate in one response."
+				"description": "Nombre màxim de tokens que el model pot generar en una sola resposta."
 			},
-			"supportsImages": {
-				"label": "Supports images",
-				"description": "Override whether the model accepts image content."
-			},
-			"supportsPromptCache": {
-				"label": "Supports prompt caching",
-				"description": "Override whether prompt caching is supported."
-			},
-			"maxTokensWarning": "Max output tokens exceed the context window.",
-			"reset": "Reset to detected values"
+			"maxTokensWarning": "El màxim de tokens de sortida supera la mida de la finestra de context"
 		},
 		"rateLimitSeconds": {
 			"label": "Límit de freqüència",

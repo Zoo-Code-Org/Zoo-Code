@@ -10,10 +10,10 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	}),
 }))
 
-const contextWindowLabel = "settings:providers.customModelInfo.contextWindow.label"
-const maxTokensLabel = "settings:providers.customModelInfo.maxTokens.label"
-const imagesLabel = "settings:providers.customModelInfo.supportsImages.label"
-const promptCacheLabel = "settings:providers.customModelInfo.supportsPromptCache.label"
+const contextWindowLabel = "settings:providers.customModel.contextWindow.label"
+const maxTokensLabel = "settings:providers.customModel.maxTokens.label"
+const imagesLabel = "settings:providers.customModel.imageSupport.label"
+const promptCacheLabel = "settings:providers.customModel.promptCache.label"
 
 describe("CustomModelInfoSettings", () => {
 	const modelInfo: ModelInfo = {
@@ -185,7 +185,7 @@ describe("CustomModelInfoSettings", () => {
 		open()
 		expect(screen.getByLabelText(contextWindowLabel)).toHaveValue("64000")
 
-		fireEvent.click(screen.getByText("settings:providers.customModelInfo.reset"))
+		fireEvent.click(screen.getByText("settings:providers.customModel.resetDefaults"))
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", undefined)
 
 		rerender(

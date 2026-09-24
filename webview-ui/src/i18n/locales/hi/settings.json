@@ -653,27 +653,13 @@
 			"resetDefaults": "डिफ़ॉल्ट पर रीसेट करें"
 		},
 		"customModelInfo": {
-			"title": "Custom model metadata",
-			"description": "Override context and capability metadata when the provider cannot detect your model accurately.",
-			"unresolved": "This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
-			"contextWindow": {
-				"label": "Context window",
-				"description": "Total tokens the model can process, including input and output."
-			},
+			"title": "कस्टम मॉडल मेटाडेटा",
+			"description": "जब प्रदाता आपके मॉडल का सटीक पता नहीं लगा सके, तो संदर्भ और क्षमता मेटाडेटा को ओवरराइड करें।",
+			"unresolved": "यह मॉडल प्रदाता कैटलॉग में नहीं है। नीचे दिए गए मान सुरक्षित डिफ़ॉल्ट से शुरू होते हैं — उन्हें मॉडल के अनुरूप समायोजित करें।",
 			"maxTokens": {
-				"label": "Max output tokens",
-				"description": "Maximum number of tokens the model can generate in one response."
+				"description": "टोकन की अधिकतम संख्या जो मॉडल एक प्रतिक्रिया में उत्पन्न कर सकता है।"
 			},
-			"supportsImages": {
-				"label": "Supports images",
-				"description": "Override whether the model accepts image content."
-			},
-			"supportsPromptCache": {
-				"label": "Supports prompt caching",
-				"description": "Override whether prompt caching is supported."
-			},
-			"maxTokensWarning": "Max output tokens exceed the context window.",
-			"reset": "Reset to detected values"
+			"maxTokensWarning": "अधिकतम आउटपुट टोकन संदर्भ विंडो आकार से अधिक हैं"
 		},
 		"rateLimitSeconds": {
 			"label": "दर सीमा",

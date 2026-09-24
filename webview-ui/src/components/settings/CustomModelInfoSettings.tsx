@@ -161,7 +161,7 @@ export const CustomModelInfoSettings = ({
 					<div className="grid grid-cols-1 gap-3 md:grid-cols-2">
 						<div className="flex flex-col gap-1">
 							<label htmlFor="custom-context-window" className="text-sm font-medium">
-								{t("settings:providers.customModelInfo.contextWindow.label")}
+								{t("settings:providers.customModel.contextWindow.label")}
 							</label>
 							<VSCodeTextField
 								id="custom-context-window"
@@ -172,13 +172,13 @@ export const CustomModelInfoSettings = ({
 								aria-describedby="custom-context-window-desc"
 							/>
 							<span id="custom-context-window-desc" className="text-xs text-vscode-descriptionForeground">
-								{t("settings:providers.customModelInfo.contextWindow.description")}
+								{t("settings:providers.customModel.contextWindow.description")}
 							</span>
 						</div>
 
 						<div className="flex flex-col gap-1">
 							<label htmlFor="custom-max-tokens" className="text-sm font-medium">
-								{t("settings:providers.customModelInfo.maxTokens.label")}
+								{t("settings:providers.customModel.maxTokens.label")}
 							</label>
 							<VSCodeTextField
 								id="custom-max-tokens"
@@ -204,25 +204,25 @@ export const CustomModelInfoSettings = ({
 						<VSCodeCheckbox
 							checked={effective.supportsImages ?? false}
 							onChange={handleCapabilityChange("supportsImages")}>
-							{t("settings:providers.customModelInfo.supportsImages.label")}
+							{t("settings:providers.customModel.imageSupport.label")}
 						</VSCodeCheckbox>
 						<span className="-mt-1 pl-5 text-xs text-vscode-descriptionForeground">
-							{t("settings:providers.customModelInfo.supportsImages.description")}
+							{t("settings:providers.customModel.imageSupport.description")}
 						</span>
 
 						<VSCodeCheckbox
 							checked={effective.supportsPromptCache}
 							onChange={handleCapabilityChange("supportsPromptCache")}>
-							{t("settings:providers.customModelInfo.supportsPromptCache.label")}
+							{t("settings:providers.customModel.promptCache.label")}
 						</VSCodeCheckbox>
 						<span className="-mt-1 pl-5 text-xs text-vscode-descriptionForeground">
-							{t("settings:providers.customModelInfo.supportsPromptCache.description")}
+							{t("settings:providers.customModel.promptCache.description")}
 						</span>
 					</div>
 
 					{hasOverride && (
 						<Button type="button" variant="ghost" size="sm" onClick={resetOverrides} className="px-0">
-							{t("settings:providers.customModelInfo.reset")}
+							{t("settings:providers.customModel.resetDefaults")}
 						</Button>
 					)}
 				</CollapsibleContent>

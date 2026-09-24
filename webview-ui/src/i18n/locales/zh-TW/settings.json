@@ -680,27 +680,13 @@
 			"resetDefaults": "重設為預設值"
 		},
 		"customModelInfo": {
-			"title": "Custom model metadata",
-			"description": "Override context and capability metadata when the provider cannot detect your model accurately.",
-			"unresolved": "This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
-			"contextWindow": {
-				"label": "Context window",
-				"description": "Total tokens the model can process, including input and output."
-			},
+			"title": "自訂模型中繼資料",
+			"description": "當提供者無法準確偵測您的模型時，可覆寫上下文與功能中繼資料。",
+			"unresolved": "此模型不在提供者目錄中。以下數值以安全的預設值為起點 — 請調整這些數值以符合該模型。",
 			"maxTokens": {
-				"label": "Max output tokens",
-				"description": "Maximum number of tokens the model can generate in one response."
+				"description": "模型在單一回應中可產生的最大 Token 數量。"
 			},
-			"supportsImages": {
-				"label": "Supports images",
-				"description": "Override whether the model accepts image content."
-			},
-			"supportsPromptCache": {
-				"label": "Supports prompt caching",
-				"description": "Override whether prompt caching is supported."
-			},
-			"maxTokensWarning": "Max output tokens exceed the context window.",
-			"reset": "Reset to detected values"
+			"maxTokensWarning": "最大輸出 Token 超過上下文視窗大小"
 		},
 		"rateLimitSeconds": {
 			"label": "速率限制",

@@ -653,27 +653,13 @@
 			"resetDefaults": "重置为默认值"
 		},
 		"customModelInfo": {
-			"title": "Custom model metadata",
-			"description": "Override context and capability metadata when the provider cannot detect your model accurately.",
-			"unresolved": "This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
-			"contextWindow": {
-				"label": "Context window",
-				"description": "Total tokens the model can process, including input and output."
-			},
+			"title": "自定义模型元数据",
+			"description": "当提供商无法准确识别您的模型时，可覆盖上下文与能力元数据。",
+			"unresolved": "该模型不在提供商模型目录中。以下数值以安全默认值为起点 —— 请调整为与该模型相符的配置。",
 			"maxTokens": {
-				"label": "Max output tokens",
-				"description": "Maximum number of tokens the model can generate in one response."
+				"description": "模型在单次响应中可生成的最大Token数。"
 			},
-			"supportsImages": {
-				"label": "Supports images",
-				"description": "Override whether the model accepts image content."
-			},
-			"supportsPromptCache": {
-				"label": "Supports prompt caching",
-				"description": "Override whether prompt caching is supported."
-			},
-			"maxTokensWarning": "Max output tokens exceed the context window.",
-			"reset": "Reset to detected values"
+			"maxTokensWarning": "最大输出Token数超过上下文窗口大小"
 		},
 		"rateLimitSeconds": {
 			"label": "API 请求频率限制",

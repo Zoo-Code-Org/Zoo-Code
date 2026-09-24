@@ -14,26 +14,27 @@ const selectedModelInfo: ModelInfo = {
 	supportsPromptCache: true,
 }
 
+// Mirrors the English strings the panel actually renders: the terminology keys
+// are shared with the OpenAI-compatible custom-model editor, so only the
+// panel-specific copy lives under `customModelInfo`.
 const translations: Record<string, string> = {
 	"settings:providers.customModelInfo.title": "Custom model metadata",
 	"settings:providers.customModelInfo.description":
 		"Override context and capability metadata when the provider cannot detect your model accurately.",
 	"settings:providers.customModelInfo.unresolved":
 		"This model is not in the provider catalog. The values below start from safe defaults — adjust them to match the model.",
-	"settings:providers.customModelInfo.contextWindow.label": "Context window",
-	"settings:providers.customModelInfo.contextWindow.description":
-		"Total tokens the model can process, including input and output.",
-	"settings:providers.customModelInfo.maxTokens.label": "Max output tokens",
 	"settings:providers.customModelInfo.maxTokens.description":
 		"Maximum number of tokens the model can generate in one response.",
-	"settings:providers.customModelInfo.supportsImages.label": "Supports images",
-	"settings:providers.customModelInfo.supportsImages.description":
-		"Override whether the model accepts image content.",
-	"settings:providers.customModelInfo.supportsPromptCache.label": "Supports prompt caching",
-	"settings:providers.customModelInfo.supportsPromptCache.description":
-		"Override whether prompt caching is supported.",
 	"settings:providers.customModelInfo.maxTokensWarning": "Max output tokens exceed the context window.",
-	"settings:providers.customModelInfo.reset": "Reset to detected values",
+	"settings:providers.customModel.contextWindow.label": "Context Window Size",
+	"settings:providers.customModel.contextWindow.description": "Total tokens (input + output) the model can process.",
+	"settings:providers.customModel.maxTokens.label": "Max Output Tokens",
+	"settings:providers.customModel.imageSupport.label": "Image Support",
+	"settings:providers.customModel.imageSupport.description":
+		"Is this model capable of processing and understanding images?",
+	"settings:providers.customModel.promptCache.label": "Prompt Caching",
+	"settings:providers.customModel.promptCache.description": "Is this model capable of caching prompts?",
+	"settings:providers.customModel.resetDefaults": "Reset to Defaults",
 }
 
 const translationValue = {
