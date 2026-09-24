@@ -253,7 +253,9 @@ export const bedrockModels = {
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
 	"anthropic.claude-opus-5-5": {
-		maxTokens: 8192,
+		// 128K max output tokens per the AWS Bedrock model card:
+		// https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5-5.html
+		maxTokens: 128_000,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -264,7 +266,9 @@ export const bedrockModels = {
 		outputPrice: 20.0, // $20 per million output tokens
 		cacheWritesPrice: 5.0, // $5 per million tokens
 		cacheReadsPrice: 0.2, // $0.20 per million tokens
-		minTokensPerCachePoint: 1024,
+		// The same Bedrock model card lists 512 as the minimum tokens per cache
+		// checkpoint for Opus 5.5 (matching the Fable 5.1 entry below).
+		minTokensPerCachePoint: 512,
 		maxCachePoints: 4,
 		cachableFields: ["system", "messages", "tools"],
 		description:
