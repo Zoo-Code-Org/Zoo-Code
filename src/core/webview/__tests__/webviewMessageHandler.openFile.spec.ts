@@ -346,7 +346,7 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 			})
 
 			expect(openFile).not.toHaveBeenCalled()
-			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("a"))
 		} finally {
 			spy.mockRestore()
 		}
