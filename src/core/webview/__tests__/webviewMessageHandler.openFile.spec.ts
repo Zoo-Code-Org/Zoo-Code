@@ -333,6 +333,24 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
+	// A hostile encoding that never stabilizes inside the fixed-point bound is
+	// rejected at the boundary (pinned here and by the direct helper test).
+	it("rejects a tagged encoding that does not stabilize within the bound", async () => {
+		const spy = vi.spyOn(globalThis, "decodeURIComponent").mockImplementation((s: string) => `${s}x`)
+		try {
+			await webviewMessageHandler(mockProvider, {
+				type: "openFile",
+				text: "a",
+				values: { fromMarkdown: true },
+			})
+
+			expect(openFile).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		} finally {
+			spy.mockRestore()
+		}
+	})
+
 	// Defense in depth: a lexically outside path whose symlinked ancestor
 	// resolves inside the workspace is still rejected by the lexical check.
 	it("rejects a lexically outside path even when its symlinked ancestor resolves inside the workspace", async () => {
@@ -427,6 +445,13 @@ describe("utils/pathUtils containment helpers", () => {
 			} finally {
 				spy.mockRestore()
 			}
+		})
+
+		it("fails closed when no ancestor exists down to the filesystem root", async () => {
+			// Nothing exists in the model: the ancestor walk reaches the root
+			// guard instead of an existing ancestor, and containment fails closed.
+			realWorld.existing.clear()
+			await expect(isRealPathOutsideWorkspace(nodePath.join(MOCK_CWD, "x.ts"))).resolves.toBe(true)
 		})
 
 		it("fails closed when a workspace folder cannot be realized", async () => {
