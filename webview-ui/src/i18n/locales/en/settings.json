@@ -226,6 +226,12 @@
 			"label": "Require {{primaryMod}}+Enter to send messages",
 			"description": "When enabled, you must press {{primaryMod}}+Enter to send messages instead of just Enter"
 		},
+		"chatInputEffect": {
+			"label": "AI Working Input Box Effect",
+			"marquee": "Marquee (rotating border)",
+			"breathing": "Breathing (pulsing glow)",
+			"description": "Choose the border animation effect on the chat input box while AI is working"
+		},
 		"chatFontSize": {
 			"label": "Chat font size",
 			"description": "Set the font size (in pixels) for the Zoo Code chat. Leave at the default to match VS Code's font size.",
@@ -242,6 +248,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Auto-close newly created files",
 			"description": "When enabled, tabs for files that Zoo created (rather than modified) will also be closed automatically after the edit is accepted."
+		},
+		"tableStriped": {
+			"label": "Striped table rows",
+			"description": "Apply alternating background colors to rows in markdown tables"
 		}
 	},
 	"prompts": {

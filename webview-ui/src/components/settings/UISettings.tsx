@@ -1,6 +1,6 @@
 import { HTMLAttributes, useMemo } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
-import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeCheckbox, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { telemetryClient } from "@/utils/TelemetryClient"
 import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
@@ -22,7 +22,9 @@ export const CHAT_FONT_SIZE_DEFAULT = 13
 interface UISettingsProps extends HTMLAttributes<HTMLDivElement> {
 	reasoningBlockCollapsed: boolean
 	enterBehavior: "send" | "newline"
+	chatInputEffect: "marquee" | "breathing"
 	chatFontSize?: number
+	tableStriped?: boolean
 	autoCloseZooOpenedFiles?: boolean
 	autoCloseZooOpenedFilesAfterUserEdited?: boolean
 	autoCloseZooOpenedNewFiles?: boolean
@@ -32,7 +34,9 @@ interface UISettingsProps extends HTMLAttributes<HTMLDivElement> {
 export const UISettings = ({
 	reasoningBlockCollapsed,
 	enterBehavior,
+	chatInputEffect,
 	chatFontSize,
+	tableStriped,
 	autoCloseZooOpenedFiles,
 	autoCloseZooOpenedFilesAfterUserEdited,
 	autoCloseZooOpenedNewFiles,
@@ -82,6 +86,25 @@ export const UISettings = ({
 		telemetryClient.capture("ui_settings_chat_font_size_reset")
 	}
 
+	// VSCodeDropdown's onChange is typed as an intersection of a native Event
+	// handler and a FormEventHandler, so we accept `unknown` (assignable to both)
+	// and narrow to the actual <select> element.
+	const handleChatInputEffectChange = (e: unknown) => {
+		const value = (e as { target: HTMLSelectElement }).target.value as "marquee" | "breathing"
+		if (value) {
+			setCachedStateField("chatInputEffect", value)
+		}
+	}
+
+	const handleTableStripedChange = (value: boolean) => {
+		setCachedStateField("tableStriped", value)
+
+		// Track telemetry event
+		telemetryClient.capture("ui_settings_table_striped_changed", {
+			enabled: value,
+		})
+	}
+
 	return (
 		<div {...props}>
 			<SectionHeader>{t("settings:sections.ui")}</SectionHeader>
@@ -122,6 +145,27 @@ export const UISettings = ({
 							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm ml-5 mt-1">
 								{t("settings:ui.requireCtrlEnterToSend.description", { primaryMod })}
+							</div>
+						</div>
+					</SearchableSetting>
+
+					{/* AI Working Input Box Effect Setting */}
+					<SearchableSetting
+						settingId="ui-chat-input-effect"
+						section="ui"
+						label={t("settings:ui.chatInputEffect.label")}>
+						<div className="flex flex-col gap-1">
+							<VSCodeDropdown
+								value={chatInputEffect}
+								onChange={handleChatInputEffectChange}
+								data-testid="chat-input-effect-dropdown">
+								<VSCodeOption value="marquee">{t("settings:ui.chatInputEffect.marquee")}</VSCodeOption>
+								<VSCodeOption value="breathing">
+									{t("settings:ui.chatInputEffect.breathing")}
+								</VSCodeOption>
+							</VSCodeDropdown>
+							<div className="text-vscode-descriptionForeground text-sm ml-5 mt-1">
+								{t("settings:ui.chatInputEffect.description")}
 							</div>
 						</div>
 					</SearchableSetting>
@@ -219,6 +263,24 @@ export const UISettings = ({
 							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm ml-5 mt-1">
 								{t("settings:ui.autoCloseZooOpenedNewFiles.description")}
+							</div>
+						</div>
+					</SearchableSetting>
+
+					{/* Markdown Table Striping Setting */}
+					<SearchableSetting
+						settingId="ui-table-striped"
+						section="ui"
+						label={t("settings:ui.tableStriped.label")}>
+						<div className="flex flex-col gap-1">
+							<VSCodeCheckbox
+								checked={tableStriped ?? false}
+								onChange={(e: any) => handleTableStripedChange(e.target.checked)}
+								data-testid="table-striped-checkbox">
+								<span className="font-medium">{t("settings:ui.tableStriped.label")}</span>
+							</VSCodeCheckbox>
+							<div className="text-vscode-descriptionForeground text-sm ml-5 mt-1">
+								{t("settings:ui.tableStriped.description")}
 							</div>
 						</div>
 					</SearchableSetting>

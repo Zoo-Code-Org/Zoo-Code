@@ -1122,6 +1122,12 @@
 			"label": "{{primaryMod}}+Enter zum Senden erfordern",
 			"description": "Wenn aktiviert, musst du {{primaryMod}}+Enter drücken, um Nachrichten zu senden, anstatt nur Enter"
 		},
+		"chatInputEffect": {
+			"label": "Effekt für das Eingabefeld, während die KI arbeitet",
+			"marquee": "Laufschrift (rotierender Rand)",
+			"breathing": "Atmung (pulsierendes Leuchten)",
+			"description": "Wähle den Rahmenanimationseffekt für das Eingabefeld, während die KI arbeitet"
+		},
 		"chatFontSize": {
 			"label": "Chat-Schriftgröße",
 			"description": "Lege die Schriftgröße (in Pixeln) für den Zoo Code-Chat fest. Belasse den Standardwert, um die Schriftgröße von VS Code zu übernehmen.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Neu erstellte Dateien automatisch schließen",
 			"description": "Wenn aktiviert, werden Tabs für Dateien, die Zoo neu erstellt hat (anstatt sie zu bearbeiten), nach dem Akzeptieren der Änderung ebenfalls automatisch geschlossen."
+		},
+		"tableStriped": {
+			"label": "Gestreifte Tabellenzeilen",
+			"description": "Abwechselnde Hintergrundfarben auf Zeilen in Markdown-Tabellen anwenden"
 		}
 	},
 	"skills": {

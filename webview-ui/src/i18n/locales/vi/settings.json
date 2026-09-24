@@ -1122,6 +1122,12 @@
 			"label": "Yêu cầu {{primaryMod}}+Enter để gửi tin nhắn",
 			"description": "Khi được bật, bạn phải nhấn {{primaryMod}}+Enter để gửi tin nhắn thay vì chỉ nhấn Enter"
 		},
+		"chatInputEffect": {
+			"label": "Hiệu ứng ô nhập khi AI đang làm việc",
+			"marquee": "Marquee (viền xoay)",
+			"breathing": "Thở (ánh sáng nhấp nháy)",
+			"description": "Chọn hiệu ứng hoạt hình viền trên ô nhập chat khi AI đang làm việc"
+		},
 		"chatFontSize": {
 			"label": "Cỡ chữ trò chuyện",
 			"description": "Đặt cỡ chữ (tính bằng pixel) cho cuộc trò chuyện Zoo Code. Để ở giá trị mặc định để khớp với cỡ chữ của VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Tự động đóng các tệp mới tạo",
 			"description": "Khi bật, các tab của các tệp mà Zoo đã tạo (thay vì chỉnh sửa) cũng sẽ tự động đóng sau khi chấp nhận thay đổi."
+		},
+		"tableStriped": {
+			"label": "Hàng bảng sọc",
+			"description": "Áp dụng màu nền xen kẽ cho các hàng trong bảng markdown"
 		}
 	},
 	"skills": {

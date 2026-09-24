@@ -32,6 +32,8 @@ const ALERT_LABELS: Record<AlertType, string> = {
 
 interface MarkdownBlockProps {
 	markdown?: string
+	/** Opt-in zebra striping for markdown tables (Settings → UI → tableStriped). */
+	striped?: boolean
 }
 
 const StyledMarkdown = styled.div`
@@ -213,7 +215,9 @@ const StyledMarkdown = styled.div`
 		color: var(--vscode-foreground);
 	}
 
-	tr:nth-child(even) {
+	/* Opt-in zebra striping (Settings → UI). The ampersand keeps the class on
+	   this element; without it styled-components would require a descendant class. */
+	&.table-striped tr:nth-child(even) {
 		background-color: var(--vscode-editor-inactiveSelectionBackground);
 	}
 
@@ -273,7 +277,7 @@ const StyledMarkdown = styled.div`
 	}
 `
 
-const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
+const MarkdownBlock = memo(({ markdown, striped = false }: MarkdownBlockProps) => {
 	const components = useMemo(
 		() => ({
 			table: ({ children, ...props }: any) => {
@@ -395,7 +399,7 @@ const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
 	)
 
 	return (
-		<StyledMarkdown>
+		<StyledMarkdown className={striped ? "table-striped" : undefined}>
 			<ReactMarkdown
 				remarkPlugins={[
 					// singleTilde: false so a single "~" around text (e.g. "1~3", "~10") is not

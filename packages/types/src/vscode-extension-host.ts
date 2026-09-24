@@ -324,6 +324,8 @@ export type ExtensionState = Pick<
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
 	| "enterBehavior"
+	| "chatInputEffect"
+	| "tableStriped"
 	| "includeCurrentTime"
 	| "includeCurrentCost"
 	| "maxGitStatusFiles"
