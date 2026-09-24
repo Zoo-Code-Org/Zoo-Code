@@ -15,23 +15,16 @@ for (const theme of visualThemes) {
 		// toggle (lucide chevron-down while collapsed).
 		await component.locator("button:has(svg.lucide-chevron-down)").click()
 
-		// The expanded view applies markdown: heading, list, mentions, and
-		// soft breaks rendered as <br>.
+		// Establish the expanded state deterministically through the heading
+		// (rendered only by the markdown pipeline in the expanded view).
 		await expect(component.getByRole("heading", { name: "Refactor the billing module" })).toBeVisible()
-		expect(await component.locator("ul li").count()).toBe(4)
-		const mentions = component.locator('span.mention-context-highlight[role="button"]')
-		expect(await mentions.count()).toBe(3)
-		await expect(mentions.nth(0)).toHaveText("@problems")
-		await expect(mentions.nth(1)).toHaveText("@terminal")
-		await expect(mentions.nth(2)).toHaveText("@/src/billing/invoice.ts")
-		expect(await component.locator("p br").count()).toBeGreaterThan(0)
 
-		// The prompt overflows the max-h-80 box, so the snapshot captures the
-		// clipped, scrollable region using the shared .scrollable (VS Code-style
-		// scrollbar) surface.
+		// Content assertions (list items, mention text, <br> soft breaks, the
+		// .scrollable/max-h-80 box) are covered by TaskHeader.spec.tsx and
+		// MarkdownBlock.spec.tsx; the pixel receipt here only pins the rendered
+		// state. The prompt overflows the max-h-80 box, so the snapshot captures
+		// the clipped, scrollable region.
 		const scrollBox = component.locator(".scrollable")
-		expect(await scrollBox.count()).toBe(1)
-		await expect(scrollBox).toHaveClass(/max-h-80/)
 		const { scrollHeight, clientHeight } = await scrollBox.evaluate((el) => ({
 			scrollHeight: el.scrollHeight,
 			clientHeight: el.clientHeight,

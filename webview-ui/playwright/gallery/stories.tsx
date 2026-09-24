@@ -182,9 +182,10 @@ export const stories: Record<string, Story> = {
 		)
 	},
 	"task-header-markdown": async () => {
-		const [{ AppProviders }, { default: TaskHeader }] = await Promise.all([
+		const [{ AppProviders }, { default: TaskHeader }, { providerIdentifiers }] = await Promise.all([
 			import("../AppProviders"),
 			import("@/components/chat/TaskHeader"),
+			import("@roo-code/types"),
 		])
 		// Representative user-authored prompt: heading, bold, inline code, a
 		// bullet list, an external link, soft breaks (single newlines), and the
@@ -213,7 +214,7 @@ export const stories: Record<string, Story> = {
 		return (
 			<AppProviders
 				initialState={{
-					apiConfiguration: { apiProvider: "anthropic", apiModelId: "claude-sonnet-4-5" },
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-sonnet-4-5" },
 					currentTaskItem: {
 						id: "task-header-markdown",
 						number: 1,
