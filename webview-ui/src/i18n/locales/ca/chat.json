@@ -281,7 +281,9 @@
 		"noToolsUsed": "El model no ha utilitzat cap eina en la seva resposta. Això sol passar quan el model només proporciona text/raonament sense cridar les eines necessàries per completar la tasca.",
 		"noToolsUsedDetails": "El model ha proporcionat text/raonament però no ha cridat cap de les eines necessàries. Això sol indicar que el model ha entès malament la tasca o té dificultats per determinar quina eina utilitzar. El model ha estat sol·licitat automàticament per tornar-ho a provar amb l'ús adequat de les eines.",
 		"noAssistantMessages": "El model no ha proporcionat cap contingut de resposta. Això pot indicar un problema amb l'API o la sortida del model.",
-		"noAssistantMessagesDetails": "El model de llenguatge ha retornat una resposta buida sense text ni crides a eines. Això pot passar a causa de problemes d'API, limitació de velocitat o problemes específics del model. El model ha estat sol·licitat automàticament per tornar-ho a provar."
+		"noAssistantMessagesDetails": "El model de llenguatge ha retornat una resposta buida sense text ni crides a eines. Això pot passar a causa de problemes d'API, limitació de velocitat o problemes específics del model. El model ha estat sol·licitat automàticament per tornar-ho a provar.",
+		"outputTokenCap": "El model ha arribat al límit de token de sortida abans de produir cap resposta. Augmenta \"Token de sortida màxims\" a la configuració del proveïdor, o redueix l'esforç de raonament, i torna-ho a provar.",
+		"outputTokenCapDetails": "El proveïdor ha acabat el torn amb el motiu d'aturada max_tokens i sense text ni crides a eines, és a dir que tot el pressupost de sortida s'ha consumit en el raonament. No s'ha tornat a provar automàticament, perquè reenviar la mateixa petició fallaria igual i es tornaria a facturar."
 	},
 	"errorDetails": {
 		"link": "Details",

@@ -281,7 +281,9 @@
 		"noToolsUsed": "El modelo no utilizó ninguna herramienta en su respuesta. Esto suele ocurrir cuando el modelo solo proporciona texto/razonamiento sin llamar a las herramientas necesarias para completar la tarea.",
 		"noToolsUsedDetails": "El modelo proporcionó texto/razonamiento pero no llamó a ninguna de las herramientas necesarias. Esto generalmente indica que el modelo malinterpretó la tarea o tiene dificultades para determinar qué herramienta usar. El modelo ha sido solicitado automáticamente para reintentar con el uso adecuado de herramientas.",
 		"noAssistantMessages": "El modelo no proporcionó ningún contenido de respuesta. Esto puede indicar un problema con la API o la salida del modelo.",
-		"noAssistantMessagesDetails": "El modelo de lenguaje devolvió una respuesta vacía sin texto ni llamadas a herramientas. Esto puede ocurrir debido a problemas de API, limitación de velocidad o problemas específicos del modelo. El modelo ha sido solicitado automáticamente para reintentar."
+		"noAssistantMessagesDetails": "El modelo de lenguaje devolvió una respuesta vacía sin texto ni llamadas a herramientas. Esto puede ocurrir debido a problemas de API, limitación de velocidad o problemas específicos del modelo. El modelo ha sido solicitado automáticamente para reintentar.",
+		"outputTokenCap": "El modelo alcanzó su límite de token de salida antes de producir ninguna respuesta. Aumenta \"Token de salida máximos\" en los ajustes del proveedor, o baja el esfuerzo de razonamiento, y vuelve a intentarlo.",
+		"outputTokenCapDetails": "El proveedor terminó el turno con el motivo de parada max_tokens y sin texto ni llamadas a herramientas, es decir que todo el presupuesto de salida se gastó en razonamiento. No se reintentó automáticamente, porque reenviar la misma petición fallaría igual y se facturaría de nuevo."
 	},
 	"errorDetails": {
 		"link": "Detalles",

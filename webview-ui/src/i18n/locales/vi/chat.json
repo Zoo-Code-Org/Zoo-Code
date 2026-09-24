@@ -282,7 +282,9 @@
 		"noToolsUsed": "Mô hình đã không sử dụng bất kỳ công cụ nào trong phản hồi của mình. Điều này thường xảy ra khi mô hình chỉ cung cấp văn bản/lý luận mà không gọi các công cụ cần thiết để hoàn thành tác vụ.",
 		"noToolsUsedDetails": "Mô hình đã cung cấp văn bản/lý luận nhưng không gọi bất kỳ công cụ bắt buộc nào. Điều này thường cho thấy mô hình đã hiểu sai tác vụ hoặc đang gặp khó khăn trong việc xác định công cụ nào sẽ sử dụng. Mô hình đã được tự động nhắc thử lại với việc sử dụng công cụ phù hợp.",
 		"noAssistantMessages": "Mô hình không cung cấp bất kỳ nội dung phản hồi nào. Điều này có thể cho thấy có vấn đề với API hoặc đầu ra của mô hình.",
-		"noAssistantMessagesDetails": "Mô hình ngôn ngữ đã trả về một phản hồi trống mà không có văn bản hoặc lệnh gọi công cụ nào. Điều này có thể xảy ra do vấn đề API, giới hạn tốc độ hoặc các vấn đề cụ thể của mô hình. Mô hình đã được tự động nhắc thử lại."
+		"noAssistantMessagesDetails": "Mô hình ngôn ngữ đã trả về một phản hồi trống mà không có văn bản hoặc lệnh gọi công cụ nào. Điều này có thể xảy ra do vấn đề API, giới hạn tốc độ hoặc các vấn đề cụ thể của mô hình. Mô hình đã được tự động nhắc thử lại.",
+		"outputTokenCap": "Mô hình đã chạm giới hạn token đầu ra trước khi tạo ra bất kỳ phản hồi nào. Hãy tăng \"Token đầu ra tối đa\" trong cài đặt nhà cung cấp, hoặc giảm mức reasoning, rồi thử lại.",
+		"outputTokenCapDetails": "Nhà cung cấp kết thúc lượt với lý do dừng max_tokens và không có văn bản hay lệnh gọi công cụ nào, nghĩa là toàn bộ ngân sách đầu ra đã bị reasoning dùng hết. Hệ thống không tự động thử lại, vì gửi lại đúng yêu cầu đó sẽ thất bại theo cách tương tự và bị tính phí lần nữa."
 	},
 	"errorDetails": {
 		"link": "Chi tiết",
