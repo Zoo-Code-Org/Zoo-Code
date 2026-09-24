@@ -96,14 +96,14 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM may legitimately have no entry in the router payload (partial
-	// listing, failed fetch, renamed deployment) even though the configured
-	// ID is a valid selection, so it only needs the fetch to settle. Other
-	// dynamic providers require a populated provider entry before the
-	// selection is resolved.
+	// LiteLLM and IO Intelligence may legitimately have no entry in the router
+	// payload (partial listing, failed fetch, renamed deployment) even though
+	// the configured ID is a valid selection, so they only need the fetch to
+	// settle. Other dynamic providers require a populated provider entry
+	// before the selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm
+			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
 				? !routerModels.isLoading
 				: routerModels.data &&
 					routerModels.data[dynamicProvider] !== undefined &&

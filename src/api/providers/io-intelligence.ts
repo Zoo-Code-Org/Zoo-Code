@@ -46,12 +46,17 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 		const apiKey = this.options.ioIntelligenceApiKey
 		const redact = (text: string) => (apiKey ? text.replaceAll(apiKey, "[REDACTED]") : text)
 
-		// handleProviderError logs the message and stack before it applies the
-		// transformer, so the key has to be scrubbed from the error itself first.
+		// handleProviderError logs the message, stack and the SDK's raw error
+		// metadata before it applies the transformer, so the key has to be
+		// scrubbed from the error itself first.
 		if (error instanceof Error) {
 			error.message = redact(error.message)
 			if (error.stack) {
 				error.stack = redact(error.stack)
+			}
+			const metadata = (error as { error?: { metadata?: { raw?: unknown } } }).error?.metadata
+			if (metadata && typeof metadata.raw === "string") {
+				metadata.raw = redact(metadata.raw)
 			}
 		}
 		const safeError = error instanceof Error ? error : redact(String(error))

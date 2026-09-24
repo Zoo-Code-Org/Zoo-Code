@@ -227,6 +227,33 @@ describe("IOIntelligenceHandler", () => {
 		}
 	})
 
+	it("redacts the API key from the SDK's raw error metadata before it is logged", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			// The OpenAI SDK attaches the upstream body as `error.metadata.raw`,
+			// which the error handler prefers over `message` when logging.
+			mockCreate.mockRejectedValue(
+				Object.assign(new Error("Request failed"), {
+					error: { metadata: { raw: '{"detail":"invalid key secret-key"}' } },
+				}),
+			)
+			const handler = new IOIntelligenceHandler({
+				ioIntelligenceApiKey: "secret-key",
+				ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			})
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toMatchObject({
+				message: 'IO Intelligence streaming error: {"detail":"invalid key [REDACTED]"}',
+			})
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[IO Intelligence] API error:",
+				expect.objectContaining({ message: '{"detail":"invalid key [REDACTED]"}' }),
+			)
+			expect(loggedText(consoleErrorSpy)).not.toContain("secret-key")
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
 	it("redacts the API key from non-Error rejections and their log line", async () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		try {

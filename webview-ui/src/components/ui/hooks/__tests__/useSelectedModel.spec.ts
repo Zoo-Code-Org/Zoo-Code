@@ -1200,6 +1200,29 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("custom-org/custom-model")
 			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
 		})
+
+		it("preserves the configured model ID when the catalog fetch errors", () => {
+			// A cold /models failure settles the router query with no data. The
+			// hook must still resolve and keep the configured ID (the handler
+			// sends requests with it) instead of resetting to the provider default.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
+			)
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.ioIntelligence,
+						ioIntelligenceModelId: "zai-org/GLM-4.6",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("zai-org/GLM-4.6")
+			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
+			expect(result.current.isError).toBe(true)
+		})
 	})
 
 	describe("openai provider", () => {
