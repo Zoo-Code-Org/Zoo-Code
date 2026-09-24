@@ -1,10 +1,14 @@
-// Covers `messageStop.stopReason`, which used to be discarded: a stream that ends with
-// zero content is otherwise indistinguishable from a truncated or filtered turn.
+// Covers the Bedrock stream events that used to be discarded silently:
+// `messageStop.stopReason` (now a diagnostic chunk) and the in-band exception events
+// (now thrown). A stream ending with zero content is otherwise indistinguishable from
+// a truncated, filtered or rejected turn.
+
+const mockCaptureException = vi.fn()
 
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
-			captureException: vi.fn(),
+			captureException: (...args: unknown[]) => mockCaptureException(...args),
 		},
 	},
 }))
@@ -34,7 +38,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 
 import type { Anthropic } from "@anthropic-ai/sdk"
 
-import { AwsBedrockHandler } from "../bedrock"
+import { AwsBedrockHandler, BEDROCK_STREAM_EXCEPTION_KEYS } from "../bedrock"
 import type { ApiStreamChunk } from "../../transform/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -100,6 +104,52 @@ describe("AwsBedrockHandler stream diagnostics", () => {
 			const chunks = await collect(createHandler([{ messageStop: {} }]))
 
 			expect(chunks).toEqual([])
+		})
+	})
+
+	describe("in-band exception events", () => {
+		it.each(BEDROCK_STREAM_EXCEPTION_KEYS)("throws on a %s event instead of dropping it", async (key) => {
+			const handler = createHandler([{ [key]: { message: "provider complaint text" } }])
+
+			// The provider's own sentence is what the reporting path renders for the user.
+			await expect(collect(handler)).rejects.toThrow(/provider complaint text/)
+		})
+
+		it("reports the exception to telemetry with the provider message", async () => {
+			const handler = createHandler([
+				{ validationException: { message: "The toolResult blocks contain duplicate Ids: tooluse_abc" } },
+			])
+
+			await expect(collect(handler)).rejects.toThrow()
+
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: expect.stringContaining("duplicate Ids: tooluse_abc"),
+				}),
+			)
+		})
+
+		it("still throws when the exception event carries no message", async () => {
+			const handler = createHandler([{ internalServerException: {} }])
+
+			await expect(collect(handler)).rejects.toThrow(/internalServerException/)
+		})
+
+		it("does not abort the stream for an unmodelled event", async () => {
+			// Only genuine exception events may throw; an event this SDK version does not
+			// model falls through and must leave a working stream intact.
+			const chunks = await collect(
+				createHandler([
+					{ $unknown: ["someFutureEvent", { detail: "ignored" }] },
+					{ contentBlockDelta: { delta: { text: "still works" } } },
+					{ messageStop: { stopReason: "end_turn" } },
+				]),
+			)
+
+			expect(chunks).toEqual([
+				{ type: "text", text: "still works" },
+				{ type: "stop_reason", reason: "end_turn" },
+			])
 		})
 	})
 })
