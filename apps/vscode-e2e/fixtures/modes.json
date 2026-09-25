@@ -13,6 +13,20 @@
 					}
 				]
 			}
+		},
+		{
+			"match": {
+				"userMessage": "Use the `switch_mode` tool to switch to debug mode."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "switch_mode",
+						"arguments": "{\"mode_slug\":\"debug\",\"reason\":\"User requested to switch to debug mode.\"}",
+						"id": "call_modes_switch_002"
+					}
+				]
+			}
 		}
 	]
 }
