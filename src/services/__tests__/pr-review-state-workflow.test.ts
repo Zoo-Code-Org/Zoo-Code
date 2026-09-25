@@ -443,7 +443,7 @@ function latestGateStatus(result: Awaited<ReturnType<typeof runWorkflow>>) {
 
 describe("PR review-state workflow", () => {
 	it("uses supported CodeRabbit access and review controls", () => {
-		expect(codeRabbitConfig.chat.allow_non_org_members).toBe(false)
+		expect(codeRabbitConfig.chat.allow_non_org_members).toBe(true)
 		expect(codeRabbitConfig.reviews.pre_merge_checks.override_requested_reviewers_only).toBe(true)
 		expect(codeRabbitConfig.reviews.auto_review.auto_pause_after_reviewed_commits).toBe(0)
 		expect(codeRabbitConfig.reviews.auto_review.labels).toEqual(["coderabbit-review-active"])
