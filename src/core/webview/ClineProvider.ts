@@ -122,9 +122,12 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
+	withTaskOwnershipReservation,
 	abandonDelegatedChild,
 	completeDelegatedChild,
 	delegateTaskToChild,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
 	interruptDelegatedChild,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
@@ -196,6 +199,9 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
+	private static isTaskRunningInAnyActiveProvider(taskId: string): boolean {
+		return Array.from(ClineProvider.activeInstances).some((provider) => provider.taskRegistry.hasRunning(taskId))
+	}
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
@@ -351,6 +357,7 @@ export class ClineProvider
 			onWrite: async () => {
 				this.scheduleGlobalStateWriteThrough()
 			},
+			isTaskOwned: (taskId) => ClineProvider.isTaskRunningInAnyActiveProvider(taskId),
 		})
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
@@ -575,20 +582,52 @@ export class ClineProvider
 	// When the task is completed, the top instance is removed, reactivating the
 	// previous task.
 	async addClineToStack(task: Task) {
-		// Add this cline instance into the stack that represents the order of
-		// all the called tasks.
-		this.taskRegistry.push(task)
-		task.emit(RooCodeEventName.TaskFocused)
+		await withTaskOwnershipReservation(async () => {
+			if (this._disposed || task.abort || task.abandoned) {
+				for (const cleanup of this.taskEventListeners.get(task) ?? []) cleanup()
+				this.taskEventListeners.delete(task)
+				await this.drainTaskDisposal(task)
+				throw new Error(`[addClineToStack] Task ${task.taskId} registration was cancelled`)
+			}
+			// Add this cline instance into the stack that represents the order of
+			// all the called tasks.
+			this.taskRegistry.push(task)
+		})
 
-		// Perform special setup provider specific tasks.
-		await this.performPreparationTasks(task)
+		try {
+			this.throwIfTaskRegistrationCancelled(task)
+			task.emit(RooCodeEventName.TaskFocused)
 
-		// Ensure getState() resolves correctly.
-		const state = await this.getState()
+			// Perform special setup provider specific tasks.
+			await this.performPreparationTasks(task)
+			this.throwIfTaskRegistrationCancelled(task)
 
-		if (!state || typeof state.mode !== "string") {
-			throw new Error(t("common:errors.retrieve_current_mode"))
+			// Ensure getState() resolves correctly.
+			const state = await this.getState()
+			this.throwIfTaskRegistrationCancelled(task)
+
+			if (!state || typeof state.mode !== "string") {
+				throw new Error(t("common:errors.retrieve_current_mode"))
+			}
+		} catch (error) {
+			await this.rollbackTaskRegistration(task)
+			throw error
 		}
+	}
+
+	private throwIfTaskRegistrationCancelled(task: Task): void {
+		if (this._disposed || task.abort || task.abandoned) {
+			throw new Error(`[addClineToStack] Task ${task.taskId} registration was cancelled`)
+		}
+	}
+
+	private async rollbackTaskRegistration(task: Task): Promise<void> {
+		if (this.taskRegistry.getById(task.taskId) === task) {
+			this.taskRegistry.remove(task.taskId)
+		}
+		for (const cleanup of this.taskEventListeners.get(task) ?? []) cleanup()
+		this.taskEventListeners.delete(task)
+		await this.drainTaskDisposal(task)
 	}
 
 	async performPreparationTasks(cline: Task) {
@@ -3849,6 +3888,60 @@ export class ClineProvider
 		return this.currentWorkspacePath || getWorkspacePath()
 	}
 
+	private isTaskRunningInAnyProvider(taskId: string): boolean {
+		return (
+			this.taskRegistry.hasRunning(taskId) ||
+			Array.from(ClineProvider.activeInstances).some(
+				(provider) => provider !== this && provider.taskRegistry.hasRunning(taskId),
+			)
+		)
+	}
+
+	private async refreshDelegationChain(taskId: string): Promise<void> {
+		const visited = new Set<string>()
+		let currentTaskId: string | undefined = taskId
+		while (currentTaskId && !visited.has(currentTaskId)) {
+			visited.add(currentTaskId)
+			await this.taskHistoryStore.invalidate(currentTaskId)
+			const current = this.taskHistoryStore.get(currentTaskId)
+			currentTaskId = current?.status === "delegated" ? current.awaitingChildId : undefined
+		}
+	}
+
+	private async recoverDeadAwaitedChild(parent: HistoryItem, childId: string): Promise<HistoryItem | undefined> {
+		return withTaskOwnershipReservation(async () => {
+			await this.refreshDelegationChain(childId)
+			const child = this.taskHistoryStore.get(childId)
+			if (
+				!child ||
+				!isDeadDelegationChain(
+					child,
+					(id) => this.taskHistoryStore.get(id),
+					(id) => this.isTaskRunningInAnyProvider(id),
+				)
+			) {
+				return child
+			}
+			await this.taskHistoryStore.atomicReadAndUpdate(childId, (currentChild) => {
+				if (
+					!isDeadDelegationChain(
+						currentChild,
+						(id) => this.taskHistoryStore.get(id),
+						(id) => this.isTaskRunningInAnyProvider(id),
+					)
+				) {
+					throw new Error(`Delegation chain for child ${childId} became live during recovery`)
+				}
+				return recoverDeadDelegatedChild(parent, currentChild)
+			})
+			const recovered = this.taskHistoryStore.get(childId)
+			this.log(
+				`[delegateParentAndOpenChild] Recovered dead delegated child ${childId} as interrupted before re-delegation`,
+			)
+			return recovered
+		})
+	}
+
 	/**
 	 * Delegate parent task and open child task.
 	 *
@@ -3899,9 +3992,24 @@ export class ClineProvider
 			const awaitedChildId = authoritativeParent.awaitingChildId
 			if (!awaitedChildId) throw new Error("Cannot re-delegate a parent with no awaited child")
 			await this.taskHistoryStore.invalidate(awaitedChildId)
-			if (this.taskHistoryStore.get(awaitedChildId)?.status !== "interrupted") {
-				throw new Error("Cannot re-delegate while the awaited child is not interrupted")
+			let awaitedChild = this.taskHistoryStore.get(awaitedChildId)
+			if (awaitedChild?.status === "delegated") {
+				awaitedChild = await this.recoverDeadAwaitedChild(authoritativeParent, awaitedChildId)
 			}
+			if (awaitedChild?.status !== "interrupted") {
+				throw new Error(
+					`Cannot re-delegate while the awaited child ${awaitedChildId} has status ${awaitedChild?.status ?? "missing"}; expected interrupted`,
+				)
+			}
+		}
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider was disposed during delegation")
+		}
+		if (parent.abort || parent.abandoned) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} was cancelled during delegation`)
+		}
+		if (this.getCurrentTask() !== parent) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} is no longer current`)
 		}
 		if (pendingActionId) {
 			const parentHistory = this.taskHistoryStore.get(parentTaskId)
@@ -3981,6 +4089,16 @@ export class ClineProvider
 			)
 		}
 
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider was disposed during delegation")
+		}
+		if (parent.abort || parent.abandoned) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} was cancelled during delegation`)
+		}
+		if (this.getCurrentTask() !== parent) {
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parent.taskId} is no longer current`)
+		}
+
 		// 3) Enforce single-open invariant by closing/disposing the parent first
 		//    This ensures we never have >1 tasks open at any time during delegation.
 		//    Await abort completion to ensure clean disposal and prevent unhandled rejections.
@@ -3993,6 +4111,10 @@ export class ClineProvider
 				}`,
 			)
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
+		}
+
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider was disposed during parent cleanup")
 		}
 
 		// 4) Bind the child directly to the delegating task's local provider
@@ -4029,6 +4151,9 @@ export class ClineProvider
 		//    slip between the status snapshot and the write. An active child must never be
 		//    silently detached.
 		try {
+			if (this._disposed) {
+				throw new Error("[delegateParentAndOpenChild] Provider was disposed before delegation commit")
+			}
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
 					throw new Error(
@@ -4045,6 +4170,9 @@ export class ClineProvider
 						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
 				}
 			})
+			if (this._disposed) {
+				throw new Error("[delegateParentAndOpenChild] Provider was disposed before child scheduling")
+			}
 			this.recentTasksCache = undefined
 			if (this.isViewLaunched) {
 				const updatedItem = this.taskHistoryStore.get(parentTaskId)
@@ -4080,15 +4208,17 @@ export class ClineProvider
 					}`,
 				)
 			}
-			try {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
-				await this.createTaskWithHistoryItem(parentHistory)
-			} catch (rollbackError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
-						(rollbackError as Error)?.message ?? String(rollbackError)
-					}`,
-				)
+			if (!this._disposed) {
+				try {
+					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					await this.createTaskWithHistoryItem(parentHistory)
+				} catch (rollbackError) {
+					this.log(
+						`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
+							(rollbackError as Error)?.message ?? String(rollbackError)
+						}`,
+					)
+				}
 			}
 			throw err
 		}
