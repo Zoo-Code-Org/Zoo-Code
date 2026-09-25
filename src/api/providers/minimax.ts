@@ -148,6 +148,9 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				}
 				case "message_delta":
 					// Tells us stop_reason, stop_sequence, and output tokens
+					// The API reports the cumulative output token count, so adopt
+					// it rather than adding it to the message_start seed value.
+					outputTokens = chunk.usage.output_tokens || outputTokens
 					yield {
 						type: "usage",
 						inputTokens: 0,
