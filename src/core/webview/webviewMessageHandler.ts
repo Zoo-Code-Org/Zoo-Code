@@ -62,7 +62,7 @@ import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
-import { CodeIndexManager } from "../../services/code-index/manager"
+import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
@@ -656,11 +656,15 @@ export const webviewMessageHandler = async (
 								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
 
-							if (globalStillValid && globalConfigName && name) {
+							if (globalStillValid && globalConfigName) {
 								// Re-pin this view to the still-valid shared global selection (not the
-								// first listed profile) so the view adopts the shared choice; the
-								// global selection itself is left untouched.
-								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// first listed profile) through the activation path so the view adopts
+								// the shared choice's settings: a name-only re-pin would leave the
+								// invalid profile's stale apiConfiguration in place. The activation
+								// writes the shared slot back with the same value, so the global
+								// selection itself is left untouched, and the first listed profile's
+								// name (absent on legacy shapes) is irrelevant to this branch.
+								await provider.activateProviderProfile({ name: globalConfigName })
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
@@ -3346,7 +3350,7 @@ export const webviewMessageHandler = async (
 					return
 				}
 				// Capture prior state for every manager before persisting the global change
-				const allManagers = CodeIndexManager.getAllInstances()
+				const allManagers = CodeIndexManagerRegistry.getAllInstances()
 				const priorStates = new Map(allManagers.map((m) => [m, m.isWorkspaceEnabled]))
 				await manager.setAutoEnableDefault(message.bool ?? true)
 				// Apply stop/start to every affected manager

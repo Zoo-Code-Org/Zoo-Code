@@ -915,40 +915,44 @@ describe("importExport", () => {
 					.spyOn(vscode.window, "showInformationMessage")
 					.mockResolvedValue(undefined)
 				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				try {
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: mockProvider,
+						},
+						filePath,
+					)
 
-				await importSettingsWithFeedback(
-					{
-						providerSettingsManager: mockProviderSettingsManager,
-						contextProxy: mockContextProxy,
-						customModesManager: mockCustomModesManager,
-						provider: mockProvider,
-					},
-					filePath,
-				)
+					// Should show warning message with short summary (not full details)
+					expect(showWarningMessageSpy).toHaveBeenCalledWith(
+						expect.stringContaining("1 item had issues during import."),
+					)
+					expect(showWarningMessageSpy).toHaveBeenCalledWith(
+						expect.stringContaining("See Developer Tools console for details."),
+					)
+					// Should log full details to console
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						"Settings import completed with warnings:",
+						expect.arrayContaining([expect.stringContaining("problematic-profile")]),
+					)
+					expect(showInfoMessageSpy).not.toHaveBeenCalled()
 
-				// Should show warning message with short summary (not full details)
-				expect(showWarningMessageSpy).toHaveBeenCalledWith(
-					expect.stringContaining("1 item had issues during import."),
-				)
-				expect(showWarningMessageSpy).toHaveBeenCalledWith(
-					expect.stringContaining("See Developer Tools console for details."),
-				)
-				// Should log full details to console
-				expect(consoleWarnSpy).toHaveBeenCalledWith(
-					"Settings import completed with warnings:",
-					expect.arrayContaining([expect.stringContaining("problematic-profile")]),
-				)
-				expect(showInfoMessageSpy).not.toHaveBeenCalled()
+					// Provider state should be delivered once, then cleared.
+					expect(seenImportedAt).toHaveLength(1)
+					expect(seenImportedAt[0]).toBeGreaterThan(0)
+					expect(mockProvider.settingsImportedAt).toBeUndefined()
+					expect(mockProvider.postStateToWebview).toHaveBeenCalled()
 
-				// Provider state should be delivered once, then cleared.
-				expect(seenImportedAt).toHaveLength(1)
-				expect(seenImportedAt[0]).toBeGreaterThan(0)
-				expect(mockProvider.settingsImportedAt).toBeUndefined()
-				expect(mockProvider.postStateToWebview).toHaveBeenCalled()
-
-				showWarningMessageSpy.mockRestore()
-				showInfoMessageSpy.mockRestore()
-				consoleWarnSpy.mockRestore()
+					showWarningMessageSpy.mockRestore()
+					showInfoMessageSpy.mockRestore()
+				} finally {
+					// Restore even when an assertion above throws, so a leftover spy
+					// cannot suppress real warnings for the remaining tests in this file.
+					consoleWarnSpy.mockRestore()
+				}
 			})
 
 			it("clears settingsImportedAt after posting the imported state so later launches do not replay it", async () => {
@@ -1077,6 +1081,13 @@ describe("importExport", () => {
 				])
 
 				const callOrder: string[] = []
+				// Hold the broadcast's promise pending so the test can observe the
+				// in-between state: a resolved mock would only prove invocation order,
+				// not that the post actually waits for the broadcast to complete.
+				let releaseBroadcast: () => void = () => {}
+				const broadcastSettled = new Promise<void>((resolve) => {
+					releaseBroadcast = resolve
+				})
 				const mockProvider = {
 					settingsImportedAt: 0,
 					postStateToWebview: vi.fn().mockImplementation(async () => {
@@ -1084,10 +1095,11 @@ describe("importExport", () => {
 					}),
 					broadcastResetToAllInstances: vi.fn().mockImplementation(async () => {
 						callOrder.push("broadcast")
+						await broadcastSettled
 					}),
 				}
 
-				await importSettingsWithFeedback(
+				const importing = importSettingsWithFeedback(
 					{
 						providerSettingsManager: mockProviderSettingsManager,
 						contextProxy: mockContextProxy,
@@ -1097,9 +1109,19 @@ describe("importExport", () => {
 					filePath,
 				)
 
+				// Wait until the broadcast is in flight (its start is recorded in
+				// callOrder), then assert the post has NOT run while it is still
+				// pending: a post before the reset would leave the webview with the
+				// stale pre-import per-view mode/profile.
+				await vi.waitFor(() => {
+					expect(callOrder).toEqual(["broadcast"])
+				})
+				expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
+
 				// The broadcast clears the durable view state, so the initiating provider's
-				// webview post must run after it — otherwise the webview keeps the stale
-				// pre-import per-view mode/profile.
+				// webview post must run after it completes.
+				releaseBroadcast()
+				await importing
 				expect(callOrder).toEqual(["broadcast", "post"])
 			})
 
@@ -1134,26 +1156,30 @@ describe("importExport", () => {
 					postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				}
 				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				try {
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: mockProvider,
+						},
+						filePath,
+					)
 
-				await importSettingsWithFeedback(
-					{
-						providerSettingsManager: mockProviderSettingsManager,
-						contextProxy: mockContextProxy,
-						customModesManager: mockCustomModesManager,
-						provider: mockProvider,
-					},
-					filePath,
-				)
-
-				expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
-				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-					expect.stringContaining("settings_imported"),
-				)
-				// A missing callback must not reach the broadcast guard's failure path.
-				expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-					expect.stringContaining("Failed to broadcast reset after settings import"),
-				)
-				consoleWarnSpy.mockRestore()
+					expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+					expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+						expect.stringContaining("settings_imported"),
+					)
+					// A missing callback must not reach the broadcast guard's failure path.
+					expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+						expect.stringContaining("Failed to broadcast reset after settings import"),
+					)
+				} finally {
+					// Restore even when an assertion above throws, so a leftover spy
+					// cannot suppress real warnings for the remaining tests in this file.
+					consoleWarnSpy.mockRestore()
+				}
 			})
 
 			it("should keep successful import result when broadcastResetToAllInstances throws", async () => {
@@ -1189,30 +1215,33 @@ describe("importExport", () => {
 					broadcastResetToAllInstances: vi.fn().mockRejectedValue(broadcastError),
 				}
 				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				try {
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: mockProvider,
+						},
+						filePath,
+					)
 
-				await importSettingsWithFeedback(
-					{
-						providerSettingsManager: mockProviderSettingsManager,
-						contextProxy: mockContextProxy,
-						customModesManager: mockCustomModesManager,
-						provider: mockProvider,
-					},
-					filePath,
-				)
-
-				expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
-				expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(1)
-				expect(consoleWarnSpy).toHaveBeenCalledWith(
-					expect.stringContaining("Failed to broadcast reset after settings import"),
-				)
-				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-					expect.stringContaining("settings_imported"),
-				)
-				// The rejected broadcast must not leave the import timestamp dangling: the
-				// guarded catch falls through to the cleanup reset.
-				expect(mockProvider.settingsImportedAt).toBeUndefined()
-
-				consoleWarnSpy.mockRestore()
+					expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+					expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(1)
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						expect.stringContaining("Failed to broadcast reset after settings import"),
+					)
+					expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+						expect.stringContaining("settings_imported"),
+					)
+					// The rejected broadcast must not leave the import timestamp dangling: the
+					// guarded catch falls through to the cleanup reset.
+					expect(mockProvider.settingsImportedAt).toBeUndefined()
+				} finally {
+					// Restore even when an assertion above throws, so a leftover spy
+					// cannot suppress real warnings for the remaining tests in this file.
+					consoleWarnSpy.mockRestore()
+				}
 			})
 
 			it("should handle multiple profiles with mixed valid and invalid providers", async () => {
@@ -1471,33 +1500,89 @@ describe("importExport", () => {
 
 				const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
 				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				try {
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: mockProvider,
+						},
+						filePath,
+					)
 
-				await importSettingsWithFeedback(
-					{
+					// Should show warning message with plural summary for multiple warnings
+					expect(showWarningMessageSpy).toHaveBeenCalledWith(
+						expect.stringContaining("2 items had issues during import."),
+					)
+					// Should log full details to console
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						"Settings import completed with warnings:",
+						expect.arrayContaining([
+							expect.stringContaining("problematic-profile-1"),
+							expect.stringContaining("problematic-profile-2"),
+						]),
+					)
+
+					showWarningMessageSpy.mockRestore()
+				} finally {
+					// Restore even when an assertion above throws, so a leftover spy
+					// cannot suppress real warnings for the remaining tests in this file.
+					consoleWarnSpy.mockRestore()
+				}
+			})
+
+			it.each([
+				{ imageGenerationProvider: providerIdentifiers.openrouter, expectedWarnings: undefined },
+				{
+					imageGenerationProvider: retiredProviderIdentifiers.roo,
+					expectedWarnings: [
+						'Setting "globalSettings.imageGenerationProvider" used unsupported value "roo" and was cleared during import.',
+					],
+				},
+			])(
+				"only clears the retired image provider: $imageGenerationProvider",
+				async ({ imageGenerationProvider, expectedWarnings }) => {
+					;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "valid-profile",
+								apiConfigs: {
+									"valid-profile": { apiProvider: providerIdentifiers.openai, id: "valid-id" },
+								},
+							},
+							globalSettings: {
+								imageGenerationProvider,
+								customInstructions: "roo",
+							},
+						}),
+					)
+					mockProviderSettingsManager.export.mockResolvedValue({
+						currentApiConfigName: "default",
+						apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+					})
+					mockProviderSettingsManager.listConfig.mockResolvedValue([
+						{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+					])
+
+					const result = await importSettings({
 						providerSettingsManager: mockProviderSettingsManager,
 						contextProxy: mockContextProxy,
 						customModesManager: mockCustomModesManager,
-						provider: mockProvider,
-					},
-					filePath,
-				)
+					})
 
-				// Should show warning message with plural summary for multiple warnings
-				expect(showWarningMessageSpy).toHaveBeenCalledWith(
-					expect.stringContaining("2 items had issues during import."),
-				)
-				// Should log full details to console
-				expect(consoleWarnSpy).toHaveBeenCalledWith(
-					"Settings import completed with warnings:",
-					expect.arrayContaining([
-						expect.stringContaining("problematic-profile-1"),
-						expect.stringContaining("problematic-profile-2"),
-					]),
-				)
-
-				showWarningMessageSpy.mockRestore()
-				consoleWarnSpy.mockRestore()
-			})
+					expect(result.success).toBe(true)
+					expect(result.warnings).toEqual(expectedWarnings)
+					expect(mockContextProxy.setValues).toHaveBeenCalledTimes(1)
+					expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+						expect.objectContaining({
+							imageGenerationProvider: expectedWarnings ? undefined : providerIdentifiers.openrouter,
+							customInstructions: "roo",
+						}),
+					)
+				},
+			)
 
 			it("should normalize imageGenerationProvider roo while preserving other global settings", async () => {
 				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
@@ -1688,28 +1773,34 @@ describe("importExport", () => {
 
 				const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
 				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				try {
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: mockProvider,
+						},
+						filePath,
+					)
 
-				await importSettingsWithFeedback(
-					{
-						providerSettingsManager: mockProviderSettingsManager,
-						contextProxy: mockContextProxy,
-						customModesManager: mockCustomModesManager,
-						provider: mockProvider,
-					},
-					filePath,
-				)
+					expect(showWarningMessageSpy).toHaveBeenCalledWith(
+						expect.stringContaining("1 item had issues during import."),
+					)
+					expect(showWarningMessageSpy).not.toHaveBeenCalledWith(
+						expect.stringContaining("profile had issues"),
+					)
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						"Settings import completed with warnings:",
+						expect.arrayContaining([expect.stringContaining("globalSettings.requestDelaySeconds")]),
+					)
 
-				expect(showWarningMessageSpy).toHaveBeenCalledWith(
-					expect.stringContaining("1 item had issues during import."),
-				)
-				expect(showWarningMessageSpy).not.toHaveBeenCalledWith(expect.stringContaining("profile had issues"))
-				expect(consoleWarnSpy).toHaveBeenCalledWith(
-					"Settings import completed with warnings:",
-					expect.arrayContaining([expect.stringContaining("globalSettings.requestDelaySeconds")]),
-				)
-
-				showWarningMessageSpy.mockRestore()
-				consoleWarnSpy.mockRestore()
+					showWarningMessageSpy.mockRestore()
+				} finally {
+					// Restore even when an assertion above throws, so a leftover spy
+					// cannot suppress real warnings for the remaining tests in this file.
+					consoleWarnSpy.mockRestore()
+				}
 			})
 		})
 	})

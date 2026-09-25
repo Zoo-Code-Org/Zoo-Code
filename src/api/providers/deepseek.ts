@@ -28,7 +28,12 @@ type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsS
 	reasoning_effort?: "low" | "high" | "max"
 }
 
-const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"])
+const deepSeekV4ThinkingModels = new Set([
+	"deepseek-flash",
+	"deepseek-v4-flash",
+	"deepseek-v4-pro",
+	"deepseek-v4-flash-vision-exp",
+])
 const supportsDeepSeekThinkingToggle = (modelId: string) => deepSeekV4ThinkingModels.has(modelId)
 
 // Only known V4 models and the legacy reasoner alias support DeepSeek's
@@ -49,6 +54,7 @@ export const normalizeDeepSeekReasoningEffort = (
 ): "low" | "high" | "max" | undefined => {
 	// still check the modelId so non-supported models won't produce reasoning efforts
 	switch (modelId) {
+		case "deepseek-flash":
 		case "deepseek-v4-flash":
 		case "deepseek-v4-pro":
 		case "deepseek-v4-flash-vision-exp":
@@ -104,7 +110,13 @@ export class DeepSeekHandler extends OpenAiHandler {
 			settings: this.options,
 			defaultTemperature: DEEP_SEEK_DEFAULT_TEMPERATURE,
 		})
-		return { id, info, ...params }
+		return {
+			id,
+			info,
+			...params,
+			// Unknown IDs use fallback metadata, but must not inherit its V4 request fields.
+			reasoning: supportsDeepSeekThinkingToggle(id) ? params.reasoning : undefined,
+		}
 	}
 
 	override async *createMessage(

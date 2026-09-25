@@ -296,6 +296,10 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// The launch handler sets this plain property on the double; vi.clearAllMocks()
+		// does not reset it, so clear a leak from a preceding test to keep the
+		// mark-launched assertion below meaningful.
+		mockClineProvider.isViewLaunched = false
 		vi.mocked(mockClineProvider.getState).mockResolvedValue({
 			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			currentApiConfigName: "view-local-profile",
@@ -320,6 +324,34 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
 	})
 
+	// The provider double is module-level and shared with the later describe
+	// blocks: the fixture members assigned above (and the isViewLaunched flag
+	// the launch handler sets) must not leak into them — vi.clearAllMocks() in
+	// a later suite clears call history but neither removes the assigned
+	// members nor resets isViewLaunched. Snapshot the originals (absent on the
+	// double literal) and restore them after every test in this suite.
+	const originalLaunchMembers: Record<keyof LaunchProviderFixture, unknown> = {
+		setViewStateId: double.setViewStateId,
+		workspaceTracker: double.workspaceTracker,
+		providerSettingsManager: double.providerSettingsManager,
+		activateProviderProfile: double.activateProviderProfile,
+		getMcpHub: double.getMcpHub,
+		getStateToPostToWebview: double.getStateToPostToWebview,
+	}
+	const originalIsViewLaunched = mockClineProvider.isViewLaunched
+
+	afterEach(() => {
+		const mutable = double as unknown as Record<string, unknown>
+		for (const [key, value] of Object.entries(originalLaunchMembers)) {
+			if (value === undefined) {
+				delete mutable[key]
+			} else {
+				mutable[key] = value
+			}
+		}
+		mockClineProvider.isViewLaunched = originalIsViewLaunched
+	})
+
 	it("validates the view-local currentApiConfigName on launch", async () => {
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
@@ -327,28 +359,35 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(double.setViewStateId).toHaveBeenCalledWith("view-1")
 
 		// The merged (view-local) name is validated first; the shared global is only
-		// consulted when the view-local name is invalid.
+		// consulted when the view-local name is invalid. toHaveBeenCalledWith proves both
+		// lookups happened in any order; the call order below proves the order itself.
 		expect(double.providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
 		expect(mockClineProvider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("shared-profile")
+		const hasConfigCalls = vi
+			.mocked(mockClineProvider.providerSettingsManager.hasConfig)
+			.mock.calls.map((call) => call[0])
+		expect(hasConfigCalls.indexOf("view-local-profile")).toBeLessThan(hasConfigCalls.indexOf("shared-profile"))
 		// Both names are invalid in this setup, so the shared global is repaired.
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
 	})
 
-	it("re-pins only the view when its profile is missing but the shared global is still valid", async () => {
+	it("re-pins the view through activation when its profile is missing but the shared global is still valid", async () => {
 		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
 			async (name: string) => name === "shared-profile",
 		)
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
-		// The view pin is re-pinned to the first available profile,
-		// and the shared global selection is left untouched: no global write, no global activation.
-		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		// The re-pin goes through the activation path so the view adopts the shared
+		// choice's provider settings, not the invalid profile's stale settings; the
+		// handler itself performs no global write.
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
 			"currentApiConfigName",
 			"shared-profile",
 		)
-		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.saveViewState).not.toHaveBeenCalled()
 	})
 
 	it("re-pins the view to the shared global profile rather than the first listed profile", async () => {
@@ -363,9 +402,29 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await new Promise((resolve) => setImmediate(resolve))
 		// The view pin follows the still-valid shared global selection, not the first
 		// profile in the list; the global selection is left untouched.
-		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
-		expect(mockClineProvider.saveViewState).not.toHaveBeenCalledWith("currentApiConfigName", "first-listed")
-		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalledWith({ name: "first-listed" })
+		expect(mockClineProvider.saveViewState).not.toHaveBeenCalled()
+	})
+
+	it("keeps the shared global selection when the first listed profile has no name", async () => {
+		// Legacy profile shape: the first listed entry carries no name. The still-valid
+		// shared global selection must be re-pinned through activation, not cleared by
+		// the repair branch.
+		double.providerSettingsManager.listConfig = vi
+			.fn()
+			.mockResolvedValue([{ apiProvider: providerIdentifiers.anthropic }])
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		// The repair branch would have cleared the selection with undefined.
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("currentApiConfigName", undefined)
 	})
 
 	it("records the legacy repair without activating a profile when no name is listed", async () => {

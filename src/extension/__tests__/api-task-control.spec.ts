@@ -45,6 +45,7 @@ type CreatedTask = {
 
 type ProviderDouble = EventEmitter & {
 	context: vscode.ExtensionContext
+	taskHistoryStore: { get: Mock<(taskId: string) => undefined> }
 	evictCurrentTask: Mock<() => Promise<void>>
 	postStateToWebview: Mock<() => Promise<void>>
 	postMessageToWebview: Mock<(message: unknown) => Promise<void>>
@@ -60,6 +61,7 @@ type TaskDouble = EventEmitter & {
 	taskId: string
 	parentTaskId?: string
 	approveAsk: Mock<() => void>
+	denyAsk: Mock<() => void>
 	handleWebviewAskResponse: Mock<(response: "messageResponse", text?: string, images?: string[]) => void>
 }
 
@@ -73,6 +75,7 @@ function asClineProvider(provider: ProviderDouble): ClineProvider {
 function createProvider(taskId = "task-1"): ProviderDouble {
 	const provider = new EventEmitter() as ProviderDouble
 	provider.context = {} as vscode.ExtensionContext
+	provider.taskHistoryStore = { get: vi.fn().mockReturnValue(undefined) }
 	provider.evictCurrentTask = vi.fn().mockResolvedValue(undefined)
 	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 	provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
@@ -89,6 +92,7 @@ function createTask(taskId: string): TaskDouble {
 	const task = new EventEmitter() as TaskDouble
 	task.taskId = taskId
 	task.approveAsk = vi.fn()
+	task.denyAsk = vi.fn()
 	task.handleWebviewAskResponse = vi.fn()
 	return task
 }
@@ -168,6 +172,24 @@ describe("API task controls", () => {
 
 			await expect(api.approveTaskAsk(task.taskId)).resolves.toBe(true)
 			expect(task.approveAsk).toHaveBeenCalledOnce()
+		})
+		it("denies a registered task by id", async () => {
+			const task = createTask("task-to-deny")
+
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(api.denyTaskAsk(task.taskId)).resolves.toBe(true)
+			expect(task.denyAsk).toHaveBeenCalledOnce()
+		})
+
+		it("returns false when denying an unknown or de-registered task", async () => {
+			const task = createTask("task-denied-lifecycle")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+			task.emit(RooCodeEventName.TaskCompleted, task.taskId, {}, {})
+
+			// Unknown id, and an id whose registry entry was removed on completion.
+			await expect(api.denyTaskAsk("missing-task")).resolves.toBe(false)
+			await expect(api.denyTaskAsk(task.taskId)).resolves.toBe(false)
 		})
 
 		it("removes completed, aborted, and unfocused tasks from the registry", async () => {
@@ -336,5 +358,28 @@ describe("API task controls - per-view review fixes", () => {
 		expect(outputChannel.appendLine).toHaveBeenCalledWith(
 			"[API#selectTaskFollowupSuggestion] mode switch failed for task task-failing-switch: persist failed",
 		)
+	})
+
+	it("wires a provider's task events exactly once when the same provider is reused for a new tab", async () => {
+		// A second new-tab task resolving the SAME provider (an existing tab panel returns
+		// its live provider) must not re-register its listeners: a duplicate copy would
+		// re-emit every task event once per registered handler.
+		const newTabProvider = createProvider("reused-tab-task")
+		createClineTabPanelMock.mockResolvedValue(newTabProvider)
+
+		await api.startNewTask({ configuration, text: "first", newTab: true })
+		await api.startNewTask({ configuration, text: "second", newTab: true })
+
+		const seen: string[] = []
+		api.on(RooCodeEventName.TaskCompleted, (taskId: string) => {
+			seen.push(taskId)
+		})
+
+		newTabProvider.emit(RooCodeEventName.TaskCompleted, "reused-tab-task", {}, {})
+		// The provider-side handler is async (file logging after the re-emit); let it settle
+		// before asserting on the emission count.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(seen).toEqual(["reused-tab-task"])
 	})
 })

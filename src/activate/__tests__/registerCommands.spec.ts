@@ -78,9 +78,9 @@ vi.mock("../../core/config/importExport", () => ({
 	importSettingsWithFeedback: vi.fn(),
 }))
 
-vi.mock("../../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn(),
+vi.mock("../../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getOrCreate: vi.fn(),
 	},
 }))
 
@@ -796,6 +796,70 @@ describe("openClineInNewTab", () => {
 		const disposeHandler = panel.onDidDispose.mock.calls[0][0] as () => void
 		disposeHandler()
 		expect(getPanel()).toBeUndefined()
+	})
+
+	it("tracks the activated older tab so tab commands target its provider", async () => {
+		// Capture each created panel: panel A is created first, panel B second,
+		// so B (the newest) is the tracked tab after creation.
+		const createdPanels: Array<{
+			webview: { postMessage: Mock }
+			onDidChangeViewState: Mock
+			onDidDispose: Mock
+			active?: boolean
+			visible?: boolean
+		}> = []
+		;(vscode.window.createWebviewPanel as Mock).mockImplementation(() => {
+			const panel = {
+				webview: { postMessage: vi.fn() },
+				onDidChangeViewState: vi.fn(),
+				onDidDispose: vi.fn(),
+			}
+			createdPanels.push(panel)
+			return panel
+		})
+
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		expect(getPanel()).toBe(createdPanels[1])
+
+		// Activating the older panel A must re-track the tab to A. VS Code passes
+		// the panel whose view state changed, so the event carries panel A itself.
+		const stateHandlerA = createdPanels[0].onDidChangeViewState.mock.calls[0][0] as (event: {
+			webviewPanel: (typeof createdPanels)[number]
+		}) => void
+		Object.assign(createdPanels[0], { active: true, visible: true })
+		stateHandlerA({ webviewPanel: createdPanels[0] })
+		expect(getPanel()).toBe(createdPanels[0])
+
+		// A tab command now resolves the provider through panel A, not B.
+		const makeProvider = () => ({
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+		})
+		const providerA = makeProvider()
+		const providerB = makeProvider()
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((panel: unknown) =>
+			panel === createdPanels[0] ? providerA : providerB,
+		)
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, callback: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = callback
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({ context: mockContext, outputChannel: mockOutputChannel, provider: {} as ClineProvider })
+
+		await commandHandlers["zoo-code.plusButtonClickedInTab"]()
+
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(createdPanels[0])
+		expect((providerA as { postMessageToWebview: Mock }).postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "chatButtonClicked",
+		})
+		expect((providerB as { postMessageToWebview: Mock }).postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {

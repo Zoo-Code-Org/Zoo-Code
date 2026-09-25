@@ -10,7 +10,6 @@ import { ClineProvider } from "../core/webview/ClineProvider"
 import { ContextProxy } from "../core/config/ContextProxy"
 import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
-import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
@@ -348,7 +347,6 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 	// don't need to use that event).
 	// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	const contextProxy = await ContextProxy.getInstance(context)
-	const codeIndexManager = CodeIndexManager.getInstance(context)
 
 	// Get the existing MDM service instance to ensure consistent policy enforcement
 	let mdmService: MdmService | undefined
@@ -396,6 +394,14 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 	newPanel.onDidChangeViewState(
 		(e) => {
 			const panel = e.webviewPanel
+			// When this panel becomes the active editor it becomes the tracked tab,
+			// so a title-bar command on an older tab (e.g. plusButtonClickedInTab)
+			// targets that tab's provider instead of the newest-created one.
+			// `active` (not `visible`) is the focus signal for the editor group.
+			if (panel.active) {
+				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+				setPanel(panel, "tab")
+			}
 			if (panel.visible) {
 				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
 			}

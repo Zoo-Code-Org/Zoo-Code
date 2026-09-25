@@ -38,6 +38,7 @@ import { getModels } from "../api/providers/fetchers/modelCache"
 
 type TaskAskController = {
 	approveAsk(): void
+	denyAsk(): void
 	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
 }
 
@@ -52,7 +53,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
 	private readonly tasksById = new Map<string, RegisteredTask>()
-	private readonly listenersRegisteredFor = new Set<ClineProvider>()
+	// WeakSet so a disposed tab panel's provider can be garbage-collected: the only
+	// operations here are has/add, so deduplication is preserved without retaining
+	// the provider (and its taskRegistry/view state) through the API after dispose.
+	private readonly listenersRegisteredFor = new WeakSet<ClineProvider>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -395,6 +399,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 
 		entry.task.approveAsk()
+		return true
+	}
+
+	/**
+	 * Denies the pending ask for a specific task by its ID.
+	 *
+	 * @returns Whether a registered task with the given ID was found and denied.
+	 */
+	public async denyTaskAsk(taskId: string): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		entry.task.denyAsk()
 		return true
 	}
 
