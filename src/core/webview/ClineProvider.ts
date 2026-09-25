@@ -1959,6 +1959,8 @@ export class ClineProvider
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
+		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+
 		await this.contextProxy.setValues({
 			...globalSettings,
 			currentApiConfigName: profileToActivate,

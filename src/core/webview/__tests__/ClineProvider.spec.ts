@@ -2939,6 +2939,64 @@ describe("ClineProvider", () => {
 			])
 		})
 	})
+
+	describe("deleteProviderProfile", () => {
+		const currentProfile: ProviderSettingsEntry = {
+			name: "current-config",
+			id: "current-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const otherProfile: ProviderSettingsEntry = {
+			name: "other-config",
+			id: "other-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+
+		const mockProviderSettingsManager = () => {
+			const profiles: ProviderSettingsEntry[] = [currentProfile, otherProfile]
+
+			Object.assign(provider, {
+				providerSettingsManager: {
+					deleteConfig: vi.fn().mockImplementation(async (name: string) => {
+						const index = profiles.findIndex((profile) => profile.name === name)
+						if (index !== -1) {
+							profiles.splice(index, 1)
+						}
+					}),
+					listConfig: vi.fn().mockImplementation(async () => profiles),
+				},
+			})
+
+			return profiles
+		}
+
+		beforeEach(async () => {
+			await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+			await provider.contextProxy.setValue("listApiConfigMeta", [currentProfile, otherProfile])
+		})
+
+		test("purges the deleted profile from ProviderSettingsManager", async () => {
+			mockProviderSettingsManager()
+
+			await provider.deleteProviderProfile(otherProfile)
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("other-config")
+			expect(await provider.providerSettingsManager.listConfig()).toEqual([currentProfile])
+			expect(provider.getProviderProfileEntries()).toEqual([currentProfile])
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "current-config")
+		})
+
+		test("switches the active profile when deleting it and purges it from ProviderSettingsManager", async () => {
+			mockProviderSettingsManager()
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("current-config")
+			expect(await provider.providerSettingsManager.listConfig()).toEqual([otherProfile])
+			expect(provider.getProviderProfileEntries()).toEqual([otherProfile])
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "other-config")
+		})
+	})
 })
 
 describe("webviewMessageHandler no-floating-promises coverage", () => {
