@@ -64,11 +64,6 @@
 			"count": 14
 		}
 	},
-	"activate/__tests__/registerCommands.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"activate/registerCodeActions.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
@@ -1036,12 +1031,12 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 37
+			"count": 36
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
