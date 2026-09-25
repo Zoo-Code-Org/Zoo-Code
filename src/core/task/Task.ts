@@ -728,10 +728,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async initializeTaskMode(provider: ClineProvider): Promise<void> {
 		try {
 			const state = await provider.getState()
-			this._taskMode = state?.mode || defaultModeSlug
+
+			// Avoid clobbering a newer value that may have been set while awaiting provider state
+			// (e.g., a message-selected mode switch issued right after task creation).
+			if (this._taskMode === undefined) {
+				this._taskMode = state?.mode || defaultModeSlug
+			}
 		} catch (error) {
-			// If there's an error getting state, use the default mode
-			this._taskMode = defaultModeSlug
+			// If there's an error getting state, use the default mode (unless a newer value was set).
+			if (this._taskMode === undefined) {
+				this._taskMode = defaultModeSlug
+			}
 			// Use the provider's log method for better error visibility
 			const errorMessage = `Failed to initialize task mode: ${error instanceof Error ? error.message : String(error)}`
 			provider.log(errorMessage)
@@ -1818,8 +1825,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			if (provider) {
 				if (mode) {
-					await provider.setMode(mode)
-					this._taskMode = mode
+					// Route through the shared mode-switch handler so the switch is
+					// validated and recorded like any other mode change (task history,
+					// TaskModeSwitched, and — when this is the focused task — the view's
+					// durable mode pin + ModeChanged broadcast). The handler writes this
+					// task's mode only after validation and persistence, so an unknown
+					// slug leaves the task mode untouched instead of recording a bad one.
+					// A mode-switch failure (e.g. a task-history write failure) must not
+					// swallow the submitted message: log it locally and continue delivery.
+					// Let the constructor-started mode initialization settle first: its
+					// deferred provider-state read would otherwise resolve after the switch
+					// and clobber the explicitly selected mode with the pre-switch value.
+					try {
+						await this.waitForModeInitialization()
+						await provider.handleModeSwitch(mode, this)
+					} catch (error) {
+						console.error(
+							`[Task#submitUserMessage] Mode switch to ${mode} failed (taskId=${this.taskId}):`,
+							error,
+						)
+					}
 				}
 
 				if (providerProfile) {

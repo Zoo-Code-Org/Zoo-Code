@@ -52,6 +52,19 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+/**
+ * Rejected by `deleteConfig` when the named config does not exist in the store.
+ * Callers can treat a missing profile as an idempotent outcome (e.g. prune the
+ * stale list entry) by branching on the error type instead of matching on
+ * message text.
+ */
+export class ProviderConfigNotFoundError extends Error {
+	constructor(readonly configName: string) {
+		super(`Config '${configName}' not found`)
+		this.name = "ProviderConfigNotFoundError"
+	}
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -474,7 +487,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 
 				if (!providerProfiles.apiConfigs[name]) {
-					throw new Error(`Config '${name}' not found`)
+					throw new ProviderConfigNotFoundError(name)
 				}
 
 				if (Object.keys(providerProfiles.apiConfigs).length === 1) {
@@ -485,6 +498,11 @@ export class ProviderSettingsManager {
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
+			// A missing config is the one outcome callers may want to branch on by
+			// type (idempotent delete); every other failure is wrapped for context.
+			if (error instanceof ProviderConfigNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to delete config: ${error}`)
 		}
 	}

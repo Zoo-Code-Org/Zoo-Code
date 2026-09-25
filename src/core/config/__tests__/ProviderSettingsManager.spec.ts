@@ -12,7 +12,12 @@ import {
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
+import {
+	ProviderConfigNotFoundError,
+	ProviderSettingsManager,
+	ProviderProfiles,
+	SyncCloudProfilesResult,
+} from "../ProviderSettingsManager"
 
 // `export()` builds an API handler per profile to read model capabilities. Mock
 // buildApiHandler with the real @roo-code/types model definitions so the token-field
@@ -737,7 +742,7 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.default.id).toBeTruthy()
 		})
 
-		it("should throw error when trying to delete non-existent config", async () => {
+		it("should throw the typed not-found error when trying to delete a non-existent config", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
 					currentApiConfigName: "default",
@@ -745,9 +750,15 @@ describe("ProviderSettingsManager", () => {
 				}),
 			)
 
-			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toThrow(
-				"Config 'nonexistent' not found",
-			)
+			const error = (await providerSettingsManager
+				.deleteConfig("nonexistent")
+				.catch((e: unknown) => e)) as ProviderConfigNotFoundError
+
+			// The typed signal carries the identity callers branch on ...
+			expect(error).toBeInstanceOf(ProviderConfigNotFoundError)
+			// ... including the name, so logged rejections are attributable.
+			expect(error.name).toBe("ProviderConfigNotFoundError")
+			expect(error.message).toBe("Config 'nonexistent' not found")
 		})
 
 		it("should throw error when trying to delete last remaining config", async () => {

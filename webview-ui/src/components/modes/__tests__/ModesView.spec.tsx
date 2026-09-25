@@ -26,6 +26,8 @@ const mockExtensionState = {
 	currentApiConfigName: "",
 	customInstructions: "Initial instructions",
 	setCustomInstructions: vitest.fn(),
+	viewStateLoaded: true,
+	setViewStateLoaded: vitest.fn(),
 }
 
 const renderPromptsView = (props = {}) => {
@@ -41,6 +43,19 @@ Element.prototype.scrollIntoView = vitest.fn()
 describe("PromptsView", () => {
 	beforeEach(() => {
 		vitest.clearAllMocks()
+	})
+
+	it("shows a loading skeleton while view-local state is initializing", () => {
+		renderPromptsView({
+			viewStateLoaded: false,
+			mode: "debug",
+			currentApiConfigName: "stale-global-profile",
+		})
+
+		expect(screen.getByTestId("modes-view-loading-skeleton")).toBeInTheDocument()
+		expect(screen.queryByTestId("mode-select-trigger")).not.toBeInTheDocument()
+		expect(screen.queryByText("Debug")).not.toBeInTheDocument()
+		expect(screen.queryByText("stale-global-profile")).not.toBeInTheDocument()
 	})
 
 	it("displays the current mode name in the select trigger", () => {
