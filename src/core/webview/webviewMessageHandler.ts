@@ -3078,7 +3078,8 @@ export const webviewMessageHandler = async (
 				await provider.postStateToWebview()
 
 				// Then handle validation and initialization for the current workspace
-				const currentCodeIndexManager = provider.getCurrentWorkspaceCodeIndexManager()
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				const currentCodeIndexManager = scope?.codeIndexManager
 				if (currentCodeIndexManager) {
 					// If embedder provider changed, perform proactive validation
 					if (embedderProviderChanged) {
@@ -3157,7 +3158,8 @@ export const webviewMessageHandler = async (
 		}
 
 		case "requestIndexingStatus": {
-			const manager = provider.getCurrentWorkspaceCodeIndexManager()
+			const scope = provider.getCurrentWorkspaceCodeIndexScope()
+			const manager = scope?.codeIndexManager
 			if (!manager) {
 				// No workspace open - send error status
 				await provider.postMessageToWebview({
@@ -3221,7 +3223,8 @@ export const webviewMessageHandler = async (
 		}
 		case "startIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				const manager = scope?.codeIndexManager
 				if (!manager) {
 					await provider.postMessageToWebview({
 						type: "indexingStatusUpdate",
@@ -3262,15 +3265,15 @@ export const webviewMessageHandler = async (
 		}
 		case "stopIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
-				if (!manager) {
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				if (!scope) {
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
 				}
-				manager.stopIndexing()
+				scope.codeIndexManager.stopIndexing()
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
-					values: manager.getCurrentStatus(),
+					values: scope.codeIndexManager.getCurrentStatus(),
 				})
 			} catch (error) {
 				provider.log(`Error stopping indexing: ${error instanceof Error ? error.message : String(error)}`)
@@ -3279,23 +3282,12 @@ export const webviewMessageHandler = async (
 		}
 		case "toggleWorkspaceIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
-				if (!manager) {
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				if (!scope) {
 					provider.log("Cannot toggle workspace indexing: No workspace folder open")
 					return
 				}
-				const enabled = message.bool ?? false
-				await manager.setWorkspaceEnabled(enabled)
-				if (enabled && manager.isFeatureEnabled && manager.isFeatureConfigured) {
-					await manager.initialize(provider.contextProxy)
-					void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
-				} else if (!enabled) {
-					manager.stopIndexing()
-				}
-				await provider.postMessageToWebview({
-					type: "indexingStatusUpdate",
-					values: manager.getCurrentStatus(),
-				})
+				await scope.workspaceIndexingEnablementManager.setEnabled(message.bool ?? false, provider)
 			} catch (error) {
 				provider.log(
 					`Error toggling workspace indexing: ${error instanceof Error ? error.message : String(error)}`,
@@ -3305,7 +3297,8 @@ export const webviewMessageHandler = async (
 		}
 		case "setAutoEnableDefault": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				const manager = scope?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot set auto-enable default: No workspace folder open")
 					return
@@ -3338,8 +3331,8 @@ export const webviewMessageHandler = async (
 		}
 		case "clearIndexData": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
-				if (!manager) {
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				if (!scope) {
 					provider.log("Cannot clear index data: No workspace folder open")
 					await provider.postMessageToWebview({
 						type: "indexCleared",
@@ -3350,7 +3343,7 @@ export const webviewMessageHandler = async (
 					})
 					return
 				}
-				await manager.clearIndexData()
+				await scope.codeIndexManager.clearIndexData()
 				await provider.postMessageToWebview({ type: "indexCleared", values: { success: true } })
 			} catch (error) {
 				provider.log(`Error clearing index data: ${error instanceof Error ? error.message : String(error)}`)
