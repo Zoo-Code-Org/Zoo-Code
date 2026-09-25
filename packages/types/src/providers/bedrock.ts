@@ -4,6 +4,17 @@ import type { ModelInfo } from "../model.js"
 
 export type BedrockModelId = keyof typeof bedrockModels
 
+export const BedrockModelsMessageType = {
+	requestBedrockModels: "requestBedrockModels",
+	bedrockModels: "bedrockModels",
+} as const
+
+export interface BedrockCatalogEntry {
+	arn: string
+	name: string
+	kind: "regional" | "geographic" | "global" | "application"
+}
+
 export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 export const bedrockDefaultPromptRouterModelId: BedrockModelId = "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -728,3 +739,24 @@ export const BEDROCK_SERVICE_TIER_PRICING = {
 	FLEX: 0.5, // 50% discount from standard
 	PRIORITY: 1.75, // 75% premium over standard
 } as const
+
+/** Resolve the bundled model selection without silently opting into a routing geography. */
+export function getBedrockInferenceModelId(
+	modelId: string,
+	region?: string,
+	crossRegion?: boolean,
+	global?: boolean,
+): string {
+	const existingPrefix = ["global.", ...AWS_INFERENCE_PROFILE_MAPPING.map(([, prefix]) => prefix)].find((prefix) =>
+		modelId.startsWith(prefix),
+	)
+	if (existingPrefix) modelId = modelId.slice(existingPrefix.length)
+	if (global && BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.some((id) => id === modelId)) {
+		return `global.${modelId}`
+	}
+	const prefix =
+		crossRegion && region
+			? AWS_INFERENCE_PROFILE_MAPPING.find(([pattern]) => region.startsWith(pattern))?.[1]
+			: undefined
+	return prefix ? `${prefix}${modelId}` : modelId
+}

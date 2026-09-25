@@ -1,7 +1,10 @@
 import React from "react"
-import { render, screen, fireEvent } from "@/utils/test-utils"
+import { act, render, screen, fireEvent } from "@/utils/test-utils"
 import { Bedrock } from "../Bedrock"
-import { ProviderSettings } from "@roo-code/types"
+import { BedrockModelsMessageType, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
+import { vscode } from "@/utils/vscode"
+
+vi.mock("@/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
 // Mock the vscrui Checkbox component
 vi.mock("vscrui", () => ({
@@ -84,6 +87,114 @@ describe("Bedrock Component", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
+
+	it.each([
+		["arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-pro-v1:0", "amazon.nova-pro-v1:0"],
+		[
+			"arn:aws:bedrock:eu-west-3:123456789012:application-inference-profile/custom",
+			"arn:aws:bedrock:eu-west-3:123456789012:application-inference-profile/custom",
+		],
+	])("previews custom ARN routing without applying checkbox prefixes: %s", (awsCustomArn, expected) => {
+		render(
+			<Bedrock
+				apiConfiguration={{
+					awsCustomArn,
+					awsRegion: "eu-west-3",
+					awsUseCrossRegionInference: true,
+					awsUseGlobalInference: true,
+				}}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		expect(screen.getByTestId("bedrock-request-model").querySelector("code")?.textContent).toBe(expected)
+		expect(screen.getByText("settings:providers.awsArnRouting")).toBeInTheDocument()
+		expect(mockSetApiConfigurationField).not.toHaveBeenCalled()
+	})
+
+	it.each<[OrganizationAllowList, boolean]>([
+		[{ allowAll: true, providers: {} }, true],
+		[{ allowAll: false, providers: { bedrock: { allowAll: true } } }, true],
+		[{ allowAll: false, providers: { bedrock: { allowAll: false, models: ["amazon.nova-pro-v1:0"] } } }, false],
+		[{ allowAll: false, providers: {} }, false],
+	])("respects organization catalogue restrictions: %j", (organizationAllowList, visible) => {
+		render(
+			<Bedrock
+				apiConfiguration={{ awsRegion: "eu-west-3" }}
+				organizationAllowList={organizationAllowList}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		expect(!!screen.queryByRole("button", { name: "settings:providers.awsCatalogRefresh" })).toBe(visible)
+	})
+
+	it("selects a discovered ARN into the edit buffer without saving or enabling routing", () => {
+		render(
+			<Bedrock
+				apiConfiguration={{ awsRegion: "eu-west-3" }}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		fireEvent.click(screen.getByRole("button", { name: "settings:providers.awsCatalogRefresh" }))
+		const request = vi.mocked(vscode.postMessage).mock.calls[0][0]
+		const arn = "arn:aws:bedrock:eu-west-3:123456789012:inference-profile/eu.model"
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: BedrockModelsMessageType.bedrockModels,
+						requestId: request.requestId,
+						bedrockModels: [{ arn, name: "Discovered", kind: "geographic" }],
+					},
+				}),
+			),
+		)
+		fireEvent.change(screen.getByLabelText("settings:providers.awsCatalogSelect"), { target: { value: arn } })
+		expect(mockSetApiConfigurationField.mock.calls).toEqual([
+			["apiModelId", "custom-arn"],
+			["awsCustomArn", arn],
+		])
+		expect(vscode.postMessage).toHaveBeenCalledTimes(1)
+	})
+
+	it.each(["awsGlobalInference", "awsCrossRegion"])("buffers explicit routing opt-in: %s", (label) => {
+		render(
+			<Bedrock
+				apiConfiguration={{ apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0" }}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		fireEvent.click(screen.getByLabelText(`settings:providers.${label}`))
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
+			label === "awsGlobalInference" ? "awsUseGlobalInference" : "awsUseCrossRegionInference",
+			true,
+		)
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		[false, false, "anthropic.claude-sonnet-4-5-20250929-v1:0"],
+		[true, false, "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"],
+		[true, true, "global.anthropic.claude-sonnet-4-5-20250929-v1:0"],
+	] as const)(
+		"previews the effective model for cross-region=%s global=%s",
+		(awsUseCrossRegionInference, awsUseGlobalInference, expected) => {
+			render(
+				<Bedrock
+					apiConfiguration={{
+						apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+						awsRegion: "eu-west-3",
+						awsUseCrossRegionInference,
+						awsUseGlobalInference,
+					}}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+			expect(screen.getByTestId("bedrock-request-model")).toHaveTextContent(expected)
+			expect(screen.getByText("settings:providers.awsGlobalInferenceDescription")).toBeInTheDocument()
+			expect(screen.getByText("settings:providers.awsCrossRegionDescription")).toBeInTheDocument()
+			expect(mockSetApiConfigurationField).not.toHaveBeenCalled()
+		},
+	)
 
 	it("should show text field when VPC endpoint checkbox is checked", () => {
 		// Initial render with checkbox unchecked

@@ -5,6 +5,7 @@ import {
 	providerIdentifiers,
 	retiredProviderIdentifiers,
 	RouterModelsMessageType,
+	BedrockModelsMessageType,
 } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -57,6 +58,10 @@ vi.mock("vscode", () => ({
 // Mock modelCache getModels/flushModels used by the handler
 const getModelsMock = vi.fn()
 const flushModelsMock = vi.fn()
+const getBedrockCatalogMock = vi.fn()
+vi.mock("../../../api/providers/fetchers/bedrock", () => ({
+	getBedrockCatalog: (...args: unknown[]) => getBedrockCatalogMock(...args),
+}))
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: (...args: any[]) => getModelsMock(...args),
 	flushModels: (...args: any[]) => flushModelsMock(...args),
@@ -100,6 +105,40 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return {}
 			}
 		})
+	})
+
+	it("discovers Bedrock models using unsaved settings and correlates the response without persisting credentials", async () => {
+		const apiConfiguration = { awsRegion: "eu-west-3", awsAccessKey: "draft-key", awsSecretKey: "draft-secret" }
+		const models = [{ arn: "profile", name: "EU model", kind: "geographic" }]
+		getBedrockCatalogMock.mockResolvedValue(models)
+		await webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.requestBedrockModels,
+			requestId: "draft",
+			apiConfiguration,
+		})
+		expect(getBedrockCatalogMock).toHaveBeenCalledWith(apiConfiguration)
+		expect(mockProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: BedrockModelsMessageType.bedrockModels,
+			requestId: "draft",
+			bedrockModels: models,
+		})
+	})
+
+	it("returns a correlated, sanitized Bedrock discovery failure", async () => {
+		getBedrockCatalogMock.mockRejectedValue(new Error("secret credential detail"))
+		await webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.requestBedrockModels,
+			requestId: "failed",
+		})
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: BedrockModelsMessageType.bedrockModels,
+				requestId: "failed",
+				error: expect.stringContaining("listing"),
+			}),
+		)
+		expect(JSON.stringify(mockProvider.postMessageToWebview.mock.calls)).not.toContain("secret credential detail")
 	})
 
 	it("returns explicit removal error for requestRooModels", async () => {

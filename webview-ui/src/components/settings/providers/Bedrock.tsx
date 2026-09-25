@@ -6,6 +6,10 @@ import {
 	type ProviderSettings,
 	type ModelInfo,
 	type BedrockServiceTier,
+	type OrganizationAllowList,
+	providerIdentifiers,
+	getBedrockInferenceModelId,
+	bedrockDefaultModelId,
 	BEDROCK_REGIONS,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
@@ -16,17 +20,39 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StandardTooltip } from "@src/components/ui"
 
 import { inputEventTransform, noTransform } from "../transforms"
+import { BedrockCatalog } from "./BedrockCatalog"
 
 type BedrockProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 	selectedModelInfo?: ModelInfo
+	organizationAllowList?: OrganizationAllowList
 	simplifySettings?: boolean
 }
 
-export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedModelInfo }: BedrockProps) => {
+export const Bedrock = ({
+	apiConfiguration,
+	setApiConfigurationField,
+	selectedModelInfo,
+	organizationAllowList,
+}: BedrockProps) => {
 	const { t } = useAppTranslation()
 	const [awsEndpointSelected, setAwsEndpointSelected] = useState(!!apiConfiguration?.awsBedrockEndpointEnabled)
+	const allowCatalog =
+		!organizationAllowList ||
+		organizationAllowList.allowAll ||
+		organizationAllowList.providers[providerIdentifiers.bedrock]?.allowAll
+	const customArn = apiConfiguration.awsCustomArn
+	const requestModelId = customArn
+		? customArn.includes(":foundation-model/")
+			? getBedrockInferenceModelId(customArn.split(":foundation-model/")[1])
+			: customArn
+		: getBedrockInferenceModelId(
+				apiConfiguration.apiModelId || bedrockDefaultModelId,
+				apiConfiguration.awsRegion,
+				apiConfiguration.awsUseCrossRegionInference,
+				apiConfiguration.awsUseGlobalInference,
+			)
 
 	// Check if the selected model supports 1M context (supported Claude 4 models)
 	const supports1MContextBeta =
@@ -179,22 +205,47 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				</div>
 			)}
 			{supportsGlobalInference && (
-				<Checkbox
-					checked={apiConfiguration?.awsUseGlobalInference || false}
-					onChange={(checked: boolean) => {
-						// Global Inference takes priority over cross-region when both are enabled
-						setApiConfigurationField("awsUseGlobalInference", checked)
-					}}>
-					{t("settings:providers.awsGlobalInference")}
-				</Checkbox>
+				<div className="flex flex-col gap-1">
+					<Checkbox
+						checked={apiConfiguration?.awsUseGlobalInference || false}
+						onChange={(checked: boolean) => {
+							// Global Inference takes priority over cross-region when both are enabled
+							setApiConfigurationField("awsUseGlobalInference", checked)
+						}}>
+						{t("settings:providers.awsGlobalInference")}
+					</Checkbox>
+					<div className="text-sm text-vscode-descriptionForeground">
+						{t("settings:providers.awsGlobalInferenceDescription")}
+					</div>
+				</div>
 			)}
-			<Checkbox
-				checked={apiConfiguration?.awsUseCrossRegionInference || false}
-				onChange={(checked: boolean) => {
-					setApiConfigurationField("awsUseCrossRegionInference", checked)
-				}}>
-				{t("settings:providers.awsCrossRegion")}
-			</Checkbox>
+			<div className="flex flex-col gap-1">
+				<Checkbox
+					checked={apiConfiguration?.awsUseCrossRegionInference || false}
+					onChange={(checked: boolean) => {
+						setApiConfigurationField("awsUseCrossRegionInference", checked)
+					}}>
+					{t("settings:providers.awsCrossRegion")}
+				</Checkbox>
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.awsCrossRegionDescription")}
+				</div>
+			</div>
+			<div className="text-sm break-all" data-testid="bedrock-request-model">
+				{t("settings:providers.awsRequestModelId")} <code>{requestModelId}</code>
+			</div>
+			<div className="text-sm text-vscode-descriptionForeground">
+				{t(customArn ? "settings:providers.awsArnRouting" : "settings:providers.awsBundledModels")}
+			</div>
+			{allowCatalog && (
+				<BedrockCatalog
+					apiConfiguration={apiConfiguration}
+					onSelect={(arn) => {
+						setApiConfigurationField("apiModelId", "custom-arn")
+						setApiConfigurationField("awsCustomArn", arn)
+					}}
+				/>
+			)}
 			{selectedModelInfo?.supportsPromptCache && (
 				<>
 					<Checkbox

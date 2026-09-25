@@ -16,6 +16,7 @@ import { RouterModelsMessageType, type ModelRecord, type RouterModels } from "./
 import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
+import { BedrockModelsMessageType, type BedrockCatalogEntry } from "./providers/bedrock.js"
 import { VsCodeLmModelsMessageType } from "./providers/vscode-llm.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
 import type { SkillMetadata } from "./skills.js"
@@ -45,6 +46,7 @@ export interface ExtensionMessage {
 		| typeof RouterModelsMessageType.routerModels
 		| "zooGatewayCredentialsReady"
 		| typeof OpenAiModelsMessageType.openAiModels
+		| typeof BedrockModelsMessageType.bedrockModels
 		| typeof OllamaModelsMessageType.ollamaModels
 		| typeof LmStudioModelsMessageType.lmStudioModels
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
@@ -141,6 +143,7 @@ export interface ExtensionMessage {
 	clineMessage?: ClineMessage
 	routerModels?: RouterModels
 	openAiModels?: string[]
+	bedrockModels?: BedrockCatalogEntry[]
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
 	vsCodeLmModels?: { vendor?: string; family?: string; version?: string; id?: string }[]
@@ -490,6 +493,7 @@ export interface WebviewMessage {
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
+		| typeof BedrockModelsMessageType.requestBedrockModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
 		| "requestRooModels"

@@ -94,6 +94,31 @@ describe("AwsBedrockHandler", () => {
 		})
 	})
 
+	it.each(["isn't supported", "isn’t supported.", "is not supported"])(
+		"explains inference-profile errors with wording %s",
+		async (wording) => {
+			handler["client"].send = vi
+				.fn()
+				.mockRejectedValue(new Error(`Invocation with on-demand throughput ${wording}`))
+			const consume = async () => {
+				for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hello" }])) {
+					void chunk
+				}
+			}
+			await expect(consume()).rejects.toThrow("Try enabling cross-region inference in settings")
+		},
+	)
+
+	it("preserves a newly discovered foundation-model ID rather than invoking the default Claude model", () => {
+		const provider = new AwsBedrockHandler({
+			apiModelId: "custom-arn",
+			awsRegion: "eu-west-3",
+			awsCustomArn: "arn:aws:bedrock:eu-west-3::foundation-model/mistral.new-model-v1:0",
+		})
+		expect(provider.getModel().id).toBe("mistral.new-model-v1:0")
+		expect(provider.getModel().info.supportsReasoningBudget).not.toBe(true)
+	})
+
 	describe("getModel", () => {
 		it("should return the correct model info for a standard model", () => {
 			const modelInfo = handler.getModel()

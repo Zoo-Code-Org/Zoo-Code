@@ -12,6 +12,39 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"bedrock-routing": async ({ global = false }) => {
+		const [{ AppProviders }, { Bedrock }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/Bedrock"),
+			import("@roo-code/types"),
+		])
+		function Routing() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+				awsRegion: "eu-west-3",
+				awsUseProfile: true,
+				awsProfile: "default",
+				awsUseCrossRegionInference: true,
+				awsUseGlobalInference: global === true,
+			})
+			return (
+				<div className="w-[480px] p-4 flex flex-col gap-3 bg-vscode-editor-background">
+					<Bedrock
+						apiConfiguration={config}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<Routing />
+			</AppProviders>
+		)
+	},
 	"accessibility-contrast": async () => {
 		const { AccessibilityContrastGallery } =
 			await import("@/components/ui/__tests__/AccessibilityContrast.visual.fixture")
