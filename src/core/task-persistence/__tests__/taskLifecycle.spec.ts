@@ -5,6 +5,8 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	isDelegatedChildLive,
+	isLivenessSignalFresh,
 } from "../taskLifecycle"
 
 function item(id: string, overrides: Partial<HistoryItem> = {}): HistoryItem {
@@ -100,5 +102,53 @@ describe("task lifecycle transitions", () => {
 		const abandoned = abandonDelegatedChild(parent, { ...activeChild, status: "interrupted" })
 		expect(abandoned.parent).toMatchObject({ status: "active", awaitingChildId: undefined })
 		expect(abandoned.child).toMatchObject({ parentTaskId: undefined, rootTaskId: undefined })
+	})
+})
+
+describe("isLivenessSignalFresh", () => {
+	const NOW = 1_756_886_400_000
+	const THRESHOLD = 5 * 60 * 1000
+
+	it("treats a timestamp inside the threshold as fresh", () => {
+		expect(isLivenessSignalFresh(NOW - THRESHOLD + 1, NOW, THRESHOLD)).toBe(true)
+	})
+
+	it("treats a timestamp exactly at the threshold as stale (strict '<' boundary)", () => {
+		expect(isLivenessSignalFresh(NOW - THRESHOLD, NOW, THRESHOLD)).toBe(false)
+	})
+
+	it("treats an absent timestamp as never fresh", () => {
+		expect(isLivenessSignalFresh(undefined, NOW, THRESHOLD)).toBe(false)
+	})
+
+	it("treats a future timestamp (clock skew, transient-stat sentinel) as fresh", () => {
+		expect(isLivenessSignalFresh(NOW + THRESHOLD, NOW, THRESHOLD)).toBe(true)
+	})
+})
+
+describe("isDelegatedChildLive", () => {
+	const NOW = 1_756_886_400_000
+	const THRESHOLD = 5 * 60 * 1000
+
+	it("is live when only the history-file mtime is fresh", () => {
+		expect(isDelegatedChildLive({}, NOW, THRESHOLD, NOW - 60_000)).toBe(true)
+	})
+
+	it("is live when only the persisted heartbeat is fresh (long streaming turn)", () => {
+		expect(isDelegatedChildLive({ lastActivityAt: NOW - 60_000 }, NOW, THRESHOLD, NOW - 10 * 60 * 1000)).toBe(true)
+	})
+
+	it("is live when only the heartbeat is fresh and the file mtime is unreadable", () => {
+		expect(isDelegatedChildLive({ lastActivityAt: NOW - 60_000 }, NOW, THRESHOLD, undefined)).toBe(true)
+	})
+
+	it("is not live when both signals are stale (genuine crash orphan)", () => {
+		expect(
+			isDelegatedChildLive({ lastActivityAt: NOW - 10 * 60 * 1000 }, NOW, THRESHOLD, NOW - 10 * 60 * 1000),
+		).toBe(false)
+	})
+
+	it("is not live when both signals are absent", () => {
+		expect(isDelegatedChildLive({}, NOW, THRESHOLD, undefined)).toBe(false)
 	})
 })
