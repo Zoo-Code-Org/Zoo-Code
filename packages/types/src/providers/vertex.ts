@@ -490,7 +490,7 @@ export const vertexModels = {
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
 	"claude-opus-5-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000, // 128K max output tokens per the Anthropic model card (same across all platforms).
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,

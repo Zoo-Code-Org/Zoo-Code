@@ -1053,7 +1053,7 @@ describe("VertexHandler", () => {
 
 			const model = handler.getModel()
 			expect(model.id).toBe("claude-opus-5-5")
-			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.maxTokens).toBe(128_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
 			expect(model.info.inputPrice).toBe(4.0)
 			expect(model.info.outputPrice).toBe(20.0)
