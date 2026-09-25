@@ -346,6 +346,10 @@
 				"label": "Abilita la protezione dai comandi distruttivi",
 				"description": "Scarica e usa Destructive Command Guard (DCG) per questa piattaforma. I comandi consentiti da DCG vengono eseguiti automaticamente. I comandi bloccati da DCG richiedono la tua approvazione. Gli elenchi dei comandi di Zoo vengono disabilitati mentre questa opzione è attiva. L'eseguibile scaricato viene conservato se la disattivi."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Comandi di auto-esecuzione consentiti",
 			"allowedCommandsDescription": "Prefissi di comando che possono essere auto-eseguiti quando \"Approva sempre operazioni di esecuzione\" è abilitato. Aggiungi * per consentire tutti i comandi (usare con cautela).",
 			"deniedCommands": "Comandi negati",

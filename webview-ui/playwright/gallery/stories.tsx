@@ -56,6 +56,11 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"auto-approve-settings": async () => {
+		const { AutoApproveSettingsStory } =
+			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
+		return <AutoApproveSettingsStory />
+	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />

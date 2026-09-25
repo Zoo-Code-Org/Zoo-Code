@@ -32,6 +32,7 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	alwaysAllowSubtasks?: boolean
 	alwaysAllowExecute?: boolean
 	destructiveCommandGuardEnabled?: boolean
+	alwaysDenyUnapprovedCommands?: boolean
 	alwaysAllowFollowupQuestions?: boolean
 	followupAutoApproveTimeoutMs?: number
 	allowedCommands?: string[]
@@ -51,6 +52,7 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "alwaysAllowSubtasks"
 		| "alwaysAllowExecute"
 		| "destructiveCommandGuardEnabled"
+		| "alwaysDenyUnapprovedCommands"
 		| "alwaysAllowFollowupQuestions"
 		| "followupAutoApproveTimeoutMs"
 		| "allowedCommands"
@@ -73,6 +75,7 @@ export const AutoApproveSettings = ({
 	alwaysAllowSubtasks,
 	alwaysAllowExecute,
 	destructiveCommandGuardEnabled,
+	alwaysDenyUnapprovedCommands,
 	alwaysAllowFollowupQuestions,
 	followupAutoApproveTimeoutMs = 60000,
 	allowedCommands,
@@ -337,6 +340,25 @@ export const AutoApproveSettings = ({
 							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm mt-1">
 								{t("settings:autoApprove.execute.destructiveCommandGuard.description")}
+							</div>
+						</SearchableSetting>
+
+						{/* Visible in both DCG modes: it replaces the hidden command
+							   lists as the fail-closed policy in hands-free setups. */}
+						<SearchableSetting
+							settingId="auto-approve-auto-deny-unapproved"
+							section="autoApprove"
+							label={t("settings:autoApprove.execute.autoDeny.label")}>
+							<VSCodeCheckbox
+								checked={alwaysDenyUnapprovedCommands}
+								onChange={(e: any) =>
+									setCachedStateField("alwaysDenyUnapprovedCommands", e.target.checked)
+								}
+								data-testid="auto-deny-unapproved-checkbox">
+								<span className="font-medium">{t("settings:autoApprove.execute.autoDeny.label")}</span>
+							</VSCodeCheckbox>
+							<div className="text-vscode-descriptionForeground text-sm mt-1">
+								{t("settings:autoApprove.execute.autoDeny.description")}
 							</div>
 						</SearchableSetting>
 

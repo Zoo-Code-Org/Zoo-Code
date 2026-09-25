@@ -346,6 +346,10 @@
 				"label": "विनाशकारी कमांड सुरक्षा सक्षम करें",
 				"description": "इस प्लेटफ़ॉर्म के लिए Destructive Command Guard (DCG) डाउनलोड करके उपयोग करें। DCG द्वारा अनुमत कमांड अपने आप चलते हैं। DCG द्वारा रोके गए कमांड चलाने के लिए आपकी मंज़ूरी आवश्यक होगी। इसके सक्षम रहने पर Zoo की कमांड सूचियाँ बंद रहेंगी। इसे बंद करने पर डाउनलोड किया गया executable रखा जाएगा।"
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "अनुमत स्वतः-निष्पादन कमांड",
 			"allowedCommandsDescription": "कमांड प्रीफिक्स जो स्वचालित रूप से निष्पादित किए जा सकते हैं जब \"निष्पादन ऑपरेशन हमेशा अनुमोदित करें\" सक्षम है। सभी कमांड की अनुमति देने के लिए * जोड़ें (सावधानी से उपयोग करें)।",
 			"deniedCommands": "अस्वीकृत कमांड",

@@ -9,7 +9,9 @@ import { customToolRegistry } from "@roo-code/core"
 import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+import type { AutoApprovalContext, ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+
+import { buildAutoDenyReason } from "../auto-approval"
 
 import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
@@ -214,16 +216,40 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images } = await cline.ask(
+				const { response, text, images, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
 					progressStatus,
 					isProtected || false,
+					autoApprovalContext,
 				)
 
 				if (response !== "yesButtonClicked") {
+					// Automatic (policy) denial: scoped to this tool call, so no
+					// `didRejectTool` (remaining tool calls in the turn proceed)
+					// and no `user_feedback` say (the reason is system-generated).
+					if (autoDenyDetail) {
+						// `guard_unavailable` marks a guard-state inconsistency, not a
+						// policy denial: the command never ran and a re-issue re-reads
+						// the guard setting, so the payload must stay a retryable error
+						// instead of carrying policy-denial advice.
+						if (autoDenyDetail.kind === "guard_unavailable") {
+							pushToolResult(formatResponse.toolError(buildAutoDenyReason(autoDenyDetail)))
+						} else {
+							pushToolResult(
+								formatResponse.toolAutoDenied({
+									reason: buildAutoDenyReason(autoDenyDetail),
+									offendingCommand: autoDenyDetail.command,
+									ruleId: autoDenyDetail.dcgRuleId,
+								}),
+							)
+						}
+						return false
+					}
+
 					if (text) {
 						await cline.say("user_feedback", text, images)
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
@@ -522,16 +548,42 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images, queuedMessageId } = await cline.ask(
+				const { response, text, images, queuedMessageId, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
 					progressStatus,
 					isProtected || false,
+					autoApprovalContext,
 				)
 
 				if (response !== "yesButtonClicked") {
+					// Automatic (policy) denial: scoped to this tool call, so no
+					// `didRejectTool` (remaining tool calls in the turn proceed)
+					// and no `user_feedback` say (the reason is system-generated).
+					// Automatic denials never carry queued feedback — a queued
+					// message forces a real ask.
+					if (autoDenyDetail) {
+						// `guard_unavailable` marks a guard-state inconsistency, not a
+						// policy denial: the command never ran and a re-issue re-reads
+						// the guard setting, so the payload must stay a retryable error
+						// instead of carrying policy-denial advice.
+						if (autoDenyDetail.kind === "guard_unavailable") {
+							pushToolResult(formatResponse.toolError(buildAutoDenyReason(autoDenyDetail)))
+						} else {
+							pushToolResult(
+								formatResponse.toolAutoDenied({
+									reason: buildAutoDenyReason(autoDenyDetail),
+									offendingCommand: autoDenyDetail.command,
+									ruleId: autoDenyDetail.dcgRuleId,
+								}),
+							)
+						}
+						return false
+					}
+
 					// Handle both messageResponse and noButtonClicked with text.
 					if (queuedMessageId) {
 						const persisted = await cline.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)

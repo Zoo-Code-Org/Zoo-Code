@@ -50,6 +50,15 @@ export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
 /**
+ * Whether commands that are not explicitly auto-approved are automatically
+ * denied (with a structured reason sent to the model) instead of prompting the
+ * user. Opt-in: by default, unapproved commands still ask for confirmation.
+ * Only engages when command auto-approval (`autoApprovalEnabled` +
+ * `alwaysAllowExecute`) is on.
+ */
+export const DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS = false
+
+/**
  * Terminal output preview size options for persisted command output.
  *
  * Controls how much command output is kept in memory as a "preview" before
@@ -154,6 +163,14 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowSubtasks: z.boolean().optional(),
 	alwaysAllowExecute: z.boolean().optional(),
 	destructiveCommandGuardEnabled: z.boolean().optional(),
+	/**
+	 * Blanket auto-deny for unapproved commands. When true (and command
+	 * auto-approval is engaged), every command that is not explicitly
+	 * auto-approved is automatically denied with a structured reason delivered
+	 * to the model, instead of prompting the user.
+	 * @default false
+	 */
+	alwaysDenyUnapprovedCommands: z.boolean().optional(),
 	alwaysAllowFollowupQuestions: z.boolean().optional(),
 	followupAutoApproveTimeoutMs: z.number().optional(),
 	allowedCommands: z.array(z.string()).optional(),

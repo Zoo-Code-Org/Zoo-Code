@@ -1,4 +1,4 @@
-import { containsDangerousSubstitution, getCommandDecision } from "../commands"
+import { containsDangerousSubstitution, getCommandDecision, getCommandDecisionDetailed } from "../commands"
 
 describe("containsDangerousSubstitution", () => {
 	describe("zsh array assignments (should NOT be flagged)", () => {
@@ -157,5 +157,61 @@ describe("getCommandDecision — multi-line script wrapped in a quoted argument"
 		expect(getCommandDecision(malformed, ["sh"])).toBe("malformed_command")
 		expect(getCommandDecision(malformed, ["*"])).toBe("malformed_command")
 		expect(getCommandDecision(malformed, [malformed])).toBe("malformed_command")
+	})
+})
+
+describe("getCommandDecisionDetailed", () => {
+	it("names the offending sub-command and matched denied prefix on chained commands", () => {
+		const result = getCommandDecisionDetailed("git status && rm x && npm test", ["git", "npm"], ["rm"])
+
+		expect(result.decision).toBe("auto_deny")
+		expect(result.offendingCommand).toBe("rm x")
+		expect(result.matchedPattern).toBe("rm")
+	})
+
+	it("preserves the original casing of the matched denied prefix", () => {
+		const result = getCommandDecisionDetailed("RM -rf /tmp/x", [], ["RM -rf"])
+
+		expect(result.decision).toBe("auto_deny")
+		expect(result.matchedPattern).toBe("RM -rf")
+	})
+
+	it("names the first sub-command lacking an allowlist match for ask_user decisions", () => {
+		const result = getCommandDecisionDetailed("git status && unknown-tool", ["git"])
+
+		expect(result.decision).toBe("ask_user")
+		expect(result.offendingCommand).toBe("unknown-tool")
+		expect(result.matchedPattern).toBeUndefined()
+	})
+
+	it("reports the parse error message for malformed commands", () => {
+		const result = getCommandDecisionDetailed("sh -c 'echo a", ["sh"])
+
+		expect(result.decision).toBe("malformed_command")
+		expect(result.offendingCommand).toBe("sh -c 'echo a")
+		expect(result.parseError).toContain("unterminated")
+	})
+
+	it("returns plain approval details for auto-approved commands", () => {
+		expect(getCommandDecisionDetailed("git status", ["git"])).toEqual({ decision: "auto_approve" })
+		expect(getCommandDecisionDetailed("   ", ["git"])).toEqual({ decision: "auto_approve" })
+	})
+
+	it("returns the same decision as getCommandDecision across representative inputs", () => {
+		const cases: Array<[string, string[], string[] | undefined]> = [
+			["git status", ["git"], []],
+			["git push origin", ["git"], ["git push"]],
+			["git status && rm file", ["git"], ["rm"]],
+			["unknown command", ["git"], ["rm"]],
+			['echo "${var@P}"', ["echo"], []],
+			["sh -c 'echo a", ["sh"], []],
+			["", ["git"], []],
+		]
+
+		for (const [command, allowed, denied] of cases) {
+			expect(getCommandDecisionDetailed(command, allowed, denied).decision).toBe(
+				getCommandDecision(command, allowed, denied),
+			)
+		}
 	})
 })

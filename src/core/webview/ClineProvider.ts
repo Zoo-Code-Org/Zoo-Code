@@ -47,6 +47,7 @@ import {
 	DEFAULT_WRITE_DELAY_MS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+	DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
@@ -2606,6 +2607,7 @@ export class ClineProvider
 			allowedWriteFiles,
 			alwaysAllowExecute,
 			destructiveCommandGuardEnabled,
+			alwaysDenyUnapprovedCommands,
 			allowedCommands,
 			deniedCommands,
 			alwaysAllowMcp,
@@ -2766,6 +2768,7 @@ export class ClineProvider
 			allowedWriteFiles: allowedWriteFiles ?? [],
 			alwaysAllowExecute: alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled,
+			alwaysDenyUnapprovedCommands: alwaysDenyUnapprovedCommands ?? false,
 			alwaysAllowMcp: alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
@@ -3006,6 +3009,8 @@ export class ClineProvider
 			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled:
 				stateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+			alwaysDenyUnapprovedCommands:
+				stateValues.alwaysDenyUnapprovedCommands ?? DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
 			alwaysAllowMcp: stateValues.alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: stateValues.alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: stateValues.alwaysAllowSubtasks ?? false,

@@ -334,8 +334,112 @@ describe("executeCommandTool", () => {
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			// The DCG verdict is forwarded so checkAutoApproval auto-approves from
+			// the verdict itself rather than inferring it from settings alone.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				dcgDecision: { decision: "allow" },
+			})
 			expect(mockPushToolResult).toHaveBeenCalled()
+		})
+
+		it("passes the DCG deny verdict unprotected when blanket auto-deny is engaged", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: true,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			// Blanket mode: not protected, so checkAutoApproval resolves the ask as
+			// an automatic denial carrying the DCG reason instead of prompting.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				dcgDecision: { decision: "deny", reason: "matches a destructive pattern" },
+			})
+		})
+
+		it("keeps the protected prompt when DCG denies and blanket auto-deny is off", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: false,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: true,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+		})
+
+		it("keeps the protected prompt when blanket auto-deny is on but command auto-approval is off", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: false,
+				alwaysAllowExecute: true,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+		})
+
+		it("keeps the protected prompt when blanket auto-deny is on but execute auto-approval is off", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: false,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			// Structural harness double — mockCline carries only the fields the handler reads; a typed Task is impractical.
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				// vi.fn stands in for the AskApproval signature; every test in this block uses this identical cast.
+				askApproval: mockAskApproval as unknown as AskApproval,
+				// vi.fn stands in for the HandleError signature; every test in this block uses this identical cast.
+				handleError: mockHandleError as unknown as HandleError,
+				// vi.fn stands in for the PushToolResult signature; every test in this block uses this identical cast.
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
 		})
 
 		it("installs or updates DCG before evaluating an enabled command", async () => {
@@ -671,6 +775,38 @@ describe("executeCommandTool", () => {
 			await handlePromise
 
 			expect(mockPushToolResult.mock.calls[0][0]).toContain("Exit code: 0")
+		})
+
+		it("honors a terminal shell integration flip made during a pending approval", async () => {
+			vitest.useFakeTimers()
+			const provider = await mockCline.providerRef.deref()
+			// The pre-ask snapshot must not pin terminal behavior: execution
+			// reads provider state again after approval and must honor the
+			// fresher value.
+			provider.getState
+				.mockResolvedValueOnce({ terminalShellIntegrationDisabled: true })
+				.mockResolvedValueOnce({ terminalShellIntegrationDisabled: false })
+			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(false)
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("Write-Output hello")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			// A stale pre-ask snapshot would have selected "execa"; the post-approval
+			// re-read sees shell integration enabled again and selects "vscode".
+			expect(terminal.provider).toBe("vscode")
+
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("hello\n", proc)
+			await callbacks.onCompleted!("hello\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
 		it("allows an explicit agent timeout to move a command to the background", async () => {

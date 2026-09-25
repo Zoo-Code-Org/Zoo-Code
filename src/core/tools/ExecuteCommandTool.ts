@@ -10,6 +10,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Task } from "../task/Task"
 import type { ClineProvider } from "../webview/ClineProvider"
 
+import type { DcgDecision } from "../../services/destructive-command-guard"
 import { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
@@ -129,7 +130,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			}
 
 			const provider = await task.providerRef.deref()
-			let dcgBlocked = false
+			let dcgDecision: DcgDecision | undefined
 			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
 				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
 				// Resolve through the managed installer on use so an extension update
@@ -143,27 +144,52 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 						? customCwd
 						: path.resolve(task.cwd, customCwd)
 					: task.cwd
-				const dcgResult = await runDcg(binaryPath, canonicalCommand, workingDirectory)
-				dcgBlocked = dcgResult.decision === "deny"
-				if (dcgResult.decision === "deny") {
-					await task.say("error", formatDcgBlockedMessage(dcgResult.reason, dcgResult.ruleId))
+				// Infra failures (spawn/parse/timeout) reject here and surface as a
+				// retryable tool_error via the outer catch — never as a policy denial.
+				dcgDecision = await runDcg(binaryPath, canonicalCommand, workingDirectory)
+				if (dcgDecision.decision === "deny") {
+					await task.say("error", formatDcgBlockedMessage(dcgDecision.reason, dcgDecision.ruleId))
 				}
 			}
 
-			// DCG-approved commands are auto-approved by checkAutoApproval. A DCG
-			// block is presented as Zoo's normal command prompt, with isProtected
-			// forcing the user to explicitly choose whether to execute it.
-			const didApprove = dcgBlocked
-				? await askApproval("command", canonicalCommand, undefined, true)
-				: await askApproval("command", canonicalCommand)
+			// The blanket auto-deny setting only engages while command auto-approval
+			// is on. A DCG block keeps its protected user prompt unless the blanket
+			// setting is fully engaged, in which case it is auto-denied. The blanket
+			// decision is frozen to this pre-ask snapshot, while terminal behavior is
+			// re-read after approval so a settings flip during a pending prompt takes
+			// effect. A blanket off-flip landing between this snapshot and Task.ask's
+			// own re-read routes a DCG block to the normal prompt instead of the
+			// protected one; a user still decides either way, so the snapshot stays.
+			const providerState = await provider?.getState()
+			const blanketAutoDeny =
+				providerState?.alwaysDenyUnapprovedCommands === true &&
+				providerState?.autoApprovalEnabled === true &&
+				providerState?.alwaysAllowExecute === true
+
+			// DCG-approved commands are auto-approved by checkAutoApproval (from the
+			// passed verdict). A DCG block is either auto-denied with the guard's
+			// reason delivered to the model (blanket mode), or presented as Zoo's
+			// normal command prompt, with isProtected forcing the user to explicitly
+			// choose whether to execute it.
+			let didApprove: boolean
+			if (dcgDecision === undefined) {
+				didApprove = await askApproval("command", canonicalCommand)
+			} else if (dcgDecision.decision === "allow") {
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, { dcgDecision })
+			} else if (blanketAutoDeny) {
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, { dcgDecision })
+			} else {
+				didApprove = await askApproval("command", canonicalCommand, undefined, true)
+			}
 
 			if (!didApprove) {
 				return
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
-			const providerState = await provider?.getState()
-			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
+			// Re-read after approval so a settings flip while the approval prompt
+			// was pending is honored for terminal behavior.
+			const { terminalShellIntegrationDisabled = true } = (await provider?.getState()) ?? {}
 
 			// Get command execution timeout from VSCode configuration (in seconds)
 			const commandExecutionTimeoutSeconds = vscode.workspace

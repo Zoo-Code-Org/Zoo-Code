@@ -226,4 +226,54 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 		expect(screen.getByTestId("allowed-commands-heading")).toBeInTheDocument()
 		expect(screen.getByTestId("denied-commands-heading")).toBeInTheDocument()
 	})
+
+	// The blanket auto-deny toggle replaces the hidden command lists as the
+	// fail-closed policy in hands-free setups, so it must stay reachable in
+	// BOTH DCG modes — unlike the list editors above.
+	it.each([
+		["disabled", false],
+		["enabled", true],
+	])("shows the blanket auto-deny toggle while destructive command guard is %s", (_label, dcgEnabled) => {
+		renderSettings({ destructiveCommandGuardEnabled: dcgEnabled })
+
+		expect(screen.getByTestId("auto-deny-unapproved-checkbox")).toBeInTheDocument()
+	})
+
+	it("renders blanket auto-deny disabled by default", () => {
+		renderSettings()
+
+		expect(screen.getByTestId("auto-deny-unapproved-checkbox")).not.toBeChecked()
+	})
+
+	it("renders blanket auto-deny enabled from cached settings", () => {
+		renderSettings({ alwaysDenyUnapprovedCommands: true })
+
+		expect(screen.getByTestId("auto-deny-unapproved-checkbox")).toBeChecked()
+	})
+
+	it("buffers the blanket auto-deny setting", () => {
+		const { setCachedStateField } = renderSettings()
+
+		fireEvent.click(screen.getByTestId("auto-deny-unapproved-checkbox"))
+
+		expect(setCachedStateField).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("buffers disabling blanket auto-deny", () => {
+		const { setCachedStateField } = renderSettings({ alwaysDenyUnapprovedCommands: true })
+
+		fireEvent.click(screen.getByTestId("auto-deny-unapproved-checkbox"))
+
+		expect(setCachedStateField).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", false)
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("hides the blanket auto-deny toggle while command auto-approval is off", () => {
+		// With alwaysAllowExecute off, the whole Execute section (and its
+		// toggles, including the blanket auto-deny toggle) is hidden.
+		renderSettings({ alwaysAllowExecute: false })
+
+		expect(screen.queryByTestId("auto-deny-unapproved-checkbox")).not.toBeInTheDocument()
+	})
 })

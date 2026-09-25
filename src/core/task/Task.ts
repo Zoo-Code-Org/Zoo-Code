@@ -30,6 +30,7 @@ import {
 	type ClineMessage,
 	type ClineSay,
 	type ClineAsk,
+	type ExtensionState,
 	type ToolProgressStatus,
 	type HistoryItem,
 	type PendingTaskAction,
@@ -73,7 +74,13 @@ import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
+import {
+	DiffStrategy,
+	type AutoApprovalContext,
+	type ToolUse,
+	type ToolParamName,
+	toolParamNames,
+} from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -132,7 +139,7 @@ import {
 import { processUserContentMentions } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
-import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
+import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
@@ -156,6 +163,50 @@ export const MODEL_FETCH_TIMEOUT_MS = 5_000
 const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
 
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
+
+/**
+ * Denial kinds the command policy produces only while blanket auto-deny is on
+ * (`checkAutoApproval` returns `ask` for these when the setting is off — see
+ * the command branch of `src/core/auto-approval/index.ts`), so a denial of one
+ * of these kinds is blanket-caused. `denylist` and `guard_unavailable` are
+ * excluded: they deny independently of the blanket setting.
+ */
+const BLANKET_DENY_AUTO_DENY_KINDS: ReadonlySet<AutoDenyDetail["kind"]> = new Set([
+	"dcg",
+	"not_allowlisted",
+	"dangerous_substitution",
+	"malformed_command",
+])
+
+/**
+ * What to do with a claimed queued message about to answer a command ask,
+ * decided against the auto-approval policy as it stands NOW.
+ */
+type QueuedCommandPolicyAction =
+	| { action: "consume" }
+	| { action: "approve" }
+	| { action: "deny"; detail?: AutoDenyDetail }
+	| { action: "release" }
+
+/**
+ * Whether blanket auto-deny currently engages. The three settings act as a
+ * conjunction: blanket deny only means anything while auto-approval is on and
+ * command auto-approval is on — without those two an unapproved command is
+ * prompted rather than auto-approved, so there is nothing to deny.
+ *
+ * Single source of truth for the derivation: the ask-time snapshot and the
+ * consume-site re-reads must not drift apart, or a flip landing between the
+ * two decides consumption on stale policy.
+ */
+function isBlanketDenyEngaged(
+	state?: Pick<ExtensionState, "alwaysDenyUnapprovedCommands" | "autoApprovalEnabled" | "alwaysAllowExecute">,
+): boolean {
+	return (
+		state?.alwaysDenyUnapprovedCommands === true &&
+		state?.autoApprovalEnabled === true &&
+		state?.alwaysAllowExecute === true
+	)
+}
 
 function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolution | undefined {
 	if (type === "command_output") {
@@ -369,6 +420,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	/**
+	 * Structured detail of the automatic denial that resolved the current ask,
+	 * set when `checkAutoApproval` denies via policy (denylist, blanket
+	 * auto-deny, or a DCG block in blanket mode) and consumed (cleared) by the
+	 * `ask()` result. System-generated, unlike `askResponseText` which carries
+	 * user feedback and triggers a `user_feedback` say row.
+	 */
+	private pendingAutoDenyDetail?: AutoDenyDetail
+	/**
+	 * Set while the current turn has blanket-denied a command ask. The queued
+	 * messages such a denial deliberately leaves in place were typed in response
+	 * to that denial, not as approval — so a later ask in the same turn must not
+	 * consume one as `yesButtonClicked` (which would silently approve it with the
+	 * interactive prompt suppressed). Read at the queued-message consume sites;
+	 * cleared by the per-turn reset beside `didToolFailInCurrentTurn`.
+	 */
+	private blanketDeniedCommandThisTurn = false
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
@@ -1003,6 +1071,101 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return undefined
 	}
 
+	/**
+	 * Re-read the auto-approval policy immediately before a queued message would
+	 * stand in for a command ask's approval, and consult the full command policy
+	 * under the fresh state if blanket deny now engages.
+	 *
+	 * The queued-answer shortcut skips `checkAutoApproval` and the ask's decision
+	 * otherwise rides on a single settings snapshot taken before the prompt was
+	 * shown. A blanket-deny flip landing between the snapshot and the consume is
+	 * invisible to that frozen gate, and the queued message would auto-approve an
+	 * unallowlisted command — fail-OPEN through a window as wide as the prompt
+	 * dwell. Re-reading here closes it: while blanket deny engages, the message
+	 * is never consumed as approval and the ask gets the structured denial policy
+	 * would have produced without a queued message.
+	 */
+	private async recheckQueuedCommandPolicy({
+		text,
+		isProtected,
+		dcgDecision,
+	}: {
+		text?: string
+		isProtected?: boolean
+		dcgDecision?: AutoApprovalContext["dcgDecision"]
+	}): Promise<QueuedCommandPolicyAction> {
+		const freshState = await this.providerRef.deref()?.getState()
+		if (!isBlanketDenyEngaged(freshState)) {
+			// Disengaged: the queued answer is a legitimate approval, as before.
+			return { action: "consume" }
+		}
+		// Engaged: the full policy decides, with the fresh state. `cwd` and the
+		// forwarded DCG verdict match the ask-time `checkAutoApproval` call.
+		const approval = await checkAutoApproval({
+			state: freshState,
+			cwd: this.cwd,
+			ask: "command",
+			text,
+			isProtected,
+			dcgDecision,
+		})
+		if (approval.decision === "deny") {
+			return { action: "deny", detail: approval.autoDeny }
+		}
+		if (approval.decision === "approve") {
+			return { action: "approve" }
+		}
+		return { action: "release" }
+	}
+
+	/**
+	 * Apply a queued-command policy re-check outcome to a claimed message: the
+	 * claim is released on every path except the legitimate consume, and an
+	 * engaged-policy outcome resolves the ask the same way the no-queued-message
+	 * path would (structured denial, approval, or — for a plain `ask` decision —
+	 * left pending for the user).
+	 */
+	private applyQueuedCommandPolicyAction(
+		action: QueuedCommandPolicyAction,
+		message: QueuedMessage,
+		resolution: QueuedAskResolution,
+	): string | undefined {
+		if (action.action !== "consume") {
+			this.messageQueueService.releaseMessage(message.id)
+		}
+		switch (action.action) {
+			case "consume":
+				return this.handleQueuedAskResponse(message, resolution)
+			case "deny":
+				if (action.detail && BLANKET_DENY_AUTO_DENY_KINDS.has(action.detail.kind)) {
+					this.blanketDeniedCommandThisTurn = true
+				}
+				this.pendingAutoDenyDetail = action.detail
+				this.denyAsk()
+				return undefined
+			case "approve":
+				this.approveAsk()
+				return undefined
+			case "release":
+				return undefined
+		}
+	}
+
+	/**
+	 * Shared claim-gate for the two queued-message consume sites.
+	 *
+	 * The latch blocks a message left in the queue by a command this turn already
+	 * blanket-denied (it answers that denial, not the current ask), and
+	 * `hasUnclaimed()` replaces the length-only `isEmpty()`, which reports a
+	 * queue containing nothing but claims as available for a new consumer.
+	 * `isMessageQueued`/`isStatusMutable` keep `isEmpty()` semantics on purpose:
+	 * flipping those would re-enable interactive prompt timers whenever a claim
+	 * is outstanding.
+	 */
+	private mayDrainQueuedMessageForAsk(): boolean {
+		return !this.blanketDeniedCommandThisTurn && this.messageQueueService.hasUnclaimed()
+	}
+
 	static create(options: TaskOptions): [Task, Promise<void>] {
 		const instance = new Task({ ...options, startTask: false })
 		const { images, task, historyItem } = options
@@ -1435,7 +1598,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		partial?: boolean,
 		progressStatus?: ToolProgressStatus,
 		isProtected?: boolean,
-	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
+		autoApprovalContext?: AutoApprovalContext,
+	): Promise<{
+		response: ClineAskResponse
+		text?: string
+		images?: string[]
+		queuedMessageId?: string
+		/**
+		 * Present when the ask was resolved by an automatic (policy) denial
+		 * rather than a user click. Consumers must not treat this as a user
+		 * rejection: the denial is scoped to its own tool call.
+		 */
+		autoDenyDetail?: AutoDenyDetail
+	}> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -1458,8 +1633,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
+		// The blanket auto-deny setting only engages while command auto-approval
+		// is on; while it is disengaged, the queued-message shortcut below is
+		// unaffected.
+		const blanketDenyEngaged = isBlanketDenyEngaged(state)
+		// A queued message normally answers the pending ask, which for command asks
+		// means an unconditional auto-approve. That shortcut must never bypass
+		// blanket deny: while it is engaged, a command ask keeps its policy
+		// decision and the queued message is left in place for a later turn
+		// instead of being consumed as approval.
+		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
 		const queuedMessage =
-			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
+			partial === true || type === "command_output" || !queueMayAnswerThisAsk
+				? undefined
+				: this.messageQueueService.claimNextMessage()
 		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
@@ -1467,7 +1654,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// currently reports.
 		const approval = queuedAskResolution
 			? ({ decision: "ask" } as const)
-			: await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
+			: await checkAutoApproval({
+					state,
+					cwd: this.cwd,
+					ask: type,
+					text,
+					isProtected,
+					dcgDecision: autoApprovalContext?.dcgDecision,
+				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
@@ -1579,6 +1773,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const timeouts: NodeJS.Timeout[] = []
 
+		// Record the structured detail of an automatic (policy) denial so the
+		// `ask()` result can hand it to the caller. Assigned unconditionally so
+		// a stale detail from a previous ask can never leak into this result.
+		// Deliberately not routed through `askResponseText`: that field means
+		// *user feedback* and triggers a `user_feedback` say row, while this
+		// reason is system-generated.
+		this.pendingAutoDenyDetail = approval.decision === "deny" ? approval.autoDeny : undefined
+		// A blanket-caused denial leaves the queued messages this turn for later
+		// turns; latch so no ask in this turn consumes one as approval. Set only on
+		// blanket-caused denials — here and at the consume-site re-check
+		// (`applyQueuedCommandPolicyAction`) — and never cleared mid-turn: the
+		// per-turn reset owns clearing, so a later non-denied ask cannot drop the
+		// latch prematurely.
+		if (
+			type === "command" &&
+			approval.decision === "deny" &&
+			approval.autoDeny &&
+			BLANKET_DENY_AUTO_DENY_KINDS.has(approval.autoDeny.kind)
+		) {
+			this.blanketDeniedCommandThisTurn = true
+		}
+
 		if (approval.decision === "approve") {
 			this.approveAsk()
 		} else if (approval.decision === "deny") {
@@ -1645,7 +1861,64 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 			}
 		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
-			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+			if (this.blanketDeniedCommandThisTurn) {
+				// A command this turn already blanket-denied left the message in the
+				// queue — it answers that denial, not this ask. Release the claim and
+				// let the user answer the prompt normally.
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			} else if (type === "command") {
+				// The snapshot gate is frozen; blanket deny may have engaged since the
+				// ask began. Re-read policy before the message stands in for approval.
+				try {
+					const action = await this.recheckQueuedCommandPolicy({
+						text,
+						isProtected,
+						dcgDecision: autoApprovalContext?.dcgDecision,
+					})
+					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+						// The user answered, the ask was superseded, or the task aborted
+						// while the fresh read was pending: the message is none of this
+						// ask's business — leave it for the next consumer. The ask
+						// resolves with the user's own response via the pWaitFor below.
+						this.messageQueueService.releaseMessage(queuedMessage.id)
+					} else {
+						queuedMessageId = this.applyQueuedCommandPolicyAction(
+							action,
+							queuedMessage,
+							queuedAskResolution,
+						)
+					}
+				} catch (error) {
+					// Drain-site parity: a failed re-check must not reject ask() nor
+					// strand the claim; the prompt stays pending for the user.
+					console.error("[Task#ask] queued command policy re-check failed:", error)
+					this.messageQueueService.releaseMessage(queuedMessage.id)
+				}
+			} else {
+				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+			}
+		}
+
+		// At most one drain-site policy re-check is in flight per ask; the
+		// pWaitFor predicate is synchronous, so its await runs out here.
+		let queuedCommandPolicyCheck: Promise<void> | undefined
+		const verifyDrainedCommandMessage = async (
+			message: QueuedMessage,
+			resolution: QueuedAskResolution,
+		): Promise<void> => {
+			const action = await this.recheckQueuedCommandPolicy({
+				text,
+				isProtected,
+				dcgDecision: autoApprovalContext?.dcgDecision,
+			})
+			if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+				// The user answered, the ask was superseded, or the task aborted
+				// while the fresh read was pending: the message is none of this
+				// ask's business — leave it for the next consumer.
+				this.messageQueueService.releaseMessage(message.id)
+				return
+			}
+			queuedMessageId = this.applyQueuedCommandPolicyAction(action, message, resolution)
 		}
 
 		// Wait for askResponse to be set
@@ -1657,12 +1930,35 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
 				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang.
-				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
+				// immediately so the task doesn't hang. Command asks under blanket deny are
+				// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
+				// for the explicit approval the policy withheld.
+				if (
+					queueMayAnswerThisAsk &&
+					shouldDrainQueuedMessageForAsk &&
+					!queuedCommandPolicyCheck &&
+					this.mayDrainQueuedMessageForAsk()
+				) {
 					const message = this.messageQueueService.claimNextMessage()
 					const resolution = message ? queuedResponseForAsk(type, text) : undefined
 					if (message && resolution) {
-						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+						if (type === "command") {
+							// Claim first, then verify the policy off-predicate: a
+							// blanket-deny flip landing during the prompt dwell is
+							// invisible to the frozen snapshot gate, so the claim is
+							// provisional until the fresh check clears it.
+							queuedCommandPolicyCheck = verifyDrainedCommandMessage(message, resolution).catch(
+								(error) => {
+									// The background check must never reject unhandled;
+									// on failure the claim is released so the message
+									// stays available to a later consumer.
+									console.error("[Task#ask] queued command policy re-check failed:", error)
+									this.messageQueueService.releaseMessage(message.id)
+								},
+							)
+						} else {
+							queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+						}
 					}
 				}
 
@@ -1670,6 +1966,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			},
 			{ interval: 100 },
 		)
+
+		// Let a policy re-check that was in flight when the wait resolved run to
+		// completion: its bail-out path releases the claim, and leaving it
+		// unresolved would let the consume race the result below.
+		if (queuedCommandPolicyCheck) {
+			await queuedCommandPolicyCheck
+		}
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
@@ -1694,10 +1997,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			text: this.askResponseText,
 			images: this.askResponseImages,
 			queuedMessageId,
+			autoDenyDetail: this.pendingAutoDenyDetail,
 		}
 		this.askResponse = undefined
 		this.askResponseText = undefined
 		this.askResponseImages = undefined
+		this.pendingAutoDenyDetail = undefined
 
 		// Cancel the timeouts if they are still running.
 		timeouts.forEach((timeout) => clearTimeout(timeout))
@@ -3240,6 +3545,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// only prevent attempt_completion within the same assistant message, not across turns
 				// (e.g., if a tool fails, then user sends a message saying "just complete anyway")
 				this.didToolFailInCurrentTurn = false
+				// A blanket command denial only suppresses queued-message approval
+				// for the turn that earned it: a message the user queues afterward
+				// (a new turn) is fair game for the next ask to answer.
+				this.blanketDeniedCommandThisTurn = false
 				this.presentAssistantMessageLocked = false
 				this.presentAssistantMessageHasPendingUpdates = false
 				// No legacy text-stream tool parser.

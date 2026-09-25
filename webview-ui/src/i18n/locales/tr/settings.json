@@ -346,6 +346,10 @@
 				"label": "Yıkıcı komut korumasını etkinleştir",
 				"description": "Bu platform için Destructive Command Guard'ı (DCG) indirir ve kullanır. DCG'nin izin verdiği komutlar otomatik olarak çalıştırılır. DCG tarafından engellenen komutlar onayını gerektirir. Bu seçenek etkinken Zoo'nun komut listeleri devre dışı bırakılır. Seçeneği kapatsan da indirilen çalıştırılabilir dosya korunur."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "İzin Verilen Otomatik Yürütme Komutları",
 			"allowedCommandsDescription": "\"Yürütme işlemlerini her zaman onayla\" etkinleştirildiğinde otomatik olarak yürütülebilen komut önekleri. Tüm komutlara izin vermek için * ekleyin (dikkatli kullanın).",
 			"deniedCommands": "Reddedilen komutlar",

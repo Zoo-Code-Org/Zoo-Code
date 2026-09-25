@@ -346,6 +346,10 @@
 				"label": "Bật bảo vệ khỏi lệnh phá hoại",
 				"description": "Tải xuống và sử dụng Destructive Command Guard (DCG) cho nền tảng này. Các lệnh được DCG cho phép sẽ tự động chạy. Các lệnh bị DCG chặn cần bạn phê duyệt. Danh sách lệnh của Zoo sẽ bị vô hiệu hóa khi tùy chọn này được bật. Tệp thực thi đã tải xuống vẫn được giữ lại nếu bạn tắt tùy chọn."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Các lệnh tự động thực thi được phép",
 			"allowedCommandsDescription": "Tiền tố lệnh có thể được tự động thực thi khi \"Luôn phê duyệt các hoạt động thực thi\" được bật. Thêm * để cho phép tất cả các lệnh (sử dụng cẩn thận).",
 			"deniedCommands": "Lệnh bị từ chối",
