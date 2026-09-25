@@ -176,6 +176,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 	protected options: ApiHandlerOptions
 
 	private client: GoogleGenAI
+	private readonly isVertex: boolean
 	private lastThoughtSignature?: string
 	private lastResponseId?: string
 	private readonly providerName = "Gemini"
@@ -184,6 +185,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		super()
 
 		this.options = options
+		this.isVertex = isVertex ?? false
 
 		const project = this.options.vertexProjectId ?? NOT_PROVIDED
 		const location = this.options.vertexRegion ?? NOT_PROVIDED
@@ -268,6 +270,38 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		const contents = geminiMessages
 			.map((message) => convertAnthropicMessageToGemini(message, { includeThoughtSignatures, toolIdToName }))
 			.flat()
+
+		// Vertex rejects requests that end with a model turn, which can occur when
+		// resuming after an interrupted response. Preserve that turn and explicitly
+		// ask the model to continue rather than dropping conversation history.
+		const lastContent = contents.at(-1)
+		if (this.isVertex && lastContent?.role === "model") {
+			// If the trailing model turn contains unanswered function calls (e.g. the
+			// response was interrupted mid-tool-call), a plain-text turn would break
+			// Gemini's functionCall -> functionResponse pairing, so synthesize benign
+			// function responses instead. The functionCall parts already carry the tool
+			// name from convertAnthropicMessageToGemini (via toolIdToName).
+			const functionCallNames = (lastContent.parts ?? [])
+				.map((part) => part.functionCall?.name)
+				.filter((name): name is string => Boolean(name))
+			if (functionCallNames.length > 0) {
+				contents.push({
+					role: "user",
+					parts: functionCallNames.map((name) => ({
+						functionResponse: {
+							name,
+							response: {
+								name,
+								content:
+									"Tool execution was interrupted before a result was recorded. Continue without the result of this call.",
+							},
+						},
+					})),
+				})
+			} else {
+				contents.push({ role: "user", parts: [{ text: "Continue." }] })
+			}
+		}
 
 		// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS).
 		// Google built-in tools (Grounding, URL Context) are mutually exclusive
