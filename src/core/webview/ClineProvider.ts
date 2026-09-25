@@ -837,6 +837,11 @@ export class ClineProvider
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
+		// Release the provider-owned browser bridge (socket.io server + port)
+		// first, while teardown is still synchronous — an awaited cleanup
+		// step below rejecting must not leak the listening port.
+		BrowserBridgeServer.disposeFor(this)
+
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
@@ -1046,11 +1051,17 @@ export class ClineProvider
 		if (BrowserBridgeServer.active(this)) {
 			BrowserBridgeServer.setPlaceholder(this)
 		} else {
-			webviewView.webview.html =
+			const html =
 				this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
 				process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
 					? await this.getHMRHtmlContent(webviewView.webview)
 					: await this.getHtmlContent(webviewView.webview)
+			// The bridge can bind while the HTML is built; keep its placeholder.
+			if (BrowserBridgeServer.active(this)) {
+				BrowserBridgeServer.setPlaceholder(this)
+			} else {
+				webviewView.webview.html = html
+			}
 		}
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
@@ -1718,17 +1729,30 @@ export class ClineProvider
 	}
 
 	/**
+	 * Attaches the provider's webview message handler to `webview` and returns
+	 * the subscription. Ownership differs by caller: the real-webview path
+	 * registers it through {@link setWebviewMessageListener} (tied to the
+	 * sidebar lifecycle), while the browser bridge keeps the virtual-webview
+	 * subscription for the bridge's own lifetime.
+	 *
+	 * @param webview A reference to the (real or virtual) webview
+	 */
+	private attachWebviewMessageListener(webview: vscode.Webview): vscode.Disposable {
+		const onReceiveMessage = async (message: WebviewMessage) =>
+			webviewMessageHandler(this, message, this.marketplaceManager)
+
+		return webview.onDidReceiveMessage(onReceiveMessage)
+	}
+
+	/**
 	 * Sets up an event listener to listen for messages passed from the webview context and
-	 * executes code based on the message that is received.
+	 * executes code based on the message that is received. The subscription is
+	 * released with the rest of the per-webview resources.
 	 *
 	 * @param webview A reference to the extension webview
 	 */
 	private setWebviewMessageListener(webview: vscode.Webview) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
-
-		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
-		this.webviewDisposables.push(messageDisposable)
+		this.webviewDisposables.push(this.attachWebviewMessageListener(webview))
 	}
 
 	/**

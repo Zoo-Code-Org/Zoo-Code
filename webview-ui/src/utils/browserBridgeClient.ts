@@ -1,4 +1,7 @@
+import type { Socket } from "socket.io-client"
+
 import { WebviewMessage } from "@roo/WebviewMessage"
+import { BROWSER_BRIDGE_UNAUTHORIZED_MESSAGE } from "@roo/browserBridge"
 
 /**
  * Browser bridge — client side of the standalone-browser UI transport.
@@ -44,23 +47,59 @@ function getBridgePortFromUrl(): number | undefined {
 	return undefined
 }
 
-type BridgeSocket = {
-	on(event: string, listener: (...args: any[]) => void): void
-	emit(event: string, ...args: any[]): void
-	disconnect(): void
+/**
+ * The per-bridge handshake token is served as a `?bridgeToken=<token>` query
+ * parameter next to the port. The bridge server rejects every socket whose
+ * handshake auth token does not match, so without it the tab could not
+ * connect anyway — an absent (or empty) token keeps the client inert, exactly
+ * like an absent port.
+ */
+function getBridgeTokenFromUrl(): string | undefined {
+	const raw = new URLSearchParams(window.location.search).get("bridgeToken")
+	// Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral: "" and null both fall through to the same undefined result (equivalent mutants)
+	return raw !== null && raw !== "" ? raw : undefined
 }
+
+// The subset of the socket.io client surface the bridge uses. Type-only
+// import above, so this adds no runtime dependency to the bundle.
+type BridgeSocket = Pick<Socket, "on" | "emit" | "disconnect">
 
 export class BrowserBridgeClient {
 	private static instance: BrowserBridgeClient | undefined
 	private static queue: WebviewMessage[] = []
+	private status: "init" | "connected" | "retry" | "disposed" = "init"
+	private initProcess: Promise<void> | null = null
 
 	private socket: BridgeSocket | undefined
 
-	private constructor(port: number) {
-		void this.connect(port)
+	private constructor(port: number, token: string) {
+		this.initProcess = this.connect(port, token).catch((error: unknown) => {
+			// Initialization can fail before the socket exists (the lazy
+			// socket.io-client or browser-mode CSS import rejecting). A dead
+			// singleton must not keep claiming `active()` or hoard the queue
+			// for a later, unrelated client — tear this one down.
+			console.error("[BrowserBridge] Failed to initialize the browser bridge:", error)
+			this.dispose()
+		})
 	}
 
-	private async connect(port: number): Promise<void> {
+	private dispose() {
+		this.socket?.disconnect()
+		this.socket = undefined
+		// connect() marks the document before the CSS import and the socket
+		// setup, so a bridge that dies after marking it (initialization
+		// failure, test reset) must un-mark it: an inactive tab has no
+		// business keeping browser-bridge styling.
+		document.documentElement.classList.remove("roo-browser-mode")
+		if (BrowserBridgeClient.instance === this) {
+			BrowserBridgeClient.instance = undefined
+			// Stryker disable next-line ArrayDeclaration: the queue reset only matters for a future instance, which no test can observe through the old array reference
+			BrowserBridgeClient.queue = []
+		}
+		this.status = "disposed"
+	}
+
+	private async connect(port: number, token: string): Promise<void> {
 		// The only socket.io-client reference in the whole webview bundle, and
 		// it is reachable only from dev builds (see the class doc comment).
 		const { io } = await import("socket.io-client")
@@ -72,26 +111,48 @@ export class BrowserBridgeClient {
 		// builds never emit (unreachable from dead code above).
 		await import("../browserBridge.css")
 
+		// The token authenticates the handshake against the bridge server's
+		// `server.use` middleware; a socket without the right token is
+		// rejected before any message can reach the provider.
 		const socket: BridgeSocket = io(`http://127.0.0.1:${port}`, {
-			transports: ["websocket", "polling"],
+			auth: { token },
+			transports: ["polling", "websocket"],
 		})
 		this.socket = socket
 
-		socket.on("connect", () => {
-			const pending = BrowserBridgeClient.queue
-			// Stryker disable next-line ArrayDeclaration: the drained `pending` snapshot is read before the reassignment, so the reset value is unobservable through the public API
-			BrowserBridgeClient.queue = []
-			for (const message of pending) {
-				socket.emit("webviewMessage", message)
-			}
-		})
+		// Drain the queue synchronously at socket creation, not from a
+		// "connect" listener: socket.io buffers pre-connect emits in a FIFO
+		// sendBuffer and flushes it *before* the "connect" event fires, so a
+		// drain inside the listener would send queued messages after any
+		// message posted while connecting (a real reordering of the wire).
+		for (const message of BrowserBridgeClient.queue.splice(0)) {
+			socket.emit("webviewMessage", message)
+		}
 
 		socket.on("extensionMessage", (message: unknown) => {
 			window.postMessage(message, "*")
 		})
 
 		socket.on("connect_error", (error: unknown) => {
+			// The bridge server rejects a bad/expired handshake token via its
+			// `server.use` middleware, and socket.io does NOT retry such a
+			// rejection. Keeping the singleton alive would leave `active()`
+			// true, so every later `postMessage` would go into a socket buffer
+			// that can never deliver — a silently dead tab. Treat the
+			// rejection as fatal and tear the bridge down instead (the user
+			// recovers by re-running "Open in Chrome", which hands out a fresh
+			// token).
+			if (error instanceof Error && error.message === BROWSER_BRIDGE_UNAUTHORIZED_MESSAGE) {
+				console.error("[BrowserBridge] The bridge server rejected the handshake token; deactivating.")
+				this.dispose()
+				return
+			}
 			console.warn("[BrowserBridge] socket.io connect error:", error)
+			this.status = "retry"
+		})
+
+		socket.on("connect", () => {
+			this.status = "connected"
 		})
 	}
 
@@ -101,8 +162,9 @@ export class BrowserBridgeClient {
 	 *
 	 *  1. production build (`import.meta.env.DEV === false`) → return; dead-code
 	 *     elimination strips everything below from the shipped bundle
-	 *  2. no `?bridgePort=` param → return (plain dev-server tab keeps the
-	 *     localStorage-only fallback behavior)
+	 *  2. no `?bridgePort=`/`?bridgeToken=` param → return (plain dev-server tab
+	 *     keeps the localStorage-only fallback behavior; a port without its
+	 *     token could never complete the authenticated handshake)
 	 *  3. lazy-load socket.io-client, apply browser-mode CSS, connect, and
 	 *     flush any queued messages
 	 */
@@ -114,10 +176,11 @@ export class BrowserBridgeClient {
 			return
 		}
 		const port = getBridgePortFromUrl()
-		if (port === undefined) {
+		const token = getBridgeTokenFromUrl()
+		if (port === undefined || token === undefined) {
 			return
 		}
-		BrowserBridgeClient.instance = new BrowserBridgeClient(port)
+		BrowserBridgeClient.instance = new BrowserBridgeClient(port, token)
 	}
 
 	/** True while the bridge client exists (connecting or connected). */
@@ -125,6 +188,7 @@ export class BrowserBridgeClient {
 		if (!import.meta.env.DEV) {
 			return false
 		}
+
 		return BrowserBridgeClient.instance !== undefined
 	}
 
@@ -145,9 +209,12 @@ export class BrowserBridgeClient {
 	}
 
 	/** Test seam: tear the singleton down (not part of the app lifecycle). */
-	static resetForTests(): void {
-		BrowserBridgeClient.instance?.socket?.disconnect()
-		BrowserBridgeClient.instance = undefined
+	static async resetForTests(): Promise<void> {
+		if (BrowserBridgeClient.instance?.status === "init") {
+			await BrowserBridgeClient.instance.initProcess
+		}
+
+		BrowserBridgeClient.instance?.dispose()
 		BrowserBridgeClient.queue = []
 	}
 }

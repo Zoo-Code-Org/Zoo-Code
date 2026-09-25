@@ -1,11 +1,12 @@
 import { createServer } from "http"
-
+import { randomBytes, timingSafeEqual } from "crypto"
 import type { Server as SocketIoServer, Socket } from "socket.io"
 import * as vscode from "vscode"
 import type { Disposable, Webview } from "vscode"
 
 import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
 
+import { BROWSER_BRIDGE_UNAUTHORIZED_MESSAGE } from "../../shared/browserBridge"
 import { Package } from "../../shared/package"
 
 /**
@@ -35,6 +36,12 @@ import { Package } from "../../shared/package"
  * passed to the browser tab as a `?bridgePort=<port>` URL query parameter, so
  * any number of Zoo Code tabs or sidebar panels can run in the browser
  * simultaneously, each on its own port.
+ *
+ * Each bridge also generates a random per-bridge token, handed to the browser
+ * tab as `?bridgeToken=<token>`. The client presents it in the socket.io
+ * handshake (`auth: { token }`) and the server rejects every socket whose
+ * token does not match, so a local process that merely finds the open port
+ * cannot drive the provider through the bridge.
  */
 
 export const DEFAULT_BROWSER_BRIDGE_PORT = 0
@@ -42,9 +49,50 @@ export const DEFAULT_BROWSER_BRIDGE_PORT = 0
 /**
  * Base URL of the webview-ui Vite dev server. It always runs on a fixed port
  * (see webview-ui/vite.config.ts); if it's not up, the browser tab simply
- * shows a connection error — good enough for a dev-only tool.
+ * shows a connection error — good enough for a dev-only tool. Wrapped in a
+ * function so both consumers (the URL builder and the origin pattern) read
+ * the same value lazily, at call time rather than at module load.
  */
-const VITE_BASE_URL = "http://localhost:5173"
+function getViteBaseUrl(): string {
+	return "http://localhost:5173"
+}
+
+/**
+ * Origins the bridge accepts. The bridge is the only consumer and it always
+ * opens the tab on {@link getViteBaseUrl}, so the allowlist is exactly that
+ * origin plus its 127.0.0.1 equivalent — never an arbitrary local port
+ * (a page served by some other local dev app must not be able to reach the
+ * bridge from the browser). The pattern is built on demand from
+ * getViteBaseUrl() so the two can never drift apart (and so a malformed base
+ * URL surfaces as a startup failure rather than an import-time crash). A
+ * browser always sends an `Origin` header on a cross-origin WebSocket
+ * upgrade / polling handshake, so the same pattern gates both the CORS
+ * responses and the handshake itself (see {@link isAllowedHandshakeOrigin}).
+ */
+function getLocalOrigin(): RegExp {
+	// The loopback names are hard-coded with their dots pre-escaped so
+	// "127.0.0.1" stays literal instead of matching arbitrary characters.
+	// No runtime escaping here at all: escaping only the dots (and not, say,
+	// backslashes) is the classic incomplete-escape pitfall a static checker
+	// will (rightly) flag even for a constant input.
+	// The Vite dev server always runs with an explicit port; any other
+	// base URL makes `new URL` throw or yields a non-matching pattern.
+	const port = new URL(getViteBaseUrl()).port
+	return new RegExp(`^http://(127\\.0\\.0\\.1|localhost)(:${port})$`)
+}
+
+/**
+ * engine.io invokes `allowRequest` for every fresh handshake — the polling GET
+ * and the WebSocket upgrade alike — while CORS never gates the WS upgrade.
+ * Validate the handshake Origin here so a random web page cannot open a
+ * socket to the local dev bridge. Non-browser clients (tests, curl) omit
+ * `Origin`; for them the per-bridge handshake token (verified by the
+ * `server.use` middleware in the {@link BrowserBridgeServer} constructor)
+ * remains the boundary.
+ */
+function isAllowedHandshakeOrigin(origin: string | string[] | undefined): boolean {
+	return origin === undefined || (typeof origin === "string" && getLocalOrigin().test(origin))
+}
 
 /**
  * The port the bridge binds to. Defaults to `0` (let the OS pick a free port)
@@ -85,20 +133,27 @@ export function getBoundPort(httpServer: SocketIoServer["httpServer"], requested
 export type BridgeHost = object
 
 /**
- * The two provider internals the bridge needs: the currently resolved real
- * webview (to render the browser-mode placeholder into) and the private
+ * The provider internals the bridge needs: the currently resolved real webview
+ * (to render the browser-mode placeholder into) and the private
  * webview-message wiring entry point. Both are private on ClineProvider, so
  * the bridge reaches them through element access via this local view rather
  * than expanding the provider's public API with bridge-specific members.
  */
 interface BridgeHostInternals {
 	view?: vscode.WebviewView | vscode.WebviewPanel
-	setWebviewMessageListener(webview: Webview): void
+	/**
+	 * Attaches the provider's message handler to `webview` and returns the
+	 * subscription. The bridge owns that disposable (the sidebar's
+	 * `webviewDisposables` must not, or clearing them on sidebar disposal
+	 * would silently deafen the virtual webview).
+	 */
+	attachWebviewMessageListener(webview: Webview): Disposable
 }
 
 /**
- * Server side of the bridge. Binds to 127.0.0.1 only and restricts CORS to
- * local origins, since this is a development-only transport.
+ * Server side of the bridge. Binds to 127.0.0.1 only and restricts CORS plus
+ * the handshake Origin check to local origins, since this is a
+ * development-only transport.
  */
 export class BrowserBridgeServer {
 	/**
@@ -106,6 +161,18 @@ export class BrowserBridgeServer {
 	 * permanently, until {@link BrowserBridgeServer.disposeFor} runs.
 	 */
 	private static readonly bridges = new WeakMap<BridgeHost, BrowserBridgeServer>()
+
+	/**
+	 * Per-host lifecycle epoch. Bridge startup is asynchronous, so
+	 * {@link BrowserBridgeServer.disposeFor} can run while a `start()` is
+	 * still pending; disposeFor bumps the epoch, and an awaiting caller that
+	 * sees it moved disposes the late bridge instead of binding it to a host
+	 * that is already released (which would leak the listening port and hold
+	 * a message listener into the disposed provider). Starts that merely race
+	 * each other keep the epoch, so the one-bridge-per-host bind() rule still
+	 * decides the winner between them.
+	 */
+	private static readonly lifecycleEpoch = new WeakMap<BridgeHost, number>()
 
 	// ---- dev-only command registration (self-gating; one line at the call site) ----
 
@@ -151,10 +218,15 @@ export class BrowserBridgeServer {
 					outputChannel.appendLine(
 						`[openInBrowser] Reusing existing browser bridge on port ${existing._port}.`,
 					)
-					await vscode.env.openExternal(vscode.Uri.parse(BrowserBridgeServer.getBrowserUrl(existing._port)))
+					await vscode.env.openExternal(
+						vscode.Uri.parse(BrowserBridgeServer.getBrowserUrl(existing._port, existing.token)),
+					)
 					return
 				}
 
+				// Snapshot the lifecycle epoch so a disposeFor(host) racing the
+				// awaited start below can invalidate it before it reaches bind().
+				const epoch = BrowserBridgeServer.lifecycleEpoch.get(host) ?? 0
 				const bridge = await BrowserBridgeServer.start(
 					(message) => outputChannel.appendLine(message),
 					(error) => {
@@ -167,13 +239,23 @@ export class BrowserBridgeServer {
 					outputChannel.appendLine("[openInBrowser] Failed to start the browser bridge.")
 					return
 				}
+				if ((BrowserBridgeServer.lifecycleEpoch.get(host) ?? 0) !== epoch) {
+					// The host was released (disposeFor) while start() was in
+					// flight; closing the newcomer here is what keeps the port
+					// from leaking into an orphaned socket.io server.
+					bridge.dispose()
+					outputChannel.appendLine("[openInBrowser] The host was disposed while the bridge was starting.")
+					return
+				}
 
 				// Irreversible switch: from now on the provider posts to the
 				// virtual webview (socket.io) and the real iframe renders a
 				// placeholder with a clickable link to the browser tab.
 				BrowserBridgeServer.bind(host, bridge)
 
-				await vscode.env.openExternal(vscode.Uri.parse(bridge.getBrowserUrl()))
+				// bind() disposes a newcomer that lost a race; open the authoritative bridge.
+				const active = BrowserBridgeServer.bridges.get(host) ?? bridge
+				await vscode.env.openExternal(vscode.Uri.parse(active.getBrowserUrl()))
 			}),
 		)
 	}
@@ -183,18 +265,31 @@ export class BrowserBridgeServer {
 	/**
 	 * Puts `host` into browser mode: start-if-needed + one-bridge-per-host
 	 * guard + virtual webview + listener wiring + placeholder refresh. Bridge
-	 * startup is asynchronous; callers that need the port/URL (e.g. the
-	 * `openInBrowser` command) go through {@link registerCommand}'s handler.
+	 * startup is asynchronous; a disposeFor racing the start disposes the
+	 * late bridge instead of binding it to a released host (see
+	 * {@link BrowserBridgeServer.lifecycleEpoch}). Callers that need the
+	 * port/URL (e.g. the `openInBrowser` command) go through
+	 * {@link registerCommand}'s handler.
 	 */
 	static enable(host: BridgeHost, listen?: (webview: Webview) => void): void {
 		if (BrowserBridgeServer.bridges.has(host)) {
 			return
 		}
-		void BrowserBridgeServer.start().then((bridge) => {
-			if (bridge) {
+		const epoch = BrowserBridgeServer.lifecycleEpoch.get(host) ?? 0
+		void BrowserBridgeServer.start()
+			.then((bridge) => {
+				if (!bridge) {
+					return
+				}
+				if ((BrowserBridgeServer.lifecycleEpoch.get(host) ?? 0) !== epoch) {
+					bridge.dispose()
+					return
+				}
 				BrowserBridgeServer.bind(host, bridge, listen)
-			}
-		})
+			})
+			.catch((error: unknown) => {
+				console.error("[BrowserBridge] Failed to start:", error)
+			})
 	}
 
 	/** True while `host` has an active bridge — the only query callers need. */
@@ -221,6 +316,9 @@ export class BrowserBridgeServer {
 
 	/** Closes the socket.io server and drops the WeakMap entry for `host`. */
 	static disposeFor(host: BridgeHost): void {
+		// Bump the lifecycle epoch so any start still in flight disposes its
+		// bridge rather than binding it to this now-released host.
+		BrowserBridgeServer.lifecycleEpoch.set(host, (BrowserBridgeServer.lifecycleEpoch.get(host) ?? 0) + 1)
 		const bridge = BrowserBridgeServer.bridges.get(host)
 		if (bridge) {
 			bridge.dispose()
@@ -235,11 +333,41 @@ export class BrowserBridgeServer {
 
 	private readonly webviewMessageListeners = new Set<(message: WebviewMessage) => void>()
 
+	/**
+	 * The host's message-handler subscription for the virtual webview, set by
+	 * {@link BrowserBridgeServer.bind}. Bridge-owned: it survives sidebar
+	 * dispose/re-resolve and is released only when the bridge itself is
+	 * disposed ({@link dispose}).
+	 */
+	private messageListener: Disposable | undefined
+
 	private virtualWebview: Webview | undefined
 
-	private constructor(server: SocketIoServer, port: number) {
+	private constructor(
+		server: SocketIoServer,
+		port: number,
+		private readonly token: string,
+	) {
 		this.server = server
 		this._port = port
+
+		// Every accepted socket reaches the provider's webviewMessageHandler,
+		// so a fresh connection must present this bridge's handshake token.
+		// Without it any local process that finds the port could create tasks,
+		// change settings, and run approved commands.
+		server.use((socket, next) => {
+			const presented = socket.handshake.auth?.token
+			const expected = Buffer.from(token)
+			const actual = typeof presented === "string" ? Buffer.from(presented) : undefined
+
+			if (actual !== undefined && actual.length === expected.length && timingSafeEqual(actual, expected)) {
+				next()
+			} else {
+				// The client matches on this exact message (shared constant) to
+				// tell a token rejection apart from transient connect errors.
+				next(new Error(BROWSER_BRIDGE_UNAUTHORIZED_MESSAGE))
+			}
+		})
 
 		// In socket.io v4 client-emitted events arrive on the individual
 		// socket, not on the Server instance: forward each socket's
@@ -255,10 +383,11 @@ export class BrowserBridgeServer {
 
 	/**
 	 * URL a browser tab must load to connect to the bridge listening on
-	 * `port` (the Vite dev server plus the `?bridgePort` query parameter).
+	 * `port` (the Vite dev server plus the `?bridgePort` and `?bridgeToken`
+	 * query parameters — the token authenticates the socket.io handshake).
 	 */
-	static getBrowserUrl(port: number): string {
-		return `${VITE_BASE_URL}/?bridgePort=${port}`
+	static getBrowserUrl(port: number, token: string): string {
+		return `${getViteBaseUrl()}/?bridgePort=${port}&bridgeToken=${token}`
 	}
 
 	/**
@@ -279,8 +408,10 @@ export class BrowserBridgeServer {
 		} else {
 			// Element-access call into the provider's private wiring (see
 			// BridgeHostInternals) — keeps ClineProvider's public API clean.
+			// The returned disposable is kept on the bridge, deliberately not
+			// on the host's per-sidebar `webviewDisposables`.
 			const internals = host as BridgeHostInternals
-			internals.setWebviewMessageListener(webview)
+			bridge.messageListener = internals.attachWebviewMessageListener(webview)
 		}
 
 		BrowserBridgeServer.setPlaceholder(host)
@@ -319,7 +450,7 @@ export class BrowserBridgeServer {
 
 	/** The URL a browser tab must load to connect to this bridge. */
 	private getBrowserUrl(): string {
-		return BrowserBridgeServer.getBrowserUrl(this._port)
+		return BrowserBridgeServer.getBrowserUrl(this._port, this.token)
 	}
 
 	/**
@@ -349,9 +480,21 @@ export class BrowserBridgeServer {
 		const server = new SocketIoServerClass(httpServer, {
 			// Development-only transport: bind loopback and allow local origins only.
 			cors: {
-				origin: [/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/],
+				origin: [getLocalOrigin()],
+			},
+			// CORS alone does not gate the WebSocket upgrade, so re-check the
+			// handshake Origin server-side (see isAllowedHandshakeOrigin).
+			allowRequest: (request, callback) => {
+				if (isAllowedHandshakeOrigin(request.headers.origin)) {
+					callback(null, true)
+				} else {
+					callback("The browser bridge only accepts local origins.", false)
+				}
 			},
 			transports: ["websocket", "polling"],
+			// Webview messages carry base64 images (maxImageFileSize defaults to 5 MB);
+			// the 1 MB socket.io default would drop them and disconnect the tab.
+			maxHttpBufferSize: 100 * 1024 * 1024,
 		})
 
 		try {
@@ -373,7 +516,9 @@ export class BrowserBridgeServer {
 
 		const port = getBoundPort(httpServer, requestedPort)
 		log(`[BrowserBridge] Listening on ws://127.0.0.1:${port}`)
-		return new BrowserBridgeServer(server, port)
+		const token = randomBytes(16).toString("hex")
+
+		return new BrowserBridgeServer(server, port, token)
 	}
 
 	/**
@@ -408,6 +553,7 @@ export class BrowserBridgeServer {
 	}
 
 	private dispose(): void {
+		this.messageListener?.dispose()
 		try {
 			void this.server.close()
 		} catch {

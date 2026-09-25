@@ -1,5 +1,7 @@
 // npx vitest run src/utils/__tests__/vscode.spec.ts
 
+import type { WebviewMessage } from "@roo-code/types"
+
 // The browser bridge is exercised through its public statics only; the real
 // client (and its lazy socket.io-client import) is covered by
 // `browserBridgeClient.spec.ts`.
@@ -53,7 +55,7 @@ describe("vscode (VSCodeAPIWrapper) browser bridge wiring", () => {
 		vi.stubGlobal("acquireVsCodeApi", () => vsCodeApi)
 
 		const { vscode } = await importFresh()
-		vscode.postMessage({ type: "webviewDidLaunch" } as any)
+		vscode.postMessage({ type: "webviewDidLaunch" })
 
 		expect(vsCodeApi.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch" })
 		expect(bridgeMock.maybeConnect).not.toHaveBeenCalled()
@@ -64,7 +66,7 @@ describe("vscode (VSCodeAPIWrapper) browser bridge wiring", () => {
 		bridgeMock.active.mockReturnValue(true)
 
 		const { vscode } = await importFresh()
-		const message = { type: "showTaskWithId", text: "task-1" } as any
+		const message: WebviewMessage = { type: "showTaskWithId", text: "task-1" }
 		vscode.postMessage(message)
 
 		expect(bridgeMock.active).toHaveBeenCalled()
@@ -75,10 +77,29 @@ describe("vscode (VSCodeAPIWrapper) browser bridge wiring", () => {
 		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 
 		const { vscode } = await importFresh()
-		const message = { type: "acceptInput" } as any
+		const message: WebviewMessage = { type: "webviewDidLaunch" }
 		vscode.postMessage(message)
 
 		expect(bridgeMock.active).toHaveBeenCalled()
+		expect(bridgeMock.postMessage).not.toHaveBeenCalled()
+		expect(consoleSpy).toHaveBeenCalledWith(message)
+
+		consoleSpy.mockRestore()
+	})
+
+	it("routes to the production fallback in a production build even while the bridge is active", async () => {
+		// The bridge branch is `import.meta.env.DEV && BrowserBridgeClient.active()`.
+		// With active() forced true, the only thing that can keep the message
+		// out of the bridge is the DEV gate: dropping it would route production
+		// postMessage calls into a socket buffer that never exists.
+		vi.stubEnv("DEV", false)
+		bridgeMock.active.mockReturnValue(true)
+		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+
+		const { vscode } = await importFresh()
+		const message: WebviewMessage = { type: "webviewDidLaunch" }
+		vscode.postMessage(message)
+
 		expect(bridgeMock.postMessage).not.toHaveBeenCalled()
 		expect(consoleSpy).toHaveBeenCalledWith(message)
 

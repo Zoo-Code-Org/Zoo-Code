@@ -646,6 +646,11 @@ describe("ClineProvider", () => {
 		})
 
 		test("resolveWebviewView renders the bridge placeholder and skips the real listener when active", async () => {
+			const hmrSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>hmr</title>")
+			const htmlSpy = vi.fn().mockResolvedValue("<!DOCTYPE html><title>dist</title>")
+			provider["getHMRHtmlContent"] = hmrSpy
+			provider["getHtmlContent"] = htmlSpy
+
 			BrowserBridgeServer.enable(provider)
 			await waitForBridge()
 
@@ -654,10 +659,53 @@ describe("ClineProvider", () => {
 			// Placeholder instead of the app HTML (no React, no scripts), and the
 			// real iframe's message listener is NOT registered (the virtual
 			// webview already owns the wiring — re-registering would
-			// double-handle messages).
+			// double-handle messages). With the bridge active, the html
+			// builders must never even run: the placeholder branch is the
+			// only path.
+			expect(hmrSpy).not.toHaveBeenCalled()
+			expect(htmlSpy).not.toHaveBeenCalled()
 			expect(mockWebviewView.webview.html).toContain("browser mode")
 			expect(mockWebviewView.webview.html).not.toContain("<script")
 			expect(mockWebviewView.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+		})
+
+		test("resolveWebviewView re-asserts the placeholder when the bridge binds mid-build", async () => {
+			// The second guard in resolveWebviewView: the app HTML is built
+			// asynchronously and the bridge can bind while the build is in
+			// flight. The late build result must not overwrite the
+			// placeholder — not even after another render clobbered it.
+			let releaseHtml!: (html: string) => void
+			const htmlGate = new Promise<string>((resolve) => {
+				releaseHtml = resolve
+			})
+			const htmlSpy = vi.fn().mockReturnValue(htmlGate)
+			provider["getHtmlContent"] = htmlSpy
+
+			const resolving = provider.resolveWebviewView(mockWebviewView)
+
+			// The build is in flight with no bridge active yet (the first
+			// guard correctly took the build branch).
+			const started = Date.now()
+			while (htmlSpy.mock.calls.length === 0) {
+				if (Date.now() - started > 5_000) {
+					throw new Error("getHtmlContent was never called")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 10))
+			}
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
+
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+			// Simulate any render that replaces the placeholder while the
+			// build is still pending.
+			mockWebviewView.webview.html = "<!DOCTYPE html><title>stale-shell</title>"
+
+			releaseHtml("<!DOCTYPE html><title>late-app</title>")
+			await resolving
+
+			expect(mockWebviewView.webview.html).toContain("browser mode")
+			expect(mockWebviewView.webview.html).not.toContain("late-app")
+			expect(mockWebviewView.webview.html).not.toContain("stale-shell")
 		})
 
 		test("postMessageToWebview targets the virtual webview while the bridge is active", async () => {
@@ -683,6 +731,38 @@ describe("ClineProvider", () => {
 
 			expect(BrowserBridgeServer.active(provider)).toBe(false)
 			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+		})
+
+		test("the bridge owns the message listener across sidebar disposal and re-resolve", async () => {
+			// The virtual-webview subscription must NOT live in the sidebar's
+			// per-webview disposables: clearWebviewResources() (run on every
+			// sidebar dispose) would silently deafen browser mode, and a later
+			// re-resolve would never re-subscribe.
+			const disposeListener = vi.fn()
+			const attachSpy = vi.fn(() => ({ dispose: disposeListener }))
+			provider["attachWebviewMessageListener"] = attachSpy
+
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			const virtualWebview = BrowserBridgeServer.webviewFor(provider)!
+			expect(attachSpy).toHaveBeenCalledTimes(1)
+			expect(attachSpy).toHaveBeenCalledWith(virtualWebview)
+
+			// Re-resolving the sidebar while the bridge is active leaves exactly
+			// one subscription: the bridge listener stays and no second one is
+			// registered (neither on the real nor the virtual webview).
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(attachSpy).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+
+			// Clearing the sidebar resources does not touch the bridge listener.
+			provider["clearWebviewResources"]()
+			expect(disposeListener).not.toHaveBeenCalled()
+
+			// Only bridge disposal releases it.
+			BrowserBridgeServer.disposeFor(provider)
+			expect(disposeListener).toHaveBeenCalledTimes(1)
 		})
 	})
 
