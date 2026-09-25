@@ -198,17 +198,16 @@ describe("OpencodeGoHandler", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					stream: true,
-					stream_options: { include_usage: true },
-					// glm-5.1 maxTokens (131_072) is clamped to 20% of its 204_800
-					// context window => 40_960.
-					max_completion_tokens: 40_960,
-					temperature: expect.any(Number),
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "glm-5.1",
+				stream: true,
+				stream_options: { include_usage: true },
+				// glm-5.1 maxTokens (131_072) is clamped to 20% of its 204_800
+				// context window => 40_960.
+				max_completion_tokens: 40_960,
+				temperature: expect.any(Number),
+			})
 		})
 
 		it("sends the stable conversation ID to chat completions", async () => {
@@ -222,18 +221,31 @@ describe("OpencodeGoHandler", () => {
 			})
 		})
 
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const sessionId = mockCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			expect(mockCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
+		})
+
 		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			await collectStream(handler.createMessage("sys", messages))
 
 			// glm-5.1 advertises supportsReasoningEffort with a default of "medium".
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					reasoning_effort: "medium",
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "glm-5.1",
+				reasoning_effort: "medium",
+			})
 		})
 
 		it("omits reasoning_effort when the user disables reasoning", async () => {
@@ -383,7 +395,8 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_completion_tokens).toBe(999)
 		})
 	})
 
@@ -392,15 +405,14 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "the answer" } }] })
 			const handler = new OpencodeGoHandler(mockOptions)
 			expect(await handler.completePrompt("ping")).toBe("the answer")
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					stream: false,
-					// glm-5.1 maxTokens (131_072) clamped to 20% of 204_800 => 40_960.
-					max_completion_tokens: 40_960,
-					reasoning_effort: "medium",
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "glm-5.1",
+				stream: false,
+				// glm-5.1 maxTokens (131_072) clamped to 20% of 204_800 => 40_960.
+				max_completion_tokens: 40_960,
+				reasoning_effort: "medium",
+			})
 		})
 
 		it("wraps errors with an Opencode Go-specific message", async () => {
@@ -425,7 +437,22 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 4321 })
 			await handler.completePrompt("ping")
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }))
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_completion_tokens).toBe(4321)
+		})
+
+		it("sends the per-instance session ID on non-streaming completions", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			await handler.completePrompt("ping")
+			const sessionId = mockCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// completePrompt has no taskId metadata, so the per-instance ID is
+			// reused across calls on the same handler.
+			await handler.completePrompt("ping")
+			expect(mockCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
 		})
 	})
 
@@ -481,13 +508,12 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "qwen3.7-max",
-					stream: true,
-					system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
-				}),
-			)
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "qwen3.7-max",
+				stream: true,
+				system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
+			})
 			// The OpenAI chat completions endpoint must NOT be used for this model.
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
@@ -501,6 +527,20 @@ describe("OpencodeGoHandler", () => {
 			expect(mockAnthropicCreate.mock.calls[0][1]?.headers).toMatchObject({
 				"x-opencode-session": "conversation-123",
 			})
+		})
+
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const sessionId = mockAnthropicCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			expect(mockAnthropicCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
 		})
 
 		it("streams text, tool-call, usage and cost chunks from the Anthropic stream", async () => {
@@ -569,17 +609,16 @@ describe("OpencodeGoHandler", () => {
 
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			expect(await handler.completePrompt("ping")).toBe("the answer")
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "qwen3.7-max",
-					stream: false,
-					messages: [{ role: "user", content: "ping" }],
-					// qwen3.7-max maxTokens (65_536) clamped to 20% of its 1M
-					// context window (200_000) => 65_536. includeMaxTokens is off,
-					// so the model default is used.
-					max_tokens: 65_536,
-				}),
-			)
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "qwen3.7-max",
+				stream: false,
+				messages: [{ role: "user", content: "ping" }],
+				// qwen3.7-max maxTokens (65_536) clamped to 20% of its 1M
+				// context window (200_000) => 65_536. includeMaxTokens is off,
+				// so the model default is used.
+				max_tokens: 65_536,
+			})
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -594,7 +633,39 @@ describe("OpencodeGoHandler", () => {
 				modelMaxTokens: 2048,
 			})
 			await handler.completePrompt("ping")
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }))
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_tokens).toBe(2048)
+		})
+
+		it("completePrompt falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, includeMaxTokens: true })
+			await handler.completePrompt("ping")
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
+			expect(callArgs.max_tokens).toBe(65_536)
+		})
+
+		it("completePrompt sends the per-instance session ID via the Anthropic client default headers", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping")
+
+			// completePrompt passes no per-request options; the session header
+			// is a default header on the Anthropic client (streaming overrides
+			// it with taskId when available).
+			expect(mockAnthropicCreate.mock.calls[0][1]).toBeUndefined()
+			expect(Anthropic).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultHeaders: expect.objectContaining({ "x-opencode-session": expect.any(String) }),
+				}),
+			)
 		})
 
 		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
@@ -754,7 +825,8 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192 }))
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_tokens).toBe(8192)
 		})
 
 		it("falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
@@ -764,7 +836,8 @@ describe("OpencodeGoHandler", () => {
 			await collectStream(handler.createMessage("sys", messages))
 
 			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 65_536 }))
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_tokens).toBe(65_536)
 		})
 
 		it("accumulates output tokens across message_delta events into the final cost", async () => {
@@ -874,6 +947,22 @@ describe("OpencodeGoHandler", () => {
 				signal: controller.signal,
 				headers: { "x-opencode-session": "test-task" },
 			})
+		})
+
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const requestOptions = mockResponsesCreate.mock.calls[0][1] as { headers: Record<string, string> }
+			const sessionId = requestOptions.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			const secondOptions = mockResponsesCreate.mock.calls[1][1] as { headers: Record<string, string> }
+			expect(secondOptions.headers["x-opencode-session"]).toBe(sessionId)
 		})
 
 		it("closes the Responses iterator when the consumer stops early", async () => {
@@ -1343,8 +1432,22 @@ describe("OpencodeGoHandler", () => {
 
 			await handler.completePrompt("ping", { abortSignal: controller.signal })
 
-			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
+				signal: controller.signal,
+				headers: { "x-opencode-session": expect.any(String) },
+			})
 			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("completePrompt sends the per-instance session ID to the Responses endpoint", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await handler.completePrompt("ping")
+
+			expect(mockResponsesCreate.mock.calls[0][1]?.headers).toMatchObject({
+				"x-opencode-session": expect.any(String),
+			})
 		})
 
 		it("completePrompt wraps errors with an Opencode Go-specific message", async () => {
