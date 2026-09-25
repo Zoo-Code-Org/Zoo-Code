@@ -20,6 +20,8 @@
 		"keep": "Оставить"
 	},
 	"ui": {
+		"loading": "Загрузка...",
+		"clear_search": "Очистить поиск",
 		"search_placeholder": "Поиск...",
 		"no_results": "Результатов не найдено"
 	},

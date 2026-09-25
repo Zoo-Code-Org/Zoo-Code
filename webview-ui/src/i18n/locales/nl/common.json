@@ -20,6 +20,8 @@
 		"billion_suffix": "mrd"
 	},
 	"ui": {
+		"loading": "Laden...",
+		"clear_search": "Zoekopdracht wissen",
 		"search_placeholder": "Zoeken...",
 		"no_results": "Geen resultaten gevonden"
 	},
