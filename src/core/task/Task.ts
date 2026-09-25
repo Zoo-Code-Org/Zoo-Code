@@ -469,6 +469,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Push a tool_result block to userMessageContent, preventing duplicates.
 	 * Duplicate tool_use_ids cause API errors.
 	 *
+	 * Keeps all tool_result blocks first and contiguous, as the Anthropic API
+	 * requires: a user message responding to tool_use blocks must begin with
+	 * the tool_result blocks, and any other content (images, text) between or
+	 * ahead of them is rejected ("tool_use ids were found without tool_result
+	 * blocks immediately after"). All tool_result blocks are therefore kept
+	 * ahead of other content in this array.
+	 *
 	 * @param toolResult - The tool_result block to add
 	 * @returns true if added, false if duplicate was skipped
 	 */
@@ -484,6 +491,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return false
 		}
 		this.userMessageContent.push(toolResult)
+
+		// Partition into [tool_results, other blocks], preserving order within
+		// each group, so results stay first and contiguous regardless of what
+		// other content (images, text) arrived between pushes.
+		const results = this.userMessageContent.filter(
+			(block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result",
+		)
+		if (results.length !== this.userMessageContent.length) {
+			const others = this.userMessageContent.filter((block) => block.type !== "tool_result")
+			this.userMessageContent.splice(0, this.userMessageContent.length, ...results, ...others)
+		}
+
 		return true
 	}
 	didRejectTool = false

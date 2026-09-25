@@ -6270,7 +6270,7 @@ describe("pushToolResultToUserContent", () => {
 		expect(task.userMessageContent[0]).toEqual(errorResult)
 	})
 
-	it("should not interfere with other content types in userMessageContent", () => {
+	it("should preserve other content types while keeping tool_results contiguous", () => {
 		const task = new Task({
 			provider: mockProvider,
 			apiConfiguration: mockApiConfig,
@@ -6279,10 +6279,11 @@ describe("pushToolResultToUserContent", () => {
 		})
 
 		// Add text and image blocks manually
-		task.userMessageContent.push(
-			{ type: "text", text: "Some text" },
-			{ type: "image", source: { type: "base64", media_type: "image/png", data: "base64data" } },
-		)
+		const image: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "base64data" },
+		}
+		task.userMessageContent.push({ type: "text", text: "Some text" }, image)
 
 		const toolResult: Anthropic.ToolResultBlockParam = {
 			type: "tool_result",
@@ -6294,8 +6295,56 @@ describe("pushToolResultToUserContent", () => {
 
 		expect(added).toBe(true)
 		expect(task.userMessageContent).toHaveLength(3)
-		expect(task.userMessageContent[0].type).toBe("text")
-		expect(task.userMessageContent[1].type).toBe("image")
-		expect(task.userMessageContent[2]).toEqual(toolResult)
+		// Results must lead the message (Anthropic rejects other content ahead
+		// of or between tool_results), so the pre-existing text and image move
+		// after the result; blocks keep their relative order within each group.
+		expect(task.userMessageContent[0]).toEqual(toolResult)
+		expect(task.userMessageContent[1].type).toBe("text")
+		expect(task.userMessageContent[2]).toEqual(image)
+	})
+
+	it("keeps tool_result blocks contiguous when a later result has no images (GitHub #1307)", () => {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+
+		const toolResult1: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-1",
+			content: "Result 1",
+		}
+		const toolResult2: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-2",
+			content: "Result 2",
+		}
+		const image1: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "img1" },
+		}
+		const image2: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "img2" },
+		}
+
+		// First tool result arrives with its images appended right after it (as
+		// presentAssistantMessage does); a second result without images follows.
+		task.pushToolResultToUserContent(toolResult1)
+		task.userMessageContent.push(image1, image2)
+		task.pushToolResultToUserContent(toolResult2)
+
+		expect(task.userMessageContent.map((block) => block.type)).toEqual([
+			"tool_result",
+			"tool_result",
+			"image",
+			"image",
+		])
+		expect(task.userMessageContent[0]).toEqual(toolResult1)
+		expect(task.userMessageContent[1]).toEqual(toolResult2)
+		expect(task.userMessageContent[2]).toEqual(image1)
+		expect(task.userMessageContent[3]).toEqual(image2)
 	})
 })
