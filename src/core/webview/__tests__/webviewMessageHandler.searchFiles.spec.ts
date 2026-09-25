@@ -163,6 +163,23 @@ describe("webviewMessageHandler - searchFiles with RooIgnore filtering", () => {
 		})
 	})
 
+	it.fails("searches the open workspace after restoring a conversation from another worktree", async () => {
+		mockSearchWorkspaceFiles.mockResolvedValue([])
+		;(mockClineProvider.getState as Mock).mockResolvedValue({ showRooIgnoredFiles: true })
+		;(mockClineProvider.getCurrentTask as Mock).mockReturnValue({
+			cwd: "/old/worktree-b",
+			rooIgnoreController: { filterPaths: vi.fn() },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "searchFiles",
+			query: "index",
+			requestId: "worktree-reopen",
+		})
+
+		expect(mockSearchWorkspaceFiles).toHaveBeenCalledWith("index", "/mock/workspace", 20)
+	})
+
 	it("should handle error when no workspace path is available", async () => {
 		// Create provider without cwd
 		mockClineProvider = {
