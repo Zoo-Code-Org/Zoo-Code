@@ -9,6 +9,12 @@ import { JsonStreamStringify } from "json-stream-stringify"
  */
 export interface SafeWriteJsonOptions {
 	/**
+	 * Whether to create and verify the target file's parent directory.
+	 * @default true
+	 */
+	createParentDirectory?: boolean
+
+	/**
 	 * Whether to pretty-print the JSON output with indentation.
 	 * When true, uses tab characters for indentation.
 	 * When false or undefined, outputs compact JSON.
@@ -49,16 +55,18 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// For directory creation
 	const dirPath = path.dirname(absoluteFilePath)
 
-	// Ensure directory structure exists with improved reliability
-	try {
-		// Create directory with recursive option
-		await fs.mkdir(dirPath, { recursive: true })
+	if (options?.createParentDirectory !== false) {
+		// Ensure directory structure exists with improved reliability
+		try {
+			// Create directory with recursive option
+			await fs.mkdir(dirPath, { recursive: true })
 
-		// Verify directory exists after creation attempt
-		await fs.access(dirPath)
-	} catch (dirError: any) {
-		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
-		throw dirError
+			// Verify directory exists after creation attempt
+			await fs.access(dirPath)
+		} catch (dirError: any) {
+			console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
+			throw dirError
+		}
 	}
 
 	// Acquire the lock before any file operations

@@ -126,6 +126,7 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	LifecycleTransitionError,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -4058,6 +4059,31 @@ export class ClineProvider
 					(err as Error)?.message ?? String(err)
 				}`,
 			)
+			// The authoritative parent record rejected this delegation (#1714).
+			// Settle the matching pending create_subtask action durably through
+			// the disk-authoritative compare-and-clear so a retry cannot replay
+			// a rejected action and a replacement action from another host is
+			// never cleared, then propagate the original error.
+			let settlementFailed = false
+			if (pendingActionId && err instanceof LifecycleTransitionError) {
+				try {
+					const authoritative = await this.taskHistoryStore.clearPendingActionIfMatching(
+						parentTaskId,
+						pendingActionId,
+					)
+					settlementFailed =
+						authoritative.pendingAction?.kind === "create_subtask" &&
+						authoritative.pendingAction.actionId === pendingActionId
+					this.recentTasksCache = undefined
+				} catch (settlementError) {
+					settlementFailed = true
+					this.log(
+						`[delegateParentAndOpenChild] Failed to settle pending action ${pendingActionId} for parent ${parentTaskId}: ${
+							(settlementError as Error)?.message ?? String(settlementError)
+						}`,
+					)
+				}
+			}
 			try {
 				// Only pop the stack if the child we just created is still on top.
 				// A concurrent delegation could have pushed another child since we created ours.
@@ -4081,8 +4107,14 @@ export class ClineProvider
 				)
 			}
 			try {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
-				await this.createTaskWithHistoryItem(parentHistory)
+				// A failed settlement write leaves the rejected pending action in
+				// durable storage. Restoring the stored parent would replay it in
+				// this process, so leave the parent unrestored. Restart recovery also
+				// settles interrupted create-subtask actions before allowing replay.
+				if (!settlementFailed) {
+					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					await this.createTaskWithHistoryItem(parentHistory)
+				}
 			} catch (rollbackError) {
 				this.log(
 					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${

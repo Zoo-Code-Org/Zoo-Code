@@ -9,7 +9,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -1057,6 +1057,76 @@ export class TaskHistoryStore {
 				await this.onWrite(all)
 			}
 			return all
+		})
+	}
+
+	/**
+	 * Disk-authoritative compare-and-clear for a rejected `create_subtask`
+	 * pending action (#1714). The comparison runs inside the per-file
+	 * advisory lock's merge callback, so the decision reads the persisted
+	 * record rather than this store's possibly stale cache. Settlement goes
+	 * through the shared `settleRejectedCreateSubtaskAction` reducer, so a
+	 * completed record is never mutated and a missing, different-kind, or
+	 * replacement pending action is preserved unchanged. The authoritative
+	 * record is written back, the store cache is refreshed with it, and it
+	 * is returned to the caller.
+	 *
+	 * Deletion by another host is authoritative (#1726): when no persisted
+	 * record exists, the merge callback removes the stale cache entry and
+	 * throws instead of writing the cached record back to disk.
+	 *
+	 * @throws If the task ID is not present in the cache or no persisted record remains on disk.
+	 */
+	public async clearPendingActionIfMatching(taskId: string, expectedActionId: string): Promise<HistoryItem> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				throw new Error(`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`)
+			}
+			const filePath = await this.getTaskFilePath(taskId)
+			let authoritative: HistoryItem = cached
+			let missingDiskRecord = false
+			try {
+				await safeWriteJson(filePath, cached, {
+					createParentDirectory: false,
+					merge: (existing) => {
+						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+							// Writing the cached record back would recreate a task
+							// another host deleted, so drop the stale entry first.
+							missingDiskRecord = true
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+							)
+						}
+						const disk = existing as HistoryItem
+						authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
+						return authoritative
+					},
+				})
+			} catch (error) {
+				const missingLockPath =
+					error &&
+					typeof error === "object" &&
+					"code" in error &&
+					error.code === "ENOENT" &&
+					"path" in error &&
+					error.path === `${filePath}.lock`
+				if (missingDiskRecord || missingLockPath) {
+					this.cache.delete(taskId)
+					this.taskFileMtimes.delete(taskId)
+					throw new Error(
+						`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+					)
+				}
+				throw error
+			}
+			this.cache.set(taskId, authoritative)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return authoritative
 		})
 	}
 
