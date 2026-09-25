@@ -131,6 +131,9 @@ mode: code
     **Documentation and version synchronization**
 
     - Always assess and create or update `docs/update-notes/v[version].md`, register that exact version newest-first in both `docs/update-notes/index.md` and `sidebars.ts`, and use the stable publication date, Zoo Code branding, and the docs project's existing linking conventions.
+        - Document only the current release; do not backfill missing historical releases.
+        - If the current release's `major.minor` group is absent, insert a new newest-first `### Version major.minor` section in `docs/update-notes/index.md` and a matching newest-first sidebar category immediately after `update-notes/index`.
+        - If the `major.minor` group exists, add the exact patch release newest-first within that group in both files.
     - Build a per-PR documentation impact matrix from every shipped PR. Cover every user-visible change in the release note, and update all relevant canonical evergreen provider, feature, tool, and getting-started pages. Record a rationale for each implementation-only exclusion and, when no evergreen page changes are needed, record that no-change rationale.
     - Synchronize the docs repository's sole package version in `package.json` using exactly:
 
