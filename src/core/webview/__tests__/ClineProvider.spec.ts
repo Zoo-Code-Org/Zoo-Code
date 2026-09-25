@@ -709,7 +709,13 @@ describe("ClineProvider", () => {
 		)
 		// The default axios mock resolves, so the dev-server probe succeeds and the
 		// HMR HTML branch (instead of the production fallback) is taken.
+		vi.mocked(axios.get).mockClear()
 		await provider.resolveWebviewView(mockWebviewView)
+
+		// Pin the health-check URL itself: the mock resolves for any URL, so only
+		// this assertion keeps the probe from silently drifting back to
+		// `localhost` (the IPv6 resolution failure this branch fixes).
+		expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173")
 
 		const html = mockWebviewView.webview.html
 		// The dev server URL must be baked into the module script tag and CSP directives.
