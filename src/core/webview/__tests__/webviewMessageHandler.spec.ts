@@ -329,6 +329,47 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
+
+	it("posts an empty model list when LM Studio has no models loaded", async () => {
+		mockGetModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "lmStudioModels",
+			lmStudioModels: {},
+		})
+	})
+
+	it("posts an empty model list with an error when the model fetch fails", async () => {
+		mockFlushModels.mockRejectedValue(new Error("connection refused"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "lmStudioModels",
+			lmStudioModels: {},
+			error: "connection refused",
+		})
+	})
+
+	it("stringifies non-Error rejection values in the posted error", async () => {
+		mockFlushModels.mockRejectedValue("network unreachable")
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "lmStudioModels",
+			lmStudioModels: {},
+			error: "network unreachable",
+		})
+	})
 })
 
 describe("webviewMessageHandler - image mentions", () => {
