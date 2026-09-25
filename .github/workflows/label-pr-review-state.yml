@@ -35,7 +35,13 @@ permissions:
   statuses: write
 
 concurrency:
+  # Serialize sweeps and PR events together, but do not replace pending runs (#1707).
+  # GitHub allows up to 100 waiting runs with queue: max; excess arrivals are cancelled.
+  # Supported since May 2026 (older actionlint versions may reject this property):
+  # https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/
+  # Keep one group: per-PR groups would let sweeps and PR events write concurrently.
   group: label-pr-review-state
+  queue: max
   cancel-in-progress: false
 
 jobs:

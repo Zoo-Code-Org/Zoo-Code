@@ -442,6 +442,14 @@ function latestGateStatus(result: Awaited<ReturnType<typeof runWorkflow>>) {
 }
 
 describe("PR review-state workflow", () => {
+	it("queues reconciliation bursts without replacing pending runs or overlapping writers", () => {
+		expect(workflow.concurrency).toEqual({
+			group: "label-pr-review-state",
+			queue: "max",
+			"cancel-in-progress": false,
+		})
+	})
+
 	it("uses supported CodeRabbit access and review controls", () => {
 		expect(codeRabbitConfig.chat.allow_non_org_members).toBe(true)
 		expect(codeRabbitConfig.reviews.pre_merge_checks.override_requested_reviewers_only).toBe(true)
