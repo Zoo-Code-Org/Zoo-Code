@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import * as path from "path"
 
+import { getBuiltInCommands } from "../built-in-commands"
 import { getCommand, getCommands } from "../commands"
 
 // Mock fs and path modules
@@ -468,6 +469,67 @@ Deploy the app.`
 						argumentHint: "staging | production",
 					}),
 				]),
+			)
+		})
+	})
+
+	describe("getCommands source precedence", () => {
+		const mockGetBuiltInCommands = vi.mocked(getBuiltInCommands)
+
+		it("should list a global command over a colliding built-in command", async () => {
+			const globalInitContent = `# Global Init
+
+Global init instructions.`
+
+			mockGetBuiltInCommands.mockResolvedValueOnce([
+				{
+					name: "init",
+					content: "Built-in init instructions.",
+					source: "built-in",
+					filePath: "built-in://init",
+				},
+			])
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readdir = vi
+				.fn()
+				.mockResolvedValueOnce([{ name: "init.md", isFile: () => true }])
+				.mockResolvedValueOnce([])
+			mockFs.readFile = vi.fn().mockResolvedValue(globalInitContent)
+
+			const result = await getCommands("/test/cwd")
+			const init = result.find((command) => command.name === "init")
+
+			expect(init).toEqual(
+				expect.objectContaining({
+					source: "global",
+					content: "# Global Init\n\nGlobal init instructions.",
+				}),
+			)
+		})
+
+		it("should list a project command over a colliding global command", async () => {
+			const globalInitContent = `# Global Init
+
+Global init instructions.`
+			const projectInitContent = `# Project Init
+
+Project init instructions.`
+
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readdir = vi
+				.fn()
+				.mockResolvedValueOnce([{ name: "init.md", isFile: () => true }])
+				.mockResolvedValueOnce([{ name: "init.md", isFile: () => true }])
+			mockFs.readFile = vi.fn().mockResolvedValueOnce(globalInitContent).mockResolvedValueOnce(projectInitContent)
+
+			const result = await getCommands("/test/cwd")
+			const init = result.find((command) => command.name === "init")
+
+			expect(init).toEqual(
+				expect.objectContaining({
+					source: "project",
+					content: "# Project Init\n\nProject init instructions.",
+				}),
 			)
 		})
 	})
