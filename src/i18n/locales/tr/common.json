@@ -40,6 +40,7 @@
 		"update_support_prompt": "Destek istemi güncellenemedi",
 		"reset_support_prompt": "Destek istemi sıfırlanamadı",
 		"enhance_prompt": "İstem geliştirilemedi",
+		"commit_message_empty_response": "Model boş bir commit mesajı döndürdü.",
 		"get_system_prompt": "Sistem istemi alınamadı",
 		"search_commits": "Taahhütler aranamadı",
 		"save_api_config": "API yapılandırması kaydedilemedi",
