@@ -19,6 +19,9 @@ vi.mock("../../../services/code-index/manager", () => ({
 	CodeIndexManager: vi.fn().mockImplementation(function (workspacePath: string) {
 		let initialized = false
 		return {
+			get isConfigurationLoaded() {
+				return initialized
+			},
 			get isInitialized() {
 				return initialized
 			},
@@ -184,7 +187,7 @@ describe("CodebaseSearchTool workspace selection", () => {
 		expect(callbacks.pushToolResult).toHaveBeenCalledTimes(3)
 	})
 
-	it("creates a manager for an external task path without initializing it", async () => {
+	it("reports a fresh external task manager as uninitialized without initializing or searching", async () => {
 		Object.defineProperty(task, "cwd", { value: "/external-task" })
 
 		await new CodebaseSearchTool().execute({ query: "external match" }, task, callbacks)
@@ -201,9 +204,24 @@ describe("CodebaseSearchTool workspace selection", () => {
 		expect(getWorkspacePath).not.toHaveBeenCalled()
 		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(
 			toolNamesSchema.enum.codebase_search,
-			new Error("Code Indexing is disabled in the settings."),
+			new Error("Code Indexing configuration has not been loaded for this workspace."),
 		)
 		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
 		expect(task.say).not.toHaveBeenCalled()
+	})
+
+	it("searches an initialized external manager while background indexing is ongoing", async () => {
+		Object.defineProperty(task, "cwd", { value: "/external-task" })
+		const manager = CodeIndexManagerRegistry.getOrCreate(provider.context, task.cwd)!
+		await manager.initialize(provider.contextProxy)
+		vi.mocked(manager.initialize).mockClear()
+		Object.defineProperty(manager, "state", { get: () => "Indexing" })
+
+		await new CodebaseSearchTool().execute({ query: "external match" }, task, callbacks)
+
+		expect(manager.state).toBe("Indexing")
+		expect(manager.initialize).not.toHaveBeenCalled()
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith("external match", undefined)
+		expect(callbacks.handleError).not.toHaveBeenCalled()
 	})
 })
