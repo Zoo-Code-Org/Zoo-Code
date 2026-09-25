@@ -79,6 +79,7 @@ describe("LmStudioHandler Native Tools", () => {
 						}),
 					]),
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 			// parallel_tool_calls should be true by default when not explicitly set
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -101,6 +102,7 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -202,6 +204,7 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
