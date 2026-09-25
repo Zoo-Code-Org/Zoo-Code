@@ -64,11 +64,6 @@
 			"count": 14
 		}
 	},
-	"activate/__tests__/registerCommands.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"activate/registerCodeActions.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
