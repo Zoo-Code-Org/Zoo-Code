@@ -27,6 +27,7 @@ vi.mock("../../../i18n", () => ({
 			"skills:errors.manager_unavailable": "Skills manager not available",
 			"skills:errors.missing_delete_fields": "Missing required fields: skillName or source",
 			"skills:errors.missing_move_fields": "Missing required fields: skillName or source",
+			"skills:errors.missing_update_modes_fields": "Missing required fields: skillName or source",
 			"skills:errors.skill_not_found": `Skill "${params?.name}" not found`,
 		}
 		return translations[key] || key
@@ -41,15 +42,18 @@ import {
 	handleDeleteSkill,
 	handleMoveSkill,
 	handleOpenSkillFile,
+	handleUpdateSkillModes,
 } from "../skillsMessageHandler"
 
 describe("skillsMessageHandler", () => {
 	const mockLog = vi.fn()
 	const mockPostMessageToWebview = vi.fn()
 	const mockGetSkillsMetadata = vi.fn()
+	const mockGetSkillDiagnostics = vi.fn()
 	const mockCreateSkill = vi.fn()
 	const mockDeleteSkill = vi.fn()
 	const mockMoveSkill = vi.fn()
+	const mockUpdateSkillModes = vi.fn()
 	const mockGetSkill = vi.fn()
 	const mockFindSkillByNameAndSource = vi.fn()
 
@@ -57,9 +61,11 @@ describe("skillsMessageHandler", () => {
 		const skillsManager = hasSkillsManager
 			? {
 					getSkillsMetadata: mockGetSkillsMetadata,
+					getSkillDiagnostics: mockGetSkillDiagnostics,
 					createSkill: mockCreateSkill,
 					deleteSkill: mockDeleteSkill,
 					moveSkill: mockMoveSkill,
+					updateSkillModes: mockUpdateSkillModes,
 					getSkill: mockGetSkill,
 					findSkillByNameAndSource: mockFindSkillByNameAndSource,
 				}
@@ -90,6 +96,7 @@ describe("skillsMessageHandler", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockGetSkillDiagnostics.mockReturnValue([])
 	})
 
 	describe("handleRequestSkills", () => {
@@ -100,7 +107,34 @@ describe("skillsMessageHandler", () => {
 			const result = await handleRequestSkills(provider)
 
 			expect(result).toEqual(mockSkills)
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: mockSkills })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: mockSkills,
+				skillDiagnostics: [],
+			})
+		})
+
+		it("sends structured malformed-skill diagnostics without hiding valid skills", async () => {
+			const provider = createMockProvider(true)
+			const diagnostics = [
+				{
+					path: "/workspace/.roo/skills/broken/SKILL.md",
+					source: "project" as const,
+					message: "bad indentation of a mapping entry",
+					line: 3,
+					column: 20,
+				},
+			]
+			mockGetSkillsMetadata.mockReturnValue(mockSkills)
+			mockGetSkillDiagnostics.mockReturnValue(diagnostics)
+
+			await handleRequestSkills(provider)
+
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: mockSkills,
+				skillDiagnostics: diagnostics,
+			})
 		})
 
 		it("returns empty skills when skills manager is not available", async () => {
@@ -109,7 +143,11 @@ describe("skillsMessageHandler", () => {
 			const result = await handleRequestSkills(provider)
 
 			expect(result).toEqual([])
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [],
+				skillDiagnostics: [],
+			})
 		})
 
 		it("handles errors and returns empty skills", async () => {
@@ -122,7 +160,11 @@ describe("skillsMessageHandler", () => {
 
 			expect(result).toEqual([])
 			expect(mockLog).toHaveBeenCalled()
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [],
+				skillDiagnostics: [],
+			})
 		})
 	})
 
@@ -142,7 +184,11 @@ describe("skillsMessageHandler", () => {
 			expect(result).toEqual(mockSkills)
 			expect(mockCreateSkill).toHaveBeenCalledWith("new-skill", "global", "New skill description", undefined)
 			expect(openFile).toHaveBeenCalledWith("/path/to/new-skill/SKILL.md")
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: mockSkills })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: mockSkills,
+				skillDiagnostics: [],
+			})
 		})
 
 		it("creates a skill with mode restriction", async () => {
@@ -212,7 +258,11 @@ describe("skillsMessageHandler", () => {
 
 			expect(result).toEqual([mockSkills[1]])
 			expect(mockDeleteSkill).toHaveBeenCalledWith("test-skill", "global", undefined)
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [mockSkills[1]] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[1]],
+				skillDiagnostics: [],
+			})
 		})
 
 		it("deletes a skill with mode restriction", async () => {
@@ -280,7 +330,11 @@ describe("skillsMessageHandler", () => {
 
 			expect(result).toEqual([mockSkills[0]])
 			expect(mockMoveSkill).toHaveBeenCalledWith("test-skill", "global", undefined, "code")
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [mockSkills[0]] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[0]],
+				skillDiagnostics: [],
+			})
 		})
 
 		it("moves a skill from one mode to another", async () => {
@@ -331,6 +385,132 @@ describe("skillsMessageHandler", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
 				"Failed to move skill: Skills manager not available",
 			)
+		})
+	})
+
+	describe("handleUpdateSkillModes", () => {
+		it("updates a skill's mode slugs successfully", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockResolvedValue(undefined)
+			mockGetSkillsMetadata.mockReturnValue([mockSkills[0]])
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				newSkillModeSlugs: ["code"],
+			} as WebviewMessage)
+
+			expect(result).toEqual([mockSkills[0]])
+			expect(mockUpdateSkillModes).toHaveBeenCalledWith("test-skill", "global", ["code"])
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[0]],
+				skillDiagnostics: [],
+			})
+		})
+
+		it("clears a skill's mode restriction with empty slugs", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockResolvedValue(undefined)
+			mockGetSkillsMetadata.mockReturnValue([mockSkills[1]])
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "project-skill",
+				source: "project",
+				newSkillModeSlugs: [],
+			} as WebviewMessage)
+
+			expect(result).toEqual([mockSkills[1]])
+			expect(mockUpdateSkillModes).toHaveBeenCalledWith("project-skill", "project", [])
+		})
+
+		it("passes undefined mode slugs and refreshes state when newSkillModeSlugs is omitted", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockResolvedValue(undefined)
+			mockGetSkillsMetadata.mockReturnValue([mockSkills[0]])
+			// Forward a concrete (non-empty) diagnostic so the assertion proves the
+			// handler relays the diagnostics list rather than always posting []
+			// (which would pass even if the field were dropped or hard-coded).
+			const diagnostics = [
+				{
+					path: "/global/.roo/skills/broken/SKILL.md",
+					source: "global" as const,
+					message: "can not read a block mapping entry",
+					line: 3,
+					column: 10,
+				},
+			]
+			mockGetSkillDiagnostics.mockReturnValue(diagnostics)
+
+			const message: WebviewMessage = {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				// newSkillModeSlugs omitted
+			}
+			const result = await handleUpdateSkillModes(provider, message)
+
+			expect(result).toEqual([mockSkills[0]])
+			expect(mockUpdateSkillModes).toHaveBeenCalledWith("test-skill", "global", undefined)
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[0]],
+				skillDiagnostics: diagnostics,
+			})
+		})
+
+		it("returns undefined when required fields are missing", async () => {
+			const provider = createMockProvider(true)
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				// missing source
+			} as WebviewMessage)
+
+			expect(result).toBeUndefined()
+			expect(mockUpdateSkillModes).not.toHaveBeenCalled()
+			expect(mockLog).toHaveBeenCalledWith(
+				"Error updating skill modes: Missing required fields: skillName or source",
+			)
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"Failed to update skill modes: Missing required fields: skillName or source",
+			)
+		})
+
+		it("returns undefined when skills manager is not available", async () => {
+			const provider = createMockProvider(false)
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				newSkillModeSlugs: ["code"],
+			} as WebviewMessage)
+
+			expect(result).toBeUndefined()
+			expect(mockLog).toHaveBeenCalledWith("Error updating skill modes: Skills manager not available")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"Failed to update skill modes: Skills manager not available",
+			)
+		})
+
+		it("returns undefined and reports the error when updateSkillModes rejects", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockRejectedValue(new Error("boom"))
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				newSkillModeSlugs: ["code"],
+			} as WebviewMessage)
+
+			expect(result).toBeUndefined()
+			expect(mockLog).toHaveBeenCalledWith("Error updating skill modes: boom")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to update skill modes: boom")
 		})
 	})
 
