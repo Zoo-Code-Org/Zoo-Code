@@ -664,12 +664,14 @@ describe("ClineProvider", () => {
 	})
 
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
+		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
-			{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },
+			developmentContext,
 			mockOutputChannel,
 			"sidebar",
-			new ContextProxy(mockContext),
+			new ContextProxy(developmentContext),
 		)
+		// The dev-server probe fails, so the HMR path falls back to the production HTML.
 		;(axios.get as any).mockRejectedValueOnce(new Error("Network error"))
 
 		await provider.resolveWebviewView(mockWebviewView)
@@ -693,6 +695,31 @@ describe("ClineProvider", () => {
 		expect(scriptSrcMatch![0]).toContain("'nonce-")
 		// Verify wasm-unsafe-eval is present for Shiki syntax highlighting
 		expect(scriptSrcMatch![0]).toContain("'wasm-unsafe-eval'")
+	})
+
+	test("resolveWebviewView builds HMR content against the local dev server when it is reachable", async () => {
+		const originalThemeFixtureProbe = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+
+		provider = new ClineProvider(
+			{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy({ ...mockContext, extensionMode: vscode.ExtensionMode.Development }),
+		)
+		// The default axios mock resolves, so the dev-server probe succeeds and the
+		// HMR HTML branch (instead of the production fallback) is taken.
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const html = mockWebviewView.webview.html
+		// The dev server URL must be baked into the module script tag and CSP directives.
+		expect(html).toContain("http://127.0.0.1:5173/src/index.tsx")
+		expect(html).toContain("ws://127.0.0.1:5173")
+		expect(html).toContain("http://127.0.0.1:5173/@react-refresh")
+
+		if (originalThemeFixtureProbe !== undefined) {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalThemeFixtureProbe
+		}
 	})
 
 	test("postMessageToWebview sends message to webview", async () => {
