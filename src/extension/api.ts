@@ -110,7 +110,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						break
 					case TaskCommandName.SendMessage:
 						this.log(`[API] SendMessage -> ${command.data.text}`)
-						await this.sendMessage(command.data.text, command.data.images)
+						try {
+							await this.sendMessage(command.data.text, command.data.images)
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error)
+							this.log(`[API] SendMessage failed: ${errorMessage}`)
+						}
 						break
 					case TaskCommandName.GetCommands:
 						try {
@@ -324,8 +329,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		const currentTask = this.sidebarProvider.getCurrentTask()
 
 		// In headless/sandbox flows the webview may not be launched, so routing
-		// through invoke=sendMessage drops the message. Deliver directly to the
-		// task ask-response channel instead.
+		// through invoke=sendMessage drops the message. Keep this path on the task
+		// ask-response channel so queued input cannot approve protected tool asks.
 		if (!this.sidebarProvider.viewLaunched) {
 			if (!currentTask) {
 				this.log("[API#sendMessage] no current task in headless mode; message dropped")
@@ -333,6 +338,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			}
 
 			await currentTask.submitUserMessage(text ?? "", images)
+			return
+		}
+
+		// Ensure steering input reaches the active task before it can finish.
+		if (currentTask?.isStreaming) {
+			currentTask.messageQueueService.addMessage(text ?? "", images)
 			return
 		}
 
