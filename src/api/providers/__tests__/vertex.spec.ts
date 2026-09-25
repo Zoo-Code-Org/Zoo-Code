@@ -21,7 +21,10 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import { vertexDefaultModelId, vertexModels } from "@roo-code/types"
+
 import { ApiStreamChunk } from "../../transform/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 import { t } from "i18next"
 import { VertexHandler } from "../vertex"
@@ -38,7 +41,7 @@ describe("VertexHandler", () => {
 		const mockGetGenerativeModel = vitest.fn()
 
 		handler = new VertexHandler({
-			apiModelId: "gemini-1.5-pro-001",
+			apiModelId: "gemini-3.7-flash",
 			vertexProjectId: "test-project",
 			vertexRegion: "us-central1",
 		})
@@ -94,6 +97,45 @@ describe("VertexHandler", () => {
 
 			// Since we're directly mocking createMessage, we don't need to verify
 			// that generateContentStream was called
+		})
+
+		it("appends a user continuation when Vertex history ends with an assistant turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Continue." }] },
+					],
+				}),
+			)
+		})
+
+		it("does not append a continuation when Vertex history ends with a user turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const userEndingMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{ role: "assistant", content: "Hi there!" },
+				{ role: "user", content: "Please continue" },
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, userEndingMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Please continue" }] },
+					],
+				}),
+			)
 		})
 	})
 
@@ -180,6 +222,89 @@ describe("VertexHandler", () => {
 			const includedCount = modelInfo.info.includedTools!.filter((t: string) => t === "edit").length
 			expect(excludedCount).toBe(1)
 			expect(includedCount).toBe(1)
+		})
+
+		it("should correctly handle :thinking suffix for gemini-3.7-flash", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-3.7-flash:thinking",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-3.7-flash")
+			expect(modelInfo.info).toBeDefined()
+			expect(modelInfo.info.excludedTools).toContain("apply_diff")
+			expect(modelInfo.info.includedTools).toContain("edit")
+			expect(modelInfo.reasoning).toBeDefined()
+		})
+
+		it("should handle custom unlisted gemini models with :thinking suffix", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-future-model:thinking",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-future-model")
+			expect(modelInfo.info).toBeDefined()
+			expect(modelInfo.info.excludedTools).toContain("apply_diff")
+			expect(modelInfo.info.includedTools).toContain("edit")
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
+		})
+
+		it("should resolve to the shared vertex default when apiModelId is undefined", () => {
+			const testHandler = new VertexHandler({
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe(vertexDefaultModelId)
+			expect(modelInfo.info).toEqual(
+				expect.objectContaining({
+					...vertexModels[vertexDefaultModelId],
+					excludedTools: expect.arrayContaining(["apply_diff"]),
+					includedTools: expect.arrayContaining(["edit"]),
+				}),
+			)
+		})
+
+		it("should honor an unknown unsuffixed gemini-* id and drop pricing fields", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-9.9-flash-exp",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-9.9-flash-exp")
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
+		})
+
+		it("should match a mixed-case unknown gemini-* id case-insensitively and keep the configured casing", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "Gemini-9.9-flash-exp",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("Gemini-9.9-flash-exp")
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
 		})
 	})
 })

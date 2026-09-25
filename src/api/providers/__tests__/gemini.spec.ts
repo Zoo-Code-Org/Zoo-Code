@@ -24,6 +24,7 @@ const GEMINI_MODEL_NAME = geminiDefaultModelId
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
 	let mockGenerateContentStream: ReturnType<typeof vitest.fn>
+	let mockGenerateContent: ReturnType<typeof vitest.fn>
 
 	beforeEach(() => {
 		// Reset mocks
@@ -31,7 +32,7 @@ describe("GeminiHandler", () => {
 
 		// Create mock functions
 		mockGenerateContentStream = vitest.fn()
-		const mockGenerateContent = vitest.fn()
+		mockGenerateContent = vitest.fn()
 		const mockGetGenerativeModel = vitest.fn()
 
 		handler = new GeminiHandler({
@@ -332,6 +333,45 @@ describe("GeminiHandler", () => {
 			})
 		})
 
+		it("appends a user continuation when history ends with an assistant turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Continue." }] },
+					],
+				}),
+			)
+		})
+
+		it("does not append a continuation when history ends with a user turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const userEndingMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{ role: "assistant", content: "Hi there!" },
+				{ role: "user", content: "Please continue" },
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, userEndingMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Please continue" }] },
+					],
+				}),
+			)
+		})
+
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
 			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
@@ -339,6 +379,22 @@ describe("GeminiHandler", () => {
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
 			await expect(collectStream(stream)).rejects.toThrow()
+		})
+
+		it("preserves status and errorDetails when the stream call rejects with a 429", async () => {
+			const rateLimitError = Object.assign(new Error("rate limit exceeded"), {
+				status: 429,
+				errorDetails: { retryAfter: 30 },
+			})
+			mockGenerateContentStream.mockRejectedValue(rateLimitError)
+
+			const error = (await collectStream(handler.createMessage(systemPrompt, mockMessages)).catch(
+				(e: unknown) => e,
+			)) as Error & { status?: number; errorDetails?: unknown }
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.status).toBe(429)
+			expect(error.errorDetails).toEqual({ retryAfter: 30 })
 		})
 	})
 
@@ -370,6 +426,23 @@ describe("GeminiHandler", () => {
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
 				t("common:errors.gemini.generate_complete_prompt", { error: "Gemini API error" }),
 			)
+		})
+
+		it("preserves status and errorDetails when the completion call rejects with a 403", async () => {
+			const forbiddenError = Object.assign(new Error("permission denied"), {
+				status: 403,
+				errorDetails: { reason: "PERMISSION_DENIED" },
+			})
+			mockGenerateContent.mockRejectedValue(forbiddenError)
+
+			const error = (await handler.completePrompt("Test prompt").catch((e: unknown) => e)) as Error & {
+				status?: number
+				errorDetails?: unknown
+			}
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.status).toBe(403)
+			expect(error.errorDetails).toEqual({ reason: "PERMISSION_DENIED" })
 		})
 
 		it("should handle empty response", async () => {
