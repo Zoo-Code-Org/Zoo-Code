@@ -167,6 +167,24 @@
 			"claudeCodeNotAuthenticated": "Claude Codeを使用するにはサインインが必要です。設定に移動して「Claude Codeにサインイン」をクリックして認証してください。"
 		}
 	},
+	"changeCard": {
+		"header": "このステップで {{count}} 件のファイルが変更されました",
+		"rollbackFile": "このファイルをロールバック",
+		"rollbackFileWarning": "このファイルをこのステップ実行前の内容に復元します。",
+		"restoreLatest": "最新バージョンを復元",
+		"restoreLatestWarning": "このファイルを最新記録バージョンに復元します。",
+		"restored": "最新バージョンを復元しました",
+		"restoreFailed": "復元に失敗しました",
+		"rollbackStep": "ステップをロールバック",
+		"rollbackWarning": "このステップのファイルを元のコンテンツに復元します。",
+		"confirm": "確認",
+		"cancel": "キャンセル",
+		"rollingBack": "ロールバック中...",
+		"rolledBack": "ロールバック済み",
+		"stepRolledBack": "ステップをロールバックしました",
+		"rollbackFailed": "ロールバックに失敗しました",
+		"openFile": "ファイルを開く: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "チェックポイント",
 		"initializingWarning": "チェックポイントの初期化中... 時間がかかりすぎる場合は、<settingsLink>設定</settingsLink>でチェックポイントを無効にしてタスクを再開できます。",

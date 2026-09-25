@@ -730,6 +730,14 @@
 		"enable": {
 			"label": "啟用自動檢查點",
 			"description": "啟用後，Zoo 將在工作執行期間自動建立檢查點，方便檢視變更或回到較早的狀態。 <0>了解更多</0>"
+		},
+		"perWrite": {
+			"label": "每次檔案寫入後建立檢查點",
+			"description": "代理每次成功寫入檔案後都會記錄一個檢查點快照"
+		},
+		"changeCardDetail": {
+			"label": "在變更卡片中顯示完整 diff",
+			"description": "在逐步變更卡片中為每個檔案內嵌完整 unified diff。關閉時，卡片僅顯示檔案清單與新增/刪除行數。"
 		}
 	},
 	"notifications": {
