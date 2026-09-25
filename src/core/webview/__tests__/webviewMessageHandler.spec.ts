@@ -1433,6 +1433,27 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
+describe("webviewMessageHandler - updateSettings persistence", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
+	})
+
+	it("routes a changed key through provider.setValue so the view-local mutation path is exercised", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { autoApprovalEnabled: true },
+		})
+
+		// The changed key must go through the provider-level mutation path (which keeps
+		// the view-local buffer/pin in sync), not a direct contextProxy write: the
+		// double's setValue forwards to contextProxy.setValue, so this assertion is
+		// only satisfiable when the handler calls the provider method itself.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("autoApprovalEnabled", true)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

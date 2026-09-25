@@ -1199,7 +1199,14 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.handleModeSwitch("architect")
 
 			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
-			expect(postMessage).toHaveBeenCalled()
+			// The locked path still posts the switched state — assert the payload so a
+			// regression that posts nothing (or a stale pre-switch state) fails here.
+			expect(postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "state",
+					state: expect.objectContaining({ mode: "architect" }),
+				}),
+			)
 
 			await provider.dispose()
 		})

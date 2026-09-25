@@ -315,7 +315,7 @@ describe("API task controls", () => {
 	})
 })
 
-describe("API task controls - per-view review fixes", () => {
+describe("API task controls - registry identity, listener wiring, and mode-switch failure handling", () => {
 	let outputChannel: vscode.OutputChannel
 	let sidebarProvider: ProviderDouble
 	let api: API

@@ -111,7 +111,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
-import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import { ProviderConfigNotFoundError, ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
@@ -1870,8 +1870,16 @@ export class ClineProvider
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(message)).catch(() => {
-			// Swallow: postMessage rejects when the webview is disposed in flight.
+		void Promise.resolve(webview.postMessage(message)).catch((error) => {
+			// A postMessage rejection does not break the dispatch path (the message is
+			// simply not delivered, e.g. when the webview is disposed in flight), but log
+			// it so a persistent post failure is attributable instead of silently
+			// dropping every message.
+			this.log(
+				`[ClineProvider#postMessageToWebview] postMessage rejected: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
 		})
 	}
 
@@ -2387,16 +2395,15 @@ export class ClineProvider
 		}
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
-		// resurrected by a later listApiConfigMeta sync. A "not found" rejection means
-		// the secret was already gone (e.g. pruned by an earlier run): treat it as an
-		// idempotent success so the stale list entry below is still pruned, while any
-		// other failure (e.g. refusing to delete the last remaining configuration)
-		// propagates.
+		// resurrected by a later listApiConfigMeta sync. A ProviderConfigNotFoundError
+		// means the secret was already gone (e.g. pruned by an earlier run): treat it as
+		// an idempotent success so the stale list entry below is still pruned, while
+		// any other failure (e.g. refusing to delete the last remaining configuration)
+		// propagates. The typed signal keeps this branch independent of message text.
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			if (!message.includes("not found")) {
+			if (!(error instanceof ProviderConfigNotFoundError)) {
 				throw error
 			}
 			this.log(

@@ -234,11 +234,15 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only when the sidebar panel was
-			// focused: the tab takes selection priority in focusPanel, so
-			// the sidebar receives the message only when no tab panel is
-			// tracked.
-			if (sidebarPanel && !tabPanel) {
+			// Post to the surface focusPanel selected: the tab takes
+			// selection priority, so the sidebar is targeted only when no
+			// tab panel is tracked.
+			if (tabPanel) {
+				const tabProvider = getTabProvider()
+				if (tabProvider) {
+					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				}
+			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {

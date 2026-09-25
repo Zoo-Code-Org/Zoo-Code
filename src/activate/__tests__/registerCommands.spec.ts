@@ -393,13 +393,34 @@ describe("registerCommands handlers", () => {
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it("focusInput does not post when a tab panel is tracked alongside the sidebar", async () => {
+	it("focusInput posts to the tracked tab provider when a tab panel is tracked alongside the sidebar", async () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
+		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
 		setPanel({} as vscode.WebviewPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
 
 		await handlers["zoo-code.focusInput"]()
 
+		// The tab owns the focus (focusPanel priority), so the post targets the
+		// tab's provider and never the sidebar registration.
+		expect((tabProvider as { postMessageToWebview: Mock }).postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("focusInput posts nothing and logs nothing when the tracked tab has no live provider", async () => {
+		setPanel({} as vscode.WebviewPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.focusInput"]()
+
+		// The guard must skip the post (not throw into the catch): the tab surface is
+		// tracked but its provider is gone (e.g. disposed in flight).
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalled()
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
 	})
 
 	it("setPanel keeps independent refs: clearing only the tab ref re-enables the sidebar post", async () => {
