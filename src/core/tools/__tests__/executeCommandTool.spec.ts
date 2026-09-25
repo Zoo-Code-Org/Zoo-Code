@@ -1,6 +1,8 @@
 // npx vitest run src/core/tools/__tests__/executeCommandTool.spec.ts
 
 import type { ToolUsage } from "@roo-code/types"
+import fs from "fs/promises"
+import type { Stats } from "fs"
 import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
@@ -19,6 +21,7 @@ vitest.mock("execa", () => ({
 vitest.mock("fs/promises", () => ({
 	default: {
 		access: vitest.fn().mockResolvedValue(undefined),
+		stat: vitest.fn().mockResolvedValue({ isDirectory: () => true }),
 	},
 }))
 
@@ -354,6 +357,56 @@ describe("executeCommandTool", () => {
 
 			expect(mockEnsureDcgInstalled).toHaveBeenCalledWith("/test/storage")
 			expect(mockRunDcg).toHaveBeenCalledWith("/test/storage/dcg", "echo test", "/test/workspace")
+		})
+
+		it("rejects a missing working directory before starting DCG", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/missing/remote/workspace"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/missing/remote/workspace" }
+			vi.mocked(fs.access).mockRejectedValueOnce(new Error("ENOENT"))
+			vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted missing-directory error")
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+				"Working directory '/missing/remote/workspace' does not exist.",
+			)
+			expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted missing-directory error")
+			expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+			expect(mockRunDcg).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("rejects an existing file used as the working directory", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/remote/workspace/file.txt"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/remote/workspace/file.txt" }
+			vi.mocked(fs.stat).mockResolvedValueOnce({ isDirectory: () => false } as Stats)
+			vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted not-a-directory error")
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(fs.access).toHaveBeenCalledWith("/remote/workspace/file.txt")
+			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+				"Working directory '/remote/workspace/file.txt' is not a directory.",
+			)
+			expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted not-a-directory error")
+			expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+			expect(mockRunDcg).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockCline.didToolFailInCurrentTurn).toBe(true)
 		})
 
 		it("fails closed when the DCG install or update fails", async () => {

@@ -3,15 +3,20 @@
 //
 import * as path from "path"
 import * as fs from "fs/promises"
+import type { Stats } from "fs"
 
 import { ExecuteCommandOptions } from "../ExecuteCommandTool"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { ExecaTerminal } from "../../../integrations/terminal/ExecaTerminal"
 import type { RooTerminalCallbacks } from "../../../integrations/terminal/types"
+const filesystemMocks = vitest.hoisted(() => ({
+	access: vitest.fn(),
+	stat: vitest.fn(),
+}))
 
-// Mock fs to control directory existence checks
-vitest.mock("fs/promises")
+// ExecuteCommandTool uses the default import; this suite configures named imports.
+vitest.mock("fs/promises", () => ({ ...filesystemMocks, default: filesystemMocks }))
 
 // Mock TerminalRegistry to control terminal creation
 vitest.mock("../../../integrations/terminal/TerminalRegistry")
@@ -33,8 +38,9 @@ describe("executeCommand", () => {
 	beforeEach(() => {
 		vitest.clearAllMocks()
 
-		// Mock fs.access to simulate directory existence
-		;(fs.access as any).mockResolvedValue(undefined)
+		// Mock filesystem checks to simulate an accessible directory.
+		vitest.mocked(fs.access).mockResolvedValue(undefined)
+		vitest.mocked(fs.stat).mockResolvedValue({ isDirectory: () => true } as Stats)
 
 		// Create mock provider
 		mockProvider = {
@@ -266,6 +272,22 @@ describe("executeCommand", () => {
 			// Verify
 			expect(rejected).toBe(false)
 			expect(result).toBe(`Working directory '${nonExistentCwd}' does not exist.`)
+			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+		})
+
+		it("should return error when custom working directory is an existing file", async () => {
+			const filePath = "/existing/file.txt"
+			vitest.mocked(fs.stat).mockResolvedValueOnce({ isDirectory: () => false } as Stats)
+
+			const [rejected, result] = await executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				command: "echo test",
+				customCwd: filePath,
+				terminalShellIntegrationDisabled: false,
+			})
+
+			expect(rejected).toBe(false)
+			expect(result).toBe(`Working directory '${filePath}' is not a directory.`)
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
 		})
 	})
