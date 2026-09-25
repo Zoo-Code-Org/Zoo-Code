@@ -608,9 +608,10 @@ export async function presentAssistantMessage(cline: Task) {
 				const isCustomTool = Boolean(stateExperiments?.customTools && customToolRegistry.has(block.name))
 
 				try {
-					// Build requirements through the shared policy module so every suppressed
-					// entry — disabled tools, and an excluded or disabled protocol tool — reaches
-					// the validator, which checks them before the always-available class. See
+					// Build requirements through the shared policy module so every entry that
+					// carries disabling weight — non-protocol disabled tools, and every excluded
+					// tool, protocol entries included on that leg — reaches the validator, which
+					// checks them before the always-available class. See
 					// `buildToolRequirements` in effective-tool-policy.ts.
 					const toolRequirements = buildToolRequirements(disabledTools, modelInfo?.info)
 

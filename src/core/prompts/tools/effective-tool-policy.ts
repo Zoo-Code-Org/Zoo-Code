@@ -16,11 +16,12 @@ type EffectiveMcpHub = {
  * Canonical tool names that participate in the task-completion protocol.
  *
  * The effective tool policy re-adds these after the mode/permission filters, so a
- * mode that grants no groups still advertises them — but a `disabledTools` entry
- * or a model `excludedTools` entry takes precedence: honoring an explicit
- * restriction takes priority over the re-add, and the runtime validator rejects
- * execution of a tool so restricted (see `buildToolRequirements` and the
- * requirements-before-always-available precedence in `validateToolUse.ts`).
+ * mode that grants no groups still advertises them. A user `disabledTools` entry
+ * cannot suppress them: such entries are ignored at policy entry (see
+ * `partitionDisabledToolsForProtocol`), because the task loop can only exit
+ * through the completion tool and configuration must not be able to close that
+ * route. A model-profile `excludedTools` entry still suppresses the re-add and
+ * reaches the runtime requirements, so prompt and validator agree on it too.
  *
  * `attempt_completion` is the only tool with no coherent prompt state when absent
  * (the task loop can only exit through it), so it is the sole protocol entry.
@@ -108,6 +109,37 @@ export function isToolDisabledOrExcluded(
 	const canonical = resolveToolAlias(toolName)
 	const isSuppressed = (entry: string): boolean => resolveToolAlias(entry) === canonical
 	return Boolean(disabledTools?.some(isSuppressed)) || Boolean(modelInfo?.excludedTools?.some(isSuppressed))
+}
+
+/**
+ * Partitions a raw user `disabledTools` list into entries that carry disabling
+ * weight and entries that name a protocol tool.
+ *
+ * Protocol tools are exempt from user disabling: the task loop exits only
+ * through `attempt_completion`, so a configuration entry must not be able to
+ * close that route. `effective` is what every suppression consumer must act
+ * on, while `ignored` surfaces the stripped entries so callers can report
+ * what was ignored instead of re-deriving the predicate elsewhere. Entries
+ * are matched after alias resolution.
+ *
+ * @param disabledTools The user's disabled-tools list (may contain aliases).
+ * @returns Order-preserving `effective` entries, plus the de-duplicated
+ *   `ignored` entries that name a protocol tool.
+ */
+export function partitionDisabledToolsForProtocol(disabledTools: string[] | undefined): {
+	effective: string[]
+	ignored: string[]
+} {
+	const effective: string[] = []
+	const ignored: string[] = []
+	for (const entry of disabledTools ?? []) {
+		if (PROTOCOL_TOOLS.includes(resolveToolAlias(entry))) {
+			ignored.push(entry)
+		} else {
+			effective.push(entry)
+		}
+	}
+	return { effective, ignored: [...new Set(ignored)] }
 }
 
 export interface EffectiveToolPolicyInput {
@@ -198,8 +230,9 @@ function hasAnyMcpResources(mcpHub: EffectiveMcpHub, allowedServers?: string[]):
  *
  * This is the single source of truth shared by prompt generation, API tool
  * construction, runtime validation, and preview. The numbered steps below (1-10)
- * compute the allowed tool set; step 11 re-adds `PROTOCOL_TOOLS` unless an
- * explicit disable/exclude suppresses them.
+ * compute the allowed tool set; step 11 re-adds `PROTOCOL_TOOLS` unless the
+ * model's `excludedTools` suppresses them — `disabledTools` entries naming a
+ * protocol tool are partitioned out at entry and carry no disabling weight.
  *
  * The returned policy is deterministic for a given input and free of side
  * effects.
@@ -220,6 +253,10 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
 		codeIndexManager,
 		allowedMcpServers,
 	} = input
+
+	// A disabledTools entry naming a protocol tool carries no disabling weight;
+	// partition it out once at entry so no later step can act on it.
+	const { effective: effectiveDisabledTools } = partitionDisabledToolsForProtocol(disabledTools)
 
 	// 1. Resolve mode config with default-slug fallback (existing behavior).
 	const modeSlug = mode ?? defaultModeSlug
@@ -290,9 +327,9 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
 		allowedToolNames.delete("run_slash_command")
 	}
 
-	// 9. Drop disabledTools entries (alias-resolved).
-	if (disabledTools?.length) {
-		for (const toolName of disabledTools) {
+	// 9. Drop effective disabledTools entries (alias-resolved).
+	if (effectiveDisabledTools.length) {
+		for (const toolName of effectiveDisabledTools) {
 			allowedToolNames.delete(resolveToolAlias(toolName))
 		}
 	}
@@ -314,15 +351,14 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
 		allowedToolNames.delete("use_mcp_tool")
 	}
 
-	// 11. Protocol guarantee: re-add every protocol tool that neither the user's
-	//     disabledTools nor the model's excludedTools suppresses, so the logical
-	//     set and the runtime validator agree in both directions: an unlisted
-	//     protocol tool stays callable — this re-add, not the always-available
-	//     roster, is what guarantees it — while a suppressed one stays out of the
-	//     prompt, the declarations, and (via buildToolRequirements) execution,
-	//     having been removed by steps 4 and 9.
+	// 11. Protocol guarantee: re-add every protocol tool that the effective
+	//     disabledTools list and the model's excludedTools do not suppress.
+	//     After the entry partition only an excludedTools entry can suppress
+	//     one, and `buildToolRequirements` partitions the same entries out of
+	//     the runtime requirements, so the logical set and the validator
+	//     cannot disagree about the completion tool in either direction.
 	for (const tool of PROTOCOL_TOOLS) {
-		if (!isToolDisabledOrExcluded(tool, disabledTools, modelInfo)) {
+		if (!isToolDisabledOrExcluded(tool, effectiveDisabledTools, modelInfo)) {
 			allowedToolNames.add(resolveToolAlias(tool))
 		}
 	}
@@ -340,10 +376,14 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
 
 /**
  * Builds the runtime `toolRequirements` map (tool name → false) from every entry
- * in the user and model exclusion lists.
+ * that carries disabling weight: the user's `disabledTools` minus protocol-tool
+ * entries, plus every model `excludedTools` entry.
+ *
  * A requirements entry outranks the always-available class in `validateToolUse`,
- * so every disabled or model-excluded tool is rejected at execution with the
- * standard validation error tool_result, matching its removal from the policy.
+ * so every tool mapped here is rejected at execution with the standard
+ * validation error tool_result, matching its removal from the policy. A
+ * `disabledTools` entry naming a protocol tool is deliberately absent — the tool
+ * stays callable, matching its retention in the policy.
  *
  * @param disabledTools The raw disabled-tools list (may contain aliases).
  * @param modelInfo The model customization whose `excludedTools` may suppress a
@@ -352,7 +392,8 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
  */
 export function buildToolRequirements(disabledTools?: string[], modelInfo?: ModelInfo): Record<string, boolean> {
 	const requirements: Record<string, boolean> = {}
-	for (const toolName of [...(disabledTools ?? []), ...(modelInfo?.excludedTools ?? [])]) {
+	const { effective } = partitionDisabledToolsForProtocol(disabledTools)
+	for (const toolName of [...effective, ...(modelInfo?.excludedTools ?? [])]) {
 		const canonical = resolveToolAlias(toolName)
 		requirements[toolName] = false
 		requirements[canonical] = false

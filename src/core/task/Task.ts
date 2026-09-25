@@ -97,6 +97,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
@@ -2256,6 +2257,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						serverCount: enabledServerCount,
 						threshold: MAX_MCP_TOOLS_THRESHOLD,
 					}),
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					{ isNonInteractive: true },
+				)
+			}
+
+			// Surface once per new task which `disabledTools` entries carry no
+			// disabling weight (protocol tools are exempt from user disabling).
+			// Detection reads the raw list, so the notice also fires when a
+			// model-profile `excludedTools` entry suppresses the tool through a
+			// separate route. `startTask` runs exactly once per new task, which
+			// is what bounds this to a single notice.
+			const disabledToolsState = await this.providerRef.deref()?.getState()
+			const { ignored } = partitionDisabledToolsForProtocol(disabledToolsState?.disabledTools)
+			if (ignored.length > 0) {
+				await this.say(
+					"ignored_disabled_tools_warning",
+					JSON.stringify({ ignoredTools: ignored }),
 					undefined,
 					undefined,
 					undefined,

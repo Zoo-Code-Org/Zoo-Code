@@ -420,11 +420,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			})
 		})
 
-		it("marks a disabled attempt_completion as blocked and answers it with an error tool_result", async () => {
-			// An explicit disabledTools entry outranks the always-available class,
-			// so a disabled attempt_completion reaches the validator like any
-			// other tool; its rejection must surface as the standard validation-
-			// error tool_result instead of completing the task.
+		it("ignores a disabled attempt_completion entry and executes the completion normally", async () => {
 			mockTask.assistantMessageContent = [
 				{
 					type: "tool_use",
@@ -449,29 +445,40 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 				}),
 			}
 
-			// Mirror the real validator's rejection for a requirement that maps
-			// to false (validateToolUse.spec pins the predicate itself).
-			vi.mocked(validateToolUse).mockImplementationOnce(() => {
-				throw new Error('Tool "attempt_completion" is not allowed in code mode.')
-			})
-
 			await presentAssistantMessage(mockTask)
 
 			const validateToolUseMock = vi.mocked(validateToolUse)
 			expect(validateToolUseMock).toHaveBeenCalled()
 			const toolRequirements = validateToolUseMock.mock.calls[0][3]
-			expect(toolRequirements).toMatchObject({ attempt_completion: false })
+			// Absent, not merely un-false: the validator is never told the
+			// completion tool was disabled.
+			expect(toolRequirements).not.toHaveProperty("attempt_completion")
 
 			const errorToolResults = mockTask.userMessageContent.filter((block: unknown) => {
 				const b = block as { type?: string; is_error?: boolean }
 				return b.type === "tool_result" && b.is_error
 			})
-			expect(errorToolResults).toHaveLength(1)
-			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(errorToolResults).toHaveLength(0)
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
 
-			// The completion handler must not run for the rejected call.
 			const { attemptCompletionTool } = await import("../../tools/AttemptCompletionTool")
-			expect(attemptCompletionTool.handle).not.toHaveBeenCalled()
+			expect(attemptCompletionTool.handle).toHaveBeenCalledWith(
+				mockTask,
+				expect.objectContaining({
+					type: "tool_use",
+					id: "tool_call_protocol_123",
+					name: "attempt_completion",
+					partial: false,
+				}),
+				expect.objectContaining({
+					askApproval: expect.any(Function),
+					handleError: expect.any(Function),
+					pushToolResult: expect.any(Function),
+					askFinishSubTaskApproval: expect.any(Function),
+					toolDescription: expect.any(Function),
+					toolCallId: "tool_call_protocol_123",
+				}),
+			)
 		})
 
 		it("treats a model-excluded attempt_completion as blocked and answers it with an error tool_result", async () => {

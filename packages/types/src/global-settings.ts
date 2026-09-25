@@ -285,7 +285,10 @@ export const globalSettingsSchema = z.object({
 
 	/**
 	 * List of native tool names to globally disable.
-	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
+	 * Tools in this list are excluded from prompt generation and rejected at
+	 * execution time. The tool the task loop completes through
+	 * (attempt_completion) cannot be disabled this way: an entry naming it is
+	 * ignored at policy resolution.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
 })

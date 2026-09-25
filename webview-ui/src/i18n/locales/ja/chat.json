@@ -488,6 +488,10 @@
 		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
 		"openMcpSettings": "MCP 設定を開く"
 	},
+	"ignoredDisabledTools": {
+		"title": "無効化されたツールは無視されました",
+		"messageTemplate": "次のツールは無効化できず、引き続き利用可能です: {{tools}}。"
+	},
 	"readCommandOutput": {
 		"title": "Zooがコマンド出力を読み込みました"
 	},

@@ -479,6 +479,10 @@
 		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
 		"openMcpSettings": "開啟 MCP 設定"
 	},
+	"ignoredDisabledTools": {
+		"title": "已忽略被停用的工具",
+		"messageTemplate": "以下工具無法被停用，將繼續可用：{{tools}}。"
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},
