@@ -705,4 +705,50 @@ describe("shouldUseReasoningEffort", () => {
 		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "none" as any } })).toBe(true)
 		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "minimal" as any } })).toBe(true)
 	})
+
+	test("array capability with model default effort and no settings -> true when default is in the ladder", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			reasoningEffort: "high",
+		}
+
+		expect(shouldUseReasoningEffort({ model })).toBe(true)
+		expect(shouldUseReasoningEffort({ model, settings: {} })).toBe(true)
+		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: undefined } })).toBe(true)
+	})
+
+	test("array capability with model default effort returns false when enableReasoningEffort is false", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			reasoningEffort: "high",
+		}
+
+		expect(shouldUseReasoningEffort({ model, settings: { enableReasoningEffort: false } })).toBe(false)
+		expect(
+			shouldUseReasoningEffort({ model, settings: { enableReasoningEffort: false, reasoningEffort: "high" } }),
+		).toBe(false)
+	})
+
+	test("array capability with a user-selected effort outside the ladder -> false", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			reasoningEffort: "high",
+		}
+
+		// The selection wins over the model default, but "medium" is not in the K3
+		// ladder, so reasoning must be omitted rather than sent as an unsupported effort.
+		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "medium" } })).toBe(false)
+		expect(
+			shouldUseReasoningEffort({
+				model,
+				settings: { enableReasoningEffort: true, reasoningEffort: "medium" },
+			}),
+		).toBe(false)
+	})
 })
