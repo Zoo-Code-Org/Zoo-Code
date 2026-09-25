@@ -81,40 +81,9 @@ describe("getModelMaxOutputTokens", () => {
 		expect(result).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS) // Should be 8192, not 64_000
 	})
 
-	test("should preserve Anthropic hybrid token handling when a model also supports binary reasoning", () => {
-		const model: ModelInfo = {
-			contextWindow: 1_000_000,
-			supportsPromptCache: true,
-			supportsReasoningBudget: true,
-			supportsReasoningBinary: true,
-			maxTokens: 128_000,
-		}
-
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-opus-4-7",
-				model,
-				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
-			}),
-		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
-
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-opus-4-7",
-				model,
-				settings: {
-					apiProvider: providerIdentifiers.anthropic,
-					enableReasoningEffort: true,
-					modelMaxTokens: 32_768,
-				},
-			}),
-		).toBe(32_768)
-	})
-
-	test("should preserve Anthropic hybrid token handling for Claude Opus 4.8", () => {
-		// 4.8 inherits the same adaptive-thinking + binary-reasoning capability as 4.7
-		// (no breaking API changes between 4.7 and 4.8 per the official migration guide).
-		const model: ModelInfo = {
+	describe("adaptive-thinking models (supportsReasoningBinary)", () => {
+		// 1M-context family: the 20% clamp (200_000) is above the 128K ceiling, so the ceiling wins.
+		const adaptiveThinkingModel: ModelInfo = {
 			contextWindow: 1_000_000,
 			supportsPromptCache: true,
 			supportsReasoningBudget: true,
@@ -123,118 +92,110 @@ describe("getModelMaxOutputTokens", () => {
 			maxTokens: 128_000,
 		}
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-opus-4-8",
-				model,
-				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
-			}),
-		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+		const adaptiveThinkingModelIds = [
+			"claude-opus-4-7",
+			"claude-opus-4-8",
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-fable-5",
+			"claude-fable-5-1",
+		] as const
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-opus-4-8",
-				model,
-				settings: {
-					apiProvider: providerIdentifiers.anthropic,
-					enableReasoningEffort: true,
-					modelMaxTokens: 32_768,
-				},
-			}),
-		).toBe(32_768)
-	})
+		test.each(adaptiveThinkingModelIds)("uses the model ceiling for %s with reasoning off", (modelId) => {
+			expect(
+				getModelMaxOutputTokens({
+					modelId,
+					model: adaptiveThinkingModel,
+					settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
+				}),
+			).toBe(128_000)
+		})
 
-	test("should preserve Anthropic hybrid token handling for Claude Fable 5", () => {
-		const model: ModelInfo = {
-			contextWindow: 1_000_000,
-			supportsPromptCache: true,
-			supportsReasoningBudget: true,
-			supportsReasoningBinary: true,
-			supportsTemperature: false,
-			maxTokens: 128_000,
-		}
+		test.each(adaptiveThinkingModelIds)("uses the model ceiling for %s with reasoning on", (modelId) => {
+			expect(
+				getModelMaxOutputTokens({
+					modelId,
+					model: adaptiveThinkingModel,
+					settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: true },
+				}),
+			).toBe(128_000)
+		})
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-fable-5",
-				model,
-				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
-			}),
-		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+		test.each(adaptiveThinkingModelIds)("honors an explicit modelMaxTokens for %s", (modelId) => {
+			for (const enableReasoningEffort of [true, false]) {
+				expect(
+					getModelMaxOutputTokens({
+						modelId,
+						model: adaptiveThinkingModel,
+						settings: {
+							apiProvider: providerIdentifiers.anthropic,
+							enableReasoningEffort,
+							modelMaxTokens: 32_768,
+						},
+					}),
+				).toBe(32_768)
+			}
+		})
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-fable-5",
-				model,
-				settings: {
-					apiProvider: providerIdentifiers.anthropic,
-					enableReasoningEffort: true,
-					modelMaxTokens: 32_768,
-				},
-			}),
-		).toBe(32_768)
-	})
+		test("caps an override at the model's own ceiling", () => {
+			expect(
+				getModelMaxOutputTokens({
+					modelId: "claude-opus-5",
+					model: adaptiveThinkingModel,
+					settings: {
+						apiProvider: providerIdentifiers.anthropic,
+						enableReasoningEffort: true,
+						modelMaxTokens: 512_000,
+					},
+				}),
+			).toBe(128_000)
+		})
 
-	test("should preserve Anthropic hybrid token handling for Claude Sonnet 5", () => {
-		const model: ModelInfo = {
-			contextWindow: 1_000_000,
-			supportsPromptCache: true,
-			supportsReasoningBudget: true,
-			supportsReasoningBinary: true,
-			supportsTemperature: false,
-			maxTokens: 128_000,
-		}
+		test("applies the 20% context-window clamp on the 200K models", () => {
+			const narrowWindowModel: ModelInfo = { ...adaptiveThinkingModel, contextWindow: 200_000 }
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-sonnet-5",
-				model,
-				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
-			}),
-		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+			expect(
+				getModelMaxOutputTokens({
+					modelId: "anthropic.claude-opus-4-7",
+					model: narrowWindowModel,
+					settings: { apiProvider: providerIdentifiers.bedrock, enableReasoningEffort: false },
+				}),
+			).toBe(40_000)
+		})
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-sonnet-5",
-				model,
-				settings: {
-					apiProvider: providerIdentifiers.anthropic,
-					enableReasoningEffort: true,
-					modelMaxTokens: 32_768,
-				},
-			}),
-		).toBe(32_768)
-	})
+		test("falls through to hybrid handling when the model declares no ceiling", () => {
+			const ceilinglessModel: ModelInfo = {
+				contextWindow: 1_000_000,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+			}
 
-	test("should preserve Anthropic hybrid token handling for Claude Opus 5", () => {
-		const model: ModelInfo = {
-			contextWindow: 1_000_000,
-			supportsPromptCache: true,
-			supportsReasoningBudget: true,
-			supportsReasoningBinary: true,
-			supportsTemperature: false,
-			maxTokens: 128_000,
-		}
+			expect(
+				getModelMaxOutputTokens({
+					modelId: "claude-opus-5",
+					model: ceilinglessModel,
+					settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
+				}),
+			).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+		})
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-opus-5",
-				model,
-				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
-			}),
-		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+		test("leaves budget-controlled hybrid models on the Anthropic default", () => {
+			const budgetReasoningModel: ModelInfo = {
+				contextWindow: 200_000,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				maxTokens: 64_000,
+			}
 
-		expect(
-			getModelMaxOutputTokens({
-				modelId: "claude-opus-5",
-				model,
-				settings: {
-					apiProvider: providerIdentifiers.anthropic,
-					enableReasoningEffort: true,
-					modelMaxTokens: 32_768,
-				},
-			}),
-		).toBe(32_768)
+			expect(
+				getModelMaxOutputTokens({
+					modelId: "claude-sonnet-4-5",
+					model: budgetReasoningModel,
+					settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
+				}),
+			).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+		})
 	})
 
 	test("should return model.maxTokens for non-Anthropic models that support reasoning budget but aren't using it", () => {

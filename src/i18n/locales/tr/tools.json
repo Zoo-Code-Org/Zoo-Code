@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo bilinmeyen bir araç kullanmaya çalıştı: \"{{toolName}}\". Yeniden deneniyor...",
 	"missingToolParameter": "Zoo, gerekli '{{paramName}}' parametresi için değer olmadan {{toolName}} kullanmaya çalıştı. Yeniden deneniyor...",
 	"missingToolParameterWithPath": "Zoo, '{{relPath}}' için gerekli '{{paramName}}' parametresi için değer olmadan {{toolName}} kullanmaya çalıştı. Yeniden deneniyor...",
+	"duplicateToolResultDropped": "İstek gönderilmeden önce '{{toolUseId}}' araç çağrısına ait {{droppedCount}} yinelenen sonuç kaldırıldı. Konuşma normal şekilde devam ediyor, ancak bu araç sonucunun kaydedilme biçiminde bir hata olduğunu gösteriyor.",
 	"codebaseSearch": {
 		"approval": "Kod tabanında '{{query}}' aranıyor..."
 	},

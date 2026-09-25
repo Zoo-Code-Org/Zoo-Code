@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo ha intentat utilitzar una eina desconeguda: \"{{toolName}}\". Reintentant...",
 	"missingToolParameter": "Zoo ha intentat utilitzar {{toolName}} sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
 	"missingToolParameterWithPath": "Zoo ha intentat utilitzar {{toolName}} per a '{{relPath}}' sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
+	"duplicateToolResultDropped": "S'han eliminat {{droppedCount}} resultat(s) duplicat(s) de la crida a l'eina '{{toolUseId}}' abans d'enviar la petició. La conversa continua amb normalitat, però això indica un error en com es va registrar el resultat de l'eina.",
 	"codebaseSearch": {
 		"approval": "Cercant '{{query}}' a la base de codi..."
 	},

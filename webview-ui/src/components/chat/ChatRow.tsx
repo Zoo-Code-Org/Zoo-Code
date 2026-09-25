@@ -1116,7 +1116,7 @@ export const ChatRowContent = ({
 											? "https://github.com/cline/cline/wiki/TroubleShooting-%E2%80%90-%22PowerShell-is-not-recognized-as-an-internal-or-external-command%22"
 											: undefined
 									}
-									errorDetails={apiReqStreamingFailedMessage}
+									errorDetails={apiReqStreamingFailedMessage || apiRequestFailedMessage}
 								/>
 							)}
 						</>
@@ -1315,9 +1315,29 @@ export const ChatRowContent = ({
 						</div>
 					)
 				case "error":
-					// Check if this is a model response error based on marker strings from backend
-					const isNoToolsUsedError = message.text === "MODEL_NO_TOOLS_USED"
-					const isNoAssistantMessagesError = message.text === "MODEL_NO_ASSISTANT_MESSAGES"
+					// Check if this is a model response error based on marker strings from backend.
+					// Markers may carry a diagnostic suffix after a newline, so match by prefix.
+					const errorText = message.text ?? ""
+					const isNoToolsUsedError = errorText.startsWith("MODEL_NO_TOOLS_USED")
+					const isNoAssistantMessagesError = errorText.startsWith("MODEL_NO_ASSISTANT_MESSAGES")
+					const isOutputTokenCapError = errorText.startsWith("MODEL_OUTPUT_TOKEN_CAP")
+					const markerDiagnostics = (marker: string) => errorText.slice(marker.length).trim() || undefined
+
+					// Checked first: the provider named the cause, so the actionable message
+					// must win over the generic "may indicate an issue with the API".
+					if (isOutputTokenCapError) {
+						return (
+							<ErrorRow
+								type="error"
+								title={t("chat:modelResponseIncomplete")}
+								message={t("chat:modelResponseErrors.outputTokenCap")}
+								errorDetails={
+									markerDiagnostics("MODEL_OUTPUT_TOKEN_CAP") ??
+									t("chat:modelResponseErrors.outputTokenCapDetails")
+								}
+							/>
+						)
+					}
 
 					if (isNoToolsUsedError) {
 						return (
@@ -1325,7 +1345,10 @@ export const ChatRowContent = ({
 								type="error"
 								title={t("chat:modelResponseIncomplete")}
 								message={t("chat:modelResponseErrors.noToolsUsed")}
-								errorDetails={t("chat:modelResponseErrors.noToolsUsedDetails")}
+								errorDetails={
+									markerDiagnostics("MODEL_NO_TOOLS_USED") ??
+									t("chat:modelResponseErrors.noToolsUsedDetails")
+								}
 							/>
 						)
 					}
@@ -1336,7 +1359,10 @@ export const ChatRowContent = ({
 								type="error"
 								title={t("chat:modelResponseIncomplete")}
 								message={t("chat:modelResponseErrors.noAssistantMessages")}
-								errorDetails={t("chat:modelResponseErrors.noAssistantMessagesDetails")}
+								errorDetails={
+									markerDiagnostics("MODEL_NO_ASSISTANT_MESSAGES") ??
+									t("chat:modelResponseErrors.noAssistantMessagesDetails")
+								}
 							/>
 						)
 					}

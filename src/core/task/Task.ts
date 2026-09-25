@@ -93,6 +93,7 @@ import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/
 import { getWorkspacePath } from "../../utils/path"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { logger } from "../../utils/logging"
 
 // prompts
 import { formatResponse } from "../prompts/responses"
@@ -135,7 +136,7 @@ import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
-import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { DuplicateToolResultIdError, mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
@@ -365,6 +366,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	apiConversationHistory: ApiMessage[] = []
 	clineMessages: ClineMessage[] = []
 
+	// Duplicate tool_result ids dropped while shaping an API request. Once a duplicate is in
+	// stored history the merge runs again on every subsequent request, so each id is reported
+	// to the user at most once per task.
+	private reportedDuplicateToolUseIds = new Set<string>()
+
 	// Ask
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
@@ -498,6 +504,59 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Native tool call streaming state (track which index each tool is at)
 	private streamingToolCallIndices: Map<string, number> = new Map()
+
+	// Per-request diagnostic record, used to explain an empty assistant response
+	private streamDiagnostics: {
+		chunkCounts: Record<string, number>
+		streamErrors: string[]
+		stopReasons: string[]
+		usage?: { inputTokens: number; outputTokens: number }
+	} = Task.emptyStreamDiagnostics()
+
+	private static emptyStreamDiagnostics(): Task["streamDiagnostics"] {
+		return { chunkCounts: {}, streamErrors: [], stopReasons: [] }
+	}
+
+	/**
+	 * Human-readable summary of what the provider stream actually delivered.
+	 *
+	 * Chunk counts alone cannot separate "the provider sent nothing" from "the provider
+	 * sent events this handler failed to map", so the stop reason and token counts ride
+	 * along: a non-zero `out` with no text chunk means content was produced and lost
+	 * downstream, whereas `out=0` means the model itself emitted nothing.
+	 */
+	private formatStreamDiagnostics(): string {
+		const { chunkCounts, streamErrors, stopReasons, usage } = this.streamDiagnostics
+		const counts = Object.entries(chunkCounts)
+			.map(([type, count]) => `${type}=${count}`)
+			.join(", ")
+		const lines = [`Stream chunks: ${counts || "none"}`]
+		if (stopReasons.length > 0) {
+			lines.push(`Stop reason: ${stopReasons.join(" | ")}`)
+		}
+		if (usage) {
+			lines.push(`Reported tokens: in=${usage.inputTokens}, out=${usage.outputTokens}`)
+		}
+		if (streamErrors.length > 0) {
+			lines.push(`Stream errors: ${streamErrors.join(" | ")}`)
+		}
+		return lines.join("\n")
+	}
+
+	/**
+	 * Whether the provider ended the turn because it hit the output-token cap.
+	 *
+	 * Unlike other empty-turn causes this is a configuration problem, not a transient
+	 * fault: the request was fully billed, so resending identical input reproduces it
+	 * while spending another output budget. Callers report it and do not retry.
+	 */
+	private reportedOutputTokenCap(): boolean {
+		return this.streamDiagnostics.stopReasons.some((reason) => {
+			// Providers spell it max_tokens, MAX_TOKENS, maxTokens or max_output_tokens.
+			const normalized = reason.toLowerCase().replace(/[^a-z]/g, "")
+			return normalized === "maxtokens" || normalized === "maxoutputtokens"
+		})
+	}
 
 	// Cached model info for current streaming session (set at start of each API request)
 	// This prevents excessive getModel() calls during tool execution
@@ -3244,6 +3303,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.presentAssistantMessageHasPendingUpdates = false
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
+				this.streamDiagnostics = Task.emptyStreamDiagnostics()
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
@@ -3308,7 +3368,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							continue
 						}
 
+						this.streamDiagnostics.chunkCounts[chunk.type] =
+							(this.streamDiagnostics.chunkCounts[chunk.type] ?? 0) + 1
+
 						switch (chunk.type) {
+							case "error":
+								// Providers can report an in-band error without throwing.
+								this.streamDiagnostics.streamErrors.push(
+									[chunk.error, chunk.message].filter(Boolean).join(": "),
+								)
+								break
+							case "stop_reason":
+								// Diagnostic only: must not make an empty turn look answered.
+								this.streamDiagnostics.stopReasons.push(chunk.reason)
+								break
 							case "reasoning": {
 								reasoningMessage += chunk.text
 								// Only apply formatting if the message contains sentence-ending punctuation followed by **
@@ -3331,6 +3404,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
+								// Read from the accumulators, so a provider that splits usage
+								// across chunks still yields the total.
+								this.streamDiagnostics.usage = { inputTokens, outputTokens }
 								break
 							case "grounding":
 								// Handle grounding sources separately from regular content
@@ -4066,7 +4142,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						// Only show error and count toward mistake limit after 2 consecutive failures
 						if (this.consecutiveNoToolUseCount >= 2) {
-							await this.say("error", "MODEL_NO_TOOLS_USED")
+							await this.say("error", `MODEL_NO_TOOLS_USED\n${this.formatStreamDiagnostics()}`)
 							// Only count toward mistake limit after second consecutive failure
 							this.consecutiveMistakeCount++
 						}
@@ -4102,10 +4178,35 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Increment consecutive no-assistant-messages counter
 					this.consecutiveNoAssistantMessagesCount++
 
+					// Diagnostic suffix so the marker is not information-free
+					const streamDiagnosticsText = this.formatStreamDiagnostics()
+
+					if (this.reportedOutputTokenCap()) {
+						// Reported on the FIRST occurrence and never retried: unlike a generic
+						// empty turn this cause is already conclusive, and a retry would resend
+						// identical input for another full output budget.
+						await this.say("error", `MODEL_OUTPUT_TOKEN_CAP\n${streamDiagnosticsText}`)
+
+						// Nothing is retried, so the user message stays; a synthetic assistant
+						// turn keeps alternation valid for a later continuation.
+						await this.addToApiConversationHistory({
+							role: "assistant",
+							content: [
+								{
+									type: "text",
+									text: "Failure: I ran out of output tokens before producing a response.",
+								},
+							],
+						})
+						this.messageCounts.assistant++
+
+						return false
+					}
+
 					// Only show error and count toward mistake limit after 2 consecutive failures
 					// This provides a "grace retry" - first failure retries silently
 					if (this.consecutiveNoAssistantMessagesCount >= 2) {
-						await this.say("error", "MODEL_NO_ASSISTANT_MESSAGES")
+						await this.say("error", `MODEL_NO_ASSISTANT_MESSAGES\n${streamDiagnosticsText}`)
 					}
 
 					// IMPORTANT: We already added the user message to
@@ -4134,7 +4235,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await this.backoffAndAnnounce(
 							currentItem.retryAttempt ?? 0,
 							new Error(
-								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
+								`Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.\n${streamDiagnosticsText}`,
 							),
 						)
 
@@ -4192,7 +4293,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							await this.say(
 								"error",
-								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
+								`Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.\n${streamDiagnosticsText}`,
 							)
 
 							// Synthetic assistant message recording the failure -- increment
@@ -4210,12 +4311,42 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// If we reach here without continuing, return false (will always be false for now)
 				return false
 			} catch (error) {
-				// This should never happen since the only thing that can throw an
-				// error is the attemptApiRequest, which is wrapped in a try catch
-				// that sends an ask where if noButtonClicked, will clear current
-				// task and destroy this instance. However to avoid unhandled
-				// promise rejection, we will end this loop which will end execution
-				// of this instance (see `startTask`).
+				// Reaching here ends the task. The error used to be discarded on the
+				// assumption it could not happen, which made a failure indistinguishable
+				// from a task that simply stopped.
+				const wasIntentional = this.abort || this.abandoned
+
+				if (!wasIntentional) {
+					const rawErrorMessage =
+						error instanceof Error
+							? (error.stack ?? error.message)
+							: JSON.stringify(serializeError(error), null, 2)
+
+					logger.error("Task request loop terminated by an unhandled error", {
+						ctx: "task",
+						taskId: this.taskId,
+						// Explicit strings: an Error serializes to {} in JSON transports.
+						errorMessage: error instanceof Error ? error.message : String(error),
+						...(error instanceof Error && error.stack ? { errorStack: error.stack } : {}),
+						streamDiagnostics: this.formatStreamDiagnostics(),
+					})
+					console.error(
+						`[Task#${this.taskId}.${this.instanceId}] Request loop terminated by an unhandled error: ${rawErrorMessage}`,
+					)
+
+					try {
+						await this.say(
+							"error",
+							`The task stopped because of an unexpected error. ${rawErrorMessage}\n${this.formatStreamDiagnostics()}`,
+						)
+					} catch (sayError) {
+						console.error(
+							`[Task#${this.taskId}.${this.instanceId}] Failed to report the terminating error:`,
+							sayError,
+						)
+					}
+				}
+
 				return true // Needs to be true so parent loop knows to end task.
 			}
 		}
@@ -4808,7 +4939,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const messagesSinceLastSummary = getMessagesSinceLastSummary(effectiveHistory)
 		// For API only: merge consecutive user messages (excludes summary messages per
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
-		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
+		const { messages: mergedForApi, droppedDuplicateToolUseIds } = mergeConsecutiveApiMessages(
+			messagesSinceLastSummary,
+			{ roles: ["user"] },
+		)
+		await this.reportDroppedDuplicateToolResults(droppedDuplicateToolUseIds)
 		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
 		const cleanConversationHistory = this.buildCleanConversationHistory(
 			messagesWithoutImages as ApiMessage[],
@@ -5083,6 +5218,55 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public async checkpointSave(force: boolean = false, suppressMessage: boolean = false) {
 		return checkpointSave(this, force, suppressMessage)
+	}
+
+	/**
+	 * Surfaces duplicate `tool_result` blocks that were dropped while shaping the API request.
+	 *
+	 * The drop keeps the request legal (providers reject a message carrying the same tool result
+	 * id twice), but it hides a real bug in how pending tool results are written to history, so
+	 * it is reported both to the user and to telemetry. The merge re-runs on every subsequent
+	 * request over the same history, so each `tool_use_id` is only reported once per task.
+	 */
+	private async reportDroppedDuplicateToolResults(droppedDuplicateToolUseIds: string[]) {
+		if (droppedDuplicateToolUseIds.length === 0) {
+			return
+		}
+
+		const unreported = droppedDuplicateToolUseIds.filter((id) => !this.reportedDuplicateToolUseIds.has(id))
+
+		if (unreported.length === 0) {
+			return
+		}
+
+		const dropCountsByToolUseId = new Map<string, number>()
+
+		for (const toolUseId of unreported) {
+			this.reportedDuplicateToolUseIds.add(toolUseId)
+			dropCountsByToolUseId.set(toolUseId, (dropCountsByToolUseId.get(toolUseId) ?? 0) + 1)
+		}
+
+		if (TelemetryService.hasInstance()) {
+			TelemetryService.instance.captureException(
+				new DuplicateToolResultIdError(
+					`Dropped duplicate tool_result blocks while merging consecutive user messages. Duplicate tool_use IDs: [${[
+						...dropCountsByToolUseId.keys(),
+					].join(", ")}]`,
+					[...dropCountsByToolUseId.keys()],
+				),
+				{
+					taskId: this.taskId,
+					duplicateToolUseIds: [...dropCountsByToolUseId.keys()],
+					droppedCount: unreported.length,
+				},
+			)
+		}
+
+		for (const [toolUseId, droppedCount] of dropCountsByToolUseId) {
+			// Deliberately not named `count`: that is an i18next pluralization keyword and would
+			// make the lookup depend on `_one`/`_other` suffixed keys.
+			await this.say("error", t("tools:duplicateToolResultDropped", { toolUseId, droppedCount }))
+		}
 	}
 
 	private buildCleanConversationHistory(

@@ -324,7 +324,9 @@
 		"noToolsUsed": "The model failed to use any tools in its response. This typically happens when the model provides only text/reasoning without calling the required tools to complete the task.",
 		"noToolsUsedDetails": "The model provided text/reasoning but did not call any of the required tools. This usually indicates the model misunderstood the task or is having difficulty determining which tool to use. The model has been automatically prompted to retry with proper tool usage.",
 		"noAssistantMessages": "The model did not provide any response content. This may indicate an issue with the API or the model's output.",
-		"noAssistantMessagesDetails": "The language model returned an empty response without any text or tool calls. This can happen due to API issues, rate limiting, or model-specific problems. The model has been automatically prompted to retry."
+		"noAssistantMessagesDetails": "The language model returned an empty response without any text or tool calls. This can happen due to API issues, rate limiting, or model-specific problems. The model has been automatically prompted to retry.",
+		"outputTokenCap": "The model hit its output token limit before producing any response. Raise \"Max output tokens\" in the provider settings, or lower the reasoning effort, then try again.",
+		"outputTokenCapDetails": "The provider ended the turn with a max_tokens stop reason and no text or tool calls, which means the entire output budget was spent on reasoning. This was not retried automatically, since resending the same request would fail the same way and be billed again."
 	},
 	"errorDetails": {
 		"link": "Details",

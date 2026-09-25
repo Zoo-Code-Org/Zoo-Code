@@ -153,17 +153,30 @@ interface ContentBlockDeltaEvent {
 	contentBlockIndex?: number
 }
 
+// In-band exception events delivered as ordinary members of ConverseStreamOutput.
+export interface BedrockStreamException {
+	message?: string
+	originalStatusCode?: number
+}
+
 // Define types for stream events based on AWS SDK
 export interface StreamEvent {
 	messageStart?: {
 		role?: string
 	}
 	messageStop?: {
-		stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence"
+		// Widened: the SDK enum also carries guardrail_intervened, content_filtered and more, and the service may add others.
+		stopReason?: string
 		additionalModelResponseFields?: Record<string, unknown>
 	}
 	contentBlockStart?: ContentBlockStartEvent
 	contentBlockDelta?: ContentBlockDeltaEvent
+	// Exception events that arrive in-band rather than being thrown
+	internalServerException?: BedrockStreamException
+	modelStreamErrorException?: BedrockStreamException
+	validationException?: BedrockStreamException
+	throttlingException?: BedrockStreamException
+	serviceUnavailableException?: BedrockStreamException
 	metadata?: {
 		usage?: {
 			inputTokens: number
@@ -198,6 +211,14 @@ export interface StreamEvent {
 }
 
 // Type for usage information in stream events
+export const BEDROCK_STREAM_EXCEPTION_KEYS = [
+	"validationException",
+	"modelStreamErrorException",
+	"internalServerException",
+	"serviceUnavailableException",
+	"throttlingException",
+] as const satisfies readonly (keyof StreamEvent)[]
+
 export type UsageType = {
 	inputTokens?: number
 	outputTokens?: number
@@ -615,6 +636,20 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 					continue
 				}
 
+				// Handled before anything else: these arrive as ordinary stream events and would
+				// otherwise match no branch, producing a silently empty response.
+				const inBandException = BEDROCK_STREAM_EXCEPTION_KEYS.find((key) => streamEvent[key])
+				if (inBandException) {
+					const details = streamEvent[inBandException] as BedrockStreamException
+					const message = details?.message?.trim() || "No message provided by the provider."
+					const streamError: Error & { status?: number } = new Error(`${inBandException}: ${message}`)
+					streamError.name = inBandException
+					if (typeof details?.originalStatusCode === "number") {
+						streamError.status = details.originalStatusCode
+					}
+					throw streamError
+				}
+
 				// Handle metadata events first
 				if (streamEvent.metadata?.usage) {
 					const usage = (streamEvent.metadata?.usage || {}) as UsageType
@@ -784,6 +819,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				}
 				// Handle message stop
 				if (streamEvent.messageStop) {
+					if (streamEvent.messageStop.stopReason) {
+						yield {
+							type: "stop_reason",
+							reason: streamEvent.messageStop.stopReason,
+						}
+					}
 					continue
 				}
 			}

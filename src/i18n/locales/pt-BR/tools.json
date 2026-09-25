@@ -10,6 +10,7 @@
 	"unknownToolError": "Zoo tentou usar uma ferramenta desconhecida: \"{{toolName}}\". Tentando novamente...",
 	"missingToolParameter": "Zoo tentou usar {{toolName}} sem valor para o parâmetro obrigatório '{{paramName}}'. Tentando novamente...",
 	"missingToolParameterWithPath": "Zoo tentou usar {{toolName}} para '{{relPath}}' sem valor para o parâmetro obrigatório '{{paramName}}'. Tentando novamente...",
+	"duplicateToolResultDropped": "Foram removidos {{droppedCount}} resultados duplicados da chamada da ferramenta '{{toolUseId}}' antes de enviar a requisição. A conversa continua normalmente, mas isso indica um bug na forma como o resultado da ferramenta foi registrado.",
 	"codebaseSearch": {
 		"approval": "Pesquisando '{{query}}' na base de código..."
 	},

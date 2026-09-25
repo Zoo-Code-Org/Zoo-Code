@@ -732,5 +732,80 @@ describe("ThinkingBudget", () => {
 			expect(screen.queryByTestId("max-output-tokens")).not.toBeInTheDocument()
 			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
 		})
+
+		// Adaptive-thinking Claude models set BOTH binary reasoning and reasoning budget.
+		const adaptiveThinkingModelInfo: ModelInfo = {
+			supportsMaxTokens: true,
+			supportsReasoningBinary: true,
+			supportsReasoningBudget: true,
+			supportsTemperature: false,
+			maxTokens: 128_000,
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+		}
+
+		const adaptiveThinkingApiConfiguration = {
+			apiProvider: providerIdentifiers.bedrock,
+			apiModelId: "anthropic.claude-opus-5",
+		} as const
+
+		it("should render the max output slider for a binary-reasoning model that supports max tokens", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={adaptiveThinkingApiConfiguration}
+					modelInfo={adaptiveThinkingModelInfo}
+				/>,
+			)
+
+			expect(screen.getByTestId("max-output-tokens")).toBeInTheDocument()
+			expect(screen.getByRole("checkbox")).toBeInTheDocument()
+			// The budget slider must NOT appear: this API rejects budget_tokens.
+			expect(screen.queryByTestId("reasoning-budget")).not.toBeInTheDocument()
+		})
+
+		it("should not render the max output slider for a binary-reasoning model without supportsMaxTokens", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={adaptiveThinkingApiConfiguration}
+					modelInfo={{ ...adaptiveThinkingModelInfo, supportsMaxTokens: undefined }}
+				/>,
+			)
+
+			expect(screen.queryByTestId("max-output-tokens")).not.toBeInTheDocument()
+			expect(screen.getByRole("checkbox")).toBeInTheDocument()
+		})
+
+		it("should persist a slider edit for a binary-reasoning model", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					setApiConfigurationField={setApiConfigurationField}
+					apiConfiguration={adaptiveThinkingApiConfiguration}
+					modelInfo={adaptiveThinkingModelInfo}
+				/>,
+			)
+
+			const slider = screen.getByTestId("max-output-tokens").querySelector("input[type='range']")!
+			fireEvent.change(slider, { target: { value: "65536" } })
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", 65536)
+		})
+
+		it("should default the binary-reasoning slider to the resolved output budget", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={adaptiveThinkingApiConfiguration}
+					modelInfo={adaptiveThinkingModelInfo}
+				/>,
+			)
+
+			// min(128_000, 20% of 1M) = 128_000 — the same value the runtime sends.
+			const slider = screen.getByTestId("max-output-tokens").querySelector("input[type='range']")!
+			expect(slider).toHaveValue("128000")
+		})
 	})
 })

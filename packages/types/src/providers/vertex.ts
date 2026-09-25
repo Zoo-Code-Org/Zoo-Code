@@ -382,7 +382,7 @@ export const vertexModels = {
 		],
 	},
 	"claude-sonnet-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -392,6 +392,7 @@ export const vertexModels = {
 		cacheReadsPrice: 0.2, // $0.20 per million tokens (introductory pricing through Aug 31, 2026)
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
@@ -429,7 +430,7 @@ export const vertexModels = {
 		],
 	},
 	"claude-opus-4-7": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -439,6 +440,7 @@ export const vertexModels = {
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
 		tiers: [
@@ -452,7 +454,7 @@ export const vertexModels = {
 		],
 	},
 	"claude-opus-4-8": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -462,6 +464,7 @@ export const vertexModels = {
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		// 4.8 inherits the same Vertex pricing structure as 4.7 — no breaking changes.
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
@@ -476,7 +479,7 @@ export const vertexModels = {
 		],
 	},
 	"claude-opus-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -486,6 +489,7 @@ export const vertexModels = {
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
@@ -515,12 +519,13 @@ export const vertexModels = {
 		cacheReadsPrice: 0.25,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		description:
 			"Claude Fable 5.1 extends Fable 5 with stronger long-running agentic coding, multistep research, and document work.",
 	},
 	"claude-fable-5": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -530,6 +535,7 @@ export const vertexModels = {
 		cacheReadsPrice: 1.0,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsMaxTokens: true,
 		supportsTemperature: false,
 		description:
 			"Claude Fable 5 is Anthropic's most capable widely released model for the most demanding reasoning and long-horizon agentic work.",

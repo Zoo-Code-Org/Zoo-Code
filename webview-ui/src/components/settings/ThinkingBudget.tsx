@@ -74,7 +74,10 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	// Models that advertise a user-configurable max output budget (e.g. Z.ai GLM) but do not
 	// use the reasoning-budget slider. The reasoning-budget branch already renders its own
 	// max-tokens control, so only surface this standalone slider when that branch is inactive.
-	const isMaxTokensConfigurable = !!modelInfo && modelInfo.supportsMaxTokens && !isReasoningBudgetSupported
+	// Binary-reasoning models are exempt: they render the on/off toggle and never reach that
+	// branch, so there is no duplicate control to avoid.
+	const isMaxTokensConfigurable =
+		!!modelInfo && modelInfo.supportsMaxTokens && (!isReasoningBudgetSupported || isReasoningSupported)
 
 	// "disable" turns off reasoning entirely; "none" is a valid reasoning level.
 	// Both display as "None" in the UI but behave differently.

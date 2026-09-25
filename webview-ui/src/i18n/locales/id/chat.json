@@ -333,7 +333,9 @@
 		"noToolsUsed": "Model gagal menggunakan alat apa pun dalam responsnya. Ini biasanya terjadi ketika model hanya memberikan teks/penalaran tanpa memanggil alat yang diperlukan untuk menyelesaikan tugas.",
 		"noToolsUsedDetails": "Model memberikan teks/penalaran tetapi tidak memanggil alat yang diperlukan. Ini biasanya menunjukkan bahwa model salah memahami tugas atau mengalami kesulitan menentukan alat mana yang akan digunakan. Model telah secara otomatis diminta untuk mencoba lagi dengan penggunaan alat yang tepat.",
 		"noAssistantMessages": "Model tidak memberikan konten respons apa pun. Ini mungkin menunjukkan masalah dengan API atau output model.",
-		"noAssistantMessagesDetails": "Model bahasa mengembalikan respons kosong tanpa teks atau panggilan alat apa pun. Ini dapat terjadi karena masalah API, pembatasan laju, atau masalah khusus model. Model telah secara otomatis diminta untuk mencoba lagi."
+		"noAssistantMessagesDetails": "Model bahasa mengembalikan respons kosong tanpa teks atau panggilan alat apa pun. Ini dapat terjadi karena masalah API, pembatasan laju, atau masalah khusus model. Model telah secara otomatis diminta untuk mencoba lagi.",
+		"outputTokenCap": "Model mencapai batas token outputnya sebelum menghasilkan respons apa pun. Naikkan \"Token output maksimum\" di pengaturan provider, atau turunkan tingkat reasoning, lalu coba lagi.",
+		"outputTokenCapDetails": "Provider mengakhiri giliran dengan alasan berhenti max_tokens tanpa teks atau panggilan alat, artinya seluruh anggaran output habis untuk reasoning. Ini tidak dicoba ulang secara otomatis, karena mengirim permintaan yang sama akan gagal dengan cara yang sama dan ditagih lagi."
 	},
 	"diffError": {
 		"title": "Edit Tidak Berhasil"
