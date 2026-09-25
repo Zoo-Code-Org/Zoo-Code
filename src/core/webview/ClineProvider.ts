@@ -99,8 +99,9 @@ import { SkillsManager } from "../../services/skills/SkillsManager"
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
-import { getWorkspacePath } from "../../utils/path"
+import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
+import { getTaskDirectoryPath } from "../../utils/storage"
 
 import { setPanel } from "../../activate/registerCommands"
 
@@ -2305,10 +2306,101 @@ export class ClineProvider
 		if (id !== this.getCurrentTask()?.taskId) {
 			// Non-current task.
 			const { historyItem } = await this.getTaskWithId(id)
-			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+			const preparedHistoryItem = await this.prepareHistoryItemForResume(historyItem)
+			if (!preparedHistoryItem) {
+				return
+			}
+			await this.createTaskWithHistoryItem(preparedHistoryItem) // Clears existing task.
 		}
 
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+	}
+
+	public async prepareHistoryItemForResume<T extends HistoryItem>(historyItem: T): Promise<T | undefined> {
+		const currentWorkspace = this.cwd
+		const originalWorkspace = historyItem.workspace
+
+		if (!currentWorkspace || !originalWorkspace || arePathsEqual(currentWorkspace, originalWorkspace)) {
+			return historyItem
+		}
+
+		const useCurrentWorkspace = { title: "Use Current Workspace" }
+		const openOriginalWorkspace = { title: "Open Original Workspace" }
+		const selection = await vscode.window.showWarningMessage(
+			`This conversation was created in "${originalWorkspace}", but the current workspace is "${currentWorkspace}". ` +
+				"Choose where to continue. Using the current workspace resets checkpoints created in the original workspace.",
+			{ modal: true },
+			useCurrentWorkspace,
+			openOriginalWorkspace,
+		)
+
+		if (selection?.title === openOriginalWorkspace.title) {
+			await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(originalWorkspace), {
+				forceNewWindow: true,
+			})
+			return undefined
+		}
+
+		if (selection?.title !== useCurrentWorkspace.title) {
+			return undefined
+		}
+
+		const updatedHistoryItem = { ...historyItem, workspace: currentWorkspace }
+		await this.resetTaskCheckpointsForWorkspaceChange(historyItem, updatedHistoryItem)
+		return updatedHistoryItem
+	}
+
+	private async resetTaskCheckpointsForWorkspaceChange(
+		originalHistoryItem: HistoryItem,
+		updatedHistoryItem: HistoryItem,
+	): Promise<void> {
+		const taskId = originalHistoryItem.id
+		const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+		const messages = await readTaskMessages({ taskId, globalStoragePath })
+		const messagesWithoutCheckpoints = messages.filter(
+			(message) => !(message.type === "say" && message.say === "checkpoint_saved"),
+		)
+		const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
+		const checkpointsDir = path.join(taskDir, "checkpoints")
+		const checkpointBackupDir = path.join(taskDir, `checkpoints.workspace-change-${crypto.randomUUID()}`)
+		let checkpointDirectoryStaged = false
+
+		try {
+			await fs.rename(checkpointsDir, checkpointBackupDir)
+			checkpointDirectoryStaged = true
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+				throw error
+			}
+		}
+
+		try {
+			if (messagesWithoutCheckpoints.length !== messages.length) {
+				await saveTaskMessages({ messages: messagesWithoutCheckpoints, taskId, globalStoragePath })
+			}
+			await this.updateTaskHistory(updatedHistoryItem)
+		} catch (error) {
+			if (messagesWithoutCheckpoints.length !== messages.length) {
+				await saveTaskMessages({ messages, taskId, globalStoragePath })
+			}
+			if (checkpointDirectoryStaged) {
+				await fs.rename(checkpointBackupDir, checkpointsDir)
+			}
+			if (this.taskHistoryStore.get(taskId)?.workspace === updatedHistoryItem.workspace) {
+				await this.updateTaskHistory(originalHistoryItem)
+			}
+			throw error
+		}
+
+		if (checkpointDirectoryStaged) {
+			try {
+				await fs.rm(checkpointBackupDir, { recursive: true, force: true })
+			} catch (error) {
+				this.log(
+					`[resetTaskCheckpointsForWorkspaceChange] Failed to remove checkpoint backup for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
 	}
 
 	async exportTaskWithId(id: string) {
