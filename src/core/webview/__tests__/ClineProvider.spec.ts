@@ -561,6 +561,15 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test("exposes only the explicitly associated workspace without a fallback", () => {
+		provider["currentWorkspacePath"] = "/workspace-a"
+		expect(provider.workspacePath).toBe("/workspace-a")
+		provider["currentWorkspacePath"] = "/workspace-b"
+		expect(provider.workspacePath).toBe("/workspace-b")
+		provider["currentWorkspacePath"] = undefined
+		expect(provider.workspacePath).toBeUndefined()
+	})
+
 	test("constructor initializes correctly", () => {
 		expect(provider).toBeInstanceOf(ClineProvider)
 		// Since getVisibleInstance returns the last instance where view.visible is true
