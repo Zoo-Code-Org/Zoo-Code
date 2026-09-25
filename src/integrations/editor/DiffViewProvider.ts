@@ -18,6 +18,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1136,6 +1137,10 @@ export class DiffViewProvider {
 	 * @param relPath - Relative path to the file
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
+	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
+	 *   Defaults to "create" because this method always publishes a complete file
+	 *   content: an unobserved target may only be created when absent, and an
+	 *   observed target must still carry the version token recorded at read time.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1144,6 +1149,7 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		writeKind: GuardedWriteKind = "create",
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1154,9 +1160,19 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Publish through the S4 guarded-write API (epic #1375): an unobserved
+		// write to an existing file and a stale observed version are rejected
+		// with a re-read-then-retry remediation instead of overwriting the file.
+		// Concurrent in-process writes to the same path are already ordered by
+		// the guard's per-path FIFO chain, so no additional locking is added here.
+		const task = this.taskRef.deref()
+		if (!task) {
+			// Fail closed: without the owning task the observation registry is
+			// unreachable and the write cannot be guarded.
+			throw new Error("Cannot guard the write: the owning task is no longer available")
+		}
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await guardedWrite(task, relPath, content, writeKind)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
