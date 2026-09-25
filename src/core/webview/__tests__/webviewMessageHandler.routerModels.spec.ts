@@ -635,4 +635,109 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(call).toBeTruthy()
 		expect(call[0].routerModels.moonshot).toEqual({})
 	})
+
+	it("skips Unbound during aggregate refresh when Unbound is not the active provider", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				unboundApiKey: "stored-unbound-key",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.unbound }),
+		)
+		// Other providers are still refreshed.
+		expect(getModelsMock).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.unbound).toEqual({})
+	})
+
+	it("fetches Unbound models during aggregate refresh when Unbound is the active provider", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
+				unboundApiKey: "stored-unbound-key",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.unbound
+				? { "unbound/model": { contextWindow: 8192, supportsPromptCache: false } }
+				: {},
+		)
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.unbound,
+			apiKey: "stored-unbound-key",
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.unbound).toEqual({
+			"unbound/model": { contextWindow: 8192, supportsPromptCache: false },
+		})
+	})
+
+	it("fetches Unbound models for a provider-scoped request even when Unbound is not active", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+		})
+
+		const unboundModels = { "unbound/model": { contextWindow: 8192, supportsPromptCache: false } }
+		getModelsMock.mockResolvedValue(unboundModels)
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.unbound, unboundApiKey: "preview-unbound-key" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledTimes(1)
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.unbound,
+			apiKey: "preview-unbound-key",
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels).toEqual({ [providerIdentifiers.unbound]: unboundModels })
+	})
+
+	it("prefers an unsaved Unbound API key when Unbound is the active provider", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
+				unboundApiKey: "stored-unbound-key",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { unboundApiKey: "preview-unbound-key" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.unbound,
+			apiKey: "preview-unbound-key",
+		})
+	})
 })

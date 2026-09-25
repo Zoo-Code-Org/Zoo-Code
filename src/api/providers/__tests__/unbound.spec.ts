@@ -1,9 +1,20 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import type { Mock } from "vitest"
+
+import axios from "axios"
+
 import { UnboundHandler } from "../unbound"
+import { getUnboundModels } from "../fetchers/unbound"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+
+vi.mock("axios")
+
+const mockedAxios = axios as typeof axios & {
+	get: Mock
+}
 
 vi.mock("openai", () => {
 	const createMock = vi.fn()
@@ -200,5 +211,75 @@ describe("UnboundHandler", () => {
 				messages: [{ role: "system", content: "Write a haiku" }],
 			}),
 		)
+	})
+})
+
+describe("getUnboundModels", () => {
+	beforeEach(() => {
+		clearAllMocks()
+	})
+
+	it.each([{ data: null }, { data: undefined }, { data: { error: "Invalid request" } }])(
+		"returns no models when the API response is not an array: %j",
+		async (mockResponse) => {
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockedAxios.get.mockResolvedValue(mockResponse)
+
+			const models = await getUnboundModels("test-key")
+
+			expect(models).toEqual({})
+			expect(consoleError).toHaveBeenCalledWith(
+				"[getUnboundModels] Unexpected response format:",
+				mockResponse.data,
+			)
+		},
+	)
+
+	it("returns no models when the Axios response has no data payload at all", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Axios resolves with a bare object when the response carries no body.
+		mockedAxios.get.mockResolvedValue({})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models).toEqual({})
+		expect(consoleError).toHaveBeenCalledWith("[getUnboundModels] Unexpected response format:", undefined)
+	})
+
+	it("returns mapped models when the API responds with an array", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockedAxios.get.mockResolvedValue({
+			data: [
+				{
+					id: "openai/gpt-4o",
+					max_output_tokens: 4096,
+					context_window: 128000,
+					supports_caching: true,
+					supports_vision: true,
+					input_price: 0.0000025,
+					output_price: 0.00001,
+					description: "GPT-4o",
+					caching_price: 0.0000005,
+					cached_price: 0.000001,
+				},
+			],
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models).toEqual({
+			"openai/gpt-4o": {
+				maxTokens: 4096,
+				contextWindow: 128000,
+				supportsPromptCache: true,
+				supportsImages: true,
+				inputPrice: 2.5,
+				outputPrice: 10,
+				description: "GPT-4o",
+				cacheWritesPrice: 0.5,
+				cacheReadsPrice: 1,
+			},
+		})
+		expect(consoleError).not.toHaveBeenCalled()
 	})
 })
