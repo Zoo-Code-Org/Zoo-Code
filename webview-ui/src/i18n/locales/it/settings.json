@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Ripristina valori predefiniti"
 		},
+		"customModelInfo": {
+			"title": "Metadati modello personalizzato",
+			"description": "Sostituisci i metadati di contesto e capacità quando il provider non riesce a rilevare correttamente il tuo modello.",
+			"unresolved": "Questo modello non è presente nel catalogo del provider. I valori riportati di seguito partono da impostazioni predefinite sicure — modificali in base al modello.",
+			"maxTokens": {
+				"description": "Numero massimo di token che il modello può generare in una singola risposta."
+			},
+			"maxTokensWarning": "I token di output massimi superano la dimensione finestra di contesto"
+		},
 		"rateLimitSeconds": {
 			"label": "Limite di frequenza",
 			"description": "Tempo minimo tra le richieste API."

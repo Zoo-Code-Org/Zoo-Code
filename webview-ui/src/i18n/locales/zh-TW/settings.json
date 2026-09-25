@@ -679,6 +679,15 @@
 			},
 			"resetDefaults": "重設為預設值"
 		},
+		"customModelInfo": {
+			"title": "自訂模型中繼資料",
+			"description": "當提供者無法準確偵測您的模型時，可覆寫上下文與功能中繼資料。",
+			"unresolved": "此模型不在提供者目錄中。以下數值以安全的預設值為起點 — 請調整這些數值以符合該模型。",
+			"maxTokens": {
+				"description": "模型在單一回應中可產生的最大 Token 數量。"
+			},
+			"maxTokensWarning": "最大輸出 Token 超過上下文視窗大小"
+		},
 		"rateLimitSeconds": {
 			"label": "速率限制",
 			"description": "API 請求間的最短時間"

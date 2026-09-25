@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Restablir als valors per defecte"
 		},
+		"customModelInfo": {
+			"title": "Metadades del model personalitzat",
+			"description": "Sobreescriviu les metadades de context i capacitats quan el proveïdor no pugui detectar el vostre model amb precisió.",
+			"unresolved": "Aquest model no és al catàleg del proveïdor. Els valors següents parteixen de valors predeterminats segurs — ajusteu-los perquè coincideixin amb el model.",
+			"maxTokens": {
+				"description": "Nombre màxim de tokens que el model pot generar en una sola resposta."
+			},
+			"maxTokensWarning": "El màxim de tokens de sortida supera la mida de la finestra de context"
+		},
 		"rateLimitSeconds": {
 			"label": "Límit de freqüència",
 			"description": "Temps mínim entre sol·licituds d'API."

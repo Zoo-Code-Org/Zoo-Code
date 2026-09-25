@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Restaurar Padrões"
 		},
+		"customModelInfo": {
+			"title": "Metadados personalizados do modelo",
+			"description": "Substitua os metadados de contexto e capacidades quando o provedor não conseguir detectar seu modelo com precisão.",
+			"unresolved": "Este modelo não está no catálogo do provedor. Os valores abaixo partem de padrões seguros — ajuste-os para corresponder ao modelo.",
+			"maxTokens": {
+				"description": "Número máximo de tokens que o modelo pode gerar em uma resposta."
+			},
+			"maxTokensWarning": "O Máximo de Tokens de Saída excede o Tamanho da Janela de Contexto"
+		},
 		"rateLimitSeconds": {
 			"label": "Limite de taxa",
 			"description": "Tempo mínimo entre requisições de API."

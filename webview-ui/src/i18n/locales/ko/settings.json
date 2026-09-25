@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "기본값으로 재설정"
 		},
+		"customModelInfo": {
+			"title": "사용자 정의 모델 메타데이터",
+			"description": "공급자가 모델을 정확하게 감지할 수 없는 경우 컨텍스트 및 기능 메타데이터를 재정의하세요.",
+			"unresolved": "이 모델은 공급자 카탈로그에 없습니다. 아래 값은 안전한 기본값에서 시작합니다 — 모델에 맞게 조정하세요.",
+			"maxTokens": {
+				"description": "모델이 한 번의 응답에서 생성할 수 있는 최대 토큰 수입니다."
+			},
+			"maxTokensWarning": "최대 출력 토큰이 컨텍스트 창 크기를 초과합니다"
+		},
 		"rateLimitSeconds": {
 			"label": "속도 제한",
 			"description": "API 요청 간 최소 시간."

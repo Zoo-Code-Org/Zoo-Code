@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Réinitialiser les valeurs par défaut"
 		},
+		"customModelInfo": {
+			"title": "Métadonnées de modèle personnalisées",
+			"description": "Remplacez les métadonnées de contexte et de capacités lorsque le fournisseur ne peut pas détecter votre modèle avec précision.",
+			"unresolved": "Ce modèle ne figure pas dans le catalogue du fournisseur. Les valeurs ci-dessous partent de valeurs par défaut sûres — ajustez-les pour correspondre au modèle.",
+			"maxTokens": {
+				"description": "Nombre maximum de tokens que le modèle peut générer dans une seule réponse."
+			},
+			"maxTokensWarning": "Les tokens de sortie maximum dépassent la taille de la fenêtre de contexte"
+		},
 		"rateLimitSeconds": {
 			"label": "Limite de débit",
 			"description": "Temps minimum entre les requêtes API."

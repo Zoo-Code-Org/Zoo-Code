@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Standaardwaarden herstellen"
 		},
+		"customModelInfo": {
+			"title": "Aangepaste modelmetadata",
+			"description": "Overschrijf de context- en mogelijkhedenmetadata wanneer de provider je model niet nauwkeurig kan detecteren.",
+			"unresolved": "Dit model staat niet in de providercatalogus. De onderstaande waarden beginnen bij veilige standaardwaarden — pas ze aan zodat ze overeenkomen met het model.",
+			"maxTokens": {
+				"description": "Maximaal aantal tokens dat het model in één reactie kan genereren."
+			},
+			"maxTokensWarning": "Maximaal aantal outputtokens overschrijdt de Contextvenstergrootte"
+		},
 		"rateLimitSeconds": {
 			"label": "Snelheidslimiet",
 			"description": "Minimale tijd tussen API-verzoeken."

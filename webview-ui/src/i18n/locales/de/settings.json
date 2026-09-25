@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Auf Standardwerte zurücksetzen"
 		},
+		"customModelInfo": {
+			"title": "Benutzerdefinierte Modell-Metadaten",
+			"description": "Überschreibe die Kontext- und Fähigkeits-Metadaten, wenn der Anbieter dein Modell nicht korrekt erkennen kann.",
+			"unresolved": "Dieses Modell ist nicht im Anbieterkatalog enthalten. Die Werte unten beginnen mit sicheren Standardwerten – passe sie an das Modell an.",
+			"maxTokens": {
+				"description": "Maximale Anzahl an Tokens, die das Modell in einer Antwort generieren kann."
+			},
+			"maxTokensWarning": "Maximale Ausgabe-Tokens überschreiten die Kontextfenstergröße"
+		},
 		"rateLimitSeconds": {
 			"label": "Ratenbegrenzung",
 			"description": "Minimale Zeit zwischen API-Anfragen."

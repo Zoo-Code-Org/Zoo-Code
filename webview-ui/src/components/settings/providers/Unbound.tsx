@@ -3,6 +3,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
 	type ProviderSettings,
+	type ModelInfo,
 	type OrganizationAllowList,
 	type RouterModels,
 	unboundDefaultModelId,
@@ -16,11 +17,13 @@ import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
 import { ModelPicker } from "../ModelPicker"
+import { CustomModelInfoSettings } from "../CustomModelInfoSettings"
 
 type UnboundProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 	routerModels?: RouterModels
+	selectedModelInfo?: ModelInfo
 	refetchRouterModels: () => void
 	organizationAllowList: OrganizationAllowList
 	modelValidationError?: string
@@ -34,6 +37,7 @@ export const Unbound = ({
 	organizationAllowList,
 	modelValidationError,
 	simplifySettings,
+	selectedModelInfo,
 }: UnboundProps) => {
 	const { t } = useAppTranslation()
 
@@ -100,6 +104,11 @@ export const Unbound = ({
 				organizationAllowList={organizationAllowList}
 				errorMessage={modelValidationError}
 				simplifySettings={simplifySettings}
+			/>
+			<CustomModelInfoSettings
+				apiConfiguration={apiConfiguration}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={selectedModelInfo}
 			/>
 		</>
 	)

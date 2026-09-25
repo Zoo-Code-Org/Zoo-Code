@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Reset ke Default"
 		},
+		"customModelInfo": {
+			"title": "Metadata Model Kustom",
+			"description": "Timpa metadata konteks dan kemampuan ketika penyedia tidak dapat mendeteksi model Anda secara akurat.",
+			"unresolved": "Model ini tidak ada dalam katalog penyedia. Nilai di bawah ini dimulai dari default yang aman — sesuaikan agar cocok dengan model.",
+			"maxTokens": {
+				"description": "Jumlah maksimum token yang dapat dihasilkan model dalam satu respons."
+			},
+			"maxTokensWarning": "Token Output Maksimum melebihi Ukuran Context Window"
+		},
 		"rateLimitSeconds": {
 			"label": "Rate limit",
 			"description": "Waktu minimum antara permintaan API."

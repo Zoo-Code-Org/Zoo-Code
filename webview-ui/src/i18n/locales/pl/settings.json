@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Przywróć domyślne"
 		},
+		"customModelInfo": {
+			"title": "Metadane modelu niestandardowego",
+			"description": "Zastąp metadane kontekstu i możliwości, gdy dostawca nie może dokładnie rozpoznać Twojego modelu.",
+			"unresolved": "Tego modelu nie ma w katalogu dostawcy. Poniższe wartości wynikają z bezpiecznych ustawień domyślnych — dostosuj je do swojego modelu.",
+			"maxTokens": {
+				"description": "Maksymalna liczba tokenów, które model może wygenerować w jednej odpowiedzi."
+			},
+			"maxTokensWarning": "Maksymalna liczba tokenów wyjściowych przekracza rozmiar okna kontekstu"
+		},
 		"rateLimitSeconds": {
 			"label": "Limit szybkości",
 			"description": "Minimalny czas między żądaniami API."

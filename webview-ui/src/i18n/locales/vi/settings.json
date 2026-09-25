@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Đặt lại về mặc định"
 		},
+		"customModelInfo": {
+			"title": "Siêu dữ liệu mẫu tùy chỉnh",
+			"description": "Ghi đè siêu dữ liệu về ngữ cảnh và khả năng khi nhà cung cấp không thể nhận diện chính xác mô hình của bạn.",
+			"unresolved": "Mẫu này không có trong danh mục của nhà cung cấp. Các giá trị bên dưới bắt đầu từ các giá trị mặc định an toàn — hãy điều chỉnh chúng cho phù hợp với mô hình.",
+			"maxTokens": {
+				"description": "Số lượng token tối đa mà mô hình có thể tạo ra trong một phản hồi."
+			},
+			"maxTokensWarning": "Số token đầu ra tối đa vượt quá Kích thước cửa sổ ngữ cảnh"
+		},
 		"rateLimitSeconds": {
 			"label": "Giới hạn tốc độ",
 			"description": "Thời gian tối thiểu giữa các yêu cầu API."

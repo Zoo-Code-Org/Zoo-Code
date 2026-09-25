@@ -652,6 +652,15 @@
 			},
 			"resetDefaults": "Varsayılanlara Sıfırla"
 		},
+		"customModelInfo": {
+			"title": "Özel model meta verileri",
+			"description": "Sağlayıcı modelinizi doğru şekilde algılayamadığında bağlam ve yetenek meta verilerini geçersiz kılın.",
+			"unresolved": "Bu model, sağlayıcı kataloğunda bulunmuyor. Aşağıdaki değerler güvenli varsayılanlardan başlar — bunları modele uyacak şekilde ayarlayın.",
+			"maxTokens": {
+				"description": "Modelin tek bir yanıtta üretebileceği maksimum token sayısı."
+			},
+			"maxTokensWarning": "Maksimum Çıktı Token'ları, Bağlam Penceresi Boyutu'nu aşıyor"
+		},
 		"rateLimitSeconds": {
 			"label": "Hız sınırı",
 			"description": "API istekleri arasındaki minimum süre."

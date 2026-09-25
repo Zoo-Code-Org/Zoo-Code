@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 
-import { type ModelInfo, type ModelRecord } from "@roo-code/types"
+import { applyCustomModelInfo, isCustomModelInfoProvider, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
@@ -54,6 +54,43 @@ export abstract class RouterProvider extends BaseProvider {
 	/** Last catalog refresh attempt per missing model id (ms), for negative caching. */
 	private missingModelRefreshAt = new Map<string, number>()
 	private static readonly MISSING_MODEL_RETRY_MS = 5 * 60 * 1000
+
+	/**
+	 * Resolve the effective model metadata, applying the user's `customModelInfo`
+	 * snapshot for providers whose settings UI exposes the editor.
+	 *
+	 * openrouter, requesty and unbound resolve overrides in their own
+	 * `getModel()` because they first merge provider-specific metadata (endpoint
+	 * selection, router tool preferences) that must run before the override wins.
+	 */
+	private resolveModelInfo(info: ModelInfo | undefined, fallback: ModelInfo): ModelInfo {
+		if (!isCustomModelInfoProvider(this.name)) {
+			return info ?? fallback
+		}
+
+		const resolvedInfo = applyCustomModelInfo(info, this.options) ?? fallback
+		const { maxTokens, contextWindow } = resolvedInfo
+
+		// These gateways forward `info.maxTokens` verbatim as max_completion_tokens
+		// with no clamp of their own, so a value above the context window produces a
+		// request the gateway rejects. openrouter/requesty/unbound instead go through
+		// `getModelParams()`, which already clamps, and must not be clamped twice.
+		//
+		// `contextWindow > 0` skips a catalog entry whose window is missing or
+		// nonsensical, because clamping to it would send 0 or a negative budget.
+		// The `typeof` check is required by the compiler (`maxTokens` is
+		// `number | null | undefined`); dropping it raises TS18049. It is not
+		// separately observable either, since a nullish value coerces to 0 and can
+		// never exceed a positive window. `>` rather than `>=` is the same: when
+		// the two are equal the clamp writes back the value already there. A
+		// negative or NaN `maxTokens` fails the comparison and passes through
+		// unchanged, which is what the provider asked for.
+		if (typeof maxTokens === "number" && contextWindow > 0 && maxTokens > contextWindow) {
+			return { ...resolvedInfo, maxTokens: contextWindow }
+		}
+
+		return resolvedInfo
+	}
 
 	public async fetchModel() {
 		// Refetch when the selected model is missing — a stale non-empty map
@@ -150,7 +187,7 @@ export abstract class RouterProvider extends BaseProvider {
 
 		// First check instance models (populated by fetchModel)
 		if (this.models[id]) {
-			return { id, info: this.models[id] }
+			return { id, info: this.resolveModelInfo(this.models[id], this.models[id]) }
 		}
 
 		// Fall back to global cache (synchronous disk/memory cache).
@@ -164,25 +201,28 @@ export abstract class RouterProvider extends BaseProvider {
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls
 			this.models = cachedModels
-			return { id, info: cachedModels[id] }
+			return { id, info: this.resolveModelInfo(cachedModels[id], cachedModels[id]) }
 		}
 
 		// Last resort: keep the configured id so we don't swap models, but zero
 		// prices so we don't bill the UI with defaultModelInfo's $/token rates.
+		// Route the fallback through resolveModelInfo so a user-supplied
+		// customModelInfo override (gateway providers) is still applied even when
+		// no fetched or cached metadata exists for the configured model.
 		if (id !== this.defaultModelId) {
 			return {
 				id,
-				info: {
+				info: this.resolveModelInfo(undefined, {
 					...this.defaultModelInfo,
 					inputPrice: 0,
 					outputPrice: 0,
 					cacheWritesPrice: 0,
 					cacheReadsPrice: 0,
-				},
+				}),
 			}
 		}
 
-		return { id, info: this.defaultModelInfo }
+		return { id, info: this.resolveModelInfo(undefined, this.defaultModelInfo) }
 	}
 
 	protected supportsTemperature(modelId: string): boolean {
