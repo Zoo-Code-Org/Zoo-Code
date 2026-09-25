@@ -103,6 +103,14 @@ const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 // entire read-write-apply sequence completes before the next one starts.
 let telemetrySettingQueue: Promise<void> = Promise.resolve()
 
+// In-flight router-models fetches keyed by the webview-supplied requestId. The webview
+// posts cancelRouterModelsRequest when it stops waiting (e.g. React Query cancellation);
+// the matching AbortController here aborts the provider catalog fetches for that request.
+// Entries are removed on EVERY exit of the requestRouterModels case — normal settle, the
+// abort early-exits, and failure paths (getState, the OAuth lookup, and the aggregate post
+// release before rethrowing) — or when the cancellation is delivered, whichever comes first.
+const routerModelsRequestControllers = new Map<string, AbortController>()
+
 import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
 import { setPendingTodoList } from "../tools/UpdateTodoListTool"
 import {
@@ -1107,8 +1115,6 @@ export const webviewMessageHandler = async (
 			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
 			break
 		case RouterModelsMessageType.requestRouterModels: {
-			const { apiConfiguration } = await provider.getState()
-
 			// Optional single provider filter from webview
 			const requestedProvider = message?.values?.provider
 			const providerFilter = requestedProvider ? toRouterName(requestedProvider) : undefined
@@ -1130,11 +1136,79 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.gemini]: {},
+						[providerIdentifiers.vertex]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 					}
+
+			// Optional request identity: when present, the fetch is cancellable from the webview
+			// via cancelRouterModelsRequest. Registered BEFORE the first await so a cancellation
+			// arriving while setup is in flight (e.g. during getState) still finds the controller
+			// instead of racing a not-yet-created registration.
+			const requestId = message?.values?.requestId
+			let requestController: AbortController | undefined
+			if (typeof requestId === "string" && requestId.length > 0) {
+				requestController = new AbortController()
+				routerModelsRequestControllers.set(requestId, requestController)
+			}
+
+			// Responses echo the requestId so the webview can correlate them with the in-flight
+			// request; requests without one keep the legacy values shape.
+			const responseRequestId = typeof requestId === "string" && requestId.length > 0 ? requestId : undefined
+			const aggregateValues = () => {
+				const values: Record<string, unknown> = {}
+				if (providerFilter) {
+					values.provider = requestedProvider
+				}
+				if (responseRequestId) {
+					values.requestId = responseRequestId
+				}
+				return Object.keys(values).length > 0 ? values : undefined
+			}
+
+			// Refresh (flushModels) calls accept the same GetModelsOptions signal as getModels(),
+			// so spreading this overlay onto every flush option threads cancellation into the
+			// refresh waiters too. Empty for requestId-less requests: the spread is a no-op and
+			// the flush options keep their exact legacy shape.
+			const requestSignal = requestController ? { signal: requestController.signal } : {}
+
+			// Consistent answer for an aborted request: the same aggregate shape the normal flow
+			// posts, with every entry {} (no fetch was attempted, so no per-provider error events
+			// are emitted); a filtered response still carries the requested provider's entry.
+			const postAbortedAggregate = () => {
+				if (providerFilter && !(providerFilter in routerModels)) {
+					routerModels[providerFilter] = {}
+				}
+				return provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: aggregateValues(),
+				})
+			}
+
+			// Cancelled before or during getState: skip setup entirely, still answering with
+			// the empty aggregate so the webview-side request count stays consistent.
+			if (requestController?.signal.aborted) {
+				await postAbortedAggregate()
+				routerModelsRequestControllers.delete(requestId)
+				break
+			}
+
+			// A rejecting getState() would otherwise strand the cancellation registration.
+			const { apiConfiguration } = await provider.getState().catch((error: unknown) => {
+				routerModelsRequestControllers.delete(requestId)
+				throw error
+			})
+
+			// Cancelled during getState: skip the flush/refresh work and candidate building.
+			if (requestController?.signal.aborted) {
+				await postAbortedAggregate()
+				routerModelsRequestControllers.delete(requestId)
+				break
+			}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 				try {
@@ -1195,7 +1269,12 @@ export const webviewMessageHandler = async (
 				// flush the cache first to ensure we fetch fresh data with the new credentials
 				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+						{
+							provider: providerIdentifiers.litellm,
+							apiKey: litellmApiKey,
+							baseUrl: litellmBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1213,7 +1292,7 @@ export const webviewMessageHandler = async (
 			if (poeApiKey) {
 				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl, ...requestSignal },
 						true,
 					)
 				}
@@ -1231,7 +1310,12 @@ export const webviewMessageHandler = async (
 			if (deepSeekApiKey) {
 				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+						{
+							provider: providerIdentifiers.deepseek,
+							apiKey: deepSeekApiKey,
+							baseUrl: deepSeekBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1253,7 +1337,12 @@ export const webviewMessageHandler = async (
 			if (moonshotApiKey) {
 				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
 					await flushModels(
-						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+						{
+							provider: providerIdentifiers.moonshot,
+							apiKey: moonshotApiKey,
+							baseUrl: moonshotBaseUrl,
+							...requestSignal,
+						},
 						true,
 					)
 				}
@@ -1268,6 +1357,79 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// Gemini is conditional on apiKey.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const geminiApiKey = message?.values?.geminiApiKey ?? apiConfiguration.geminiApiKey
+			const googleGeminiBaseUrl = message?.values?.googleGeminiBaseUrl ?? apiConfiguration.googleGeminiBaseUrl
+
+			if (geminiApiKey) {
+				if (message?.values?.geminiApiKey || message?.values?.googleGeminiBaseUrl) {
+					await flushModels(
+						{
+							provider: providerIdentifiers.gemini,
+							apiKey: geminiApiKey,
+							baseUrl: googleGeminiBaseUrl,
+							...requestSignal,
+						},
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.gemini,
+					options: {
+						provider: providerIdentifiers.gemini,
+						apiKey: geminiApiKey,
+						baseUrl: googleGeminiBaseUrl,
+					},
+				})
+			}
+
+			// Vertex is conditional on a project ID: the catalog list requires a project, so a
+			// key file or JSON credentials without one would fail at fetch time and leave the
+			// picker silently empty. keyFile/jsonCredentials stay optional credential routes
+			// for the project that IS set.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const vertexProjectId = message?.values?.vertexProjectId ?? apiConfiguration.vertexProjectId
+			const vertexRegion = message?.values?.vertexRegion ?? apiConfiguration.vertexRegion
+			const vertexKeyFile = message?.values?.vertexKeyFile ?? apiConfiguration.vertexKeyFile
+			const vertexJsonCredentials =
+				message?.values?.vertexJsonCredentials ?? apiConfiguration.vertexJsonCredentials
+
+			if (vertexProjectId) {
+				if (
+					message?.values?.vertexProjectId ||
+					message?.values?.vertexRegion ||
+					message?.values?.vertexKeyFile ||
+					message?.values?.vertexJsonCredentials
+				) {
+					await flushModels(
+						{
+							provider: providerIdentifiers.vertex,
+							projectId: vertexProjectId,
+							region: vertexRegion,
+							keyFile: vertexKeyFile,
+							jsonCredentials: vertexJsonCredentials,
+							...requestSignal,
+						},
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.vertex,
+					options: {
+						provider: providerIdentifiers.vertex,
+						projectId: vertexProjectId,
+						region: vertexRegion,
+						keyFile: vertexKeyFile,
+						jsonCredentials: vertexJsonCredentials,
+					},
+				})
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1277,7 +1439,10 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.opencodeGoApiKey) {
-				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey, ...requestSignal },
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1294,7 +1459,10 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.kenariApiKey) {
-				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.kenari, apiKey: kenariApiKey, ...requestSignal },
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1307,7 +1475,10 @@ export const webviewMessageHandler = async (
 			// same key-scoped options for refresh and retrieval.
 			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
 			if (message?.values?.nanoGptApiKey !== undefined) {
-				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey, ...requestSignal },
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1316,18 +1487,25 @@ export const webviewMessageHandler = async (
 			})
 
 			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
-				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-				const kimiCodeAuthMethod =
-					message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
-				const kimiCodeApiKey =
-					kimiCodeAuthMethod === "api-key"
-						? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
-						: await kimiCodeOAuthManager.getAccessToken()
-				if (kimiCodeApiKey) {
-					candidates.push({
-						key: providerIdentifiers.kimiCode,
-						options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
-					})
+				// The dynamic import and OAuth token lookup can reject; release the cancellation
+				// registration before rethrowing so a failure here cannot strand the entry.
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					const kimiCodeAuthMethod =
+						message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
+					const kimiCodeApiKey =
+						kimiCodeAuthMethod === "api-key"
+							? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
+							: await kimiCodeOAuthManager.getAccessToken()
+					if (kimiCodeApiKey) {
+						candidates.push({
+							key: providerIdentifiers.kimiCode,
+							options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
+						})
+					}
+				} catch (error) {
+					routerModelsRequestControllers.delete(requestId)
+					throw error
 				}
 			}
 
@@ -1339,12 +1517,24 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, true)
+				await flushModels({ ...targetCandidate.options, ...requestSignal }, true)
+			}
+
+			// Cancelled during the flush/refresh awaits (credential flushes, OAuth token lookup,
+			// explicit refresh): skip starting the candidate fetches.
+			if (requestController?.signal.aborted) {
+				await postAbortedAggregate()
+				routerModelsRequestControllers.delete(requestId)
+				break
 			}
 
 			const results = await Promise.allSettled(
 				modelFetchPromises.map(async ({ key, options }) => {
-					const models = await safeGetModels(options)
+					// Thread the per-request cancellation signal (when the webview sent a requestId)
+					// into the modelCache fetch options so cancelRouterModelsRequest stops this
+					// request's catalog fetches. Requests without a requestId keep their old options.
+					const fetchOptions = requestController ? { ...options, signal: requestController.signal } : options
+					const models = await safeGetModels(fetchOptions)
 					return { key, models } // The key is `ProviderName` here.
 				}),
 			)
@@ -1367,16 +1557,43 @@ export const webviewMessageHandler = async (
 						type: RouterModelsMessageType.singleRouterModelFetchResponse,
 						success: false,
 						error: errorMessage,
-						values: { provider: routerName },
+						values: responseRequestId
+							? { provider: routerName, requestId: responseRequestId }
+							: { provider: routerName },
 					})
 				}
 			})
 
-			await provider.postMessageToWebview({
-				type: RouterModelsMessageType.routerModels,
-				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
-			})
+			// The aggregate post can reject (e.g. a disposed webview); release the cancellation
+			// registration before rethrowing so the failure cannot strand the entry.
+			try {
+				await provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: aggregateValues(),
+				})
+			} catch (error) {
+				routerModelsRequestControllers.delete(requestId)
+				throw error
+			}
+
+			// The request has settled (aggregate posted, per-candidate failures handled):
+			// release the cancellation registration. A cancellation arriving afterwards
+			// finds no entry and no-ops, so an aborted-then-refetched id starts fresh.
+			routerModelsRequestControllers.delete(requestId)
+			break
+		}
+		case RouterModelsMessageType.cancelRouterModelsRequest: {
+			// Webview stopped waiting for a router-models request: abort its in-flight catalog
+			// fetches (when any) and drop the registration. Unknown/expired ids no-op.
+			const cancelRequestId = message?.values?.requestId
+			if (typeof cancelRequestId === "string") {
+				const controller = routerModelsRequestControllers.get(cancelRequestId)
+				if (controller) {
+					routerModelsRequestControllers.delete(cancelRequestId)
+					controller.abort()
+				}
+			}
 			break
 		}
 		case OllamaModelsMessageType.requestOllamaModels: {

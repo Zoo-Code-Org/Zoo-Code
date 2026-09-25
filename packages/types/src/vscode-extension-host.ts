@@ -489,6 +489,7 @@ export interface WebviewMessage {
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
+		| typeof RouterModelsMessageType.cancelRouterModelsRequest
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels

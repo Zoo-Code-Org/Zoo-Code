@@ -33,6 +33,8 @@ import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
 import { getMoonshotModels } from "./moonshot"
+import { getGeminiModels } from "./gemini"
+import { getVertexModels } from "./vertex"
 import { getZooGatewayModels } from "./zoo-gateway"
 import { getKimiCodeModels } from "./kimi-code"
 
@@ -105,6 +107,7 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.poe,
 	providerIdentifiers.deepseek,
 	providerIdentifiers.moonshot,
+	providerIdentifiers.gemini,
 	providerIdentifiers.ollama,
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.requesty,
@@ -118,15 +121,30 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 // (same server, different session token) doesn't collapse into the same throttle/in-flight
 // identity -- see the URL_SCOPED_PROVIDERS comment above for why this matters despite caching
 // being skipped for both.
+// gemini is in both this set and URL_SCOPED_PROVIDERS: its catalog varies per API key and
+// custom base URLs (googleGeminiBaseUrl) can point at a different server entirely.
+// vertex is deliberately in NEITHER set: its catalog carries no apiKey/baseUrl discriminator.
+// Instead getCacheKey() scopes vertex by projectId + effective region (see VERTEX_DEFAULT_REGION
+// below): the gemini-* catalog is per project/location, so two locations must never share an
+// entry, and the 5-minute memory/disk TTL bounds staleness after access changes.
 const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
 	providerIdentifiers.poe, // Per-account model availability
 	providerIdentifiers.requesty, // Per-account custom model policies
 	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+	providerIdentifiers.gemini, // Catalog can differ per API key and per custom base URL
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
 ])
+
+// Vertex catalogs are scoped to a project AND region: a model available in us-central1 may
+// be absent in europe-west1, so the same provider name across two locations must never share
+// a cache entry. projectId/region are identifiers rather than credentials, so they appear
+// verbatim in the key. Requests without a projectId (which cannot reach the fetcher) key on
+// the region alone; region defaults mirror the SDK's own default so an explicit region and
+// the unset default map to the same entry.
+const VERTEX_DEFAULT_REGION = "us-central1"
 
 // Providers whose model lists are scoped to the signed-in user (e.g. per-account
 // allowlists or org policies). For these we MUST NOT cache results on disk or
@@ -196,6 +214,8 @@ function deriveApiKeyDiscriminator(apiKey: string): string {
  *   from the API key so that two different API keys on the same server never share a cache
  *   entry (relevant when the server enforces per-key model allowlists, e.g. LiteLLM, Poe,
  *   Requesty). See deriveApiKeyDiscriminator for why the value cannot be reversed to the key.
+ * - Vertex is scoped by projectId + effective region: the catalog differs per project and
+ *   location, so neither may collapse into a bare provider entry.
  */
 function getCacheKey(options: GetModelsOptions): string {
 	const { provider } = options
@@ -208,11 +228,72 @@ function getCacheKey(options: GetModelsOptions): string {
 	// Strip trailing slashes so "http://host:4000/" and "http://host:4000" map to the same key.
 	const urlPart = isUrlScoped && options.baseUrl ? options.baseUrl.replace(/\/+$/, "") : undefined
 	const keyPart = isKeyScoped && options.apiKey ? deriveApiKeyDiscriminator(options.apiKey) : undefined
+	// Vertex: scope by project + effective region (identifiers, not credentials).
+	const vertexPart =
+		options.provider === providerIdentifiers.vertex
+			? `${options.projectId ?? ""}/${options.region ?? VERTEX_DEFAULT_REGION}`
+			: undefined
 
 	if (urlPart && keyPart) return `${provider}:${urlPart}:${keyPart}`
 	if (urlPart) return `${provider}:${urlPart}`
+	if (vertexPart) return `${provider}:${vertexPart}`
 	if (keyPart) return `${provider}:${keyPart}`
 	return provider
+}
+
+/**
+ * Redact credential-bearing URL components from a cache key for logging.
+ *
+ * URL-scoped cache keys embed the provider's free-form baseUrl (e.g. a user-configured
+ * googleGeminiBaseUrl of `https://user:pass@host/path?x=1#frag`), and those components can
+ * carry credentials that must never reach logs or telemetry. The key is decomposed into
+ * `provider[:baseUrl[:digest]]` (see getCacheKey); the baseUrl segment is reduced through
+ * the WHATWG URL parser to `${protocol}//${host}<path>` — userinfo, query, and fragment
+ * are dropped by construction, and the pathname is replaced with a fixed marker because
+ * paths can themselves carry tokens or PII (e.g. `/v1beta/secret-token/models`). The
+ * provider name and the non-secret key digest pass through for diagnosis. The stored
+ * cache key is left unchanged; only log output flows through here.
+ *
+ * Fail closed: the key shape is a security boundary, not a convenience. If any part of it
+ * is unrecognizable — a baseUrl the URL parser rejects, an unexpected segment — the whole
+ * key collapses to a constant marker rather than risking a partially redacted leak.
+ */
+export function sanitizeCacheKeyForLog(cacheKey: string): string {
+	try {
+		const segments = cacheKey.split(":")
+		const [provider, ...rest] = segments
+		if (rest.length === 0) {
+			// Bare provider key ("gemini") — nothing to redact.
+			return cacheKey
+		}
+
+		// A trailing key digest (deriveApiKeyDiscriminator: 4 bytes = 8 hex chars) is not
+		// secret and is preserved; peel it so colons inside the baseUrl survive reassembly.
+		let digest: string | undefined
+		if (rest.length > 0 && /^[0-9a-f]{8}$/.test(rest[rest.length - 1])) {
+			digest = rest.pop()
+		}
+
+		const urlPart = rest.join(":")
+		if (!urlPart) {
+			// Key-scoped provider without a baseUrl ("gemini:abcd1234").
+			return digest ? `${provider}:${digest}` : provider
+		}
+
+		if (provider === providerIdentifiers.vertex && /^[a-z0-9-]*\/[a-z0-9-]+$/.test(urlPart)) {
+			// Vertex keys scope by `projectId/region` — identifiers, not credentials, and the
+			// character class cannot smuggle userinfo/query/fragment markers. Log verbatim.
+			return [provider, urlPart, digest].filter((part) => part !== undefined).join(":")
+		}
+
+		// Throws for anything that is not an absolute URL — fail closed below.
+		const url = new URL(urlPart)
+		const reduced = `${url.protocol}//${url.host}<path>`
+		return [provider, reduced, digest].filter((part) => part !== undefined).join(":")
+	} catch {
+		// Unrecognizable key shape: never log a partially-redacted guess.
+		return "<redacted>"
+	}
 }
 
 /**
@@ -304,6 +385,18 @@ async function fetchModelsFromProvider(options: GetModelsOptions, signal?: Abort
 		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey, ...fetchOpts)
 			break
+		case providerIdentifiers.gemini:
+			models = await getGeminiModels(options.apiKey, options.baseUrl, ...fetchOpts)
+			break
+		case providerIdentifiers.vertex:
+			models = await getVertexModels(
+				options.projectId,
+				options.region,
+				options.keyFile,
+				options.jsonCredentials,
+				...fetchOpts,
+			)
+			break
 		case providerIdentifiers.zooGateway:
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
 			break
@@ -375,7 +468,10 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 				memoryCache.set(cacheKey, fetched)
 
 				await writeModels(cacheKey, fetched).catch((err) =>
-					console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
+					console.error(
+						`[MODEL_CACHE] Error writing ${sanitizeCacheKeyForLog(cacheKey)} models to file cache:`,
+						err,
+					),
 				)
 			}
 		} else {
@@ -585,7 +681,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 			memoryCache.set(cacheKey, models)
 
 			await writeModels(cacheKey, models).catch((err) =>
-				console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
+				console.error(`[refreshModels] Error writing ${sanitizeCacheKeyForLog(cacheKey)} models to disk:`, err),
 			)
 		}
 
@@ -594,7 +690,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		// Log the error for debugging, then return existing cache if available (graceful degradation).
 		// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
 		// session, since they could belong to a different user -- return empty instead.
-		console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
+		console.error(`[refreshModels] Failed to refresh ${sanitizeCacheKeyForLog(cacheKey)} models:`, error)
 		if (shouldSkipCache) {
 			return {}
 		}
@@ -704,7 +800,7 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 			const validation = modelRecordSchema.safeParse(models)
 			if (!validation.success) {
 				console.error(
-					`[MODEL_CACHE] Invalid disk cache data structure for ${cacheKey}:`,
+					`[MODEL_CACHE] Invalid disk cache data structure for ${sanitizeCacheKeyForLog(cacheKey)}:`,
 					validation.error.format(),
 				)
 				return undefined
@@ -716,7 +812,7 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 			return validation.data
 		}
 	} catch (error) {
-		console.error(`[MODEL_CACHE] Error loading ${cacheKey} models from disk:`, error)
+		console.error(`[MODEL_CACHE] Error loading ${sanitizeCacheKeyForLog(cacheKey)} models from disk:`, error)
 	}
 
 	return undefined

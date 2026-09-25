@@ -47,10 +47,12 @@ vi.mock("../requesty")
 vi.mock("../kenari")
 vi.mock("../nanogpt")
 vi.mock("../moonshot")
+vi.mock("../gemini")
+vi.mock("../vertex")
 vi.mock("../zoo-gateway")
 
 // Mock ContextProxy with a simple static instance
-vi.mock("../../../core/config/ContextProxy", () => ({
+vi.mock("../../../../core/config/ContextProxy", () => ({
 	ContextProxy: {
 		instance: {
 			globalStorageUri: {
@@ -62,19 +64,21 @@ vi.mock("../../../core/config/ContextProxy", () => ({
 
 // Then imports
 import { getEventListeners } from "events"
-import type { Mock, Mocked } from "vitest"
+import type { Mock, MockInstance, Mocked } from "vitest"
 import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModels, getModelsFromCache } from "../modelCache"
+import { getModels, getModelsFromCache, sanitizeCacheKeyForLog } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
 import { getKenariModels } from "../kenari"
 import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
+import { getGeminiModels } from "../gemini"
+import { getVertexModels } from "../vertex"
 import { getZooGatewayModels } from "../zoo-gateway"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
@@ -83,6 +87,8 @@ const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
+const mockGetGeminiModels = getGeminiModels as Mock<typeof getGeminiModels>
+const mockGetVertexModels = getVertexModels as Mock<typeof getVertexModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
@@ -263,6 +269,72 @@ describe("getModels with new GetModelsOptions", () => {
 		expect(result).toEqual(mockModels)
 	})
 
+	it("calls getGeminiModels with the API key, base URL, and the flight signal", async () => {
+		const mockModels = {
+			"gemini-2.5-flash": {
+				maxTokens: 64_000,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: true,
+				description: "Gemini 2.5 Flash",
+			},
+		}
+		mockGetGeminiModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: "https://gemini-proxy.example",
+		})
+
+		expect(mockGetGeminiModels).toHaveBeenCalledWith("gemini-key", "https://gemini-proxy.example", {
+			signal: expect.any(AbortSignal),
+		})
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getGeminiModels without a base URL while preserving the signal arity", async () => {
+		mockGetGeminiModels.mockResolvedValue({
+			"gemini-2.5-flash": {
+				maxTokens: 64_000,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+		})
+
+		await getModels({ provider: providerIdentifiers.gemini, apiKey: "gemini-key" })
+
+		expect(mockGetGeminiModels).toHaveBeenCalledWith("gemini-key", undefined, {
+			signal: expect.any(AbortSignal),
+		})
+	})
+
+	it("calls getVertexModels with project, region, credentials, and the flight signal", async () => {
+		const mockModels = {
+			"gemini-3.7-flash": {
+				maxTokens: 65_536,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: true,
+				description: "Vertex Gemini 3.7 Flash",
+			},
+		}
+		mockGetVertexModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.vertex,
+			projectId: "gcp-project",
+			region: "us-central1",
+			keyFile: "/keys/sa.json",
+		})
+
+		expect(mockGetVertexModels).toHaveBeenCalledWith("gcp-project", "us-central1", "/keys/sa.json", undefined, {
+			signal: expect.any(AbortSignal),
+		})
+		expect(result).toEqual(mockModels)
+	})
+
 	it("validates exhaustive provider checking with unknown provider", async () => {
 		// This test ensures TypeScript catches unknown providers at compile time
 		// In practice, the discriminated union should prevent this at compile time
@@ -335,10 +407,6 @@ describe("getModelsFromCache disk fallback", () => {
 	})
 
 	it("returns disk cache data when memory cache misses and context is available", () => {
-		// Note: This test validates the logic but the ContextProxy mock in test environment
-		// returns undefined for getCacheDirectoryPathSync, which is expected behavior
-		// when the context is not fully initialized. The actual disk cache loading
-		// is validated through integration tests.
 		const diskModels = {
 			"disk-model": {
 				maxTokens: 4096,
@@ -352,9 +420,9 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
-		// In the test environment, ContextProxy.instance may not be fully initialized,
-		// so getCacheDirectoryPathSync returns undefined and disk cache is not attempted
-		expect(result).toBeUndefined()
+		expect(result).toEqual(diskModels)
+		// A validated disk hit is promoted to the memory cache for subsequent lookups.
+		expect(mockCache.set).toHaveBeenCalledWith(providerIdentifiers.openrouter, diskModels)
 	})
 
 	it("handles disk read errors gracefully", () => {
@@ -1136,6 +1204,131 @@ describe("NanoGPT key-scoped cache isolation", () => {
 	})
 })
 
+describe("Gemini url+key-scoped cache isolation", () => {
+	// Gemini belongs to BOTH URL_SCOPED_PROVIDERS and KEY_SCOPED_PROVIDERS (modelCache.ts):
+	// its catalog can differ per API key and a custom base URL (googleGeminiBaseUrl) can
+	// point at an entirely different server, so neither dimension may collapse into a
+	// shared cache identity. Mirrors the MiMo/NanoGPT isolation tests above.
+	const geminiCatalog = {
+		"gemini-2.5-flash": {
+			maxTokens: 64_000,
+			contextWindow: 1_048_576,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetGeminiModels.mockResolvedValue(geminiCatalog)
+	})
+
+	it("separates cache identities by base URL and API key without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.gemini })
+		await getModels({ provider: providerIdentifiers.gemini, baseUrl: "https://gemini-proxy.example" })
+		await getModels({
+			provider: providerIdentifiers.gemini,
+			baseUrl: "https://gemini-proxy.example",
+			apiKey: "gemini-key-a",
+		})
+		await getModels({
+			provider: providerIdentifiers.gemini,
+			baseUrl: "https://gemini-proxy.example",
+			apiKey: "gemini-key-b",
+		})
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(4)
+		// Bare provider fallback when neither URL nor key is set; url-only component when
+		// the key is absent (catalog varies per key on the same server).
+		expect(cacheKeys).toContain("gemini")
+		expect(cacheKeys).toContain("gemini:https://gemini-proxy.example")
+		// url+key compound identity for each distinct key on the proxy server.
+		expect(cacheKeys.filter((key) => key.startsWith("gemini:https://gemini-proxy.example:"))).toHaveLength(2)
+		// Raw secrets must never appear in the on-disk-bound cache keys.
+		expect(cacheKeys.every((key) => !key.includes("gemini-key-a") && !key.includes("gemini-key-b"))).toBe(true)
+	})
+
+	it("keys the catalog per base URL so two servers never share an entry", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.gemini, apiKey: "shared-key", baseUrl: "https://a.example" })
+		await getModels({ provider: providerIdentifiers.gemini, apiKey: "shared-key", baseUrl: "https://b.example" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(2)
+		expect(cacheKeys.every((key) => key.startsWith("gemini:https://"))).toBe(true)
+	})
+})
+
+describe("Vertex project+region-scoped cache identity", () => {
+	// Vertex is in NEITHER URL_SCOPED_PROVIDERS nor KEY_SCOPED_PROVIDERS (modelCache.ts):
+	// instead getCacheKey() scopes it by projectId + effective region, because the gemini-*
+	// catalog differs per project/location and the two locations must never share an entry.
+	const vertexCatalog = {
+		"gemini-3.7-flash": {
+			maxTokens: 65_536,
+			contextWindow: 1_048_576,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetVertexModels.mockResolvedValue(vertexCatalog)
+	})
+
+	it("keys the catalog per project+region and reuses the entry for an identical combo", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a", region: "us-central1" })
+		await getModels({
+			provider: providerIdentifiers.vertex,
+			projectId: "project-a",
+			region: "us-central1",
+			keyFile: "/keys/sa.json",
+		})
+		await getModels({
+			provider: providerIdentifiers.vertex,
+			projectId: "project-b",
+			region: "europe-west1",
+		})
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		// Same project+region (different credential route) reuses one entry; a different
+		// project or region gets its own.
+		expect(cacheKeys).toEqual([
+			"vertex:project-a/us-central1",
+			"vertex:project-a/us-central1",
+			"vertex:project-b/europe-west1",
+		])
+	})
+
+	it("maps an unset region to the SDK default region and a missing project to the region-only key", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a" })
+		await getModels({ provider: providerIdentifiers.vertex, projectId: "project-a", region: "us-central1" })
+		await getModels({ provider: providerIdentifiers.vertex, region: "europe-west1" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		// Explicit us-central1 and the unset default collapse into the same entry; a request
+		// without a projectId keys on the region alone instead of crashing the key builder.
+		expect(cacheKeys).toEqual([
+			"vertex:project-a/us-central1",
+			"vertex:project-a/us-central1",
+			"vertex:/europe-west1",
+		])
+	})
+})
+
 describe("compound cache key derivation across scoping dimensions", () => {
 	// Exercises every branch of getCacheKey via the public getModels() entry point.
 	// litellm is url-scoped AND key-scoped; openrouter is neither, so it hits the bare
@@ -1677,4 +1870,221 @@ it("ignores the caller signal on the auth-scoped bypass without entering the fli
 	} finally {
 		boundSpy.mockRestore()
 	}
+})
+
+describe("credential redaction in cache-key logs", () => {
+	// A free-form base URL (googleGeminiBaseUrl, litellm baseUrl, ...) can embed credentials
+	// in userinfo/query/fragment. The compound cache key must keep the raw URL for storage
+	// identity, but every log line derived from it must be redacted (modelCache.ts sanitizes
+	// at each console.error site that embeds a cache key).
+	const credentialBaseUrl = "https://user:pass@proxy.example.com:8443/v1beta?api_key=topsecret#frag"
+
+	let mockCache: Mocked<NodeCache>
+	let consoleErrorSpy: MockInstance<typeof console.error>
+
+	const loggedOutput = () =>
+		consoleErrorSpy.mock.calls.map((call) => call.map((arg) => String(arg)).join(" ")).join("\n")
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
+	})
+
+	afterEach(() => {
+		consoleErrorSpy.mockRestore()
+	})
+
+	describe("sanitizeCacheKeyForLog", () => {
+		it("redacts userinfo, query, and fragment from URL-scoped keys, keeping the digest", () => {
+			const key = `${providerIdentifiers.gemini}:${credentialBaseUrl}:abcd1234`
+			expect(sanitizeCacheKeyForLog(key)).toBe(
+				`${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>:abcd1234`,
+			)
+		})
+
+		it("reduces a token-bearing path to the origin plus a fixed path marker", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta/secret-token-123/models`
+			const sanitized = sanitizeCacheKeyForLog(key)
+			expect(sanitized).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com<path>`)
+			expect(sanitized).not.toContain("secret-token-123")
+		})
+
+		it("drops query-only credentials entirely", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta?api_key=topsecret`
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com<path>`)
+		})
+
+		it("drops fragment-only content entirely", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta#section-2`
+			expect(sanitizeCacheKeyForLog(key)).toBe(`${providerIdentifiers.gemini}:https://proxy.example.com<path>`)
+		})
+
+		it("does not let a colon inside the query leak past the digest separator", () => {
+			const key = `${providerIdentifiers.gemini}:https://proxy.example.com/v1beta?next=http://other.example:8080/x:abcd1234`
+			expect(sanitizeCacheKeyForLog(key)).toBe(
+				`${providerIdentifiers.gemini}:https://proxy.example.com<path>:abcd1234`,
+			)
+		})
+
+		it("fails closed to a fixed marker when a segment is unparseable", () => {
+			// Empty authority — the URL parser rejects the baseUrl.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:https://`)).toBe("<redacted>")
+			// No scheme at all — not an absolute URL.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:not-a-url`)).toBe("<redacted>")
+			// Whitespace inside the scheme — the URL parser rejects it.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:ht tps://proxy.example.com`)).toBe(
+				"<redacted>",
+			)
+		})
+
+		it("is a no-op for bare provider keys and key-digest keys", () => {
+			expect(sanitizeCacheKeyForLog(providerIdentifiers.gemini)).toBe(providerIdentifiers.gemini)
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.gemini}:abcd1234`)).toBe(
+				`${providerIdentifiers.gemini}:abcd1234`,
+			)
+			expect(sanitizeCacheKeyForLog(providerIdentifiers.openrouter)).toBe(providerIdentifiers.openrouter)
+		})
+
+		it("reduces credential-free URL keys to their structural shape", () => {
+			const key = `${providerIdentifiers.litellm}:https://proxy.example.com:4000`
+			expect(sanitizeCacheKeyForLog(key)).toBe(
+				`${providerIdentifiers.litellm}:https://proxy.example.com:4000<path>`,
+			)
+		})
+
+		it("logs the vertex project/region scope verbatim and still fails closed on smuggled markers", () => {
+			// projectId/region are identifiers, not credentials.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:my-project/us-central1`)).toBe(
+				`${providerIdentifiers.vertex}:my-project/us-central1`,
+			)
+			// The region-only shape (no projectId) is equally loggable.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:/us-central1`)).toBe(
+				`${providerIdentifiers.vertex}:/us-central1`,
+			)
+			// A vertex-shaped key smuggling URL components outside the safe character class fails closed.
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:my-project/us-central1?x=1`)).toBe(
+				"<redacted>",
+			)
+			expect(sanitizeCacheKeyForLog(`${providerIdentifiers.vertex}:evil@host/path`)).toBe("<redacted>")
+		})
+	})
+
+	it("redacts the gemini cache key in the getModels cache-write failure log while storage keeps the raw key", async () => {
+		mockGetGeminiModels.mockResolvedValue({
+			"gemini-2.5-flash": { maxTokens: 64_000, contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+
+		await getModels({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		// The stored cache key keeps the raw URL (identity is unaffected by redaction)...
+		const storedKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(storedKeys).toHaveLength(1)
+		expect(storedKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		// ...while the logged key has credentials, query, and fragment stripped.
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[MODEL_CACHE] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+		expect(output).not.toContain("#frag")
+	})
+
+	it("redacts litellm URL-scoped keys in the refreshModels failure log", async () => {
+		mockGetLiteLLMModels.mockRejectedValue(new Error("litellm unreachable"))
+		const { refreshModels } = await import("../modelCache")
+
+		await refreshModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "litellm-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[refreshModels] Failed to refresh ${providerIdentifiers.litellm}:https://proxy.example.com:8443<path>`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
+
+	it("redacts the key in the refreshModels disk-write failure log while storage keeps the raw key", async () => {
+		mockGetGeminiModels.mockResolvedValue({
+			"gemini-2.5-flash": { maxTokens: 64_000, contextWindow: 1_048_576, supportsPromptCache: true },
+		})
+		const { refreshModels } = await import("../modelCache")
+
+		await refreshModels({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		// The refresh stored the catalog under the raw key before the disk write failed.
+		const storedKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(storedKeys).toHaveLength(1)
+		expect(storedKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[refreshModels] Error writing ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
+
+	it("redacts the key in the disk-load failure log while the lookup uses the raw key", async () => {
+		vi.mocked(fsSync.existsSync).mockReturnValue(true)
+		vi.mocked(fsSync.readFileSync).mockImplementation(() => {
+			throw new Error("Disk read failed")
+		})
+
+		getModelsFromCache({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		// The cache lookup itself used the raw credentialed key (storage identity is untouched).
+		const lookupKeys = mockCache.get.mock.calls.map(([key]) => key as string)
+		expect(lookupKeys).toHaveLength(1)
+		expect(lookupKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[MODEL_CACHE] Error loading ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
+
+	it("redacts the key in the invalid disk-cache structure log", async () => {
+		vi.mocked(fsSync.existsSync).mockReturnValue(true)
+		// Parses as JSON but violates the ModelRecord schema, so the structure log fires.
+		vi.mocked(fsSync.readFileSync).mockReturnValue(JSON.stringify({ "gemini-bad": { contextWindow: "huge" } }))
+
+		getModelsFromCache({
+			provider: providerIdentifiers.gemini,
+			apiKey: "gemini-key",
+			baseUrl: credentialBaseUrl,
+		})
+
+		const lookupKeys = mockCache.get.mock.calls.map(([key]) => key as string)
+		expect(lookupKeys).toHaveLength(1)
+		expect(lookupKeys[0].startsWith(`${providerIdentifiers.gemini}:${credentialBaseUrl}:`)).toBe(true)
+
+		const output = loggedOutput()
+		expect(output).toContain(
+			`[MODEL_CACHE] Invalid disk cache data structure for ${providerIdentifiers.gemini}:https://proxy.example.com:8443<path>`,
+		)
+		expect(output).not.toContain("user:pass")
+		expect(output).not.toContain("api_key=topsecret")
+	})
 })
