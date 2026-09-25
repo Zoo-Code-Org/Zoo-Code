@@ -91,6 +91,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
+import { ALLOWED_BASE_URLS } from "../../api/providers/fetchers/mimo"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -1130,6 +1131,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.mimo]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.nanogpt]: {},
@@ -1268,6 +1270,72 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// MiMo is conditional on apiKey. The baseUrl selects the cluster
+			// (cn/sgp/ams token-plan or pay-as-you-go), so unsaved form values are
+			// honored the same way as DeepSeek/Moonshot above.
+			const mimoApiKey = message?.values?.mimoApiKey ?? apiConfiguration.mimoApiKey
+			const mimoBaseUrl = message?.values?.mimoBaseUrl ?? apiConfiguration.mimoBaseUrl
+
+			// Unsaved form values bypass the settings-schema validation that pins
+			// stored mimoBaseUrl to the four allowed Xiaomi endpoints, so gate them
+			// on the fetcher's allowlist before they can carry the bearer key into
+			// modelCache. The exact match subsumes credential-bearing URLs (no
+			// allowlisted literal contains userinfo), and the raw value is never
+			// echoed since an unsaved one may embed credentials.
+			const unsavedMimoBaseUrl = message?.values?.mimoBaseUrl
+			const mimoBaseUrlRejected =
+				typeof unsavedMimoBaseUrl === "string" &&
+				unsavedMimoBaseUrl !== "" &&
+				!ALLOWED_BASE_URLS.has(unsavedMimoBaseUrl.replace(/\/+$/, ""))
+
+			if (mimoApiKey) {
+				if (mimoBaseUrlRejected) {
+					// Same surface as a failed refresh: post the MiMo failure
+					// response and skip the candidate so no fetch is dispatched,
+					// while router aggregation for other providers continues.
+					const errorMessage =
+						"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint."
+					console.error(`Error refreshing models for ${providerIdentifiers.mimo}: ${errorMessage}`)
+
+					await provider.postMessageToWebview({
+						type: RouterModelsMessageType.singleRouterModelFetchResponse,
+						success: false,
+						error: errorMessage,
+						values: { provider: providerIdentifiers.mimo },
+					})
+				} else {
+					const mimoOptions = {
+						provider: providerIdentifiers.mimo,
+						apiKey: mimoApiKey,
+						baseUrl: mimoBaseUrl,
+					}
+
+					if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
+						// A refresh failure (bad key/endpoint) must not abort the
+						// aggregate fetch — surface the normal MiMo failure response
+						// and continue so routerModels is still posted.
+						try {
+							await flushModels(mimoOptions, true)
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error)
+							console.error(`Error refreshing models for ${providerIdentifiers.mimo}:`, error)
+
+							await provider.postMessageToWebview({
+								type: RouterModelsMessageType.singleRouterModelFetchResponse,
+								success: false,
+								error: errorMessage,
+								values: { provider: providerIdentifiers.mimo },
+							})
+						}
+					}
+
+					candidates.push({
+						key: providerIdentifiers.mimo,
+						options: mimoOptions,
+					})
+				}
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1372,10 +1440,20 @@ export const webviewMessageHandler = async (
 				}
 			})
 
+			// Echo the webview's request ID when one was provided so
+			// fetchRouterModels can correlate the response to the exact pending
+			// request (a remount may re-issue the same provider request while a
+			// stale response is in flight). Requests without an ID keep the
+			// previous response shape.
+			const requestId = message?.values?.requestId
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
+				values: requestId
+					? { requestId, ...(providerFilter ? { provider: requestedProvider } : {}) }
+					: providerFilter
+						? { provider: requestedProvider }
+						: undefined,
 			})
 			break
 		}

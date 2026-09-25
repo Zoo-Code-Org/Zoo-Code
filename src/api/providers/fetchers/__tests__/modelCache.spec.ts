@@ -47,6 +47,7 @@ vi.mock("../requesty")
 vi.mock("../kenari")
 vi.mock("../nanogpt")
 vi.mock("../moonshot")
+vi.mock("../mimo")
 vi.mock("../zoo-gateway")
 
 // Mock ContextProxy with a simple static instance
@@ -75,6 +76,7 @@ import { getRequestyModels } from "../requesty"
 import { getKenariModels } from "../kenari"
 import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
+import { getMimoModels } from "../mimo"
 import { getZooGatewayModels } from "../zoo-gateway"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
@@ -83,6 +85,7 @@ const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
+const mockGetMimoModels = getMimoModels as Mock<typeof getMimoModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
@@ -258,6 +261,29 @@ describe("getModels with new GetModelsOptions", () => {
 		})
 
 		expect(mockGetMoonshotModels).toHaveBeenCalledWith("https://api.moonshot.ai/v1", "test-key", {
+			signal: expect.any(AbortSignal),
+		})
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getMimoModels with correct parameters and forwards the abort signal", async () => {
+		const mockModels = {
+			"mimo-v2-omni": {
+				maxTokens: 16384,
+				contextWindow: 262144,
+				supportsPromptCache: false,
+				description: "MiMo model via dynamic catalog endpoint",
+			},
+		}
+		mockGetMimoModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.mimo,
+			apiKey: "mimo-test-key",
+			baseUrl: "https://api.mimo.example/v1",
+		})
+
+		expect(mockGetMimoModels).toHaveBeenCalledWith("https://api.mimo.example/v1", "mimo-test-key", {
 			signal: expect.any(AbortSignal),
 		})
 		expect(result).toEqual(mockModels)
@@ -1133,6 +1159,48 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("nanogpt")
 		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
+	})
+})
+
+describe("MiMo url+key-scoped cache isolation", () => {
+	// MiMo belongs to BOTH URL_SCOPED_PROVIDERS and KEY_SCOPED_PROVIDERS (modelCache.ts),
+	// so distinct base URLs and distinct API keys must never collapse into a shared cache
+	// identity. Mirrors the NanoGPT key-scoped isolation test above, extended across the
+	// url dimension that NanoGPT (key-scoped only) does not exercise.
+	const mimoModels = {
+		"mimo-v2-omni": { maxTokens: 16384, contextWindow: 262144, supportsPromptCache: false },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetMimoModels.mockResolvedValue(mimoModels)
+	})
+
+	it("separates cache identities by base URL and API key without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.mimo })
+		await getModels({ provider: providerIdentifiers.mimo, baseUrl: "https://api.mimo.example/v1" })
+		await getModels({
+			provider: providerIdentifiers.mimo,
+			baseUrl: "https://api.mimo.example/v1",
+			apiKey: "mimo-key-a",
+		})
+		await getModels({
+			provider: providerIdentifiers.mimo,
+			baseUrl: "https://api.mimo.example/v1",
+			apiKey: "mimo-key-b",
+		})
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(4)
+		// Bare provider fallback when neither URL nor key is set; url-only component when
+		// the key is absent (MiMo PAYG vs token-plan visibility differs per key).
+		expect(cacheKeys).toContain("mimo")
+		expect(cacheKeys).toContain("mimo:https://api.mimo.example/v1")
+		// Raw secrets must never appear in the on-disk-bound cache keys.
+		expect(cacheKeys.every((key) => !key.includes("mimo-key-a") && !key.includes("mimo-key-b"))).toBe(true)
 	})
 })
 

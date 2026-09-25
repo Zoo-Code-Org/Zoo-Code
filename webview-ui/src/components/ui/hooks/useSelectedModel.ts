@@ -7,9 +7,12 @@ import {
 	anthropicModels,
 	bedrockModels,
 	deepSeekModels,
+	deepSeekDefaultModelId,
 	moonshotModels,
+	moonshotDefaultModelId,
 	minimaxModels,
 	mimoModels,
+	mimoDefaultModelId,
 	geminiModels,
 	mistralModels,
 	openAiModelInfoSaneDefaults,
@@ -55,6 +58,60 @@ function getValidatedModelId(
 	defaultModelId: string,
 ): string {
 	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
+}
+
+/**
+ * Dynamic providers whose shipped static catalog carries complete specs
+ * (context window, max tokens). For these, resolving from the static catalog
+ * while router models are unavailable is safe: the ready-path merge in
+ * getSelectedModel already prefers router data and falls back to the same
+ * static entries.
+ */
+type StaticCatalogDynamicProvider =
+	| typeof providerIdentifiers.deepseek
+	| typeof providerIdentifiers.moonshot
+	| typeof providerIdentifiers.mimo
+
+const isStaticCatalogDynamicProvider = (provider: ProviderName): provider is StaticCatalogDynamicProvider =>
+	provider === providerIdentifiers.deepseek ||
+	provider === providerIdentifiers.moonshot ||
+	provider === providerIdentifiers.mimo
+
+/**
+ * Resolves a selection from the shipped static catalog while router models are
+ * unavailable (first load, missing API key, or a query-layer fetch failure).
+ * Without this fallback these providers returned `info: undefined` until the
+ * router response arrived, and capability-driven UI such as TaskHeader's
+ * context window rendered a bogus window size of 1 (`contextWindow || 1`).
+ * Once router data arrives, getSelectedModel revalidates against the merged
+ * catalog and takes over.
+ */
+function getStaticCatalogSelection(
+	provider: StaticCatalogDynamicProvider,
+	apiConfiguration: ProviderSettings,
+): { id: string; info: ModelInfo | undefined } {
+	const configuredId = apiConfiguration.apiModelId
+	switch (provider) {
+		case providerIdentifiers.deepseek: {
+			const id =
+				configuredId && deepSeekModels[configuredId as keyof typeof deepSeekModels]
+					? configuredId
+					: deepSeekDefaultModelId
+			return { id, info: deepSeekModels[id as keyof typeof deepSeekModels] }
+		}
+		case providerIdentifiers.moonshot: {
+			const id =
+				configuredId && moonshotModels[configuredId as keyof typeof moonshotModels]
+					? configuredId
+					: moonshotDefaultModelId
+			return { id, info: moonshotModels[id as keyof typeof moonshotModels] }
+		}
+		case providerIdentifiers.mimo: {
+			const id =
+				configuredId && mimoModels[configuredId as keyof typeof mimoModels] ? configuredId : mimoDefaultModelId
+			return { id, info: mimoModels[id as keyof typeof mimoModels] }
+		}
+	}
 }
 
 /**
@@ -131,7 +188,12 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 						id: apiConfiguration.apiModelId || getProviderDefaultModelId(providerIdentifiers.kimiCode),
 						info: kimiCodeDefaultModelInfo,
 					}
-				: { id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter), info: undefined }
+				: apiConfiguration && activeProvider && isStaticCatalogDynamicProvider(activeProvider)
+					? getStaticCatalogSelection(activeProvider, apiConfiguration)
+					: {
+							id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter),
+							info: undefined,
+						}
 
 	return {
 		provider,
@@ -317,9 +379,13 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.mimo: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = mimoModels[id as keyof typeof mimoModels] ?? mimoModels["mimo-v2.5-pro"]
-			return { id, info }
+			const availableModels = routerModels[providerIdentifiers.mimo]
+				? { ...mimoModels, ...routerModels[providerIdentifiers.mimo] }
+				: mimoModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels[providerIdentifiers.mimo]?.[id]
+			const staticInfo = mimoModels[id as keyof typeof mimoModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"

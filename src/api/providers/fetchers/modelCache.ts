@@ -33,6 +33,7 @@ import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
 import { getMoonshotModels } from "./moonshot"
+import { getMimoModels } from "./mimo"
 import { getZooGatewayModels } from "./zoo-gateway"
 import { getKimiCodeModels } from "./kimi-code"
 
@@ -105,6 +106,7 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.poe,
 	providerIdentifiers.deepseek,
 	providerIdentifiers.moonshot,
+	providerIdentifiers.mimo,
 	providerIdentifiers.ollama,
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.requesty,
@@ -123,6 +125,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.poe, // Per-account model availability
 	providerIdentifiers.requesty, // Per-account custom model policies
 	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+	providerIdentifiers.mimo, // Token-plan and PAYG catalogs are authenticated per key
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
@@ -303,6 +306,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions, signal?: Abort
 			break
 		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey, ...fetchOpts)
+			break
+		case providerIdentifiers.mimo:
+			models = await getMimoModels(options.baseUrl, options.apiKey, ...fetchOpts)
 			break
 		case providerIdentifiers.zooGateway:
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })

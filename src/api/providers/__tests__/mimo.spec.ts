@@ -85,23 +85,58 @@ describe("MimoHandler", () => {
 			expect(model.id).toBe("mimo-v2.5-pro")
 			expect(model.info.contextWindow).toBe(1_048_576)
 			expect(model.info.maxTokens).toBe(131_072)
-			expect(model.info.inputPrice).toBe(1.0)
-			expect(model.info.outputPrice).toBe(3.0)
+			expect(model.info.inputPrice).toBe(0.435)
+			expect(model.info.outputPrice).toBe(0.87)
 		})
 
 		it("should return correct model info for mimo-v2.5", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.5" })
 			const model = h.getModel()
 			expect(model.id).toBe("mimo-v2.5")
-			expect(model.info.inputPrice).toBe(0.4)
-			expect(model.info.outputPrice).toBe(2.0)
+			expect(model.info.inputPrice).toBe(0.14)
+			expect(model.info.outputPrice).toBe(0.28)
+		})
+
+		it("should return correct model info for mimo-v2.6-pro", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-pro" })
+			const model = h.getModel()
+			expect(model.id).toBe("mimo-v2.6-pro")
+			expect(model.info.contextWindow).toBe(1_048_576)
+			expect(model.info.maxTokens).toBe(131_072)
+			expect(model.info.inputPrice).toBe(0.435)
+			expect(model.info.outputPrice).toBe(0.87)
+			expect(model.info.cacheReadsPrice).toBe(0.0036)
+		})
+
+		it("should return correct model info for mimo-v2.6-flash", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-flash" })
+			const model = h.getModel()
+			expect(model.id).toBe("mimo-v2.6-flash")
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.inputPrice).toBe(0.14)
+			expect(model.info.outputPrice).toBe(0.28)
+		})
+
+		it("should return correct model info for mimo-v2.6-pro-ultraspeed", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-pro-ultraspeed" })
+			const model = h.getModel()
+			expect(model.id).toBe("mimo-v2.6-pro-ultraspeed")
+			expect(model.info.inputPrice).toBe(4.35)
+			expect(model.info.outputPrice).toBe(8.7)
+		})
+
+		it("should default to mimo-v2.6-pro", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: undefined })
+			const model = h.getModel()
+			expect(model.id).toBe(mimoDefaultModelId)
+			expect(model.info).toBe(mimoModels["mimo-v2.6-pro"])
 		})
 
 		it("should fallback to default model for unknown model ID", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "unknown-model" })
 			const model = h.getModel()
 			expect(model.id).toBe("unknown-model")
-			expect(model.info).toBe(mimoModels["mimo-v2.5-pro"])
+			expect(model.info).toBe(mimoModels[mimoDefaultModelId])
 		})
 	})
 
