@@ -1383,37 +1383,57 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
-		it("reconciles an already-persisted tool result before generic resume", async () => {
-			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
-			mockReadApiMessages.mockResolvedValue([
-				{ role: "user", content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }] },
-			])
-			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				historyItem: {
-					id: "child-1",
-					number: 1,
-					ts: 1,
-					task: "Child",
-					tokensIn: 0,
-					tokensOut: 0,
-					totalCost: 0,
-					pendingAction,
-				},
-				startTask: false,
-			})
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
-			vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
-			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+		it.each(["finish_subtask", "create_subtask"] as const)(
+			"reconciles a durable %s error before generic resume",
+			async (kind) => {
+				const action: PendingTaskAction =
+					kind === "finish_subtask"
+						? pendingAction
+						: {
+								kind,
+								actionId: "create-action",
+								approvalText: JSON.stringify({ tool: "newTask" }),
+								mode: "code",
+								message: "Delegate",
+								todos: [],
+							}
+				mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
+				mockReadApiMessages.mockResolvedValue([
+					{
+						role: "user",
+						content: [
+							{ type: "tool_result", tool_use_id: action.actionId, content: "Failed", is_error: true },
+						],
+					},
+				])
+				mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "child-1",
+						number: 1,
+						ts: 1,
+						task: "Child",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						status: "interrupted",
+						pendingAction: action,
+					},
+					startTask: false,
+				})
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+				vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+				const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
 
-			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+				await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
-			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
-			expect(replay).not.toHaveBeenCalled()
-			expect(task.ask).toHaveBeenCalledWith("resume_task")
-		})
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", action.actionId)
+				expect(replay).not.toHaveBeenCalled()
+				expect(task.ask).toHaveBeenCalledWith("resume_task")
+			},
+		)
 
 		it("clears pending metadata after the matching tool result is saved", async () => {
 			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)

@@ -25,8 +25,12 @@ interface TraceStep {
 
 const MAX_DEPTH = 12
 const MAX_STATES = 10_000
-const expectedActions = ["delegate", "interrupt", "complete", "abandon"] as const
+const expectedActions = ["delegate", "resume-delegate", "interrupt", "complete", "abandon"] as const
 const semanticLandmarks = {
+	"detached-task-delegation": (state: ModelState) =>
+		state["child-a"]?.status === "delegated" &&
+		state["child-a"].parentTaskId === undefined &&
+		state["child-a"].awaitingChildId === "child-b",
 	"interrupted-child-redelegation": (state: ModelState) =>
 		state.parent?.status === "delegated" &&
 		state.parent.awaitingChildId === "child-b" &&
@@ -73,12 +77,17 @@ function transitions(state: ModelState): Transition[] {
 		for (const childId of taskIds) {
 			if (childId === parentId || state[childId]) continue
 			const awaitedStatus = parent.awaitingChildId ? state[parent.awaitingChildId as TaskId]?.status : undefined
-			if (parent.status !== "active" && !(parent.status === "delegated" && awaitedStatus === "interrupted")) {
+			if (
+				parent.status !== "active" &&
+				parent.status !== "interrupted" &&
+				!(parent.status === "delegated" && awaitedStatus === "interrupted")
+			) {
 				continue
 			}
-			const delegated = delegateTaskToChild(parent, childId, awaitedStatus)
+			const owningParent = parent.parentTaskId ? state[parent.parentTaskId as TaskId] : undefined
+			const delegated = delegateTaskToChild(parent, childId, awaitedStatus, owningParent)
 			result.push({
-				name: `delegate(${parentId}, ${childId})`,
+				name: `${parent.status === "interrupted" ? "resume-delegate" : "delegate"}(${parentId}, ${childId})`,
 				next: replace(state, delegated, task(childId, parentId)),
 			})
 		}
@@ -263,8 +272,17 @@ function runRepresentativeScenarios(): void {
 	assert.throws(() => delegateTaskToChild(delegated, "child-b", "active"), /not interrupted/)
 
 	const interruptedA = interruptDelegatedChild(delegated, childA)
+	const resumedA = delegateTaskToChild(interruptedA, "child-b", undefined, delegated)
+	assert.equal(resumedA.status, "delegated")
+	assert.equal(resumedA.parentTaskId, "parent")
+	const nestedReturn = completeDelegatedChild(resumedA, task("child-b", "child-a"), "nested result")
+	assert.equal(completeDelegatedChild(delegated, nestedReturn.parent, "resumed result").child.status, "completed")
+
 	const redelegated = delegateTaskToChild(delegated, "child-b", interruptedA.status)
 	assert.throws(() => completeDelegatedChild(redelegated, interruptedA, "stale"), /not delegated to child/)
+	const detached = delegateTaskToChild(interruptedA, "new-grandchild", undefined, redelegated)
+	assert.equal(detached.parentTaskId, undefined)
+	assert.equal(detached.rootTaskId, undefined)
 
 	const abandoned = abandonDelegatedChild(delegated, interruptedA)
 	assert.throws(() => completeDelegatedChild(abandoned.parent, abandoned.child, "late"), /not delegated to child/)

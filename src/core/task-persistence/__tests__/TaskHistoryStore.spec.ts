@@ -93,6 +93,46 @@ describe("TaskHistoryStore", () => {
 		})
 	})
 
+	describe("invalidate()", () => {
+		const invalidRecords = {
+			malformed: "{",
+			"invalid-record": "{}",
+			"non-object-record": "null",
+			"non-string-id": JSON.stringify({ id: 42, status: "active" }),
+			"other-task-id": JSON.stringify({ id: "other-task", status: "active" }),
+		} as const
+
+		it.each([
+			"malformed",
+			"invalid-record",
+			"non-object-record",
+			"non-string-id",
+			"other-task-id",
+			"read-error",
+			"missing",
+		] as const)("preserves cached ownership unless the record is missing (%s)", async (scenario) => {
+			await store.initialize()
+			store.dispose() // Keep filesystem watcher reconciliation out of this explicit refresh test.
+			const owner = makeHistoryItem({ id: "owner", status: "delegated", awaitingChildId: "child" })
+			await store.upsert(owner)
+			const filePath = path.join(tmpDir, "tasks", "owner", GlobalFileNames.historyItem)
+			if (scenario in invalidRecords) {
+				await fs.writeFile(filePath, invalidRecords[scenario as keyof typeof invalidRecords])
+			} else {
+				await fs.unlink(filePath)
+				if (scenario === "read-error") await fs.mkdir(filePath)
+			}
+
+			if (scenario === "missing") {
+				await expect(store.invalidate("owner")).resolves.toBeUndefined()
+				expect(store.get("owner")).toBeUndefined()
+			} else {
+				await expect(store.invalidate("owner")).rejects.toThrow()
+				expect(store.get("owner")).toEqual(owner)
+			}
+		})
+	})
+
 	describe("pending action persistence", () => {
 		it("persists set and clear operations across store reinitialization", async () => {
 			await store.initialize()

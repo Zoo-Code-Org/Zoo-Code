@@ -55,6 +55,8 @@ The model has three fixed task slots, enough to cover competing siblings and a n
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
 
+An approved delegation can also resume an `interrupted` task directly into `delegated`. The `resume-delegate` action and detached-task-delegation landmark cover this path without allowing arbitrary message saves to reactivate interrupted tasks. The reducer retains the task's own parent link only when that parent still awaits it; otherwise it clears stale lineage instead of taking ownership back from a newer sibling. Provider rollback persists an error tool result before rehydrating a failed pending delegation, so history resume reconciles the action rather than auto-approving it again. Failed result persistence stops restoration. Provider and history-resume tests cover this persistence boundary; the subtask extension-host smoke test covers interrupted pending approval replay with auto-approval enabled (#1714).
+
 ## Shared-store concurrency model
 
 The same `pnpm lifecycle:model-check` command also runs a second bounded explorer over two `TaskHistoryStore` hosts. It imports the production `computeHistoryDelta` and `mergeHistoryDelta` functions, so its semantics match the store rather than assuming coherent caches or transactional pair writes:
