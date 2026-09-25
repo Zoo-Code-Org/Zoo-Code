@@ -308,6 +308,8 @@ export function parseVitestTestFiles(report, runRoot) {
 }
 
 export function preferDirectTestFiles(testFiles, sourceFiles) {
+	// Spec files follow the lowerCamel source-name convention (e.g.
+	// writeToFileTool.spec.ts for WriteToFileTool.ts), so match case-insensitively.
 	const sourceNames = sourceFiles.map((sourceFile) =>
 		path.posix.basename(sourceFile, path.posix.extname(sourceFile)).toLowerCase(),
 	)
