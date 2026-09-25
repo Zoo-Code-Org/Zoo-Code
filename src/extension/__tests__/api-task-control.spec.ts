@@ -45,6 +45,7 @@ type CreatedTask = {
 
 type ProviderDouble = EventEmitter & {
 	context: vscode.ExtensionContext
+	taskHistoryStore: { get: Mock<(taskId: string) => undefined> }
 	evictCurrentTask: Mock<() => Promise<void>>
 	postStateToWebview: Mock<() => Promise<void>>
 	postMessageToWebview: Mock<(message: unknown) => Promise<void>>
@@ -74,6 +75,7 @@ function asClineProvider(provider: ProviderDouble): ClineProvider {
 function createProvider(taskId = "task-1"): ProviderDouble {
 	const provider = new EventEmitter() as ProviderDouble
 	provider.context = {} as vscode.ExtensionContext
+	provider.taskHistoryStore = { get: vi.fn().mockReturnValue(undefined) }
 	provider.evictCurrentTask = vi.fn().mockResolvedValue(undefined)
 	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 	provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
@@ -356,5 +358,28 @@ describe("API task controls - per-view review fixes", () => {
 		expect(outputChannel.appendLine).toHaveBeenCalledWith(
 			"[API#selectTaskFollowupSuggestion] mode switch failed for task task-failing-switch: persist failed",
 		)
+	})
+
+	it("wires a provider's task events exactly once when the same provider is reused for a new tab", async () => {
+		// A second new-tab task resolving the SAME provider (an existing tab panel returns
+		// its live provider) must not re-register its listeners: a duplicate copy would
+		// re-emit every task event once per registered handler.
+		const newTabProvider = createProvider("reused-tab-task")
+		createClineTabPanelMock.mockResolvedValue(newTabProvider)
+
+		await api.startNewTask({ configuration, text: "first", newTab: true })
+		await api.startNewTask({ configuration, text: "second", newTab: true })
+
+		const seen: string[] = []
+		api.on(RooCodeEventName.TaskCompleted, (taskId: string) => {
+			seen.push(taskId)
+		})
+
+		newTabProvider.emit(RooCodeEventName.TaskCompleted, "reused-tab-task", {}, {})
+		// The provider-side handler is async (file logging after the re-emit); let it settle
+		// before asserting on the emission count.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(seen).toEqual(["reused-tab-task"])
 	})
 })

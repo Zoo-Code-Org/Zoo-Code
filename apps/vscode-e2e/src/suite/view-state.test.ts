@@ -149,6 +149,7 @@ suite("Roo Code View State", function () {
 		const taskIds = new Map<string, string>()
 		const pendingSuggestions = new Map<string, { answer: string; mode?: string }>()
 		const answeredSuggestions = new Set<string>()
+		const completedTasks = new Set<string>()
 		const suggestionKey = (taskId: string, answer: string) => `${taskId}:${answer}`
 		let releasedRounds = 0
 		let roundInFlight = false
@@ -220,9 +221,13 @@ suite("Roo Code View State", function () {
 				maybeReleaseRound()
 			}
 		}
+		const completionHandler = (taskId: string) => {
+			completedTasks.add(taskId)
+		}
 
 		globalThis.api.on(RooCodeEventName.Message, messageHandler)
 		globalThis.api.on(RooCodeEventName.TaskModeSwitched, modeHandler)
+		globalThis.api.on(RooCodeEventName.TaskCompleted, completionHandler)
 
 		try {
 			for (const [index, taskPlan] of plan.entries()) {
@@ -302,9 +307,28 @@ suite("Roo Code View State", function () {
 					`Persisted viewStates.${viewStateId} leaked secret state at ${secretStatePath}`,
 				)
 			}
+
+			// The final TaskModeSwitched fires before the fixture sends
+			// attempt_completion: while the message listener is still registered,
+			// wait for every task to complete so the trailing completion_result
+			// ask is approved and no task stays pending (the suite teardown's
+			// cancelCurrentTask() only covers the current task).
+			await waitFor(
+				() =>
+					plan.every((taskPlan) => {
+						const taskId = taskIds.get(taskPlan.taskName)
+						return !!taskId && completedTasks.has(taskId)
+					}),
+				{ timeout: 30_000 },
+			).catch((error) => {
+				throw new Error(
+					`Timed out waiting for all tasks to complete; completed: ${[...completedTasks].join(", ") || "(none)"}; expected: ${taskIdsInPlanOrder().join(", ")}. ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
 		} finally {
 			globalThis.api.off(RooCodeEventName.Message, messageHandler)
 			globalThis.api.off(RooCodeEventName.TaskModeSwitched, modeHandler)
+			globalThis.api.off(RooCodeEventName.TaskCompleted, completionHandler)
 		}
 	})
 	/**

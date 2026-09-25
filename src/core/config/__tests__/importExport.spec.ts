@@ -1081,6 +1081,13 @@ describe("importExport", () => {
 				])
 
 				const callOrder: string[] = []
+				// Hold the broadcast's promise pending so the test can observe the
+				// in-between state: a resolved mock would only prove invocation order,
+				// not that the post actually waits for the broadcast to complete.
+				let releaseBroadcast: () => void = () => {}
+				const broadcastSettled = new Promise<void>((resolve) => {
+					releaseBroadcast = resolve
+				})
 				const mockProvider = {
 					settingsImportedAt: 0,
 					postStateToWebview: vi.fn().mockImplementation(async () => {
@@ -1088,10 +1095,11 @@ describe("importExport", () => {
 					}),
 					broadcastResetToAllInstances: vi.fn().mockImplementation(async () => {
 						callOrder.push("broadcast")
+						await broadcastSettled
 					}),
 				}
 
-				await importSettingsWithFeedback(
+				const importing = importSettingsWithFeedback(
 					{
 						providerSettingsManager: mockProviderSettingsManager,
 						contextProxy: mockContextProxy,
@@ -1101,9 +1109,19 @@ describe("importExport", () => {
 					filePath,
 				)
 
+				// Wait until the broadcast is in flight (its start is recorded in
+				// callOrder), then assert the post has NOT run while it is still
+				// pending: a post before the reset would leave the webview with the
+				// stale pre-import per-view mode/profile.
+				await vi.waitFor(() => {
+					expect(callOrder).toEqual(["broadcast"])
+				})
+				expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
+
 				// The broadcast clears the durable view state, so the initiating provider's
-				// webview post must run after it — otherwise the webview keeps the stale
-				// pre-import per-view mode/profile.
+				// webview post must run after it completes.
+				releaseBroadcast()
+				await importing
 				expect(callOrder).toEqual(["broadcast", "post"])
 			})
 

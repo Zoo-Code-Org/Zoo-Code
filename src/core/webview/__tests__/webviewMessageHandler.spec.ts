@@ -324,6 +324,34 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
 	})
 
+	// The provider double is module-level and shared with the later describe
+	// blocks: the fixture members assigned above (and the isViewLaunched flag
+	// the launch handler sets) must not leak into them — vi.clearAllMocks() in
+	// a later suite clears call history but neither removes the assigned
+	// members nor resets isViewLaunched. Snapshot the originals (absent on the
+	// double literal) and restore them after every test in this suite.
+	const originalLaunchMembers: Record<keyof LaunchProviderFixture, unknown> = {
+		setViewStateId: double.setViewStateId,
+		workspaceTracker: double.workspaceTracker,
+		providerSettingsManager: double.providerSettingsManager,
+		activateProviderProfile: double.activateProviderProfile,
+		getMcpHub: double.getMcpHub,
+		getStateToPostToWebview: double.getStateToPostToWebview,
+	}
+	const originalIsViewLaunched = mockClineProvider.isViewLaunched
+
+	afterEach(() => {
+		const mutable = double as unknown as Record<string, unknown>
+		for (const [key, value] of Object.entries(originalLaunchMembers)) {
+			if (value === undefined) {
+				delete mutable[key]
+			} else {
+				mutable[key] = value
+			}
+		}
+		mockClineProvider.isViewLaunched = originalIsViewLaunched
+	})
+
 	it("validates the view-local currentApiConfigName on launch", async () => {
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))

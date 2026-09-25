@@ -394,6 +394,14 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 	newPanel.onDidChangeViewState(
 		(e) => {
 			const panel = e.webviewPanel
+			// When this panel becomes the active editor it becomes the tracked tab,
+			// so a title-bar command on an older tab (e.g. plusButtonClickedInTab)
+			// targets that tab's provider instead of the newest-created one.
+			// `active` (not `visible`) is the focus signal for the editor group.
+			if (panel.active) {
+				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+				setPanel(panel, "tab")
+			}
 			if (panel.visible) {
 				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
 			}
