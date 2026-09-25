@@ -1,6 +1,5 @@
 // npx vitest run __tests__/single-open-invariant.spec.ts
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
 import { type OutputChannel } from "vscode"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
@@ -9,6 +8,7 @@ import { type Task } from "../core/task/Task"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { makeProviderStub } from "./helpers/provider-stub"
 
 type PrivateClineProviderMethods = {
 	createTask: (
@@ -240,8 +240,8 @@ describe("Single-open-task invariant", () => {
 		const registry = new TaskRegistry()
 		registry.push(existingTask as unknown as Task)
 
-		const provider = {
-			getCurrentTask: vi.fn(() => existingTask),
+		const provider = makeProviderStub({
+			getCurrentTask: vi.fn(() => registry.current),
 			taskRegistry: registry,
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
@@ -269,6 +269,7 @@ describe("Single-open-task invariant", () => {
 			taskScheduler: { schedule: schedulespy },
 			taskEventListeners: new WeakMap(),
 			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			syncFocusedTaskToWebview: vi.fn().mockResolvedValue(undefined),
 			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
 			contextProxy: {
 				extensionUri: {},
@@ -278,7 +279,7 @@ describe("Single-open-task invariant", () => {
 				getProviderSettings: vi.fn(() => ({})),
 			},
 			postStateToWebview: vi.fn(),
-		} as unknown as ClineProvider
+		})
 
 		const historyItem = {
 			id: historyId,
@@ -291,8 +292,16 @@ describe("Single-open-task invariant", () => {
 			workspace: "/tmp",
 		}
 
-		await privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem)
+		const replacement = await privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem)
 
+		expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "clineMessagesFocus",
+			taskId: historyId,
+			taskInstanceId: replacement.instanceId,
+		})
+		expect(vi.mocked(provider.postMessageToWebview).mock.invocationCallOrder[0]).toBeLessThan(
+			existingTask.abortTask.mock.invocationCallOrder[0],
+		)
 		expect(schedulespy).toHaveBeenCalledTimes(1)
 		// evictCurrentTask must NOT have been called — in-place replace, no stack pop
 		expect(removeClineFromStack).not.toHaveBeenCalled()
@@ -315,7 +324,7 @@ describe("Single-open-task invariant", () => {
 		})
 		const schedulespy = vi.fn().mockResolvedValue(undefined)
 
-		const provider = {
+		const provider = makeProviderStub({
 			historyTaskCreationQueue: Promise.resolve(),
 			getCurrentTask: vi.fn(() => registry.current),
 			taskRegistry: registry,
@@ -341,6 +350,7 @@ describe("Single-open-task invariant", () => {
 			taskScheduler: { schedule: schedulespy },
 			taskEventListeners: new WeakMap(),
 			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			syncFocusedTaskToWebview: vi.fn().mockResolvedValue(undefined),
 			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
 			contextProxy: {
 				extensionUri: {},
@@ -350,7 +360,7 @@ describe("Single-open-task invariant", () => {
 				getProviderSettings: vi.fn(() => ({})),
 			},
 			postStateToWebview: vi.fn(),
-		} as unknown as ClineProvider
+		})
 
 		const historyItem = {
 			id: "hist-concurrent-1",

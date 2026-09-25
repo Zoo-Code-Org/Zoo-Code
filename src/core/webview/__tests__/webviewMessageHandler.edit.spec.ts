@@ -43,6 +43,7 @@ import type { ClineProvider } from "../ClineProvider"
 import type { ClineMessage } from "@roo-code/types"
 import type { ApiMessage } from "../../task-persistence/apiMessages"
 import { MessageManager } from "../../message-manager"
+import { saveTaskMessages } from "../../task-persistence"
 
 describe("webviewMessageHandler - Edit Message with Timestamp Fallback", () => {
 	let mockClineProvider: ClineProvider
@@ -59,6 +60,7 @@ describe("webviewMessageHandler - Edit Message with Timestamp Fallback", () => {
 			overwriteClineMessages: vi.fn(),
 			overwriteApiConversationHistory: vi.fn(),
 			handleWebviewAskResponse: vi.fn(),
+			submitUserMessage: vi.fn(),
 		}
 		mockCurrentTask.messageManager = new MessageManager(mockCurrentTask)
 
@@ -212,6 +214,61 @@ describe("webviewMessageHandler - Edit Message with Timestamp Fallback", () => {
 				content: [{ type: "text", text: "Earlier message" }],
 			},
 		])
+	})
+
+	it("awaits one rewind with preserved checkpoint metadata before submitting an edited message", async () => {
+		const checkpoint = { hash: "checkpoint-hash", type: "user_message" }
+		const preservedMessage = {
+			ts: 500,
+			type: "say",
+			say: "user_feedback",
+			text: "Earlier message",
+			checkpoint,
+		} as ClineMessage
+		mockCurrentTask.clineMessages = [
+			preservedMessage,
+			{ ts: 1000, type: "say", say: "user_feedback", text: "Edit me" } as ClineMessage,
+		]
+		mockCurrentTask.apiConversationHistory = [
+			{ ts: 500, role: "user", content: [{ type: "text", text: "Earlier message" }] },
+			{ ts: 1000, role: "user", content: [{ type: "text", text: "Edit me" }] },
+		] as ApiMessage[]
+		let completedOverwrites = 0
+		let submitObservedCompletedOverwrites = 0
+		let releaseOverwrite!: () => void
+		const pendingOverwrite = new Promise<void>((resolve) => {
+			releaseOverwrite = resolve
+		})
+		mockCurrentTask.overwriteClineMessages.mockImplementation(async (messages: ClineMessage[]) => {
+			await pendingOverwrite
+			mockCurrentTask.clineMessages = structuredClone(messages)
+			completedOverwrites += 1
+		})
+		mockCurrentTask.submitUserMessage.mockImplementation(() => {
+			submitObservedCompletedOverwrites = completedOverwrites
+		})
+
+		const edit = webviewMessageHandler(mockClineProvider, {
+			type: "editMessageConfirm",
+			messageTs: 1000,
+			text: "Edited message",
+			restoreCheckpoint: false,
+		})
+
+		try {
+			await vi.waitFor(() => expect(mockCurrentTask.overwriteClineMessages).toHaveBeenCalledOnce())
+			expect(mockCurrentTask.overwriteApiConversationHistory).not.toHaveBeenCalled()
+			expect(mockCurrentTask.submitUserMessage).not.toHaveBeenCalled()
+		} finally {
+			releaseOverwrite()
+			await edit
+		}
+
+		expect(mockCurrentTask.overwriteClineMessages).toHaveBeenCalledExactlyOnceWith([preservedMessage])
+		expect(mockCurrentTask.clineMessages).toEqual([preservedMessage])
+		expect(saveTaskMessages).not.toHaveBeenCalled()
+		expect(mockCurrentTask.submitUserMessage).toHaveBeenCalledWith("Edited message", [])
+		expect(submitObservedCompletedOverwrites).toBe(1)
 	})
 
 	it("should not use fallback when exact apiConversationHistoryIndex is found", async () => {

@@ -1036,7 +1036,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 141
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1081,7 +1081,7 @@
 	},
 	"core/webview/__tests__/webviewMessageHandler.checkpoint.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 2
 		}
 	},
 	"core/webview/__tests__/webviewMessageHandler.cloudAuth.spec.ts": {
@@ -1131,7 +1131,7 @@
 	},
 	"core/webview/webviewMessageHandler.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 3
 		}
 	},
 	"extension/__tests__/api-delete-queued-message.spec.ts": {
