@@ -6,6 +6,7 @@ import type { ToolCallbacks } from "../BaseTool"
 import { CodebaseSearchTool } from "../CodebaseSearchTool"
 import { CodeIndexManagerRegistry } from "../../../services/code-index/code-index-manager-registry"
 import { CodeIndexManager } from "../../../services/code-index/manager"
+import { CodeIndexStateManager } from "../../../services/code-index/state-manager"
 import { getWorkspacePath } from "../../../utils/path"
 import { makeExtensionContext, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
 
@@ -15,6 +16,7 @@ vi.mock("vscode", () => ({
 	Uri: { file: vi.fn() },
 }))
 vi.mock("../../../utils/path", () => ({ getWorkspacePath: vi.fn() }))
+vi.mock("../../../services/code-index/state-manager")
 vi.mock("../../../services/code-index/manager", () => ({
 	CodeIndexManager: vi.fn().mockImplementation(function (workspacePath: string) {
 		let initialized = false
@@ -193,6 +195,7 @@ describe("CodebaseSearchTool workspace selection", () => {
 			"/external-task",
 			expect.objectContaining({ fsPath: "/external-task" }),
 			provider.context,
+			expect.any(CodeIndexStateManager),
 		)
 		expect(vscode.Uri.file).toHaveBeenCalledExactlyOnceWith("/external-task")
 		const manager = CodeIndexManagerRegistry.getOrCreate(provider.context, "/external-task")!

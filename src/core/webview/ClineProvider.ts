@@ -90,9 +90,8 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
-import type { CodeIndexManager } from "../../services/code-index/manager"
 import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
-import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
@@ -212,8 +211,6 @@ export class ClineProvider
 	private taskScheduler = new TaskScheduler()
 	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
 	private cancelledDelegationChildIds = new Set<string>()
-	private codeIndexStatusSubscription?: vscode.Disposable
-	private codeIndexManager?: CodeIndexManager
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
@@ -1082,17 +1079,6 @@ export class ClineProvider
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView.webview)
 
-		// Initialize code index status subscription for the current workspace.
-		this.updateCodeIndexStatusSubscription()
-
-		// Listen for active editor changes to update code index status for the
-		// current workspace.
-		const activeEditorSubscription = vscode.window.onDidChangeActiveTextEditor(() => {
-			// Update subscription when workspace might have changed.
-			this.updateCodeIndexStatusSubscription()
-		})
-		this.webviewDisposables.push(activeEditorSubscription)
-
 		// Listen for when the panel becomes visible.
 		// https://github.com/microsoft/vscode-discussions/discussions/840
 		if ("onDidChangeViewState" in webviewView) {
@@ -1130,8 +1116,6 @@ export class ClineProvider
 				} else {
 					this.log("Clearing webview resources for sidebar view")
 					this.clearWebviewResources()
-					// Reset current workspace manager reference when view is disposed
-					this.codeIndexManager = undefined
 				}
 			},
 			null,
@@ -3303,59 +3287,8 @@ export class ClineProvider
 		return true
 	}
 
-	/**
-	 * Gets the CodeIndexManager for the current active workspace
-	 * @returns CodeIndexManager instance for the current workspace or the default one
-	 */
-	public getCurrentWorkspaceCodeIndexManager(): CodeIndexManager | undefined {
-		return CodeIndexManagerRegistry.getOrCreate(this.context)
-	}
-
-	/**
-	 * Updates the code index status subscription to listen to the current workspace manager
-	 */
-	private updateCodeIndexStatusSubscription(): void {
-		// Get the current workspace manager
-		const currentManager = this.getCurrentWorkspaceCodeIndexManager()
-
-		// If the manager hasn't changed, no need to update subscription
-		if (currentManager === this.codeIndexManager) {
-			return
-		}
-
-		// Dispose the old subscription if it exists
-		if (this.codeIndexStatusSubscription) {
-			this.codeIndexStatusSubscription.dispose()
-			this.codeIndexStatusSubscription = undefined
-		}
-
-		// Update the current workspace manager reference
-		this.codeIndexManager = currentManager
-
-		// Subscribe to the new manager's progress updates if it exists
-		if (currentManager) {
-			this.codeIndexStatusSubscription = currentManager.onProgressUpdate((update: IndexProgressUpdate) => {
-				// Only send updates if this manager is still the current one
-				if (currentManager === this.getCurrentWorkspaceCodeIndexManager()) {
-					// Get the full status from the manager to ensure we have all fields correctly formatted
-					const fullStatus = currentManager.getCurrentStatus()
-					void this.postMessageToWebview({
-						type: "indexingStatusUpdate",
-						values: fullStatus,
-					})
-				}
-			})
-
-			if (this.view) {
-				this.webviewDisposables.push(this.codeIndexStatusSubscription)
-			}
-
-			// Send initial status for the current workspace
-			void this.postMessageToWebview({
-				type: "indexingStatusUpdate",
-				values: currentManager.getCurrentStatus(),
-			})
-		}
+	public getCurrentWorkspaceCodeIndexScope(): CodeIndexWorkspaceScope | undefined {
+		return CodeIndexManagerRegistry.getOrCreateScope(this.context)
 	}
 
 	/**
@@ -3843,6 +3776,11 @@ export class ClineProvider
 			...(await this.getTaskProperties()),
 			...(await this.getGitProperties()),
 		}
+	}
+
+	/** Workspace explicitly associated with this provider, without an active-editor fallback. */
+	public get workspacePath(): string | undefined {
+		return this.currentWorkspacePath
 	}
 
 	public get cwd() {
