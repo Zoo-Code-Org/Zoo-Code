@@ -1909,6 +1909,52 @@ describe("Cline", () => {
 			})
 		})
 
+		describe("slash command mode switch", () => {
+			it("passes null as targetTask so handleModeSwitch does not overwrite the orchestrator task", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+				Object.assign(task.api, { ensureModelFetched })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "run /commit" }],
+					mode: "code",
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+				vi.spyOn(task, "say").mockImplementation(async (type) => {
+					if (type === "api_req_started") {
+						task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+					}
+					return undefined as never
+				})
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw new Error("stop after mode switch")
+				})
+
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
+
+				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
+			})
+		})
+
 		describe("Subtask Rate Limiting", () => {
 			let mockProvider: MockedClineProvider
 			let mockApiConfig: RateLimitedProviderSettings

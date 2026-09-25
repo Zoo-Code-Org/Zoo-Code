@@ -3091,7 +3091,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const state = await provider.getState()
 					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
 					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode)
+						await provider.handleModeSwitch(slashCommandMode, null)
 					}
 				}
 			}
