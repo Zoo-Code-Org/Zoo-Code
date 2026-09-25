@@ -223,6 +223,14 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private lastWebviewHeartbeatAt = 0
+	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
+	// Bumped to invalidate an in-flight recovery reload when the provider or
+	// the watched view is disposed; the reload must not reassign webview.html
+	// afterwards.
+	private webviewRecoveryEpoch = 0
+	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
+	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -816,6 +824,10 @@ export class ClineProvider
 	*/
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+		this.stopWebviewWatchdog()
+		// Invalidate any recovery reload still awaiting its HTML so it cannot
+		// reassign webview.html on the disposed view.
+		this.webviewRecoveryEpoch++
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -842,6 +854,7 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		this.stopWebviewWatchdog()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1042,11 +1055,7 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
-			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
-				? await this.getHMRHtmlContent(webviewView.webview)
-				: await this.getHtmlContent(webviewView.webview)
+		webviewView.webview.html = await this.getWebviewHtml(webviewView.webview)
 
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
@@ -1082,6 +1091,9 @@ export class ClineProvider
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView.webview)
 
+		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
+		this.startWebviewWatchdog()
+
 		// Initialize code index status subscription for the current workspace.
 		this.updateCodeIndexStatusSubscription()
 
@@ -1100,6 +1112,9 @@ export class ClineProvider
 			// for this visibility listener panel.
 			const viewStateDisposable = webviewView.onDidChangeViewState(() => {
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.updateWebviewHeartbeat()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
@@ -1111,6 +1126,9 @@ export class ClineProvider
 			// sidebar
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.updateWebviewHeartbeat()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
@@ -1130,6 +1148,11 @@ export class ClineProvider
 				} else {
 					this.log("Clearing webview resources for sidebar view")
 					this.clearWebviewResources()
+					if (this.view === webviewView) {
+						// Drop the disposed view so nothing keeps polling it
+						// (e.g. the recovery watchdog) for the provider's lifetime.
+						this.view = undefined
+					}
 					// Reset current workspace manager reference when view is disposed
 					this.codeIndexManager = undefined
 				}
@@ -3379,6 +3402,76 @@ export class ClineProvider
 				`  timestamp:    ${new Date().toISOString()}\n` +
 				`If the panel appears gray after this, share this log with support@zoocode.dev`,
 		)
+	}
+
+	/** Records that the webview renderer is alive; called on every webviewHeartbeat message. */
+	public updateWebviewHeartbeat(): void {
+		this.lastWebviewHeartbeatAt = Date.now()
+	}
+
+	/**
+	 * Starts (or restarts) the watchdog that detects a dead webview renderer
+	 * process. Hidden webviews throttle timers, so becoming visible resets the
+	 * grace window instead of counting throttled heartbeats as a crash.
+	 */
+	private startWebviewWatchdog(): void {
+		this.updateWebviewHeartbeat()
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+		}
+		this.webviewWatchdogInterval = setInterval(() => {
+			if (this.view?.visible !== true) {
+				return
+			}
+			if (Date.now() - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) {
+				return
+			}
+			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")
+			void this.reloadWebviewForRecovery()
+		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
+	}
+
+	/** Stops the renderer heartbeat watchdog; the webview it watches is gone. */
+	private stopWebviewWatchdog(): void {
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+			this.webviewWatchdogInterval = null
+		}
+	}
+
+	/**
+	 * Reloads only this provider's own webview by regenerating its HTML (fresh
+	 * nonce) and reassigning `webview.html`, which forces VS Code to reload that
+	 * webview. Works for both sidebar (WebviewView) and tab (WebviewPanel) shapes.
+	 */
+	private async reloadWebviewForRecovery(): Promise<void> {
+		const view = this.view
+		if (!view?.webview) {
+			return
+		}
+		// Capture the epoch so a disposal or view replacement can invalidate
+		// this operation while the HTML is being generated.
+		const epoch = this.webviewRecoveryEpoch
+		try {
+			const html = await this.getWebviewHtml(view.webview)
+			// The await yields; assigning html now that the provider is disposed
+			// or the watched view was disposed/replaced would touch a dead or
+			// unrelated webview.
+			if (this._disposed || this.webviewRecoveryEpoch !== epoch || this.view !== view) {
+				return
+			}
+			view.webview.html = html
+		} catch (error) {
+			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	/** Builds the webview HTML using the same path as resolveWebviewView (HMR in development). */
+	private async getWebviewHtml(webview: vscode.Webview): Promise<string> {
+		return this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
+			? await this.getHMRHtmlContent(webview)
+			: await this.getHtmlContent(webview)
 	}
 
 	public getRecentTasks(): string[] {

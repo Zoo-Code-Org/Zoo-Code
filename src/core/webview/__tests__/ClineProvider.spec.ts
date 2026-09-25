@@ -527,10 +527,7 @@ describe("ClineProvider", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -660,6 +657,350 @@ describe("ClineProvider", () => {
 			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
 			visibilityCallback()
 			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("running-task"))
+		})
+	})
+
+	describe("webview heartbeat watchdog", () => {
+		let visibilityCallback: () => void
+		let disposeCallback: () => void
+
+		beforeEach(() => {
+			// Fake timers must be active before resolveWebviewView so the
+			// watchdog interval is registered on the fake clock.
+			vi.useFakeTimers()
+			mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
+				visibilityCallback = cb
+				return { dispose: vi.fn() }
+			})
+			mockWebviewView.onDidDispose = vi.fn().mockImplementation((cb: () => void) => {
+				disposeCallback = cb
+				return { dispose: vi.fn() }
+			})
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			vi.useRealTimers()
+		})
+
+		test("does not reload the webview while heartbeats are fresh", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(110_000)
+			await webviewMessageHandler(provider, { type: "webviewHeartbeat", timestamp: Date.now() })
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("reloads the webview with fresh HTML when the heartbeat is stale and the view is visible", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			// Reassigning webview.html with a fresh nonce is what forces the reload.
+			expect(mockWebviewView.webview.html).not.toBe(htmlAfterResolve)
+			expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
+		})
+
+		test("does not reload while the view is hidden even when the heartbeat is stale", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("resets the grace window when the view becomes visible", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			Object.defineProperty(mockWebviewView, "visible", { value: true, configurable: true })
+			visibilityCallback()
+			const htmlAfterBecomingVisible = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterBecomingVisible)
+
+			// Watchdog ticks every 60s; 120s after the flip the heartbeat is stale again.
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).not.toBe(htmlAfterBecomingVisible)
+		})
+
+		test("stops watching after the provider is disposed", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await provider.dispose()
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("stops watching and clears the view when the sidebar webview is disposed", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Precondition: the watchdog interval was actually scheduled, so the
+			// null check below proves disposal stopped it rather than it never
+			// having started.
+			expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+
+			// The provider outlives a disposed sidebar view; VS Code re-resolves
+			// a fresh view later. Disposal must stop the watchdog and drop the
+			// stale view reference so no recovery reload targets the dead view.
+			disposeCallback()
+			expect(provider["webviewWatchdogInterval"]).toBeNull()
+			// @ts-ignore - accessing private property for testing
+			expect(provider.view).toBeUndefined()
+
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not stack watchdog intervals when resolveWebviewView runs again", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// getHtmlContent regenerates the HTML via one getState() call per reload,
+			// so getState invocations after this point count watchdog reloads.
+			const getStateSpy = vi.spyOn(provider, "getState")
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(getStateSpy).toHaveBeenCalledTimes(1)
+		})
+
+		test("logs when regenerating the reload HTML fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.spyOn(provider, "getState").mockRejectedValue(new Error("regen boom"))
+			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[Zoo Code] Failed to reload webview: regen boom"),
+			)
+		})
+
+		test("logs and keeps the webview html when the recovery reload rejects", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+			// The watchdog reload no longer goes through a VS Code command; stub
+			// the recovery HTML regeneration itself to reject.
+			provider["getWebviewHtml"] = vi.fn().mockRejectedValue(new Error("reload boom"))
+			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[Zoo Code] Failed to reload webview: reload boom"),
+			)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the provider is disposed mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Hold the recovery reload's HTML regeneration in flight until the
+			// disposal below lands.
+			let finishReload: (state: ExtensionState) => void = () => {}
+			vi.spyOn(provider, "getState").mockImplementation(
+				() =>
+					new Promise<ExtensionState>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			// The stale heartbeat started a recovery reload, but its HTML is still pending.
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			await provider.dispose()
+			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the sidebar view is disposed mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (state: ExtensionState) => void = () => {}
+			vi.spyOn(provider, "getState").mockImplementation(
+				() =>
+					new Promise<ExtensionState>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			disposeCallback()
+			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the watched view is replaced mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (state: ExtensionState) => void = () => {}
+			vi.spyOn(provider, "getState").mockImplementation(
+				() =>
+					new Promise<ExtensionState>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// VS Code re-resolves a fresh view (e.g. sidebar re-opened) while the
+			// recovery reload for the old view is still awaiting its HTML.
+			// @ts-ignore - accessing private property for testing
+			provider.view = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+			}
+
+			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("reloads only its own webview when multiple providers are active", async () => {
+			// Structural stand-in for the VS Code webview API surface this scenario
+			// exercises, same as the mockContext cast below.
+			const mockWebviewViewB = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn(),
+				onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			} as unknown as vscode.WebviewView
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			try {
+				await provider.resolveWebviewView(mockWebviewView)
+				await providerB.resolveWebviewView(mockWebviewViewB)
+
+				const htmlBeforeA = mockWebviewView.webview.html
+				const htmlBeforeB = mockWebviewViewB.webview.html
+
+				await vi.advanceTimersByTimeAsync(119_000)
+				// B's view is still alive; refresh its heartbeat so a stale one
+				// would reload it too, leaving only A's watchdog to fire.
+				await webviewMessageHandler(providerB, { type: "webviewHeartbeat", timestamp: Date.now() })
+				await vi.advanceTimersByTimeAsync(1_000)
+
+				expect(mockWebviewView.webview.html).not.toBe(htmlBeforeA)
+				expect(mockWebviewViewB.webview.html).toBe(htmlBeforeB)
+			} finally {
+				await providerB.dispose()
+			}
+		})
+
+		describe("tab panel (WebviewPanel shape)", () => {
+			let viewStateCallback: () => void
+			// Structural stand-in for the VS Code webview API surface this
+			// scenario exercises, same as the mockWebviewViewB cast below.
+			let mockWebviewPanel: vscode.WebviewPanel
+
+			beforeEach(() => {
+				// WebviewPanel-shaped stand-in: same webview surface, but the
+				// visibility listener is onDidChangeViewState instead of
+				// onDidChangeVisibility, matching resolveWebviewView's tab branch.
+				mockWebviewPanel = {
+					webview: {
+						postMessage: vi.fn(),
+						html: "",
+						options: {},
+						onDidReceiveMessage: vi.fn(),
+						asWebviewUri: vi.fn(),
+						cspSource: "vscode-webview://test-csp-source",
+					},
+					visible: true,
+					onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+					onDidChangeViewState: vi.fn().mockImplementation((cb: () => void) => {
+						viewStateCallback = cb
+						return { dispose: vi.fn() }
+					}),
+					dispose: vi.fn(),
+				} as unknown as vscode.WebviewPanel
+			})
+
+			test("reloads the tab webview when the heartbeat is stale and the tab is visible", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(120_000)
+
+				expect(mockWebviewPanel.webview.html).not.toBe(htmlAfterResolve)
+				expect(mockWebviewPanel.webview.html).toContain("<title>Zoo Code</title>")
+			})
+
+			test("does not reload a hidden tab even when the heartbeat is stale", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				Object.defineProperty(mockWebviewPanel, "visible", { value: false, configurable: true })
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(180_000)
+
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterResolve)
+			})
+
+			test("resets the grace window when the tab becomes visible", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				Object.defineProperty(mockWebviewPanel, "visible", { value: false, configurable: true })
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterResolve)
+
+				Object.defineProperty(mockWebviewPanel, "visible", { value: true, configurable: true })
+				viewStateCallback()
+				const htmlAfterBecomingVisible = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterBecomingVisible)
+
+				// Watchdog ticks every 60s; 120s after the flip the heartbeat is stale again.
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(mockWebviewPanel.webview.html).not.toBe(htmlAfterBecomingVisible)
+			})
 		})
 	})
 
@@ -3717,10 +4058,7 @@ describe("ClineProvider - Router Models", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -4071,10 +4409,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
