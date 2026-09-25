@@ -118,8 +118,8 @@ describe("SwitchModeTool", () => {
 
 	// ===== Already in mode tests =====
 
-	it("should handle switching to the same mode", async () => {
-		// Current mode is "code" (from mockGetState)
+	it("should reject switching to the task's current mode when provider state differs", async () => {
+		mockGetState.mockResolvedValue({ mode: "orchestrator", customModes: [] })
 		const block = createBlock({ mode_slug: "code", reason: "already here" })
 
 		await switchModeTool.handle(mockTask, block, mockCallbacks)
@@ -127,6 +127,7 @@ describe("SwitchModeTool", () => {
 		expect(mockTask.recordToolError).toHaveBeenCalledWith("switch_mode")
 		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith("Already in Code mode.")
+		expect(mockTask.getTaskMode).toHaveBeenCalledOnce()
 		// Should NOT ask approval or switch
 		expect(mockCallbacks.askApproval).not.toHaveBeenCalled()
 		expect(mockHandleModeSwitch).not.toHaveBeenCalled()

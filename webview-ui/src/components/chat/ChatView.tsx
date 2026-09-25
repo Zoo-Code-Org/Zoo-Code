@@ -21,7 +21,7 @@ import { batchNearby } from "@src/utils/batchNearby"
 import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
 import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
-import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
+import { getCompletionCheckpoint, getSuggestionMode, hasUsableAnswer, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
 import { combineApiRequests } from "@roo/combineApiRequests"
@@ -1431,6 +1431,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const handleSuggestionClickInRow = useCallback(
 		(suggestion: SuggestionItem, event?: React.MouseEvent) => {
+			// The model may emit suggestions with missing or blank answers (issue #1226).
+			// Ignore them instead of pushing an undefined value into the input, which
+			// would crash the text area (inputValue.trim on undefined).
+			const answer = hasUsableAnswer(suggestion) ? suggestion.answer.trim() : ""
+			if (!answer) {
+				return
+			}
+
 			// Mark that user has responded if this is a manual click (not auto-approval)
 			if (event) {
 				userRespondedRef.current = true
@@ -1455,13 +1463,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			if (event?.shiftKey) {
 				// Always append to existing text, don't overwrite
 				setInputValue((currentValue: string) => {
-					return currentValue !== "" ? `${currentValue} \n${suggestion.answer}` : suggestion.answer
+					return currentValue !== "" ? `${currentValue} \n${answer}` : answer
 				})
 			} else {
 				// Don't clear the input value when sending a follow-up choice
 				// The message should be sent but the text area should preserve what the user typed
 				const preservedInput = inputValueRef.current
-				handleSendMessage(suggestion.answer, [])
+				handleSendMessage(answer, [])
 				// Restore the input value after sending
 				setInputValue(preservedInput)
 			}

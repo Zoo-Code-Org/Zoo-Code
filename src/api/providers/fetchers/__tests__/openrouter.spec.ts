@@ -76,6 +76,50 @@ describe("OpenRouter API", () => {
 
 			nockDone()
 		})
+
+		it("passes the caller's abort signal to the catalog request", async () => {
+			const controller = new AbortController()
+
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: [] } })
+
+			await getOpenRouterModels(undefined, { signal: controller.signal })
+
+			expect(getSpy).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", { signal: controller.signal })
+
+			getSpy.mockRestore()
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockImplementation((_url, config) => {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getOpenRouterModels(undefined, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+
+			getSpy.mockRestore()
+		})
+
+		it("requests the catalog without a signal when none is provided", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: [] } })
+
+			const models = await getOpenRouterModels()
+
+			expect(getSpy).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", { signal: undefined })
+			expect(models).toEqual({})
+
+			getSpy.mockRestore()
+		})
 	})
 
 	describe("getOpenRouterModelEndpoints", () => {
