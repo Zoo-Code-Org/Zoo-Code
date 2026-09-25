@@ -226,7 +226,9 @@ export const parseOpenRouterModel = ({
 		cacheWritesPrice,
 		cacheReadsPrice,
 		description: model.description,
-		supportsReasoningEffort: supportedParameters ? supportedParameters.includes("reasoning") : undefined,
+		supportsReasoningEffort: supportedParameters?.includes("reasoning")
+			? ["low", "medium", "high", "xhigh", "max"]
+			: undefined,
 		supportedParameters: supportedParameters ? supportedParameters.filter(isModelParameter) : undefined,
 	}
 
