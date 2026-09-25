@@ -196,13 +196,21 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			}
 
 			try {
-				const [rejected, result] = await executeCommandInTerminal(task, options)
+				const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, options)
 
 				if (rejected) {
 					task.didRejectTool = true
 				}
 
 				pushToolResult(result)
+				// Only drain queued messages when the command actually ran
+				// (early validation failures end the turn without an execution,
+				// matching file tools' error-path behavior). The drain is awaited
+				// so a failed queued-message submission propagates instead of
+				// being dropped after the tool result was already published.
+				if (commandSubmitted) {
+					await task.processQueuedMessages()
+				}
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
@@ -212,7 +220,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					const status: CommandExecutionStatus = { executionId, status: "fallback" }
 					postCommandExecutionStatus(provider, status)
 
-					const [rejected, result] = await executeCommandInTerminal(task, {
+					const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, {
 						...options,
 						terminalShellIntegrationDisabled: true,
 					})
@@ -222,6 +230,9 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					}
 
 					pushToolResult(result)
+					if (commandSubmitted) {
+						await task.processQueuedMessages()
+					}
 				} else {
 					// Command was submitted but shell integration lost track of it — show warning.
 					await task.say("shell_integration_warning")
@@ -268,7 +279,7 @@ export async function executeCommandInTerminal(
 		commandExecutionTimeout = 0,
 		agentTimeout = 0,
 	}: ExecuteCommandOptions,
-): Promise<[boolean, ToolResponse]> {
+): Promise<[boolean, ToolResponse, boolean]> {
 	// Convert milliseconds back to seconds for display purposes.
 	const commandExecutionTimeoutSeconds = commandExecutionTimeout / 1000
 	let workingDir: string
@@ -284,7 +295,8 @@ export async function executeCommandInTerminal(
 	try {
 		await fs.access(workingDir)
 	} catch (error) {
-		return [false, `Working directory '${workingDir}' does not exist.`]
+		// The command never ran (working directory validation failed).
+		return [false, `Working directory '${workingDir}' does not exist.`, false]
 	}
 
 	let runInBackground = false
@@ -521,6 +533,8 @@ export async function executeCommandInTerminal(
 			return [
 				false,
 				`The command was terminated after exceeding a user-configured ${commandExecutionTimeoutSeconds}s timeout. Do not try to re-run the command.`,
+
+				true,
 			]
 		}
 		throw error
@@ -556,7 +570,7 @@ export async function executeCommandInTerminal(
 
 		// Use persisted output format when output was truncated and spilled to disk
 		if (persistedResult?.truncated) {
-			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir)]
+			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir), true]
 		}
 
 		// Use inline format for small outputs (original behavior with exit status).
@@ -571,6 +585,7 @@ export async function executeCommandInTerminal(
 		return [
 			false,
 			`Command executed in terminal within working directory '${currentWorkingDir}'. ${exitStatus}\nOutput:\n${result}`,
+			true,
 		]
 	} else {
 		return [
@@ -580,6 +595,8 @@ export async function executeCommandInTerminal(
 				result.length > 0 ? `Here's the output so far:\n${result}\n` : "\n",
 				"You will be updated on the terminal status and new output in the future.",
 			].join("\n"),
+
+			true,
 		]
 	}
 }

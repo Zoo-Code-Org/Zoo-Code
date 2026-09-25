@@ -2,6 +2,7 @@
 
 import type { ToolUsage } from "@roo-code/types"
 import * as vscode from "vscode"
+import fs from "fs/promises"
 
 import { Task } from "../../task/Task"
 import { formatResponse } from "../../prompts/responses"
@@ -73,7 +74,9 @@ describe("executeCommandTool", () => {
 		vitest.useRealTimers()
 
 		// Spy on executeCommandInTerminal and mock its return value
-		vitest.spyOn(executeCommandModule, "executeCommandInTerminal").mockResolvedValue([false, "Command executed"])
+		vitest
+			.spyOn(executeCommandModule, "executeCommandInTerminal")
+			.mockResolvedValue([false, "Command executed", true])
 
 		// Create mock implementations with eslint directives to handle the type issues
 		mockCline = {
@@ -88,6 +91,7 @@ describe("executeCommandTool", () => {
 			recordToolUsage: vitest.fn().mockReturnValue({} as ToolUsage),
 			recordToolError: vitest.fn(),
 			supersedePendingAsk: vitest.fn(),
+			processQueuedMessages: vitest.fn(),
 			providerRef: {
 				deref: vitest.fn().mockResolvedValue({
 					contextProxy: {
@@ -494,6 +498,200 @@ describe("executeCommandTool", () => {
 				terminalProvider: "execa",
 				isCmdExeFallback: true,
 			})
+		})
+	})
+
+	describe("Queued message processing", () => {
+		it("processes queued messages after the command completes", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			// The tool result must be published before queued messages are processed.
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("processes queued messages after the execa fallback retry completes", async () => {
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulProcess = Object.assign(Promise.resolve(), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulTerminalProcess = successfulProcess as unknown as RooTerminalProcess
+
+			vitest
+				.mocked(TerminalRegistry.getOrCreateTerminal)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockReturnValue(failedProcess),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+						void callbacks.onCompleted?.("", successfulTerminalProcess)
+						callbacks.onShellExecutionComplete?.({ exitCode: 0 }, successfulTerminalProcess)
+						return successfulProcess
+					}),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("processes queued messages once after a command terminated by an interruption", async () => {
+			mockToolUse.params.command = "long-running-command"
+			mockToolUse.nativeArgs = { command: "long-running-command" }
+
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
+				runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+					const interruptedProcess = Object.assign(Promise.resolve(), {
+						continue: vitest.fn(),
+						abort: vitest.fn(),
+					}) as unknown as RooTerminalProcess
+					void callbacks.onCompleted?.("Command interrupted", interruptedProcess)
+					callbacks.onShellExecutionComplete?.(
+						{ exitCode: undefined, signalName: "SIGINT", coreDumpPossible: false },
+						interruptedProcess,
+					)
+					return interruptedProcess
+				}),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Process terminated by signal SIGINT"),
+			)
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			// The tool result must be published before queued messages are processed.
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("processes queued messages once after a user-configured execution timeout", async () => {
+			mockToolUse.params.command = "sleep 10"
+			mockToolUse.nativeArgs = { command: "sleep 10" }
+			// 0.1s user timeout keeps the test fast while exercising the real abort path.
+			vitest.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vitest
+					.fn()
+					.mockImplementation((key: string, defaultValue: unknown) =>
+						key === "commandExecutionTimeout" ? 0.1 : defaultValue,
+					),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
+				runCommand: vitest.fn().mockReturnValue(pendingProcess),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("terminated after exceeding a user-configured"),
+			)
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("does not process queued messages when the user rejects the command", async () => {
+			mockAskApproval.mockResolvedValue(false)
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+		})
+
+		it("does not process queued messages when the working directory does not exist", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "/nonexistent/working/dir"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/nonexistent/working/dir" }
+			vitest.mocked(fs.access).mockRejectedValueOnce(new Error("ENOENT"))
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				"Working directory '/nonexistent/working/dir' does not exist.",
+			)
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+		})
+
+		it("does not drain when the execa fallback retry hits a working directory failure", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "/nonexistent/working/dir"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/nonexistent/working/dir" }
+			// First attempt passes validation but fails shell integration startup
+			// (retryable); the retry then fails the working directory check.
+			vitest.mocked(fs.access).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("ENOENT"))
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValueOnce({
+				runCommand: vitest.fn().mockReturnValue(failedProcess),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				"Working directory '/nonexistent/working/dir' does not exist.",
+			)
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
 	})
 

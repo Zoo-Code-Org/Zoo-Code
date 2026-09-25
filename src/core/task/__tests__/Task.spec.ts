@@ -1187,7 +1187,7 @@ describe("Cline", () => {
 				info: ctxModelInfo,
 			})
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
 
 			const getSystemPromptSpy = vi
@@ -1283,7 +1283,7 @@ describe("Cline", () => {
 				condenseId: "condense-id",
 			})
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 
 			await expect(task.condenseContext()).resolves.toBeUndefined()
 
@@ -4352,7 +4352,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			// The wait never settles on its own; only the bound expires it.
 			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
 			task.apiConversationHistory = [
@@ -4400,7 +4400,7 @@ describe("Cline", () => {
 			})
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.abandoned = true
 			// Only an unstarted prompt build attributes the skip to the entry
@@ -4431,7 +4431,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
@@ -4487,7 +4487,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
@@ -4540,7 +4540,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
@@ -4587,7 +4587,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
@@ -5068,7 +5068,7 @@ describe("Cline", () => {
 				releasePrompt = () => resolve("mock system prompt")
 			})
 			vi.mocked(SYSTEM_PROMPT).mockReturnValueOnce(promptGate)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			vi.useFakeTimers()
@@ -5780,18 +5780,12 @@ describe("Queued message processing after condense", () => {
 
 		// Make condense fast + deterministic
 		vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("system")
-		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 
 		// Queue a message during condensing
 		task.messageQueueService.addMessage("queued text", ["img1.png"])
 
-		// Use fake timers to capture setTimeout(0) in processQueuedMessages
-		vi.useFakeTimers()
 		await task.condenseContext()
-
-		// Flush the microtask that submits the queued message
-		vi.runAllTimers()
-		vi.useRealTimers()
 
 		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
 		expect(task.messageQueueService.isEmpty()).toBe(true)
@@ -5817,30 +5811,75 @@ describe("Queued message processing after condense", () => {
 		vi.spyOn(getTaskTestAccess(taskA), "getSystemPrompt").mockResolvedValue("system")
 		vi.spyOn(getTaskTestAccess(taskB), "getSystemPrompt").mockResolvedValue("system")
 
-		const spyA = vi.spyOn(taskA, "submitUserMessage").mockResolvedValue(undefined)
-		const spyB = vi.spyOn(taskB, "submitUserMessage").mockResolvedValue(undefined)
+		const spyA = vi.spyOn(taskA, "submitUserMessage").mockResolvedValue(true)
+		const spyB = vi.spyOn(taskB, "submitUserMessage").mockResolvedValue(true)
 
 		taskA.messageQueueService.addMessage("A message")
 		taskB.messageQueueService.addMessage("B message")
 
 		// Condense in task A should only drain A's queue
-		vi.useFakeTimers()
 		await taskA.condenseContext()
-		vi.runAllTimers()
-		vi.useRealTimers()
 
 		expect(spyA).toHaveBeenCalledWith("A message", undefined)
 		expect(spyB).not.toHaveBeenCalled()
 		expect(taskB.messageQueueService.isEmpty()).toBe(false)
 
 		// Now condense in task B should drain B's queue
-		vi.useFakeTimers()
 		await taskB.condenseContext()
-		vi.runAllTimers()
-		vi.useRealTimers()
 
 		expect(spyB).toHaveBeenCalledWith("B message", undefined)
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	describe("processQueuedMessages drain semantics", () => {
+		const createQueueTask = () =>
+			new Task({
+				provider: createProvider(),
+				apiConfiguration: apiConfig,
+				task: "initial task",
+				startTask: false,
+			})
+
+		it("submits and durably removes the next queued message", async () => {
+			const task = createQueueTask()
+			const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
+			task.messageQueueService.addMessage("queued text", ["img1.png"])
+
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+
+			expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("resolves false when the queue is empty", async () => {
+			const task = createQueueTask()
+			const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
+
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+			expect(submitSpy).not.toHaveBeenCalled()
+		})
+
+		it("releases the queued message and propagates when submission fails", async () => {
+			const task = createQueueTask()
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(false)
+			task.messageQueueService.addMessage("retry me")
+
+			await expect(task.processQueuedMessages()).rejects.toThrow("Failed to submit queued message")
+
+			// The claim is released, so the message stays queued for a later drain.
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("retry me")
+		})
+
+		it("releases the queued message and propagates when submission throws", async () => {
+			const task = createQueueTask()
+			vi.spyOn(task, "submitUserMessage").mockRejectedValue(new Error("emit failed"))
+			task.messageQueueService.addMessage("retry me too")
+
+			await expect(task.processQueuedMessages()).rejects.toThrow("emit failed")
+
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("retry me too")
+		})
 	})
 })
 
