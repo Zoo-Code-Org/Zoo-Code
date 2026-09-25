@@ -83,7 +83,7 @@ import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
-import { isPathOutsideWorkspace } from "../../utils/pathUtils"
+import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
@@ -1515,13 +1515,70 @@ export const webviewMessageHandler = async (
 				}
 			}
 			break
-		case "openFile":
-			let filePath: string = message.text!
-			if (!path.isAbsolute(filePath)) {
-				filePath = path.join(getCurrentCwd(), filePath)
+		case "openFile": {
+			const rawPath = message.text || ""
+			if (!rawPath) {
+				break
 			}
-			await openFile(filePath, message.values as { create?: boolean; content?: string; line?: number })
+			// Task markdown links are untrusted, so markdown-sourced openFile
+			// requests (flagged by the webview with fromMarkdown) must resolve
+			// inside the current workspace. First-party callers (modes, MCP,
+			// slash-command settings) may legitimately open global config files
+			// outside the workspace, so they keep the previous behavior.
+			const fromMarkdown = message.values?.fromMarkdown === true
+			const rejectOutsideWorkspace = () => {
+				void vscode.window.showErrorMessage(
+					t("common:errors.cannot_access_path", {
+						path: rawPath,
+						error: t("common:errors.path_outside_workspace"),
+					}),
+				)
+			}
+			let filePath = rawPath
+			// Markdown link targets are URL syntax: percent-decode to a fixed point
+			// here, at the containment boundary. openFile decodes AFTER this check,
+			// so a request like `%2e%2e/%2e%2e/.env` would otherwise pass
+			// containment as a literal and escape only after that later decode.
+			if (fromMarkdown) {
+				const decoded = decodeUntrustedPathToStable(rawPath)
+				// Stryker disable next-line ConditionalExpression,BlockStatement: hostile non-stabilizing encodings are unreachable from the webview (its posts are plain link targets); the bound is defensive
+				if (decoded === null) {
+					// Stryker disable next-line CallExpression: hostile non-stabilizing encodings are pinned by the direct decodeUntrustedPathToStable bound test; the webview never posts such values
+					rejectOutsideWorkspace()
+					break
+				}
+				filePath = decoded
+			}
+			if (!path.isAbsolute(filePath)) {
+				const cwd = getCurrentCwd()
+				if (!cwd) {
+					void vscode.window.showErrorMessage(
+						t("common:errors.could_not_open_file", { errorMessage: t("common:errors.no_workspace") }),
+					)
+					break
+				}
+				filePath = path.resolve(cwd, filePath)
+			}
+			// Workspace-boundary validation (defense in depth): the webview already
+			// rejects traversal in markdown anchors, but refuse any markdown path
+			// that still resolves outside the workspace.
+			if (fromMarkdown && isPathOutsideWorkspace(filePath)) {
+				rejectOutsideWorkspace()
+				break
+			}
+			// Lexical containment cannot see symlinks: a link inside a workspace
+			// folder may resolve to a target outside the workspace. Re-check the
+			// real filesystem path (failing closed) before opening.
+			if (fromMarkdown && (await isRealPathOutsideWorkspace(filePath))) {
+				rejectOutsideWorkspace()
+				break
+			}
+			await openFile(
+				filePath,
+				message.values as { create?: boolean; content?: string; line?: number; fromMarkdown?: boolean },
+			)
 			break
+		}
 		case "readFileContent": {
 			const relPath = message.text || ""
 			if (!relPath) {
