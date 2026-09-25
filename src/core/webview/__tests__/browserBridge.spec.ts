@@ -278,6 +278,21 @@ describe("BrowserBridgeServer.start (socket.io options)", () => {
 		}
 	})
 
+	it("binds the listening socket to the loopback interface only", async () => {
+		const bridge = await startBridge()
+		try {
+			// The dev-only bridge must never be reachable from outside the
+			// machine. An emptied host option makes Node bind to all interfaces,
+			// and every loopback client still connects to such a server, so only
+			// the actually-bound address pins the loopback-only guarantee.
+			const bound = bridge["server"].httpServer.address() as AddressInfo
+			expect(bound.address).toBe("127.0.0.1")
+			expect(bound.port).toBe(bridge["_port"])
+		} finally {
+			bridge["dispose"]()
+		}
+	})
+
 	it("gates every fresh handshake through the allowRequest Origin check", async () => {
 		const bridge = await startBridge()
 		try {
