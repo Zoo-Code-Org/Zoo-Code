@@ -1044,6 +1044,25 @@ describe("VertexHandler", () => {
 			expect(model.info.supportsTemperature).toBe(false)
 		})
 
+		it("should return Claude Opus 5.5 model info", () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-5-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+		})
+
 		it("should not enable 1M context when flag is disabled", () => {
 			const handler = new AnthropicVertexHandler({
 				apiModelId: VERTEX_1M_CONTEXT_MODEL_IDS[0],
@@ -1387,6 +1406,39 @@ describe("VertexHandler", () => {
 					]),
 				)
 			;(opusHandler["client"].messages as any).create = mockCreate
+
+			await opusHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should use adaptive thinking for Claude Opus 5.5", async () => {
+			const opusHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-5-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
+			// The SDK client's overloaded `create` signature can't be assigned a
+			// vitest mock directly, so a structural double assertion is required.
+			;(opusHandler["client"].messages as unknown as { create: typeof mockCreate }).create = mockCreate
 
 			await opusHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
 
