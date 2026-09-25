@@ -12,6 +12,7 @@ import {
 	RooCodeEventName,
 	type GlobalState,
 	type HistoryItem,
+	type ModeConfig,
 	type ProviderSettings,
 	type ModelInfo,
 	type TaskLike,
@@ -29,6 +30,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
@@ -45,6 +47,7 @@ type TaskTestAccess = {
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
+	requestPolicySnapshot?: RequestPolicySnapshot
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
@@ -1348,6 +1351,249 @@ describe("Cline", () => {
 			const snapshot = await providerRef.deref()?.getState()
 
 			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).rejects.toThrow("Provider not available")
+		})
+	})
+
+	describe("request policy snapshot publication", () => {
+		// The wrapper is fire-and-forget; this is how the wrapper's own specs
+		// settle its catch microtask before asserting.
+		const flushMicrotasks = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+		// Custom mode only present on the request-time read: the live double
+		// below disagrees on every policy field, so a snapshot re-derived from
+		// live state fails these tests instead of passing vacuously.
+		const requestTimeCustomMode: ModeConfig = {
+			slug: "snapshot-mode",
+			name: "Snapshot Mode",
+			roleDefinition: "Frozen at request build time.",
+			groups: ["read"],
+		}
+
+		// Common seams so attemptApiRequest runs its capture and streams a first
+		// chunk without touching prompt building, context management, or UX.
+		function armRequestSeams(task: Task) {
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+		}
+
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		it("delivers the exact request-time snapshot to the presenter, immune to later provider-state changes", async () => {
+			const requestTimeState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: ["read_file"],
+				experiments: { customTools: true },
+				customModes: [requestTimeCustomMode],
+			})
+			const laterState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: [],
+				experiments: { customTools: false },
+				customModes: [],
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState")
+				// First read: the one attemptApiRequest captures at request build.
+				.mockResolvedValueOnce(requestTimeState)
+				// Every later read returns divergent settings: any surviving
+				// live re-read (in publication or consumption) would pick these
+				// up and contradict the request's prompt.
+				.mockResolvedValue(laterState)
+			armRequestSeams(task)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			// The published snapshot disables read_file, so validation must
+			// reject the tool call before any approval ask is reached.
+			const askSpy = vi.spyOn(task, "ask").mockRejectedValue(new Error("approval path must not be reached"))
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+			)
+
+			// A completed non-partial native tool block: when the wrapper fires,
+			// the real presenter validates it against the published snapshot.
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_snapshot_1",
+					name: "read_file",
+					params: { path: "test.txt" },
+					nativeArgs: { path: "test.txt" },
+					partial: false,
+				},
+			]
+
+			await expect(task.attemptApiRequest(0).next()).resolves.toMatchObject({
+				done: false,
+				value: { type: "text", text: "ok" },
+			})
+
+			// Spied through to the original: this records the exact second
+			// argument while the real presenter's consumption below still runs.
+			const assistantMessageModule = await import("../../assistant-message")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage")
+
+			getTaskTestAccess(task).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			const delivered = requireDefined(presentSpy.mock.calls[0]?.[1])
+			// Exact four-field content — nothing more, nothing less — and each
+			// field is the very reference read at request time, not the
+			// divergent live values.
+			expect(delivered).toEqual({
+				disabledTools: ["read_file"],
+				experiments: { customTools: true },
+				customModes: [requestTimeCustomMode],
+				modelInfo: stubModelInfo,
+			})
+			expect(delivered.disabledTools).toBe(requestTimeState.disabledTools)
+			expect(delivered.experiments).toBe(requestTimeState.experiments)
+			expect(delivered.customModes).toBe(requestTimeState.customModes)
+			expect(delivered.modelInfo).toBe(stubModelInfo)
+
+			// End-to-end consumption: the rejection can only originate from the
+			// snapshot's disabledTools; live state no longer disables read_file.
+			const errorResults = task.userMessageContent.filter(
+				(block): block is Anthropic.ToolResultBlockParam =>
+					block.type === "tool_result" && block.is_error === true,
+			)
+			expect(errorResults).toHaveLength(1)
+			// The wrapped validation error is exactly the snapshot's restriction
+			// message; the divergent live list (no disabled tools) could not
+			// produce it.
+			expect(errorResults[0]?.content).toEqual(expect.stringContaining("not allowed"))
+			expect(askSpy).not.toHaveBeenCalled()
+		})
+
+		it("re-captures policy state for the retry attempt while the first attempt's snapshot stays frozen", async () => {
+			const firstAttemptState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: ["read_file"],
+				experiments: { customTools: true },
+				customModes: [requestTimeCustomMode],
+			})
+			const retryAttemptState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: ["execute_command"],
+				experiments: { customTools: false },
+				customModes: [],
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState")
+				.mockResolvedValueOnce(firstAttemptState)
+				// Settings change lands after attempt 1 was built: attempt 2's
+				// generator re-entry must re-read, attempt 1 must not be rewritten.
+				.mockResolvedValue(retryAttemptState)
+			armRequestSeams(task)
+			const safeEnsureModelFetchedSpy = vi
+				.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+				.mockResolvedValue(stubModelInfo)
+
+			// Seam between attempt 1's first-chunk failure and the retry
+			// recursion: whatever the field holds here is exactly what attempt
+			// 1's in-flight validation was bound to.
+			let firstAttemptSnapshot: RequestPolicySnapshot | undefined
+			vi.spyOn(getTaskTestAccess(task), "handleContextWindowExceededError").mockImplementation(async () => {
+				firstAttemptSnapshot = getTaskTestAccess(task).requestPolicySnapshot
+			})
+			const contextWindowFailure: AsyncGenerator<ApiStreamChunk> = (async function* () {
+				yield* []
+				throw { status: 400, message: "context length exceeded" }
+			})()
+			vi.spyOn(task.api, "createMessage")
+				.mockImplementationOnce(() => contextWindowFailure)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+				)
+
+			await expect(task.attemptApiRequest(0).next()).resolves.toMatchObject({
+				done: false,
+				value: { type: "text", text: "retry response" },
+			})
+
+			// What attempt 1's validation saw in flight: the request-time list.
+			const attemptOne = requireDefined(firstAttemptSnapshot)
+			expect(attemptOne.disabledTools).toEqual(["read_file"])
+
+			const retrySnapshot = requireDefined(getTaskTestAccess(task).requestPolicySnapshot)
+			// The retry re-executed the generator-body capture and picked up the
+			// settings that landed between attempts.
+			expect(retrySnapshot.disabledTools).toEqual(["execute_command"])
+			expect(retrySnapshot.experiments).toEqual(retryAttemptState.experiments)
+			expect(retrySnapshot.customModes).toEqual(retryAttemptState.customModes)
+			// Re-capture replaces the snapshot object; it never mutates the one
+			// the first attempt's in-flight validation already consumed.
+			expect(retrySnapshot).not.toBe(attemptOne)
+			expect(attemptOne.disabledTools).toEqual(["read_file"])
+			expect(attemptOne.experiments).toEqual(firstAttemptState.experiments)
+			expect(attemptOne.customModes).toEqual(firstAttemptState.customModes)
+			// modelInfo carries the request-scoped resolution on every attempt:
+			// retries forward the once-resolved metadata instead of re-resolving,
+			// so model-specific tool policy cannot move mid-request.
+			expect(retrySnapshot.modelInfo).toBe(stubModelInfo)
+			expect(safeEnsureModelFetchedSpy).toHaveBeenCalledTimes(1)
+
+			// The retry request's presenter receives the re-captured snapshot.
+			const assistantMessageModule = await import("../../assistant-message")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage").mockResolvedValue(undefined)
+			getTaskTestAccess(task).presentAssistantMessageSafe()
+			await flushMicrotasks()
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			expect(presentSpy.mock.calls[0]?.[1].disabledTools).toEqual(["execute_command"])
+		})
+
+		it("surfaces the presenter's missing-snapshot throw as a real failure without aborting the run", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			// Drain constructor noise so only the wrapper's own log is asserted.
+			await flushMicrotasks()
+			consoleErrorSpy.mockClear()
+
+			// No attemptApiRequest ran, so nothing published a snapshot: the
+			// wrapper passes undefined and the real presenter's guard throws.
+			getTaskTestAccess(task).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			const presentErrors = consoleErrorSpy.mock.calls.filter(
+				(call: unknown[]) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
+			)
+			// The guard's message deliberately lacks the "aborted" suffix, so the
+			// wrapper must log it as a real failure rather than treat the run as
+			// cancelled.
+			expect(presentErrors).toHaveLength(1)
+			const loggedError = presentErrors[0]?.[1]
+			if (loggedError instanceof Error) {
+				expect(loggedError.message).toMatch(/missing request policy snapshot/)
+			} else {
+				throw new Error("Expected the missing-snapshot throw to be logged as a real Error")
+			}
+			expect(task.abort).toBeFalsy()
 		})
 	})
 

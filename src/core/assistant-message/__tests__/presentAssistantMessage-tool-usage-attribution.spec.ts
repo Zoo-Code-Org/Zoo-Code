@@ -6,6 +6,7 @@ import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import { getModeBySlug } from "../../../shared/modes"
 import type { Task } from "../../task/Task"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 
 vi.mock("../../task/Task")
 vi.mock("../../../shared/modes", async (importOriginal) => {
@@ -45,6 +46,13 @@ vi.mock("@roo-code/telemetry", () => ({
 }))
 
 import { TelemetryService } from "@roo-code/telemetry"
+
+// The snapshot the presenter consumes; the getState doubles below deliberately
+// disagree with it so any surviving live-read re-entry is caught by assertions.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+}
 
 interface MockTask {
 	taskId: string
@@ -112,7 +120,10 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				deref: () => ({
 					getState: vi.fn().mockResolvedValue({
 						mode: "code",
-						customModes: [],
+						// Poisoned: disagrees with baseSnapshot, so a live
+						// read here changes validation args and fails tests.
+						customModes: [{ slug: "poison", name: "Poison", roleDefinition: "", groups: [] }],
+						disabledTools: ["write_to_file"],
 					}),
 				}),
 			},
@@ -147,7 +158,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockTask.recordToolUsage).toHaveBeenCalledTimes(1)
 		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("read_file")
@@ -167,7 +178,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
 		expect(TelemetryService.instance.captureToolUsage).toHaveBeenCalledWith(mockTask.taskId, "use_mcp_tool")
@@ -185,7 +196,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
 		expect(mockTask.recordToolUsage).not.toHaveBeenCalledWith("mcp_")
@@ -194,7 +205,13 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 	it("validates tools against the task-local mode when provider state differs", async () => {
 		mockTask.getTaskMode.mockResolvedValue("code")
 		mockTask.providerRef.deref = () => ({
-			getState: vi.fn().mockResolvedValue({ mode: "orchestrator", customModes: [] }),
+			getState: vi.fn().mockResolvedValue({
+				mode: "orchestrator",
+				// Poisoned: a live read would put non-empty customModes and a
+				// read_file restriction into the validator call.
+				customModes: [{ slug: "delegated", name: "Delegated", roleDefinition: "", groups: [] }],
+				disabledTools: ["read_file"],
+			}),
 		})
 		mockTask.assistantMessageContent = [
 			{
@@ -207,7 +224,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(validateToolUse).toHaveBeenCalledWith(
 			"read_file",
@@ -236,7 +253,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		// A known static tool that fails validation still maps to its own name
 		// (it's a real, recognized tool - just disallowed here), never left raw/unmapped.
@@ -261,7 +278,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockTask.recordToolError).toHaveBeenCalledWith("invalid_tool_call", expect.any(String))
 		expect(mockTask.recordToolError).not.toHaveBeenCalledWith("totally_made_up_tool", expect.anything())
@@ -275,6 +292,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					getState: vi.fn().mockResolvedValue({
 						mode: "code",
 						customModes: [],
+						disabledTools: ["use_mcp_tool"],
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
@@ -300,7 +318,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				},
 			]
 
-			await presentAssistantMessage(mockTask as unknown as Task)
+			await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 			expect(mockTask.recordToolUsage).toHaveBeenCalledTimes(1)
 			expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
@@ -322,6 +340,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					getState: vi.fn().mockResolvedValue({
 						mode: "code",
 						customModes: [],
+						disabledTools: ["use_mcp_tool"],
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
@@ -341,7 +360,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				},
 			]
 
-			await presentAssistantMessage(mockTask as unknown as Task)
+			await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 			// The server is disallowed, so the call never reaches onValidated:
 			// no success attempt is recorded for a call that was never permitted to execute.
@@ -351,10 +370,9 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 	})
 
 	describe("undefined provider state", () => {
-		// Covers the `state ?? {}` fallback branch (line 347 of presentAssistantMessage.ts).
-		// When providerRef.deref() returns undefined, state is undefined and the
-		// destructure falls back to {}, so customModes / experiments / disabledTools
-		// are all undefined. Tool validation must still use the task-local mode.
+		// The presenter reads only the request snapshot, never live provider state,
+		// so an unavailable provider must not affect validation: the task-local
+		// mode and the snapshot's own fields govern the validator call.
 		it("falls back to empty state when provider is unavailable", async () => {
 			mockTask.providerRef = { deref: () => undefined }
 			mockTask.assistantMessageContent = [
@@ -368,13 +386,13 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				},
 			]
 
-			await presentAssistantMessage(mockTask as unknown as Task)
+			await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 			// validateToolUse must still be called with the task-local mode.
 			const calls = vi.mocked(validateToolUse).mock.calls
 			expect(calls.length).toBeGreaterThan(0)
 			expect(calls[0][1]).toBe("code")
-			// customModes falls back to [] (from the ?? {} path).
+			// customModes comes from the snapshot's own customModes field ([] here), not from provider state.
 			expect(calls[0][2]).toEqual([])
 		})
 	})
@@ -390,7 +408,9 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				deref: () => ({
 					getState: vi.fn().mockResolvedValue({
 						mode: "orchestrator",
-						customModes: [],
+						// Poisoned: a live read would pass these customModes
+						// to validateToolUse instead of the snapshot's [].
+						customModes: [{ slug: "delegated", name: "Delegated", roleDefinition: "", groups: [] }],
 					}),
 				}),
 			}
@@ -407,7 +427,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				},
 			]
 
-			await presentAssistantMessage(mockTask as unknown as Task)
+			await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 			// The key assertion: task-local mode "architect" was passed, not "orchestrator".
 			const calls = vi.mocked(validateToolUse).mock.calls

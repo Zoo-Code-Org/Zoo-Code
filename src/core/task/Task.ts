@@ -106,6 +106,7 @@ import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
@@ -443,6 +444,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
+	 * The tool-policy inputs captured for the API request currently being built
+	 * (see `attemptApiRequest`). The streaming presenter reads this field at call
+	 * time and binds it to `presentAssistantMessage`'s required parameter, so
+	 * every tool call of a request validates against the same frozen policy its
+	 * prompt was generated from. Re-assigned per API attempt — including retries,
+	 * whose generator-body re-execution re-captures before any new presentation
+	 * can fire.
+	 */
+	private requestPolicySnapshot?: RequestPolicySnapshot
+
+	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
 	 * expected cancellation rejection (the presenter throws when `this.abort` is set)
 	 * and logs any other failure. Keeping it non-blocking preserves the streaming
@@ -450,7 +462,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * from crashing the extension host.
 	 */
 	private presentAssistantMessageSafe(): void {
-		void presentAssistantMessage(this).catch((error) => {
+		void presentAssistantMessage(this, this.requestPolicySnapshot!).catch((error) => {
 			// Discriminate on the error message rather than `this.abort` state,
 			// which can flip between the throw and the catch microtask running:
 			// a real failure followed by an abort flip would otherwise be
@@ -4607,6 +4619,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// caller threaded a snapshot its options object is forwarded unchanged —
 		// same reference, and never mutated.
 		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
+		// Publish this attempt's tool-policy snapshot from the same `state` read
+		// the prompt is built from: the snapshot's fields are read off that held
+		// local at the store itself, with no await between those reads and the
+		// assignment, and no policy input is re-read from live state across the
+		// awaits above, so the streaming presenter of this request validates
+		// against exactly the policy its prompt advertised. The generator body
+		// re-executes per retry, so each attempt re-captures before its stream
+		// can present anything.
+		this.requestPolicySnapshot = {
+			disabledTools: state?.disabledTools,
+			experiments: state?.experiments,
+			customModes: state?.customModes,
+			modelInfo: requestModelInfo,
+		}
 		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata
