@@ -13,13 +13,14 @@ import {
 import type { ApiHandlerOptions } from "../../shared/api"
 import { kimiCodeOAuthManager } from "../../integrations/kimi-code/oauth"
 
-import type { ApiHandlerCreateMessageMetadata } from "../index"
+import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import type { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+import { throwIfAborted } from "./utils/abort-signal"
 
 const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
 const API_KEY_AUTH_METHOD: KimiCodeAuthMethod = "api-key"
@@ -88,6 +89,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		throwIfAborted(metadata?.abortSignal)
 		await this.prepareRequest()
 		try {
 			yield* super.createMessage(systemPrompt, messages, metadata)
@@ -98,14 +100,17 @@ export class KimiCodeHandler extends OpenAiHandler {
 		}
 	}
 
-	override async completePrompt(prompt: string): Promise<string> {
+	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
 		await this.prepareRequest()
 		try {
-			return await super.completePrompt(prompt)
+			// Forward abort/timeout options so the inherited OpenAiHandler wiring
+			// applies (the createMessage override inherits the same via metadata).
+			return await super.completePrompt(prompt, options)
 		} catch (error) {
 			if (getHttpStatus(error) !== 401 || !this.canRefreshOAuth()) throw error
 			await this.prepareRequest(true)
-			return super.completePrompt(prompt)
+			return super.completePrompt(prompt, options)
 		}
 	}
 
