@@ -62,7 +62,6 @@ describe("IO Intelligence model fetcher", () => {
 			supportsImages: true,
 			supportsPromptCache: true,
 			displayName: "Vision Model",
-			description: "Vision Model",
 			inputPrice: 0.306,
 			outputPrice: 1.224,
 			cacheReadsPrice: 0.153,
@@ -83,7 +82,6 @@ describe("IO Intelligence model fetcher", () => {
 				maxTokens: ioIntelligenceDefaultModelInfo.maxTokens,
 				supportsImages: false,
 				supportsPromptCache: false,
-				description: "eligible",
 			},
 		})
 		expect(warning).toHaveBeenCalledOnce()
@@ -155,7 +153,6 @@ describe("IO Intelligence model fetcher", () => {
 			maxTokens: ioIntelligenceDefaultModelInfo.maxTokens,
 			supportsImages: false,
 			supportsPromptCache: false,
-			description: "minimal",
 		})
 	})
 })

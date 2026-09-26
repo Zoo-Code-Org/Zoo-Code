@@ -417,6 +417,27 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("IO Intelligence validation", () => {
+		it("returns an apiKey error when the IO Intelligence API key is unset", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceModelId: "zai-org/GLM-4.6",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("accepts an IO Intelligence API key and selected model", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "valid-key",
+				ioIntelligenceModelId: "zai-org/GLM-4.6",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
+		})
+	})
+
 	describe("NanoGPT validation", () => {
 		it("returns an apiKey error when the NanoGPT API key is missing", () => {
 			const config: ProviderSettings = {

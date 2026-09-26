@@ -44,8 +44,10 @@ export const parseIoIntelligenceModel = (model: IOIntelligenceModel): ModelInfo 
 	...(model.cache_read_token_price !== undefined
 		? { cacheReadsPrice: model.cache_read_token_price * 1_000_000 }
 		: {}),
+	// The catalog has no free-text description. Its name and id are remote
+	// strings and ModelInfo.description is rendered as Markdown, so neither is
+	// copied there; the name is only surfaced as the plain-text displayName.
 	...(model.name !== undefined ? { displayName: model.name } : {}),
-	description: model.name ?? model.id,
 })
 
 /**
