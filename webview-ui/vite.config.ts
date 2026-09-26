@@ -121,8 +121,10 @@ export default defineConfig(({ mode }) => {
 			},
 		},
 		server: {
-			hmr: {
-				host: "localhost",
+			hmr: true,
+			host: "127.0.0.1",
+			port: 5173,
+			ws: {
 				protocol: "ws",
 			},
 			cors: {

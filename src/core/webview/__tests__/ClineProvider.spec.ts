@@ -1,5 +1,6 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
+import fs from "fs"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
 
@@ -664,12 +665,14 @@ describe("ClineProvider", () => {
 	})
 
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
+		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
-			{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },
+			developmentContext,
 			mockOutputChannel,
 			"sidebar",
-			new ContextProxy(mockContext),
+			new ContextProxy(developmentContext),
 		)
+		// The dev-server probe fails, so the HMR path falls back to the production HTML.
 		;(axios.get as any).mockRejectedValueOnce(new Error("Network error"))
 
 		await provider.resolveWebviewView(mockWebviewView)
@@ -693,6 +696,56 @@ describe("ClineProvider", () => {
 		expect(scriptSrcMatch![0]).toContain("'nonce-")
 		// Verify wasm-unsafe-eval is present for Shiki syntax highlighting
 		expect(scriptSrcMatch![0]).toContain("'wasm-unsafe-eval'")
+	})
+
+	test("resolveWebviewView builds HMR content against the local dev server when it is reachable", async () => {
+		const originalThemeFixtureProbe = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		// getHMRHtmlContent prefers an on-disk .vite-port file when one exists, so a
+		// stale dev leftover could silently move the probe (and the HMR URLs) to
+		// another port. Establish the default-port branch for this test by hiding
+		// exactly that file from the existence check; every other path falls
+		// through to the real implementation.
+		const realExistsSync = fs.existsSync
+		const existsSyncSpy = vi
+			.spyOn(fs, "existsSync")
+			.mockImplementation((target) =>
+				path.basename(String(target)) === ".vite-port" ? false : realExistsSync(target),
+			)
+
+		try {
+			provider = new ClineProvider(
+				{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy({ ...mockContext, extensionMode: vscode.ExtensionMode.Development }),
+			)
+			// The default axios mock resolves, so the dev-server probe succeeds and the
+			// HMR HTML branch (instead of the production fallback) is taken.
+			vi.mocked(axios.get).mockClear()
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Pin the health-check URL itself: the mock resolves for any URL, so only
+			// this assertion keeps the probe from silently drifting back to
+			// `localhost` (the IPv6 resolution failure this branch fixes).
+			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173")
+
+			const html = mockWebviewView.webview.html
+			// The dev server URL must be baked into the module script tag and CSP directives.
+			expect(html).toContain("http://127.0.0.1:5173/src/index.tsx")
+			expect(html).toContain("ws://127.0.0.1:5173")
+			expect(html).toContain("http://127.0.0.1:5173/@react-refresh")
+		} finally {
+			existsSyncSpy.mockRestore()
+			// Always restore the probe flag (even when an assertion above throws),
+			// so later tests outside the fixture-probe describe block cannot observe
+			// this test's deletion.
+			if (originalThemeFixtureProbe !== undefined) {
+				process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalThemeFixtureProbe
+			} else {
+				delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			}
+		}
 	})
 
 	test("postMessageToWebview sends message to webview", async () => {
