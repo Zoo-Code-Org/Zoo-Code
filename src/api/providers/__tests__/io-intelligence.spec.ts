@@ -254,6 +254,33 @@ describe("IOIntelligenceHandler", () => {
 		}
 	})
 
+	it("serializes and redacts an object-valued raw error body and keeps the status", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			mockCreate.mockRejectedValue(
+				Object.assign(new Error("Request failed"), {
+					status: 401,
+					error: { metadata: { raw: { detail: "invalid key secret-key" } } },
+				}),
+			)
+			const handler = new IOIntelligenceHandler({
+				ioIntelligenceApiKey: "secret-key",
+				ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			})
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toMatchObject({
+				message: 'IO Intelligence streaming error: {"detail":"invalid key [REDACTED]"}',
+				status: 401,
+			})
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[IO Intelligence] API error:",
+				expect.objectContaining({ message: '{"detail":"invalid key [REDACTED]"}', status: 401 }),
+			)
+			expect(loggedText(consoleErrorSpy)).not.toContain("secret-key")
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
 	it("redacts the API key from non-Error rejections and their log line", async () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		try {

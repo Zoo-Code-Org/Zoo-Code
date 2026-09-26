@@ -54,9 +54,12 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 			if (error.stack) {
 				error.stack = redact(error.stack)
 			}
+			// handleProviderError calls string methods on this field, so an
+			// object-valued upstream body is serialized before it is redacted.
 			const metadata = (error as { error?: { metadata?: { raw?: unknown } } }).error?.metadata
-			if (metadata && typeof metadata.raw === "string") {
-				metadata.raw = redact(metadata.raw)
+			if (metadata && metadata.raw !== undefined && metadata.raw !== null) {
+				const raw = metadata.raw
+				metadata.raw = redact(typeof raw === "string" ? raw : (JSON.stringify(raw) ?? String(raw)))
 			}
 		}
 		const safeError = error instanceof Error ? error : redact(String(error))
