@@ -733,6 +733,59 @@ describe("ClineProvider", () => {
 			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
 		})
 
+		test("dispose releases the bridge before awaited teardown completes", async () => {
+			// The early disposeFor in dispose() runs while teardown is still
+			// synchronous, so a later awaited step rejecting cannot leak the
+			// listening port. Parking teardown at its first await (a task whose
+			// abort never resolves) proves the release came from the early call:
+			// the end-of-dispose call could not have run yet.
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			let releaseAbort!: () => void
+			const blockedTask = {
+				taskId: "blocked-task",
+				instanceId: "blocked-instance",
+				emit: vi.fn(),
+				abortTask: vi.fn().mockReturnValue(
+					new Promise<void>((resolve) => {
+						releaseAbort = resolve
+					}),
+				),
+				dispose: vi.fn().mockResolvedValue(undefined),
+			}
+			Object.assign(provider, { taskRegistry: new TaskRegistry() })
+			provider["taskRegistry"].push(blockedTask as unknown as Task)
+
+			const shutdown = provider.dispose()
+
+			await vi.waitFor(() => expect(blockedTask.abortTask).toHaveBeenCalledOnce())
+
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
+			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+
+			releaseAbort()
+			await shutdown
+		})
+
+		test("dispose releases the bridge at both the early and the final teardown step", async () => {
+			// dispose() calls disposeFor twice: the early call bounds the port
+			// leak if an awaited step rejects, the final call re-checks after
+			// every teardown await (a bridge enabled mid-dispose would still be
+			// released). Dropping either call site must fail this test.
+			BrowserBridgeServer.enable(provider)
+			await waitForBridge()
+
+			const disposeForSpy = vi.spyOn(BrowserBridgeServer, "disposeFor").mockImplementation(() => {})
+
+			await provider.dispose()
+
+			expect(disposeForSpy).toHaveBeenCalledTimes(2)
+			expect(disposeForSpy).toHaveBeenCalledWith(provider)
+
+			disposeForSpy.mockRestore()
+		})
+
 		test("the bridge owns the message listener across sidebar disposal and re-resolve", async () => {
 			// The virtual-webview subscription must NOT live in the sidebar's
 			// per-webview disposables: clearWebviewResources() (run on every
