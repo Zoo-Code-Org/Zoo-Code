@@ -2,6 +2,7 @@ import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 
+import { BrowserBridgeServer } from "../../core/webview/browserBridge"
 import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
 vi.mock("execa", () => ({
@@ -91,6 +92,13 @@ vi.mock("../../i18n", () => ({
 
 vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+}))
+
+// The browser bridge command is dev-only tooling; registerCommands must merely
+// hand it the activation context (its self-gating is covered in
+// core/webview/__tests__/browserBridge.spec.ts).
+vi.mock("../../core/webview/browserBridge", () => ({
+	BrowserBridgeServer: { registerCommand: vi.fn() },
 }))
 
 describe("getVisibleProviderOrLog", () => {
@@ -190,6 +198,17 @@ describe("registerCommands handlers", () => {
 		const disposable = mock.mock.results[0]?.value
 		expect(mock).toHaveBeenCalled()
 		expect(mockContext.subscriptions).toContain(disposable)
+	})
+
+	it("delegates the dev-only browser bridge command registration to BrowserBridgeServer", async () => {
+		const registerCommandSpy = vi.mocked(BrowserBridgeServer.registerCommand)
+		expect(registerCommandSpy).toHaveBeenCalledTimes(1)
+		expect(registerCommandSpy).toHaveBeenCalledWith(mockContext, mockOutputChannel, expect.any(Function))
+
+		// The third argument is the visible-provider callback the bridge uses
+		// to find the provider to put into browser mode.
+		const getVisibleProvider = registerCommandSpy.mock.calls[0][2]
+		expect(getVisibleProvider()).toBe(mockVisibleProvider)
 	})
 
 	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions", () => {

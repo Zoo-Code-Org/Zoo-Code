@@ -1,0 +1,74 @@
+/*
+	* Standalone browser mode (browser bridge) styles.
+	*
+	* Dynamically imported by BrowserBridgeClient.maybeConnect() only when the
+	* bridge is active, so the production webview bundle never carries these
+	* rules (see import.meta.env.DEV dead-code elimination in
+	* src/utils/browserBridgeClient.ts).
+	*
+	* The --vscode-* theme fallbacks these rules consume live in src/index.css
+	* so they resolve before this stylesheet finishes loading.
+	*/
+@layer base {
+	/*
+		* VS Code additionally injects an unlayered "_defaultStyles" stylesheet
+		* into every webview (html/body background + text color, font, scrollbars,
+		* link/code colors). A plain browser tab has none of that, which is why
+		* body and input text rendered black-on-white even with the variables
+		* above. Mirror the essentials here, scoped to browser mode.
+		*/
+	html.roo-browser-mode {
+		background-color: var(--vscode-editor-background);
+		color: var(--vscode-editor-foreground);
+	}
+
+	html.roo-browser-mode body {
+		overscroll-behavior-x: none;
+		background-color: transparent;
+		color: var(--vscode-editor-foreground);
+		font-family: var(--vscode-font-family);
+		font-weight: var(--vscode-font-weight);
+		font-size: var(--vscode-font-size);
+		padding: 0 20px;
+	}
+
+	html.roo-browser-mode a,
+	html.roo-browser-mode a code {
+		color: var(--vscode-textLink-foreground);
+	}
+
+	html.roo-browser-mode a:hover {
+		color: var(--vscode-textLink-activeForeground);
+	}
+
+	html.roo-browser-mode code {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+		color: var(--vscode-textPreformat-foreground);
+	}
+
+	html.roo-browser-mode blockquote {
+		background: var(--vscode-textBlockQuote-background);
+		border-left: 1px solid var(--vscode-textBlockQuote-border);
+	}
+
+	html.roo-browser-mode ::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+
+	html.roo-browser-mode ::-webkit-scrollbar-corner {
+		background-color: var(--vscode-editor-background);
+	}
+
+	html.roo-browser-mode ::-webkit-scrollbar-thumb {
+		background-color: var(--vscode-scrollbarSlider-background);
+	}
+
+	html.roo-browser-mode ::-webkit-scrollbar-thumb:hover {
+		background-color: var(--vscode-scrollbarSlider-hoverBackground);
+	}
+
+	html.roo-browser-mode ::-webkit-scrollbar-thumb:active {
+		background-color: var(--vscode-scrollbarSlider-activeBackground);
+	}
+}
