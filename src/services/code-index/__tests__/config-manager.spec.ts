@@ -81,6 +81,34 @@ describe("CodeIndexConfigManager", () => {
 		})
 	})
 
+	describe("model dimension parsing", () => {
+		it.each([
+			{ raw: undefined, expected: undefined, warns: false },
+			{ raw: null, expected: undefined, warns: false },
+			{ raw: 1536, expected: 1536, warns: false },
+			{ raw: "768", expected: 768, warns: false },
+			{ raw: 0, expected: undefined, warns: true },
+			{ raw: -1, expected: undefined, warns: true },
+			{ raw: "invalid", expected: undefined, warns: true },
+			{ raw: NaN, expected: undefined, warns: true },
+		])("parses $raw with warning=$warns", async ({ raw, expected, warns }) => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				mockContextProxy.getGlobalState.mockReturnValue({ codebaseIndexEmbedderModelDimension: raw })
+				const { currentConfig } = await configManager.loadConfiguration()
+				expect(currentConfig.modelDimension).toBe(expected)
+				expect(warn).toHaveBeenCalledTimes(warns ? 1 : 0)
+				if (warns) {
+					expect(warn).toHaveBeenCalledWith(
+						`Invalid codebaseIndexEmbedderModelDimension value: ${raw}. Must be a positive number.`,
+					)
+				}
+			} finally {
+				warn.mockRestore()
+			}
+		})
+	})
+
 	describe("isFeatureEnabled", () => {
 		it("should return false when codebaseIndexEnabled is false", async () => {
 			mockContextProxy.getGlobalState.mockReturnValue({
@@ -192,6 +220,7 @@ describe("CodeIndexConfigManager", () => {
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "",
 				searchMinScore: 0.4,
+				searchMaxResults: 50,
 			})
 			expect(result.requiresRestart).toBe(false)
 		})
@@ -1773,6 +1802,69 @@ describe("CodeIndexConfigManager", () => {
 	})
 
 	describe("getConfig", () => {
+		it("publishes frozen configuration and options for every provider", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: providerIdentifiers.openai,
+				codebaseIndexQdrantUrl: "http://localhost:6333",
+				codebaseIndexOpenAiCompatibleBaseUrl: "https://example.com/v1",
+				codebaseIndexSearchMaxResults: 23,
+			})
+			mockContextProxy.getSecret.mockReturnValue("test-key")
+
+			const { currentConfig } = await configManager.loadConfiguration()
+			expect(currentConfig).toEqual(configManager.getConfig())
+			expect(currentConfig.searchMaxResults).toBe(23)
+			expect(Object.isFrozen(currentConfig)).toBe(true)
+			expect(Reflect.set(currentConfig, "modelId", "changed")).toBe(false)
+			for (const options of [
+				currentConfig.openAiOptions,
+				currentConfig.ollamaOptions,
+				currentConfig.openAiCompatibleOptions,
+				currentConfig.geminiOptions,
+				currentConfig.mistralOptions,
+				currentConfig.vercelAiGatewayOptions,
+				currentConfig.bedrockOptions,
+				currentConfig.openRouterOptions,
+			]) {
+				expect(options).toBeDefined()
+				if (!options) throw new Error("Expected provider options")
+				expect(Object.isFrozen(options)).toBe(true)
+				for (const key of Object.keys(options)) {
+					expect(Reflect.set(options, key, "changed")).toBe(false)
+				}
+			}
+			expect(configManager.getConfig()).toEqual(currentConfig)
+		})
+
+		it("preserves previously returned snapshots across reloads", async () => {
+			mockContextProxy.getSecret.mockReturnValue("old-key")
+			const { currentConfig: previous } = await configManager.loadConfiguration()
+			mockContextProxy.getSecret.mockReturnValue("new-key")
+			const { currentConfig: current, configSnapshot } = await configManager.loadConfiguration()
+
+			expect(previous.openAiOptions?.openAiNativeApiKey).toBe("old-key")
+			expect(current.openAiOptions?.openAiNativeApiKey).toBe("new-key")
+			expect(current.openAiOptions).not.toBe(previous.openAiOptions)
+			expect(configSnapshot.openAiKey).toBe("old-key")
+		})
+
+		it("keeps the current snapshot when building the next snapshot fails", async () => {
+			const previous = configManager.getConfig()
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://changed:6333",
+				get codebaseIndexEmbedderModelDimension(): number {
+					throw new Error("Invalid stored dimension")
+				},
+			})
+
+			await expect(configManager.loadConfiguration()).rejects.toThrow("Invalid stored dimension")
+			expect(configManager.getConfig()).toEqual(previous)
+			expect(configManager.isFeatureEnabled).toBe(false)
+			expect(configManager.getConfig().openAiOptions).toBe(previous.openAiOptions)
+		})
+
 		it("should return the current configuration", () => {
 			mockContextProxy.getGlobalState.mockReturnValue({
 				codebaseIndexEnabled: true,
@@ -2292,13 +2384,9 @@ describe("CodeIndexConfigManager", () => {
 			mockContextProxy.getSecret.mockReturnValue(undefined)
 
 			configManager = new CodeIndexConfigManager(mockContextProxy)
-			// The defensive `return false` is unreachable through the public API because
-			// EmbedderProvider is a closed union, so exercise it by forcing the private field
-			// to a value outside the union. `embedderProvider` is TypeScript `private`, not
-			// `#`-private, so a runtime property write reaches it. The double assertion is a
-			// last resort: the private field is not part of the public type surface, and
-			// `as any` is avoided to keep the file's no-explicit-any suppression budget flat.
-			;(configManager as unknown as Record<string, unknown>)["embedderProvider"] = "not-a-provider"
+			// Replace the snapshot with deliberately invalid runtime data to exercise
+			// the defensive branch without mutating the frozen production snapshot.
+			Reflect.set(configManager, "config", { ...configManager["config"], embedderProvider: "not-a-provider" })
 			expect(configManager.isConfigured()).toBe(false)
 		})
 	})
