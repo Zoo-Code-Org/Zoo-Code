@@ -11,6 +11,9 @@
  */
 
 import * as vscode from "vscode"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
+import { HttpProxyAgent } from "http-proxy-agent"
+import { HttpsProxyAgent } from "https-proxy-agent"
 import { Package } from "../shared/package"
 
 /**
@@ -417,6 +420,79 @@ export function getSystemProxyUrl(targetUrl?: string): string | undefined {
 	}
 
 	return undefined
+}
+
+// Derived from the handler's own signatures so this file needs no @smithy/types dependency.
+type HandleParameters = Parameters<NodeHttpHandler["handle"]>
+type UpdateClientConfigParameters = Parameters<NodeHttpHandler["updateHttpClientConfig"]>
+
+/**
+ * The subset of the AWS SDK request-handler contract implemented below. Exported so callers and
+ * their tests can name the type without reaching for @smithy/types.
+ */
+export interface ProxyRoutingHandler {
+	handle(...args: HandleParameters): ReturnType<NodeHttpHandler["handle"]>
+	updateHttpClientConfig(...args: UpdateClientConfigParameters): void
+	httpHandlerConfigs(): ReturnType<NodeHttpHandler["httpHandlerConfigs"]>
+	destroy(): void
+}
+
+/**
+ * AWS SDK request handler that chooses, per request, between the system proxy and a direct
+ * connection.
+ *
+ * The SDK resolves its own endpoint — region, partition, FIPS/dualstack flags, and any endpoint
+ * override — so the destination is only known once a request has been built. Choosing here is
+ * what makes NO_PROXY apply to the host actually called, rather than one guessed up front.
+ *
+ * The agents take no options, so no connection outlives its request. Both routes are HTTP/1.1:
+ * a client defaulting to NodeHttp2Handler drops to 1.1 once a proxy is configured, which is what
+ * the chat provider already does.
+ */
+class ProxyRoutingRequestHandler implements ProxyRoutingHandler {
+	private readonly direct = new NodeHttpHandler()
+	private readonly proxied: NodeHttpHandler
+
+	constructor(proxyUrl: string) {
+		this.proxied = new NodeHttpHandler({
+			httpAgent: new HttpProxyAgent(proxyUrl),
+			httpsAgent: new HttpsProxyAgent(proxyUrl),
+		})
+	}
+
+	private handlerFor(request: HandleParameters[0]): NodeHttpHandler {
+		// NO_PROXY entries match on host alone, so the port is left out.
+		return isNoProxyHost(`${request.protocol}//${request.hostname}`) ? this.direct : this.proxied
+	}
+
+	handle(...args: HandleParameters) {
+		return this.handlerFor(args[0]).handle(...args)
+	}
+
+	updateHttpClientConfig(...args: UpdateClientConfigParameters) {
+		this.direct.updateHttpClientConfig(...args)
+		this.proxied.updateHttpClientConfig(...args)
+	}
+
+	httpHandlerConfigs() {
+		return this.proxied.httpHandlerConfigs()
+	}
+
+	destroy() {
+		this.direct.destroy()
+		this.proxied.destroy()
+	}
+}
+
+/**
+ * Build a request handler routing AWS SDK traffic through the system proxy, except for the
+ * destinations NO_PROXY excludes.
+ *
+ * Returns undefined when no proxy is configured, so the client keeps its own default handler.
+ */
+export function createProxyRoutingRequestHandler(): ProxyRoutingHandler | undefined {
+	const proxyUrl = getSystemProxyUrl()
+	return proxyUrl ? new ProxyRoutingRequestHandler(proxyUrl) : undefined
 }
 
 /**
