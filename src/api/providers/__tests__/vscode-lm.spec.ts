@@ -69,7 +69,14 @@ vi.mock("vscode", () => {
 })
 
 import * as vscode from "vscode"
-import { VsCodeLmHandler, extractLeakedToolCalls, trailingPartialToolMarkerLength } from "../vscode-lm"
+import {
+	VsCodeLmHandler,
+	extractLeakedToolCalls,
+	trailingPartialToolMarkerLength,
+	middleOutTruncate,
+	truncateToolResultsToFitWindow,
+} from "../vscode-lm"
+import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
@@ -505,6 +512,165 @@ describe("VsCodeLmHandler", () => {
 				).properties
 				expect(codeUnits(schemaProperties.path.description)).toEqual(codeUnits("p\uFFFDath"))
 			})
+		})
+
+		it("still trims oversized tool_results when the system prompt consumes most of the budget", async () => {
+			// A system prompt large enough to drive the raw budget negative; the clamp keeps trimming
+			// active for the case where the request is most oversized.
+			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "hi" }],
+				},
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			// No sendRequest response is queued: the request must be refused before it is sent, and a
+			// queued-but-unconsumed response would leak into later tests.
+			// The clamped floor cannot be met once the tool_result bottoms out at its minimum, so the
+			// request must be refused rather than sent over-window (which orphans the tool_result).
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(/too large for this model's context window/)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("refuses a request that exceeds a small positive raw budget below the trimming floor", async () => {
+			// The clamp to MIN_TOOL_RESULT_CHARS only keeps trimming productive; admission must still
+			// respect the raw budget, otherwise a conversation between the raw budget and the floor is
+			// sent over-window. Sized so the remaining content exceeds the raw budget but stays under
+			// the floor, and so no tool_result is large enough for trimming to shrink anything.
+			const targetRawBudgetChars = 1000
+			const systemPrompt = "S".repeat(
+				Math.floor(handler.getCondenseContextWindow() * 0.8 * 3) - targetRawBudgetChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1500) }],
+				},
+			]
+
+			// No sendRequest response is queued: refusal must happen before the request is sent.
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(/too large for this model's context window/)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("refuses with an error the task recognises as a context-window failure", async () => {
+			// Asserted through the real detector: without a recognised shape the task takes its
+			// generic retry path and re-sends the same over-window history instead of condensing.
+			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const refusal = await (async () => {
+				try {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				} catch (error) {
+					return error
+				}
+				throw new Error("expected the request to be refused")
+			})()
+
+			expect(checkContextWindowExceededError(refusal)).toBe(true)
+		})
+
+		it("sends a request that fits within a small positive raw budget", async () => {
+			const targetRawBudgetChars = 1000
+			const systemPrompt = "S".repeat(
+				Math.floor(handler.getCondenseContextWindow() * 0.8 * 3) - targetRawBudgetChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Y".repeat(500) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const chunks = await collectStream(stream)
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
+
+		it("sends the request when trimming brings the conversation back under budget", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(500_000) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage("system", messages, { taskId: "test-task" })
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const sent = JSON.stringify(mockLanguageModelChat.sendRequest.mock.calls[0][0])
+			expect(sent).toContain("characters truncated")
+			expect(sent).not.toContain("X".repeat(400_000))
 		})
 
 		it("should handle native tool calls when tools are provided", async () => {
@@ -2533,5 +2699,270 @@ describe("leaked tool-call parser scaling", () => {
 		expectLinearGrowth(growthFactor(cues, 500, (input) => extractLeakedToolCalls(input, tools)))
 		// The cue still suppresses recovery, so the fast path did not silently change the verdict.
 		expect(extractLeakedToolCalls(cues(500), tools).calls).toHaveLength(0)
+	})
+})
+
+describe("context-window tool_result truncation", () => {
+	describe("middleOutTruncate", () => {
+		it("returns text unchanged when within the limit", () => {
+			expect(middleOutTruncate("hello world", 100)).toBe("hello world")
+		})
+
+		it("returns text unchanged when its length exactly equals the limit", () => {
+			// Longer than the truncation marker, so `<=` is observable here: the marker-less
+			// fallback for tiny limits would otherwise return the same text under either operator.
+			const text = "A".repeat(200)
+			expect(middleOutTruncate(text, 200)).toBe(text)
+		})
+
+		it("stays within a limit too small to hold the truncation marker", () => {
+			const text = "A".repeat(500)
+			for (const limit of [1, 5, 50]) {
+				const result = middleOutTruncate(text, limit)
+				expect(result).toBe("A".repeat(limit))
+			}
+		})
+
+		it("does not end a marker-less truncation on a lone high surrogate", () => {
+			// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+			const codeUnits = (value: string): number[] =>
+				Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
+
+			// The limit lands between the halves of the pair at index 3, which would otherwise be
+			// emitted alone and make the payload un-encodable as UTF-8.
+			const result = middleOutTruncate(`abc\uD83D\uDE00${"z".repeat(200)}`, 4)
+
+			expect(codeUnits(result)).toEqual(codeUnits("abc"))
+		})
+
+		it("keeps the head and tail and inserts a truncation marker", () => {
+			const text = "A".repeat(500) + "B".repeat(500)
+			const result = middleOutTruncate(text, 200)
+
+			expect(result.length).toBeLessThanOrEqual(200)
+			expect(result).toContain("characters truncated to fit the model context window")
+			expect(result.startsWith("A")).toBe(true)
+			expect(result.endsWith("B")).toBe(true)
+		})
+
+		it("returns an empty string for a non-positive limit", () => {
+			expect(middleOutTruncate("anything", 0)).toBe("")
+		})
+
+		// A lone surrogate cannot be encoded as UTF-8 and 400s the whole request.
+		it("never splits a surrogate pair across the removed middle", () => {
+			const pair = "\u{1F600}" // one astral char = high + low surrogate
+			const text = pair.repeat(400)
+			const result = middleOutTruncate(text, 200)
+
+			expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result)).toBe(false)
+		})
+	})
+
+	describe("truncateToolResultsToFitWindow", () => {
+		const toolUseMessage = (id: string): Anthropic.Messages.MessageParam => ({
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Calling a tool." },
+				{ type: "tool_use", id, name: "some_tool", input: { a: 1 } },
+			],
+		})
+
+		const toolResultMessage = (id: string, content: string): Anthropic.Messages.MessageParam => ({
+			role: "user",
+			content: [
+				{ type: "tool_result", tool_use_id: id, content },
+				{ type: "text", text: "<environment_details>env</environment_details>" },
+			],
+		})
+
+		const findBlock = (message: Anthropic.Messages.MessageParam, type: string) =>
+			(message.content as unknown as Array<{ type: string; [key: string]: unknown }>).find(
+				(block) => block.type === type,
+			)!
+
+		it("is a no-op when the conversation already fits the budget", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "small result"),
+			]
+			const before = JSON.parse(JSON.stringify(messages))
+
+			truncateToolResultsToFitWindow(messages, 100_000)
+
+			expect(messages).toEqual(before)
+		})
+
+		it("returns messages untouched when the budget is not a usable number", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "Y".repeat(50_000)),
+			]
+			const before = JSON.parse(JSON.stringify(messages))
+
+			expect(truncateToolResultsToFitWindow(messages, 0)).toBe(messages)
+			expect(truncateToolResultsToFitWindow(messages, Number.NaN)).toBe(messages)
+			expect(messages).toEqual(before)
+		})
+
+		it("truncates array-form tool_result content and preserves non-text parts", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t1",
+							content: [
+								{ type: "text", text: "Z".repeat(50_000) },
+								{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+							],
+						},
+					],
+				} as unknown as Anthropic.Messages.MessageParam,
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			const parts = toolResult.content as Array<{ type: string; text?: string }>
+			expect(parts[0].text).toContain("characters truncated")
+			// Exact shape: a surviving original text part would leave a third element behind.
+			expect(parts.map((part) => part.type)).toEqual(["text", "image"])
+		})
+
+		it("ignores string content and skips messages that cannot hold tool_result blocks", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "a plain string turn" },
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "t1", content: "W".repeat(50_000) },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+					],
+				} as unknown as Anthropic.Messages.MessageParam,
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			expect(messages[0].content).toBe("a plain string turn")
+			expect(String(findBlock(messages[2], "tool_result").content)).toContain("characters truncated")
+		})
+
+		it("ignores a tool_result whose content is neither string nor array", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "V".repeat(50_000)),
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t2", content: undefined }],
+				} as unknown as Anthropic.Messages.MessageParam,
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			expect(findBlock(messages[2], "tool_result").content).toBeUndefined()
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+		})
+
+		it("skips a tool_result already small enough to need no trimming", () => {
+			// Overage is tiny, so the largest block's target lands at its current length.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "U".repeat(3000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", "T".repeat(2500)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 5600)
+
+			const first = String(findBlock(messages[1], "tool_result").content)
+			const second = String(findBlock(messages[3], "tool_result").content)
+			expect(first.length + second.length).toBeLessThanOrEqual(5600)
+		})
+
+		it("leaves a tool_result at or below the minimum size alone", () => {
+			const shortResult = "S".repeat(1500)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", shortResult),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", shortResult),
+			]
+
+			truncateToolResultsToFitWindow(messages, 100)
+
+			expect(findBlock(messages[1], "tool_result").content).toBe(shortResult)
+			expect(findBlock(messages[3], "tool_result").content).toBe(shortResult)
+		})
+
+		it("shrinks an oversized tool_result so the conversation fits the budget", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "X".repeat(50_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			expect(toolResult.tool_use_id).toBe("t1") // pairing preserved
+			expect(String(toolResult.content).length).toBeLessThanOrEqual(10_000)
+			expect(String(toolResult.content)).toContain("characters truncated")
+		})
+
+		it("truncates the largest tool_result first and leaves small ones intact", () => {
+			const small = "small but real result"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "B".repeat(40_000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", small),
+			]
+
+			truncateToolResultsToFitWindow(messages, 12_000)
+
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+			expect(findBlock(messages[3], "tool_result").content).toBe(small) // untouched
+		})
+
+		it("never truncates tool_use blocks, assistant text, or environment details", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "X".repeat(50_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 8_000)
+
+			expect(findBlock(messages[0], "text").text).toBe("Calling a tool.")
+			expect(findBlock(messages[0], "tool_use")).toMatchObject({ id: "t1", name: "some_tool" })
+			expect(findBlock(messages[1], "text").text).toBe("<environment_details>env</environment_details>")
+		})
+
+		it("handles array-form tool_result content and keeps it valid", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t1",
+							content: [{ type: "text", text: "Y".repeat(40_000) }],
+						},
+					],
+				},
+			]
+
+			truncateToolResultsToFitWindow(messages, 8_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			expect(toolResult.tool_use_id).toBe("t1")
+			expect(Array.isArray(toolResult.content)).toBe(true)
+			const parts = toolResult.content as Array<{ type: string; text?: string }>
+			expect(parts[0].type).toBe("text")
+			expect(String(parts[0].text)).toContain("characters truncated")
+		})
 	})
 })
