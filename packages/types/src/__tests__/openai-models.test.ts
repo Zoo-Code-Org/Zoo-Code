@@ -1,3 +1,4 @@
+import { openAiCodexModels } from "../providers/openai-codex.js"
 import { openAiNativeDefaultModelId, openAiNativeModels } from "../providers/openai.js"
 
 describe("OpenAI native models", () => {
@@ -46,6 +47,96 @@ describe("OpenAI native models", () => {
 		])
 	})
 
+	it("describes GPT-6 Sol and Luna with verified pricing and context metadata", () => {
+		expect(openAiNativeModels["gpt-6-sol"]).toEqual({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			inputPrice: 2,
+			outputPrice: 10,
+			cacheWritesPrice: 2.5,
+			cacheReadsPrice: 0.2,
+			longContextPricing: {
+				thresholdTokens: 272_000,
+				inputPriceMultiplier: 2,
+				outputPriceMultiplier: 1.5,
+				cacheWritesPriceMultiplier: 2,
+				cacheReadsPriceMultiplier: 2,
+				appliesToServiceTiers: ["default", "flex", "priority"],
+			},
+			supportsVerbosity: true,
+			supportsTemperature: false,
+			tiers: [
+				{
+					name: "flex",
+					contextWindow: 1_050_000,
+					inputPrice: 1,
+					outputPrice: 5,
+					cacheWritesPrice: 1.25,
+					cacheReadsPrice: 0.1,
+				},
+				{
+					name: "priority",
+					contextWindow: 1_050_000,
+					inputPrice: 4,
+					outputPrice: 20,
+					cacheWritesPrice: 5,
+					cacheReadsPrice: 0.4,
+				},
+			],
+			description: "GPT-6 Sol: OpenAI's cost-efficient frontier model for complex coding and agentic workflows",
+		})
+
+		expect(openAiNativeModels["gpt-6-luna"]).toEqual({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			inputPrice: 0.1,
+			outputPrice: 0.5,
+			cacheWritesPrice: 0.125,
+			cacheReadsPrice: 0.01,
+			longContextPricing: {
+				thresholdTokens: 272_000,
+				inputPriceMultiplier: 2,
+				outputPriceMultiplier: 1.5,
+				cacheWritesPriceMultiplier: 2,
+				cacheReadsPriceMultiplier: 2,
+				appliesToServiceTiers: ["default", "flex", "priority"],
+			},
+			supportsVerbosity: true,
+			supportsTemperature: false,
+			tiers: [
+				{
+					name: "flex",
+					contextWindow: 1_050_000,
+					inputPrice: 0.05,
+					outputPrice: 0.25,
+					cacheWritesPrice: 0.0625,
+					cacheReadsPrice: 0.005,
+				},
+				{
+					name: "priority",
+					contextWindow: 1_050_000,
+					inputPrice: 0.2,
+					outputPrice: 1,
+					cacheWritesPrice: 0.25,
+					cacheReadsPrice: 0.02,
+				},
+			],
+			description: "GPT-6 Luna: The fastest, most affordable member of the GPT-6 family",
+		})
+	})
+
 	it("uses current GPT-5.6 base pricing and context metadata", () => {
 		expect(openAiNativeModels["gpt-5.6-sol"]).toMatchObject({
 			contextWindow: 1_050_000,
@@ -67,6 +158,43 @@ describe("OpenAI native models", () => {
 			cacheWritesPrice: 0.25,
 			cacheReadsPrice: 0.02,
 			outputPrice: 1.2,
+		})
+	})
+})
+
+describe("OpenAI Codex models", () => {
+	it("describes GPT-6 Sol and Luna subscription contracts", () => {
+		expect(openAiCodexModels["gpt-6-sol"]).toEqual({
+			maxTokens: 128_000,
+			contextWindow: 372_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			inputPrice: 0,
+			outputPrice: 0,
+			supportsVerbosity: true,
+			supportsTemperature: false,
+			description:
+				"GPT-6 Sol: OpenAI's cost-efficient frontier model for complex coding and agentic workflows via ChatGPT subscription",
+		})
+
+		expect(openAiCodexModels["gpt-6-luna"]).toEqual({
+			maxTokens: 128_000,
+			contextWindow: 372_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			inputPrice: 0,
+			outputPrice: 0,
+			supportsVerbosity: true,
+			supportsTemperature: false,
+			description: "GPT-6 Luna: The fastest, most affordable member of the GPT-6 family via ChatGPT subscription",
 		})
 	})
 })

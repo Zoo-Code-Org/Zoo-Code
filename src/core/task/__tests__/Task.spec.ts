@@ -25,6 +25,7 @@ import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
@@ -46,6 +47,7 @@ type TaskTestAccess = {
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
@@ -515,6 +517,60 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("output token limit mid-stream", () => {
+		async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new OutputTokenLimitError()
+		}
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("asks once instead of auto-retrying, even with auto-approval", async () => {
+			const task = await createAutoApprovedTask()
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => truncatedStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(backoffSpy).not.toHaveBeenCalled()
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
+		})
+
+		it("retries from a fresh attempt count when the user confirms", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => truncatedStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
 		})
 	})
 
@@ -2003,6 +2059,52 @@ describe("Cline", () => {
 					await cline.abortTask(true)
 					await task.catch(() => {})
 				})
+			})
+		})
+
+		describe("slash command mode switch", () => {
+			it("passes null as targetTask so handleModeSwitch does not overwrite the orchestrator task", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+				Object.assign(task.api, { ensureModelFetched })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "run /commit" }],
+					mode: "code",
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+				vi.spyOn(task, "say").mockImplementation(async (type) => {
+					if (type === "api_req_started") {
+						task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+					}
+					return undefined as never
+				})
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw new Error("stop after mode switch")
+				})
+
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
+
+				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
 			})
 		})
 
