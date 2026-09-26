@@ -70,6 +70,18 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			role="textbox"
 		/>
 	),
+	// Mocks added for the chat-input-effect dropdown introduced by the chat-input UX PR.
+	// Without these, every SettingsView render throws "No VSCodeDropdown export is defined"
+	// and cascades 19 failures across Sound / API / Allowed Commands / Tab Navigation suites.
+	VSCodeDropdown: ({ children, value, onChange, "data-testid": dataTestId }: any) => (
+		<select
+			value={value}
+			onChange={(e) => onChange?.({ target: { value: e.target.value } })}
+			data-testid={dataTestId}>
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ value, children }: any) => <option value={value}>{children}</option>,
 }))
 
 vi.mock("../../../components/common/Tab", () => ({
