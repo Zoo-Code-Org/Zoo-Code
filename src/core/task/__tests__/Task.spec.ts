@@ -713,6 +713,60 @@ describe("Cline", () => {
 			])
 		})
 
+		it("clears didFinishAbortingStream on retry so cancelTask waits for the new stream (#1801)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort flag reset test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+
+			const failingStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial" }
+				throw new Error("simulated mid-stream failure")
+			}
+
+			let releaseRetryStream: (() => void) | undefined
+			let markRetryStreamPaused: (() => void) | undefined
+			const retryStreamRelease = new Promise<void>((resolve) => {
+				releaseRetryStream = resolve
+			})
+			const retryStreamPaused = new Promise<void>((resolve) => {
+				markRetryStreamPaused = resolve
+			})
+			const pausedRetryStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "retry" }
+				markRetryStreamPaused?.()
+				await retryStreamRelease
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => failingStream())
+				.mockImplementationOnce(() => pausedRetryStream())
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			const request = task.recursivelyMakeClineRequests([{ type: "text", text: "abort flag reset test" }])
+			try {
+				await retryStreamPaused
+
+				const firstApiReq = task.clineMessages.find((message) => message.say === "api_req_started")
+				expect(JSON.parse(firstApiReq?.text ?? "{}")).toMatchObject({ cancelReason: "streaming_failed" })
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(task.isStreaming).toBe(true)
+				expect(task.didFinishAbortingStream).toBe(false)
+			} finally {
+				releaseRetryStream?.()
+			}
+			await expect(request).resolves.toBe(true)
+		})
+
 		it("finalizes MCP tool call using the request-scoped parser state", async () => {
 			const task = new Task({
 				provider: mockProvider,
