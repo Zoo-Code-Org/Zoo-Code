@@ -44,12 +44,7 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					<div className="mb-4">
 						<p className="mb-3">{t("chat:announcement.release.heading")}</p>
 						<ul className="list-disc list-inside text-sm space-y-1.5">
-							<li>
-								<Trans
-									i18nKey="chat:announcement.release.highlight1"
-									components={{ modelsLink: <ModelsLink /> }}
-								/>
-							</li>
+							<li>{t("chat:announcement.release.highlight1")}</li>
 							<li>{t("chat:announcement.release.highlight2")}</li>
 							<li>{t("chat:announcement.release.highlight3")}</li>
 						</ul>
@@ -109,15 +104,6 @@ const GitHubLink = ({ children }: { children?: ReactNode }) => (
 		href={EXTERNAL_LINKS.GITHUB_REPO}
 		className="text-vscode-textLink-foreground underline"
 		onClick={openExternal(EXTERNAL_LINKS.GITHUB_REPO)}>
-		{children}
-	</a>
-)
-
-const ModelsLink = ({ children }: { children?: ReactNode }) => (
-	<a
-		href={EXTERNAL_LINKS.MODELS}
-		className="text-vscode-textLink-foreground underline"
-		onClick={openExternal(EXTERNAL_LINKS.MODELS)}>
 		{children}
 	</a>
 )

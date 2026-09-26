@@ -344,9 +344,9 @@
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novedades:",
-			"highlight1": "🔑 Usa tu clave API de Zoo Gateway en cualquier lugar: llévala a cualquier cliente o flujo de trabajo compatible con OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Por tiempo limitado, obtén acceso gratis a MiniMax-M3 mediante Zoo Gateway.",
-			"highlight3": "✨ Ya disponibles: los nuevos modelos GPT-6 Astra y Claude Fable 5.1."
+			"highlight1": "✨ Nuevos modelos SOTA añadidos: Usa GPT-6 Sol, GPT-6 Luna y Claude Opus 5.5 con los proveedores compatibles.",
+			"highlight2": "🧭 Tareas y subtareas más fiables: Mantén aislados los modos delegados, conserva los enlaces de las subtareas después de detenerlas varias veces y protege la configuración del orquestador cuando los comandos con barra cambien de modo.",
+			"highlight3": "🛠️ Comportamiento más fiable del terminal, los proveedores y la búsqueda de código: Mejora el terminal en Windows y en entornos que no están en inglés, refuerza las respuestas y la cancelación de los proveedores y haz que la búsqueda de código use el espacio de trabajo correcto de forma más consistente."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",
