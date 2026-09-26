@@ -100,6 +100,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
 
 import { setPanel } from "../../activate/registerCommands"
@@ -508,8 +509,55 @@ export class ClineProvider
 			}
 
 			this.taskHistoryStoreInitialized = true
+
+			// The store is authoritative from this point (the legacy fallback in
+			// getTaskHistoryItem is off), so the migrated blob can leave globalState.
+			await this.clearLegacyTaskHistory()
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	/**
+	 * Remove the legacy `taskHistory` array from globalState after a verified
+	 * migration (#1771).
+	 *
+	 * The blob is never removed today, and VS Code weighs the entire extension
+	 * state on every read and write, so migrated users keep seeing the
+	 * large-state warning forever. Ordering answers the failure modes the issue
+	 * lists:
+	 *
+	 * - Only runs once `taskHistoryStoreInitialized` is set (the caller does
+	 *   that first), so no window that still reads the fallback loses data.
+	 *   A second window that is mid-startup during this delete has its own copy
+	 *   of the marker and finishes initializing against the same files; the
+	 *   delete is idempotent.
+	 * - The array is backed up to a file BEFORE it is removed, so a downgrade
+	 *   or an entry that migration skipped as orphaned still has its data.
+	 * - Any failure leaves the blob in place and is retried on the next
+	 *   startup: the blob's presence is the condition, so there is no
+	 *   "cleared" marker that could get out of sync.
+	 */
+	private async clearLegacyTaskHistory(): Promise<void> {
+		const legacyHistory = this.context.globalState.get<HistoryItem[]>("taskHistory")
+		if (!legacyHistory?.length) {
+			return
+		}
+
+		const backupPath = path.join(this.context.globalStorageUri.fsPath, "legacy-task-history.backup.json")
+		try {
+			await fs.mkdir(path.dirname(backupPath), { recursive: true })
+			await safeWriteJson(backupPath, legacyHistory)
+			await this.context.globalState.update("taskHistory", undefined)
+			this.log(
+				`[initializeTaskHistoryStore] Cleared legacy taskHistory (${legacyHistory.length} entries); backup at ${backupPath}`,
+			)
+		} catch (error) {
+			this.log(
+				`[initializeTaskHistoryStore] Legacy taskHistory cleanup failed, blob kept for next startup: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
 		}
 	}
 
