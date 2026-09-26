@@ -18,20 +18,25 @@ import {
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Task } from "../Task"
+import { MODEL_FETCH_TIMEOUT_MS, Task } from "../Task"
 import { SYSTEM_PROMPT } from "../../prompts/system"
 import { createRateLimitClock } from "../RateLimitClock"
 import { summarizeConversation } from "../../condense"
+import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { McpHub } from "../../../services/mcp/McpHub"
+import { McpServerManager } from "../../../services/mcp/McpServerManager"
 
 type TaskTestAccess = {
-	getSystemPrompt: () => Promise<string>
+	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
+	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
 	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
@@ -40,9 +45,15 @@ type TaskTestAccess = {
 	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
-	safeEnsureModelFetched: () => Promise<void>
+	safeEnsureModelFetched: () => Promise<ModelInfo>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
+	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
+	buildCleanConversationHistory: (
+		messages: ApiMessage[],
+		requestModelInfo: ModelInfo,
+	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -129,6 +140,15 @@ vi.mock("fs/promises", async (importOriginal) => {
 
 vi.mock("p-wait-for", () => ({
 	default: vi.fn().mockImplementation(async () => Promise.resolve()),
+}))
+
+// Task tests do not exercise indexing; keep workspace resolution and its cache out of this suite.
+vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getOrCreate: vi.fn().mockReturnValue(undefined),
+		getAllInstances: vi.fn().mockReturnValue([]),
+		disposeAll: vi.fn(),
+	},
 }))
 
 vi.mock("vscode", () => {
@@ -277,13 +297,33 @@ const mockMessages = [
 	},
 ]
 
+// Model-info stand-in for tests that stub safeEnsureModelFetched and only need
+// the settled snapshot to be a defined ModelInfo.
+const stubModelInfo: ModelInfo = {
+	contextWindow: 200_000,
+	maxTokens: 4096,
+	supportsPromptCache: true,
+}
+
 describe("Cline", () => {
 	let mockProvider: ClineProvider
 	let mockApiConfig: ProviderSettings
 	let mockOutputChannel: vscode.OutputChannel
 	let mockExtensionContext: vscode.ExtensionContext
 
-	beforeEach(() => {
+	// Builds provider-state doubles on top of the real getState() result
+	// captured before any test stubs it, so required fields stay
+	// compile-checked while each test states only its own overrides.
+	// mcpEnabled defaults to false so doubles skip the MCP-hub path unless a
+	// test opts in.
+	let baseProviderState: ProviderState
+	const providerStateWith = (overrides: Partial<ProviderState> = {}): ProviderState => ({
+		...baseProviderState,
+		mcpEnabled: false,
+		...overrides,
+	})
+
+	beforeEach(async () => {
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
 		}
@@ -398,6 +438,8 @@ describe("Cline", () => {
 				},
 			],
 		}))
+
+		baseProviderState = await mockProvider.getState()
 	})
 
 	describe("empty-response retries", () => {
@@ -430,7 +472,8 @@ describe("Cline", () => {
 			let retryUserMessageCount: number | undefined
 
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
-			vi.spyOn(task, "attemptApiRequest")
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() => stream([]))
 				.mockImplementationOnce(() => {
 					retryHistory = structuredClone(task.apiConversationHistory)
@@ -444,6 +487,14 @@ describe("Cline", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(retryHistory).toHaveLength(1)
+			// The retry iteration must reach the request seam with its own incremented
+			// retry count; passing the initial-attempt value instead would make retries
+			// indistinguishable from the first attempt downstream.
+			expect(attemptApiRequestSpy).toHaveBeenNthCalledWith(
+				2,
+				1,
+				expect.objectContaining({ skipProviderRateLimit: true }),
+			)
 			expect(retryHistory?.[0]).toMatchObject({
 				role: "user",
 				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
@@ -465,6 +516,60 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("output token limit mid-stream", () => {
+		async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new OutputTokenLimitError()
+		}
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("asks once instead of auto-retrying, even with auto-approval", async () => {
+			const task = await createAutoApprovedTask()
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => truncatedStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(backoffSpy).not.toHaveBeenCalled()
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
+		})
+
+		it("retries from a fresh attempt count when the user confirms", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => truncatedStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
 		})
 	})
 
@@ -507,7 +612,7 @@ describe("Cline", () => {
 
 			for (const task of [firstTask, secondTask]) {
 				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 				vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
 			}
 			vi.spyOn(firstTask, "attemptApiRequest").mockImplementation(() => firstStream())
@@ -568,7 +673,7 @@ describe("Cline", () => {
 			})
 
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
 
 			const firstStream = async function* (): AsyncGenerator<ApiStreamChunk> {
@@ -616,7 +721,7 @@ describe("Cline", () => {
 			})
 
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
 			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
 				asyncStreamFrom<ApiStreamChunk>([
@@ -795,10 +900,7 @@ describe("Cline", () => {
 				...mockApiConfig,
 				todoListEnabled: true,
 			}
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				mode: "architect",
-				mcpEnabled: false,
-			} as unknown as ProviderState)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "architect" }))
 
 			const task = new Task({
 				provider: mockProvider,
@@ -808,14 +910,14 @@ describe("Cline", () => {
 			})
 			await task.getTaskMode()
 
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				mode: "code",
-				mcpEnabled: false,
+			// The focused provider's state diverges from the task's own
+			// configuration; threading it must not change what the prompt resolves.
+			const focusedProviderState = providerStateWith({
 				apiConfiguration: { ...mockApiConfig, todoListEnabled: false },
-			} as unknown as ProviderState)
+			})
 			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
 
-			await getTaskTestAccess(task).getSystemPrompt()
+			await getTaskTestAccess(task).getSystemPrompt(focusedProviderState)
 
 			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
 			const [, , , , , mode, , , , , , , settings] = systemPromptCall
@@ -823,11 +925,7 @@ describe("Cline", () => {
 			expect(settings).toMatchObject({ todoListEnabled: true })
 		})
 
-		it("uses the task mode when manually condensing after focused state changes", async () => {
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				mode: "architect",
-				mcpEnabled: false,
-			} as unknown as ProviderState)
+		it("passes undefined disabledTools when the threaded snapshot carries none", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -835,10 +933,342 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			await task.getTaskMode()
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				mode: "code",
-				mcpEnabled: false,
-			} as unknown as ProviderState)
+
+			// The threaded snapshot's mcpEnabled:false skips the MCP-hub path; its
+			// disabledTools is undefined, so the prompt call receives undefined for
+			// that argument.
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(providerStateWith())).resolves.toBe(
+				"mock system prompt",
+			)
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is the disabledTools parameter fed by `requestState?.disabledTools`.
+			expect(systemPromptCall[16]).toBeUndefined()
+		})
+
+		it("passes undefined disabledTools to the system prompt when the threaded snapshot is undefined", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// A caller whose own read came back empty threads undefined; the prompt
+			// path must still deliver undefined disabledTools rather than fail, and
+			// it must not read provider state to fill the gap. providerRef stays
+			// alive, so the MCP-hub branch below can run.
+			const getStateSpy = vi.spyOn(mockProvider, "getState")
+			// An unavailable snapshot leaves the mcpEnabled gate open, so the hub branch
+			// runs; the spy also witnesses that the branch really was taken. The
+			// awaited connect wait is a no-op under this file's p-wait-for mock, so
+			// the hub double needs no members.
+			const hubSpy = vi.spyOn(McpServerManager, "getInstance")
+			hubSpy.mockResolvedValue(Object.create(McpHub.prototype))
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(undefined)).resolves.toBe("mock system prompt")
+
+			expect(getStateSpy).not.toHaveBeenCalled()
+			expect(hubSpy).toHaveBeenCalledTimes(1)
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is the disabledTools parameter fed by `requestState?.disabledTools`.
+			expect(systemPromptCall[16]).toBeUndefined()
+
+			hubSpy.mockRestore()
+		})
+
+		it("builds the prompt from the threaded snapshot without reading provider state", async () => {
+			// A live provider whose state read returns a divergent snapshot must
+			// not be able to influence the prompt: the prompt path performs no
+			// provider-state read at all, so a re-read here would pick up the
+			// divergent disabledTools instead of the threaded ones.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			const getStateSpy = vi
+				.spyOn(mockProvider, "getState")
+				.mockResolvedValue(providerStateWith({ disabledTools: ["read_file"] }))
+			const snapshot = providerStateWith({ disabledTools: ["execute_command"] })
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).resolves.toBe("mock system prompt")
+
+			expect(getStateSpy).not.toHaveBeenCalled()
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is disabledTools: the threaded snapshot's value,
+			// not the value a provider-state re-read would have produced.
+			expect(systemPromptCall[16]).toEqual(["execute_command"])
+		})
+
+		it("forwards non-empty disabledTools and modelInfo to the system prompt call", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// The threaded snapshot feeds `requestState?.disabledTools`; mcpEnabled
+			// stays false so the MCP-hub path is skipped.
+			const snapshot = providerStateWith({ disabledTools: ["execute_command"] })
+
+			const modelInfo: ModelInfo = {
+				contextWindow: 128_000,
+				supportsPromptCache: false,
+				maxTokens: 1234,
+			}
+			vi.spyOn(task.api, "getModel").mockReturnValue({ id: "distinctive-model-id", info: modelInfo })
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).resolves.toBe("mock system prompt")
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is the disabledTools parameter fed by `requestState?.disabledTools`;
+			// index 17 is the modelInfo from `this.api.getModel().info`.
+			expect(systemPromptCall[16]).toEqual(["execute_command"])
+			expect(systemPromptCall[17]).toBe(modelInfo)
+		})
+
+		it("fetches dynamic model metadata before reading model info for the prompt", async () => {
+			// Router providers discover model metadata (including included/excluded
+			// tools) lazily. getSystemPrompt must await ensureModelFetched() before
+			// reading getModel().info, otherwise the prompt is built from fallback
+			// metadata with different tool guidance than the runtime path.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			const snapshot = providerStateWith()
+
+			const fallbackInfo: ModelInfo = {
+				contextWindow: 32_000,
+				supportsPromptCache: false,
+			}
+			const fetchedInfo: ModelInfo = {
+				contextWindow: 128_000,
+				supportsPromptCache: true,
+				excludedTools: ["execute_command"],
+			}
+			let currentInfo = fallbackInfo
+			const ensureModelFetched = vi.fn(async () => {
+				currentInfo = fetchedInfo
+			})
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({ id: "router-model", info: currentInfo }))
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).resolves.toBe("mock system prompt")
+
+			expect(ensureModelFetched).toHaveBeenCalledTimes(1)
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 17 is modelInfo: it must be the post-fetch metadata.
+			expect(systemPromptCall[17]).toBe(fetchedInfo)
+		})
+
+		it("uses the threaded model-info snapshot and skips the fetch guard when one is provided", async () => {
+			// A threaded snapshot replaces the per-call guard entirely: the prompt
+			// must be built from the caller's snapshot without touching
+			// ensureModelFetched or the handler's current model info.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			const handlerInfo: ModelInfo = { contextWindow: 100_000, supportsPromptCache: false }
+			const threadedInfo: ModelInfo = { contextWindow: 64_000, supportsPromptCache: true, excludedTools: [] }
+			const ensureModelFetched = vi.fn(async () => {})
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(task.api, "getModel").mockReturnValue({ id: "threaded-model", info: handlerInfo })
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(providerStateWith(), threadedInfo)).resolves.toBe(
+				"mock system prompt",
+			)
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 17 is modelInfo: the threaded snapshot, not the handler's.
+			expect(systemPromptCall[17]).toBe(threadedInfo)
+			expect(ensureModelFetched).not.toHaveBeenCalled()
+		})
+
+		it("threads the request state snapshot into the system prompt when provider state changes mid-request", async () => {
+			// attemptApiRequest captures provider state, then getSystemPrompt waits
+			// on MCP initialization. A settings change during that window must NOT
+			// leak into the prompt: the prompt and the runtime tool array (both fed
+			// from the request snapshot) have to stay aligned. The prompt must be
+			// built from that snapshot: if the prompt path re-read provider state,
+			// it would pick up the divergent disabledTools stubbed for later calls.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			const realState = await mockProvider.getState()
+			// First call: the snapshot captured by attemptApiRequest.
+			vi.spyOn(mockProvider, "getState")
+				.mockResolvedValueOnce({
+					...realState,
+					mcpEnabled: false,
+					autoApprovalEnabled: false,
+					disabledTools: ["execute_command"],
+				})
+				// Any later getState() read returns different disabledTools, so a
+				// re-read along the prompt path would change the observed behavior.
+				.mockResolvedValue({
+					...realState,
+					mcpEnabled: false,
+					autoApprovalEnabled: false,
+					disabledTools: ["read_file"],
+				})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "text", text: "ok" }
+				},
+				async next() {
+					return { done: true, value: undefined }
+				},
+				async return() {
+					return { done: true, value: undefined }
+				},
+				async throw(error: unknown) {
+					throw error
+				},
+				async [Symbol.asyncDispose]() {},
+			} as AsyncGenerator<ApiStreamChunk>)
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			const iterator = task.attemptApiRequest(0)
+			await iterator.next()
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 16 is disabledTools: the snapshot value from the first
+			// getState call, not the changed value from later reads.
+			expect(systemPromptCall[16]).toEqual(["execute_command"])
+		})
+
+		it("threads the captured state snapshot into the system prompt when manually condensing", async () => {
+			// condenseContext captures provider state once and threads it into
+			// getSystemPrompt so the prompt and the condensing tool array resolve
+			// from one snapshot. Without threading, getSystemPrompt would re-read
+			// provider state here and pick up the divergent second state below.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			const snapshot = providerStateWith({ disabledTools: ["execute_command"] })
+			vi.spyOn(mockProvider, "getState")
+				// First call: the snapshot captured by condenseContext.
+				.mockResolvedValueOnce(snapshot)
+				// Any later getState() read returns different disabledTools, so a
+				// re-read along the prompt path would change the observed behavior.
+				.mockResolvedValue(providerStateWith({ disabledTools: ["read_file"] }))
+
+			const getSystemPromptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockResolvedValue("mock system prompt")
+
+			await task.condenseContext()
+
+			// Reference equality: without threading, the arguments would be
+			// undefined and getSystemPrompt would re-read the divergent state and
+			// re-guard the model metadata. The second argument must be the handler's
+			// own settled snapshot, not just any object.
+			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, task.api.getModel().info)
+		})
+
+		it("threads the captured state snapshot into the system prompt when the context window is exceeded", async () => {
+			// handleContextWindowExceededError captures provider state up front
+			// and threads it into the getSystemPrompt call feeding manageContext;
+			// a settings change mid-handler must not leak into the condensing prompt.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			const snapshot = providerStateWith({ disabledTools: ["execute_command"] })
+			vi.spyOn(mockProvider, "getState")
+				// First call: the snapshot captured at the top of
+				// handleContextWindowExceededError.
+				.mockResolvedValueOnce(snapshot)
+				// Any later getState() read returns different disabledTools, so a
+				// re-read along the prompt path would change the observed behavior.
+				.mockResolvedValue(providerStateWith({ disabledTools: ["read_file"] }))
+
+			// Overflow the 50k window so manageContext takes the condense branch
+			// (the module-mocked summarizeConversation returns a summary).
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 100_000,
+			})
+			const ctxModelInfo: ModelInfo = { contextWindow: 50_000, maxTokens: 1024, supportsPromptCache: false }
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: "ctx-model",
+				info: ctxModelInfo,
+			})
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
+
+			const getSystemPromptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockResolvedValue("mock system prompt")
+
+			await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+			// Reference equality: without threading, the arguments would be
+			// undefined and getSystemPrompt would re-read the divergent state and
+			// the model info; the second argument must be the snapshot threaded
+			// into the handler, not a fresh re-read.
+			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo)
+		})
+
+		it("uses the task mode when manually condensing after focused state changes", async () => {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "architect" }))
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "code" }))
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 			await task.condenseContext()
@@ -848,12 +1278,9 @@ describe("Cline", () => {
 		})
 
 		it("uses the task mode in request metadata when focused provider state differs", async () => {
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				mode: "ask",
-				mcpEnabled: false,
-				autoApprovalEnabled: true,
-				requestDelaySeconds: 0,
-			} as unknown as ProviderState)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ mode: "ask", autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -863,12 +1290,9 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				mode: "code",
-				mcpEnabled: false,
-				autoApprovalEnabled: true,
-				requestDelaySeconds: 0,
-			} as unknown as ProviderState)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ mode: "code", autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
 			const stream = (async function* () {
 				yield { type: "text", text: "response" } as ApiStreamChunk
 			})()
@@ -881,6 +1305,105 @@ describe("Cline", () => {
 
 			const metadata = requireDefined(createMessage.mock.calls[0])[2]
 			expect(metadata?.mode).toBe("ask")
+		})
+
+		it("condenses with an undefined state snapshot when the provider is gone", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// Condensing must tolerate a collected provider: the snapshot read resolves to undefined and completes.
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: () => undefined },
+				writable: false,
+				configurable: true,
+			})
+			const getSystemPromptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			vi.mocked(summarizeConversation).mockResolvedValueOnce({
+				messages: [{ role: "user", content: [{ type: "text", text: "condensed" }], ts: Date.now() }],
+				summary: "summary",
+				cost: 0,
+				newContextTokens: 1,
+				condenseId: "condense-id",
+			})
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+
+			await expect(task.condenseContext()).resolves.toBeUndefined()
+
+			// The state snapshot stays undefined for a gone provider; the model-info
+			// snapshot is still captured from the task's own api handler.
+			expect(getSystemPromptSpy).toHaveBeenCalledWith(undefined, task.api.getModel().info)
+			expect(overwriteSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("rejects with the view-transition error when the provider ref is lost", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// A collected provider must reject with the view-transition error, not with a state-read TypeError.
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: () => undefined },
+				writable: false,
+				configurable: true,
+			})
+
+			// The undefined snapshot keeps the mcpEnabled gate open, so the request
+			// reaches the provider guard and rejects there.
+			await expect(getTaskTestAccess(task).getSystemPrompt(undefined)).rejects.toThrow(
+				"Provider reference lost during view transition",
+			)
+		})
+
+		it("rejects with the provider-unavailable error when the provider dies between state reads", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// The caller's own snapshot read performs the only deref that finds the
+			// provider alive - it flips the mock's liveness flag - so the provider
+			// guard at the top of the prompt-building closure is what answers for the
+			// ref that died before the prompt was built.
+			let providerAlive = true
+			const providerRef = {
+				deref: () => {
+					if (providerAlive) {
+						providerAlive = false
+						return mockProvider
+					}
+					return undefined
+				},
+			}
+			Object.defineProperty(task, "providerRef", {
+				value: providerRef,
+				writable: false,
+				configurable: true,
+			})
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			const snapshot = await providerRef.deref()?.getState()
+
+			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).rejects.toThrow("Provider not available")
 		})
 	})
 
@@ -1439,6 +1962,52 @@ describe("Cline", () => {
 					await cline.abortTask(true)
 					await task.catch(() => {})
 				})
+			})
+		})
+
+		describe("slash command mode switch", () => {
+			it("passes null as targetTask so handleModeSwitch does not overwrite the orchestrator task", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+				Object.assign(task.api, { ensureModelFetched })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "run /commit" }],
+					mode: "code",
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+				vi.spyOn(task, "say").mockImplementation(async (type) => {
+					if (type === "api_req_started") {
+						task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+					}
+					return undefined as never
+				})
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw new Error("stop after mode switch")
+				})
+
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
+
+				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
 			})
 		})
 
@@ -2022,10 +2591,7 @@ describe("Cline", () => {
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
-				vi.spyOn(mockProvider, "getState").mockResolvedValue({
-					mode: "ask",
-					mcpEnabled: false,
-				} as unknown as ProviderState)
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "ask" }))
 				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
 				const task = new Task({
 					provider: mockProvider,
@@ -2064,10 +2630,12 @@ describe("Cline", () => {
 				})
 				task.setTaskApiConfigName("previous-profile")
 				vi.spyOn(mockProvider, "setProviderProfile").mockResolvedValue(undefined)
-				vi.spyOn(mockProvider, "getState").mockResolvedValue({
-					currentApiConfigName: "selected-profile",
-					apiConfiguration: selectedConfiguration,
-				} as unknown as ProviderState)
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					providerStateWith({
+						currentApiConfigName: "selected-profile",
+						apiConfiguration: selectedConfiguration,
+					}),
+				)
 				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
 
 				await task.submitUserMessage("switch profiles", undefined, undefined, "selected-profile")
@@ -3217,10 +3785,7 @@ describe("Cline", () => {
 			})
 
 			it("should propagate AbortController signal through attemptApiRequest context-window retry path", async () => {
-				vi.spyOn(mockProvider, "getState").mockResolvedValue({
-					mode: "architect",
-					mcpEnabled: false,
-				} as unknown as ProviderState)
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "architect" }))
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -3326,10 +3891,212 @@ describe("Cline", () => {
 				expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
 				expect(options.metadata?.abortSignal?.aborted).toBe(false)
 			})
+
+			// Shared harness for the retry-options-forwarding tests: the first
+			// createMessage fails on the first chunk, the retry attempt streams a
+			// success chunk, and the attemptApiRequest spy exposes the arguments
+			// each retry site's recursion passes downstream. A same-reference
+			// assertion on options is the point: a rebuilt object would silently
+			// refetch model metadata and restart the rate-limit wait on retries.
+			async function createRetryForwardingTask(stateOverrides: Partial<ProviderState> = {}) {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					providerStateWith({
+						autoApprovalEnabled: false,
+						requestDelaySeconds: 0,
+						...stateOverrides,
+					}),
+				)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.getTaskMode()
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 0,
+				})
+				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				task.apiConversationHistory = [
+					{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+				]
+				return task
+			}
+
+			const failingStream = (error: unknown): AsyncGenerator<ApiStreamChunk> =>
+				(async function* () {
+					// Yield nothing, then fail the first next() like a first-chunk
+					// stream error would.
+					yield* []
+					throw error
+				})()
+
+			const retryForwardingOptions = (): { skipProviderRateLimit: boolean; requestModelInfo: ModelInfo } => ({
+				skipProviderRateLimit: true,
+				requestModelInfo: { contextWindow: 200_000, maxTokens: 4096, supportsPromptCache: true },
+			})
+
+			it("forwards the caller's options to the context-window retry recursion", async () => {
+				const task = await createRetryForwardingTask()
+				vi.spyOn(getTaskTestAccess(task), "handleContextWindowExceededError").mockResolvedValue(undefined)
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 400, message: "context length exceeded" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				const options = retryForwardingOptions()
+				const iterator = task.attemptApiRequest(0, options)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[0]).toBe(1)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[1]).toBe(options)
+			})
+
+			it("forwards the caller's options to the auto-approval backoff retry recursion", async () => {
+				const task = await createRetryForwardingTask({ autoApprovalEnabled: true })
+				// An ask landing here means the auto-approval branch was not taken,
+				// so the rejection names the wrong-site failure explicitly.
+				vi.spyOn(task, "ask").mockRejectedValue(new Error("auto-approval retry must not prompt the user"))
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 500, message: "server error" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				const options = retryForwardingOptions()
+				const iterator = task.attemptApiRequest(0, options)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[0]).toBe(1)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[1]).toBe(options)
+			})
+
+			it("forwards the caller's options and resets the counter on the user-clicked retry recursion", async () => {
+				const task = await createRetryForwardingTask()
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 500, message: "server error" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				const options = retryForwardingOptions()
+				const iterator = task.attemptApiRequest(0, options)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				// The user-confirmed retry restarts the retry counter at 0 (its own
+				// pacing is the user's click), unlike the automatic backoff retries.
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[0]).toBe(0)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[1]).toBe(options)
+			})
+
+			it("carries the derived model snapshot into the retry recursion when the caller omitted one", async () => {
+				const task = await createRetryForwardingTask()
+				vi.spyOn(getTaskTestAccess(task), "handleContextWindowExceededError").mockResolvedValue(undefined)
+				const safeEnsureModelFetchedSpy = vi
+					.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+					.mockResolvedValue(stubModelInfo)
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 400, message: "context length exceeded" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				// No caller-supplied snapshot: the first hop derives one locally.
+				const iterator = task.attemptApiRequest(0)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(attemptApiRequestSpy.mock.calls[1]?.[0]).toBe(1)
+				// The retry hop carries the snapshot derived at the first hop, so a
+				// metadata update landing between attempts cannot move model-specific
+				// tool policy mid-request.
+				expect(attemptApiRequestSpy.mock.calls[1]?.[1]?.requestModelInfo).toBe(stubModelInfo)
+				// Derivation ran once per logical request, not once per hop.
+				expect(safeEnsureModelFetchedSpy).toHaveBeenCalledTimes(1)
+			})
+
+			it("recovers from a context-window overflow against the pinned request snapshot when metadata changes in between", async () => {
+				// The pinned-snapshot invariant covers the recovery half too:
+				// truncation permanently rewrites apiConversationHistory for the
+				// retry hop to consume, so recovery must size against the same
+				// snapshot the retry uses — never a fresh metadata read that
+				// landed between the failed attempt and recovery.
+				const task = await createRetryForwardingTask()
+				// Distinct object, same window as the stub: identity is what the
+				// retry hop must carry forward.
+				const pinnedInfo: ModelInfo = { ...stubModelInfo }
+				// A narrower window arriving after the first failure would drive
+				// harsher truncation math than the retry hop actually needs.
+				const freshInfo: ModelInfo = { ...stubModelInfo, contextWindow: 32_000 }
+				const safeEnsureModelFetchedSpy = vi
+					.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+					.mockResolvedValueOnce(pinnedInfo)
+					.mockResolvedValue(freshInfo)
+				const getSystemPromptSpy = vi
+					.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+					.mockResolvedValue("mock system prompt")
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 400, message: "context length exceeded" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				const iterator = task.attemptApiRequest(0)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				// hop 1 prompt, the recovery handler's condensing prompt, hop 2 prompt.
+				expect(getSystemPromptSpy).toHaveBeenCalledTimes(3)
+				// Without threading, the handler re-fetches and this second call
+				// carries freshInfo, so truncation is sized against a window the
+				// retry never uses.
+				expect(getSystemPromptSpy.mock.calls[1]?.[1]).toBe(pinnedInfo)
+				// Recovery and the retry hop share one snapshot object.
+				expect(attemptApiRequestSpy.mock.calls[1]?.[1]?.requestModelInfo).toBe(pinnedInfo)
+				// The handler performs no metadata fetch of its own.
+				expect(safeEnsureModelFetchedSpy).toHaveBeenCalledTimes(1)
+			})
 		})
 	})
 
 	describe("safeEnsureModelFetched", () => {
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
 		it("loads model metadata before getModel is used", async () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -3356,15 +4123,16 @@ describe("Cline", () => {
 
 			const ensureModelFetched = vi.fn().mockRejectedValue(new Error("network down"))
 			Object.assign(task.api, { ensureModelFetched })
+			const expectedInfo = task.api.getModel().info
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBeUndefined()
+			// A swallowed failure still returns the handler's settled fallback info.
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBe(expectedInfo)
 
 			expect(errorSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to fetch model metadata"),
 				"network down",
 			)
-			errorSpy.mockRestore()
 		})
 
 		it("is a no-op when the api handler does not implement ensureModelFetched", async () => {
@@ -3375,7 +4143,578 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
-			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBeUndefined()
+			const expectedInfo = task.api.getModel().info
+
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBe(expectedInfo)
+		})
+
+		it("settles at the bound when ensureModelFetched never resolves", async () => {
+			// A hung metadata endpoint (some fetchers issue unbounded GETs) must
+			// not stall the task: the race resolves at MODEL_FETCH_TIMEOUT_MS and
+			// callers proceed with the handler's fallback metadata.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
+			const expectedInfo = task.api.getModel().info
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const settled = getTaskTestAccess(task).safeEnsureModelFetched()
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+
+				// The timeout path returns the handler's settled fallback snapshot.
+				await expect(settled).resolves.toBe(expectedInfo)
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
+		})
+
+		it("aborts the fetch signal when the bounded wait expires", async () => {
+			// The bound must detach this task's waiter, not just stop waiting on
+			// it: a handler that observes its signal stops serving the abandoned
+			// fetch, and one that ignores it at least sees the task move on.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			let capturedSignal: AbortSignal | undefined
+			Object.assign(task.api, {
+				ensureModelFetched: (signal?: AbortSignal) => {
+					capturedSignal = signal
+					return new Promise<void>(() => {})
+				},
+			})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const settled = getTaskTestAccess(task).safeEnsureModelFetched()
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				await settled
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(capturedSignal?.aborted).toBe(true)
+		})
+
+		it("aborts an in-flight metadata wait when the current request is cancelled", async () => {
+			// Cancel/dispose must reach the metadata waiter, not only the stream:
+			// cancelCurrentRequest aborts the controller feeding the handler's
+			// signal, so a signal-observing handler settles the waiter immediately
+			// and the call degrades to fallback info instead of hanging until the
+			// bound.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			let capturedSignal: AbortSignal | undefined
+			Object.assign(task.api, {
+				ensureModelFetched: (signal?: AbortSignal) =>
+					new Promise<void>((_resolve, reject) => {
+						capturedSignal = signal
+						signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+					}),
+			})
+			const expectedInfo = task.api.getModel().info
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const settled = getTaskTestAccess(task).safeEnsureModelFetched()
+			// Let the waiter attach to the handler before cancelling.
+			await Promise.resolve()
+
+			task.cancelCurrentRequest()
+
+			await expect(settled).resolves.toBe(expectedInfo)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to fetch model metadata"),
+				expect.anything(),
+			)
+		})
+
+		it("releases the metadata abort controller once the wait completes", async () => {
+			// The ownership guard in safeEnsureModelFetched's finally block must
+			// clear the field for the call that still owns it: a never-cleared
+			// controller would let cancelCurrentRequest abort a long-dead signal.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			Object.assign(task.api, { ensureModelFetched: () => Promise.resolve() })
+
+			await getTaskTestAccess(task).safeEnsureModelFetched()
+
+			expect(task.metadataFetchAbortController).toBeUndefined()
+		})
+
+		it("does not clear a controller owned by a newer metadata wait", async () => {
+			// Overlap guard: if a newer call replaced this call's controller while
+			// the bounded wait was pending, the finished call's finally block must
+			// leave the foreign controller in place — clearing unconditionally
+			// would silently orphan the newer wait from cancel/dispose.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			let settleFetch!: () => void
+			Object.assign(task.api, {
+				ensureModelFetched: () =>
+					new Promise<void>((resolve) => {
+						settleFetch = resolve
+					}),
+			})
+
+			const settled = getTaskTestAccess(task).safeEnsureModelFetched()
+			// The per-call controller is installed synchronously before the race.
+			expect(task.metadataFetchAbortController).toBeInstanceOf(AbortController)
+			const foreignController = new AbortController()
+			task.metadataFetchAbortController = foreignController
+
+			settleFetch()
+			await settled
+
+			expect(task.metadataFetchAbortController).toBe(foreignController)
+		})
+
+		it("does not block getSystemPrompt when ensureModelFetched never settles", async () => {
+			// The prompt/condense guard site must proceed with fallback model
+			// info once the bounded wait expires instead of hanging the request.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+			const callsBefore = vi.mocked(SYSTEM_PROMPT).mock.calls.length
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const promptPromise = getTaskTestAccess(task).getSystemPrompt(providerStateWith())
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+
+				await expect(promptPromise).resolves.toBe("mock system prompt")
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(vi.mocked(SYSTEM_PROMPT).mock.calls.length).toBe(callsBefore + 1)
+		})
+
+		it("refuses to send a request when the task is cancelled during the bounded metadata wait", async () => {
+			// Cancellation must be honored before any provider-visible work of
+			// the request: an abort landing while the metadata wait is pending
+			// rejects the generator instead of quietly sending a request the
+			// user already cancelled.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+			// The wait never settles on its own; only the bound expires it.
+			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
+			const createMessageSpy = vi
+				.spyOn(task.api, "createMessage")
+				.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const first = task.attemptApiRequest(0).next()
+				// Observe the rejection the moment it can land: the generator
+				// rejects during the timer advance below, before the assertion
+				// line runs, and an unobserved rejection would surface as an
+				// unhandled rejection independent of the awaited assertion.
+				void first.catch(() => {})
+				await vi.advanceTimersByTimeAsync(0)
+				// The user cancels while the bounded metadata wait is still pending.
+				const cancelling = task.abortTask()
+				// The wait itself still expires at the bound, as it normally would.
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+
+				await expect(first).rejects.toThrow(/aborted during request construction/)
+				expect(createMessageSpy).not.toHaveBeenCalled()
+				// The per-request controller is only created once the request is
+				// committed, so a cancelled construction never reaches it.
+				expect(task.currentRequestAbortController).toBeUndefined()
+				await cancelling
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
+		})
+
+		it("refuses to send a request when the task is disposed during the bounded metadata wait", async () => {
+			// Disposal alone — no cancel button, no abortTask — must make the
+			// task observe cancellation: disposeOnce sets the abort state
+			// synchronously in its call, before its aborts land, so once the
+			// metadata wait settles at its bound the request-construction
+			// guard refuses to build tools or call createMessage for a task
+			// nobody owns anymore.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			// The wait never settles on its own; only the bound expires it.
+			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
+			const createMessageSpy = vi
+				.spyOn(task.api, "createMessage")
+				.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const first = task.attemptApiRequest(0).next()
+				// Observe the rejection the moment it can land: the generator
+				// rejects during the timer advance below, before the assertion
+				// line runs, and an unobserved rejection would surface as an
+				// unhandled rejection independent of the awaited assertion.
+				void first.catch(() => {})
+				await vi.advanceTimersByTimeAsync(0)
+				// The task is disposed while the bounded metadata wait is still
+				// pending; the abort state is set synchronously in this call.
+				const disposal = task.dispose()
+				expect(task.abort).toBe(true)
+				// The wait itself still expires at the bound, as it normally would.
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+
+				await expect(first).rejects.toThrow(/aborted during request construction/)
+				expect(createMessageSpy).not.toHaveBeenCalled()
+				// The per-request controller is only created once the request is
+				// committed, so a disposed construction never reaches it.
+				expect(task.currentRequestAbortController).toBeUndefined()
+				await disposal
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
+		})
+
+		it("stops manual condensation when the task is aborted during the metadata wait", async () => {
+			// Cancellation must be honored before any provider-visible work of
+			// the condense: an abort landing while the metadata wait is pending
+			// ends condenseContext instead of quietly issuing a summarization
+			// request the user already cancelled.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			// The wait never settles on its own; only the bound expires it.
+			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			// Spying on the prompt build pins the cancellation to the entry
+			// checkpoint: skipping summarization alone is also achieved by the
+			// check placed after the prompt await, so only an unstarted
+			// prompt build proves the entry check did its work.
+			const promptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockResolvedValue("mock system prompt")
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this condense starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const condensing = task.condenseContext()
+				await vi.advanceTimersByTimeAsync(0)
+				// The user cancels while the bounded metadata wait is still pending.
+				const cancelling = task.abortTask()
+				// The wait itself still expires at the bound, as it normally would.
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				await condensing
+				await cancelling
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
+			expect(promptSpy).not.toHaveBeenCalled()
+			expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summarizeCallsBefore)
+		})
+
+		it("stops manual condensation on an abandoned task", async () => {
+			// Abandonment is the other cancellation flavor: the metadata wait
+			// settles normally, yet condenseContext must still end before the
+			// prompt build and the summarization request.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			task.abandoned = true
+			// Only an unstarted prompt build attributes the skip to the entry
+			// checkpoint rather than one of the later cancellation checks.
+			const promptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockResolvedValue("mock system prompt")
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+
+			await task.condenseContext()
+
+			expect(promptSpy).not.toHaveBeenCalled()
+			expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summarizeCallsBefore)
+		})
+
+		it("stops manual condensation when the task is aborted while the system prompt is pending", async () => {
+			// A cancellation landing inside the prompt build (whose bounded MCP
+			// wait is cancellation-blind) must stop condenseContext before it
+			// issues the summarization request. The prompt gate is released only
+			// after abortTask has synchronously set its flag, so whenever the
+			// prompt await resumes the cancellation is observed.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			let resolvePrompt!: (value: string) => void
+			const promptGate = new Promise<string>((resolve) => {
+				resolvePrompt = resolve
+			})
+			const promptSpy = vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockReturnValue(promptGate)
+			// The early return this guards never reaches say; the spy only keeps
+			// the aborted task's post-overwrite say from throwing before the
+			// summarize/overwrite assertions can report a regression.
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this condense starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+			// Attribution pin: the summarize-count assertion alone is also
+			// satisfied by the later input-gathering checkpoint, so the collectors
+			// must additionally stay unstarted to prove THIS prompt-boundary check
+			// (not a downstream one) stopped the condense.
+			const envCallsBefore = vi.mocked(getEnvironmentDetails).mock.calls.length
+			const filesReadSpy = vi.spyOn(getTaskTestAccess(task), "getFilesReadByRooSafely")
+
+			const condensing = task.condenseContext()
+			// Suspend inside the prompt build, past the entry guard, so this
+			// exercises the prompt-boundary check rather than the entry one.
+			await vi.waitFor(() => expect(promptSpy).toHaveBeenCalled())
+			const cancelling = task.abortTask()
+			resolvePrompt("mock system prompt")
+			await condensing
+			await cancelling
+
+			expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summarizeCallsBefore)
+			expect(overwriteSpy).not.toHaveBeenCalled()
+			expect(vi.mocked(getEnvironmentDetails).mock.calls.length).toBe(envCallsBefore)
+			expect(filesReadSpy).not.toHaveBeenCalled()
+		})
+
+		it("stops manual condensation from overwriting history when the task is aborted during summarization", async () => {
+			// The summarization round-trip is the widest cancellation window on
+			// the condense path: a cancellation landing while it is pending must
+			// stop condenseContext before it replaces and persists the history.
+			// The gate is released only after abortTask has synchronously set
+			// its flag, so whenever the summarize await resumes the cancellation
+			// is observed.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			// The early return this guards never reaches say; the spy only keeps
+			// the aborted task's post-overwrite say from throwing before the
+			// overwrite assertion can report the regression.
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this condense starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+			type SummarizeResult = Awaited<ReturnType<typeof summarizeConversation>>
+			let releaseSummarize!: (value: SummarizeResult) => void
+			const summarizeGate = new Promise<SummarizeResult>((resolve) => {
+				releaseSummarize = resolve
+			})
+			vi.mocked(summarizeConversation).mockImplementationOnce(() => summarizeGate)
+
+			const condensing = task.condenseContext()
+			await vi.waitFor(() =>
+				expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summarizeCallsBefore + 1),
+			)
+			const cancelling = task.abortTask()
+			releaseSummarize({
+				messages: [{ role: "user", content: [{ type: "text", text: "condensed" }], ts: Date.now() }],
+				summary: "summary",
+				cost: 0,
+				newContextTokens: 1,
+			})
+			await condensing
+			await cancelling
+
+			expect(overwriteSpy).not.toHaveBeenCalled()
+			expect(saySpy).not.toHaveBeenCalled()
+		})
+
+		it("stops manual condensation when the task is aborted while environment details are pending", async () => {
+			// Gathering the summary inputs suspends twice before the
+			// summarization request: a cancellation landing while the
+			// environment-details collector is pending must stop condenseContext
+			// before any summarization request or history rewrite is issued.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			// Suspend inside the collector so the abort lands while the
+			// summarization request cannot have started yet.
+			let releaseEnvDetails!: (value: string) => void
+			const envDetailsGate = new Promise<string>((resolve) => {
+				releaseEnvDetails = resolve
+			})
+			vi.mocked(getEnvironmentDetails).mockReturnValueOnce(envDetailsGate)
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this condense starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+			// Same for the environment-details module mock: waiting on a count
+			// delta proves THIS condense reached the collector before the abort.
+			const envCallsBefore = vi.mocked(getEnvironmentDetails).mock.calls.length
+
+			const condensing = task.condenseContext()
+			await vi.waitFor(() => expect(vi.mocked(getEnvironmentDetails).mock.calls.length).toBe(envCallsBefore + 1))
+			const cancelling = task.abortTask()
+			releaseEnvDetails("")
+			await condensing
+			await cancelling
+
+			expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summarizeCallsBefore)
+			expect(overwriteSpy).not.toHaveBeenCalled()
+		})
+
+		it("stops manual condensation when the task is aborted while the files-read collector is pending", async () => {
+			// The second input-gathering suspension sits between the
+			// environment-details collector and the summarization request: a
+			// cancellation landing while the files-read collector is pending must
+			// likewise stop condenseContext before either is issued.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			let releaseFilesRead!: (value: string[] | undefined) => void
+			const filesReadGate = new Promise<string[] | undefined>((resolve) => {
+				releaseFilesRead = resolve
+			})
+			const filesReadSpy = vi
+				.spyOn(getTaskTestAccess(task), "getFilesReadByRooSafely")
+				.mockReturnValue(filesReadGate)
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+
+			const condensing = task.condenseContext()
+			await vi.waitFor(() => expect(filesReadSpy).toHaveBeenCalled())
+			const cancelling = task.abortTask()
+			releaseFilesRead(undefined)
+			await condensing
+			await cancelling
+
+			expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summarizeCallsBefore)
+			expect(overwriteSpy).not.toHaveBeenCalled()
 		})
 
 		it("calls safeEnsureModelFetched from attemptApiRequest when context tokens are present", async () => {
@@ -3393,7 +4732,7 @@ describe("Cline", () => {
 				totalTokensOut: 0,
 				contextTokens: 50_000,
 			})
-			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(task.api, "getModel").mockReturnValue({
 				id: mockApiConfig.apiModelId!,
 				info: {
@@ -3490,7 +4829,6 @@ describe("Cline", () => {
 				value: { type: "text", text: "ok" },
 			})
 			expect(errorSpy).toHaveBeenCalled()
-			errorSpy.mockRestore()
 		})
 
 		it("fetches model metadata before caching the streaming model", async () => {
@@ -3518,7 +4856,7 @@ describe("Cline", () => {
 			})
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
 			const resetPersistenceSpy = vi.spyOn(getTaskTestAccess(task), "resetAssistantMessagePersistence")
-			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
 				throw new Error("stop after model metadata fetch")
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
@@ -3551,7 +4889,463 @@ describe("Cline", () => {
 			expect(safeSpy).toHaveBeenCalled()
 			expect(resetPersistenceSpy).toHaveBeenCalledTimes(1)
 			expect(ensureModelFetched).toHaveBeenCalled()
+			// Exact-object match on purpose: a partial matcher would stop pinning the
+			// options literal the streaming loop passes to attemptApiRequest.
+			expect(attemptApiRequestSpy).toHaveBeenCalledWith(0, {
+				skipProviderRateLimit: true,
+				requestModelInfo: task.cachedStreamingModel?.info,
+			})
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
+		})
+
+		it("stays silent when the api handler lacks ensureModelFetched", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const expectedInfo = task.api.getModel().info
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// A missing optional fetcher is the normal case for static providers,
+			// so the call must resolve quietly instead of surfacing a caught TypeError.
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBe(expectedInfo)
+
+			expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("Failed to fetch model metadata")
+		})
+
+		it("does not warn when the fetch resolves within the bound", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			Object.assign(task.api, { ensureModelFetched: () => Promise.resolve() })
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				await getTaskTestAccess(task).safeEnsureModelFetched()
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+			} finally {
+				vi.useRealTimers()
+			}
+
+			expect(warnSpy).not.toHaveBeenCalled()
+		})
+
+		it("warns only once the bound elapses", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
+			const expectedInfo = task.api.getModel().info
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const settled = getTaskTestAccess(task).safeEnsureModelFetched()
+				// The 5000 ms bound is asserted in absolute milliseconds so any
+				// change to it changes observed behavior, not just the schedule.
+				await vi.advanceTimersByTimeAsync(4_999)
+
+				expect(warnSpy).not.toHaveBeenCalled()
+
+				await vi.advanceTimersByTimeAsync(1)
+
+				expect(warnSpy).toHaveBeenCalledTimes(1)
+				await expect(settled).resolves.toBe(expectedInfo)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("clears the race timer after the fetch wins", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			Object.assign(task.api, { ensureModelFetched: () => Promise.resolve() })
+			const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+
+			await getTaskTestAccess(task).safeEnsureModelFetched()
+
+			// The armed handle must be handed to clearTimeout on the winning
+			// path; a never-armed or never-cleared timer leaks a pending handle.
+			expect(clearSpy).toHaveBeenCalledWith(expect.any(Object))
+		})
+
+		it("only clears a timer handle that was actually armed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Hand production a falsy handle while still arming the real timer,
+			// so skipping clearTimeout for an unarmed handle is observable.
+			const realSetTimeout = globalThis.setTimeout
+			let armedHandle: ReturnType<typeof setTimeout> | undefined
+			vi.stubGlobal("setTimeout", (callback: () => void, delay?: number) => {
+				armedHandle = realSetTimeout(callback, delay)
+				return 0
+			})
+			const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+			Object.assign(task.api, { ensureModelFetched: () => Promise.resolve() })
+
+			try {
+				await getTaskTestAccess(task).safeEnsureModelFetched()
+
+				expect(clearSpy).not.toHaveBeenCalled()
+			} finally {
+				if (armedHandle !== undefined) {
+					clearTimeout(armedHandle)
+				}
+				vi.unstubAllGlobals()
+			}
+		})
+
+		it("keeps prompt and request tools on one snapshot when the fetch stalls past the bound and resolves late", async () => {
+			// Stalled-then-late fetch: the entry snapshot times out at
+			// MODEL_FETCH_TIMEOUT_MS and captures fallback metadata; the fetch
+			// then resolves while the request is still being built. The prompt
+			// and every tool array of this request must both come from the same
+			// (fallback) snapshot, even though the handler's model info has
+			// already flipped to the loaded metadata with different exclusions.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+
+			const fallbackInfo: ModelInfo = { contextWindow: 32_000, supportsPromptCache: false }
+			const loadedInfo: ModelInfo = {
+				contextWindow: 128_000,
+				supportsPromptCache: true,
+				// Divergent tool policy: only the loaded metadata excludes it.
+				excludedTools: ["read_file"],
+			}
+			const fetchState = { resolved: false }
+			let resolveFetch!: () => void
+			const metadataFetch = new Promise<void>((resolve) => {
+				resolveFetch = () => {
+					fetchState.resolved = true
+					resolve()
+				}
+			})
+			Object.assign(task.api, { ensureModelFetched: () => metadataFetch })
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({
+				id: "lazy-router-model",
+				info: fetchState.resolved ? loadedInfo : fallbackInfo,
+			}))
+
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				// Far above allowedTokens under either snapshot (32k or 128k window),
+				// so the request-scoped condense sub-call always runs and its metadata
+				// tools are observable on the mocked summarizeConversation.
+				contextTokens: 500_000,
+			})
+			vi.spyOn(task.api, "countTokens").mockResolvedValue(1_000)
+			const createMessageSpy = vi
+				.spyOn(task.api, "createMessage")
+				.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+			// Hold the prompt build open so the late flip lands after the request
+			// snapshot was captured but before any tool array is built: a flip
+			// between those points must not move either consumer.
+			let releasePrompt!: () => void
+			const promptGate = new Promise<string>((resolve) => {
+				releasePrompt = () => resolve("mock system prompt")
+			})
+			vi.mocked(SYSTEM_PROMPT).mockImplementationOnce(() => promptGate)
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this request starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+
+			vi.useFakeTimers()
+			try {
+				const first = task.attemptApiRequest(0).next()
+				// The entry snapshot times out and resolves with fallback info;
+				// the prompt is then built from it and suspends on the gate.
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
+				// Late success flips the handler's metadata mid-request.
+				resolveFetch()
+				releasePrompt()
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				await expect(first).resolves.toMatchObject({ done: false, value: { type: "text", text: "ok" } })
+			} finally {
+				vi.useRealTimers()
+			}
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 17 is modelInfo: the prompt used the captured snapshot.
+			expect(systemPromptCall[17]).toBe(fallbackInfo)
+			const [, , metadata] = requireDefined(createMessageSpy.mock.calls[0])
+			// Indexed-access type keeps the helper import-free (the spec does not
+			// import the OpenAI types) and metadata itself stays possibly-undefined.
+			type MetadataTools = NonNullable<typeof metadata>["tools"]
+			const toolNames = (tools: MetadataTools): string[] =>
+				requireDefined(tools).map((tool) => {
+					if (tool.type !== "function") {
+						throw new Error(`Unexpected tool type: ${tool.type}`)
+					}
+					return tool.function.name
+				})
+			// The request's tools were built from the same fallback snapshot, so
+			// the tool the loaded metadata excludes is still declared.
+			expect(toolNames(metadata?.tools)).toContain("read_file")
+
+			// The condense sub-call of this same request carries the same guarantee:
+			// manageContext forwards its metadata verbatim into summarizeConversation,
+			// so that array is the one built at the context-management tool site.
+			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore + 1)
+			const [condenseOptions] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+			expect(condenseOptions.isAutomaticTrigger).toBe(true)
+			// Reverting that build to a fresh guarded re-read (like the per-site
+			// guard at the top of this block) would pick up the flipped (loaded)
+			// metadata and drop read_file from this array.
+			expect(toolNames(condenseOptions.metadata?.tools)).toContain("read_file")
+		})
+
+		it("keeps manual condense prompt and tools on one snapshot when the fetch resolves late", async () => {
+			// condenseContext twin of the stalled-fetch regression: the prompt and
+			// the condensing metadata's tool array must resolve from the single
+			// snapshot captured before prompt generation.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+
+			const fallbackInfo: ModelInfo = { contextWindow: 32_000, supportsPromptCache: false }
+			const loadedInfo: ModelInfo = {
+				contextWindow: 128_000,
+				supportsPromptCache: true,
+				excludedTools: ["read_file"],
+			}
+			const fetchState = { resolved: false }
+			let resolveFetch!: () => void
+			const metadataFetch = new Promise<void>((resolve) => {
+				resolveFetch = () => {
+					fetchState.resolved = true
+					resolve()
+				}
+			})
+			Object.assign(task.api, { ensureModelFetched: () => metadataFetch })
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({
+				id: "lazy-router-model",
+				info: fetchState.resolved ? loadedInfo : fallbackInfo,
+			}))
+			// Hold the prompt build open so the test can flip the handler's
+			// metadata after the snapshot is captured but before the tools are
+			// built: a flip between those points must not move either consumer.
+			let releasePrompt!: () => void
+			const promptGate = new Promise<string>((resolve) => {
+				releasePrompt = () => resolve("mock system prompt")
+			})
+			vi.mocked(SYSTEM_PROMPT).mockReturnValueOnce(promptGate)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.useFakeTimers()
+			try {
+				const condensing = task.condenseContext()
+				// The entry snapshot times out with fallback info and the prompt
+				// build suspends on the gate.
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
+				// Late success lands after the snapshot but before the tools.
+				resolveFetch()
+				releasePrompt()
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				await condensing
+			} finally {
+				vi.useRealTimers()
+			}
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 17 is modelInfo: the prompt used the captured snapshot.
+			expect(systemPromptCall[17]).toBe(fallbackInfo)
+			const [options] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+			const toolNames = requireDefined(options.metadata?.tools).map((tool) => {
+				if (tool.type !== "function") {
+					throw new Error(`Unexpected tool type: ${tool.type}`)
+				}
+				return tool.function.name
+			})
+			// Same fallback snapshot: the loaded metadata's exclusion never applied.
+			expect(toolNames).toContain("read_file")
+		})
+
+		it("uses the caller's model-info snapshot for both the prompt and context sizing", async () => {
+			// A streaming turn captures its model-info snapshot before opening
+			// the request; attemptApiRequest must reuse it for the prompt, the
+			// context-window sizing, and every tool array, so a metadata fetch
+			// that lands mid-request cannot re-decide whether condensing runs.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
+
+			const threadedInfo: ModelInfo = { contextWindow: 32_000, supportsPromptCache: false }
+			const lateInfo: ModelInfo = {
+				contextWindow: 128_000,
+				supportsPromptCache: true,
+				// Divergent policy: only the late metadata excludes it.
+				excludedTools: ["read_file"],
+			}
+			const fetchState = { resolved: false }
+			let resolveFetch!: () => void
+			const metadataFetch = new Promise<void>((resolve) => {
+				resolveFetch = () => {
+					fetchState.resolved = true
+					resolve()
+				}
+			})
+			Object.assign(task.api, { ensureModelFetched: () => metadataFetch })
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({
+				id: "lazy-router-model",
+				info: fetchState.resolved ? lateInfo : threadedInfo,
+			}))
+
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				// Above the hard limit for the 32k threaded window (~24.7k tokens)
+				// but well below the limit for a 128k re-read (~111k), so whether
+				// condensing runs exposes which snapshot the sizing resolved from.
+				contextTokens: 50_000,
+			})
+			vi.spyOn(task.api, "countTokens").mockResolvedValue(1_000)
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+			)
+			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+			const cleanHistorySpy = vi.spyOn(getTaskTestAccess(task), "buildCleanConversationHistory")
+			// Hold the prompt build open so the metadata fetch can land after the
+			// snapshot was captured but before context sizing runs.
+			let releasePrompt!: () => void
+			const promptGate = new Promise<string>((resolve) => {
+				releasePrompt = () => resolve("mock system prompt")
+			})
+			vi.mocked(SYSTEM_PROMPT).mockImplementationOnce(() => promptGate)
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this request starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+
+			vi.useFakeTimers()
+			try {
+				const first = task.attemptApiRequest(0, { requestModelInfo: threadedInfo }).next()
+				await vi.advanceTimersByTimeAsync(0)
+				// Late metadata arrives while the request is still being built; a
+				// fresh re-read here would return the wider 128k window instead.
+				resolveFetch()
+				releasePrompt()
+				await vi.advanceTimersByTimeAsync(MODEL_FETCH_TIMEOUT_MS)
+				await expect(first).resolves.toMatchObject({ done: false, value: { type: "text", text: "ok" } })
+			} finally {
+				vi.useRealTimers()
+			}
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			// Argument index 17 is modelInfo: the prompt used the caller's snapshot.
+			expect(systemPromptCall[17]).toBe(threadedInfo)
+			// The threaded snapshot replaces the per-request guard entirely.
+			expect(safeSpy).not.toHaveBeenCalled()
+			// The cleaned request history resolves its model-dependent flags from
+			// the same threaded snapshot, not from a fresh handler re-read.
+			expect(cleanHistorySpy).toHaveBeenCalledWith(expect.any(Array), threadedInfo)
+			// Condensing ran because sizing resolved from the 32k threaded
+			// window; a 128k re-read would have cleared the threshold instead.
+			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore + 1)
+		})
+	})
+
+	describe("buildCleanConversationHistory", () => {
+		// Assistant message carrying a plain-text (unencrypted) reasoning block:
+		// whether the block survives into the sent history depends solely on the
+		// model snapshot's preserveReasoning flag.
+		const reasoningMessage: ApiMessage = {
+			role: "assistant",
+			content: [
+				{
+					type: "reasoning",
+					text: "hidden chain of thought",
+					summary: [],
+				} as unknown as Anthropic.Messages.ContentBlockParam,
+				{ type: "text", text: "answer" },
+			],
+			ts: 1,
+		}
+
+		function historyFor(preserveReasoning: boolean) {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			// The handler re-read deliberately disagrees with the threaded
+			// snapshot: any output that follows the re-read instead of the
+			// parameter flips the assertions below.
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: "lazy-router-model",
+				info: { contextWindow: 1_000, supportsPromptCache: false, preserveReasoning: !preserveReasoning },
+			})
+
+			const requestModelInfo: ModelInfo = {
+				contextWindow: 1_000,
+				supportsPromptCache: false,
+				preserveReasoning,
+			}
+			return getTaskTestAccess(task).buildCleanConversationHistory([reasoningMessage], requestModelInfo)
+		}
+
+		it("keeps plain-text reasoning when the threaded snapshot sets preserveReasoning", () => {
+			const history = historyFor(true)
+
+			expect(history).toEqual([{ role: "assistant", content: reasoningMessage.content }])
+		})
+
+		it("strips plain-text reasoning when the threaded snapshot omits preserveReasoning", () => {
+			const history = historyFor(false)
+
+			expect(history).toEqual([{ role: "assistant", content: "answer" }])
 		})
 	})
 

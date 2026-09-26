@@ -42,6 +42,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			didRejectTool: false,
 			didAlreadyUseTool: false,
 			consecutiveMistakeCount: 0,
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			api: {
 				getModel: () => ({ id: "test-model", info: {} }),
 			},
