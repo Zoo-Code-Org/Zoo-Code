@@ -88,6 +88,17 @@ describe("IO Intelligence model fetcher", () => {
 		warning.mockRestore()
 	})
 
+	it("keeps a hostile catalog id as an own entry instead of polluting the prototype chain", async () => {
+		vi.mocked(axios.get).mockResolvedValue({
+			data: { data: [{ id: "__proto__", max_tokens: 1 }, { id: "constructor" }] },
+		})
+		const models = await getIOIntelligenceModels()
+		expect(Object.getPrototypeOf(models)).toBeNull()
+		expect(Object.keys(models)).toEqual(["__proto__", "constructor"])
+		expect(models["__proto__"]).toMatchObject({ maxTokens: 1 })
+		expect(({} as Record<string, unknown>).maxTokens).toBeUndefined()
+	})
+
 	it("keeps models with null token metadata and prefers context_window over max_model_len", () => {
 		expect(
 			parseIoIntelligenceModel({ id: "both", max_model_len: 65_536, context_window: 262_144 }).contextWindow,

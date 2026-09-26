@@ -69,7 +69,8 @@ export async function getIOIntelligenceModels(apiKey?: string): Promise<ModelRec
 			return {}
 		}
 
-		const models: ModelRecord = {}
+		// Use null-prototype object to prevent prototype pollution
+		const models: ModelRecord = Object.create(null)
 		for (const rawModel of responseResult.data.data) {
 			const modelResult = ioIntelligenceModelSchema.safeParse(rawModel)
 			if (!modelResult.success) {
