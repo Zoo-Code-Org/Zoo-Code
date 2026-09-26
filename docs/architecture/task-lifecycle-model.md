@@ -72,10 +72,10 @@ There is no production record version or compare-and-swap token today. The model
 
 Two desired properties are currently false and remain issue-keyed shortest-witness ratchets rather than silently allowed assertion failures:
 
-- [#1469](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1469): an old completion can commit after a newer handoff and clear it because disk revalidation checks status legality, not exact-child ownership.
+- [#1469](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1469): an old completion can commit after a newer handoff and clear it because disk revalidation checks status legality and has no lock-time ownership check.
 - [#1021](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1021): after abandonment and cache refresh, a stale live-task save can preserve the new interrupted status while restoring old lineage fields.
 
-The lock-time awaited-child revalidation boundary required to promote the #1469 witness to a universal invariant, the production two-store test required for that promotion, and the lineage field-ownership contract and monotonic-detachment invariant behind #1021 are specified in the [persisted ownership and generation model](./task-lifecycle-persisted-ownership-model.md) (`LIFE-BLK-P1-001`, `LIFE-BLK-P1-002`).
+The lock-time ownership check required to promote the #1469 witness to a universal invariant, the production two-store test required for that promotion, and the lineage field-ownership contract and monotonic-detachment invariant behind #1021 are specified in the [persisted ownership and generation model](./task-lifecycle-persisted-ownership-model.md) (`LIFE-BLK-P1-001`, `LIFE-BLK-P1-002`).
 
 CI fails if either exact causal witness or violation class changes, a witness disappears without being promoted to a universal invariant, a named semantic landmark or modeled phase becomes unreachable, a new safety violation appears, or exploration truncates. Raw reachable-state totals are printed as diagnostics, not used as ratchets: harmless representation changes can alter them without weakening protocol coverage.
 
