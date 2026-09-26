@@ -103,6 +103,8 @@ collectTests(root)
 
 const laneForTest = (file) => {
 	if (file === "__tests__/dist_assets.spec.ts") return "dist"
+	// Reads root-level config; runs outside Turbo in a dedicated CI step.
+	if (file === "services/__tests__/pr-review-state-workflow.test.ts") return "workflow"
 	if (file.startsWith("services/tree-sitter/")) return "tree-sitter"
 	for (const lane of ["api", "core", "services"]) if (file.startsWith(`${lane}/`)) return lane
 	if (

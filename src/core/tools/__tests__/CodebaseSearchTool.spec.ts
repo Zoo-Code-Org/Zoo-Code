@@ -25,7 +25,15 @@ describe("CodebaseSearchTool", () => {
 	let task: Task
 	let context: vscode.ExtensionContext
 	let callbacks: ToolCallbacks
-	let manager: Pick<CodeIndexManager, "isFeatureEnabled" | "isFeatureConfigured" | "searchIndex">
+	let manager: Pick<
+		CodeIndexManager,
+		| "isFeatureEnabled"
+		| "isFeatureConfigured"
+		| "isConfigurationLoaded"
+		| "isInitialized"
+		| "initialize"
+		| "searchIndex"
+	>
 	let deref: ReturnType<typeof vi.fn<Task["providerRef"]["deref"]>>
 
 	beforeEach(() => {
@@ -61,8 +69,11 @@ describe("CodebaseSearchTool", () => {
 			pushToolResult: vi.fn<ToolCallbacks["pushToolResult"]>(),
 		}
 		manager = {
+			isConfigurationLoaded: true,
 			isFeatureEnabled: true,
 			isFeatureConfigured: true,
+			isInitialized: true,
+			initialize: vi.fn<CodeIndexManager["initialize"]>().mockResolvedValue({ requiresRestart: false }),
 			searchIndex: vi.fn<CodeIndexManager["searchIndex"]>().mockResolvedValue([]),
 		}
 		vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReturnValue(manager as CodeIndexManager)
@@ -70,7 +81,10 @@ describe("CodebaseSearchTool", () => {
 		vi.mocked(vscode.workspace.asRelativePath).mockReturnValue("src/result.ts")
 	})
 
-	afterEach(() => vi.restoreAllMocks())
+	afterEach(() => {
+		expect(manager.initialize).not.toHaveBeenCalled()
+		vi.restoreAllMocks()
+	})
 
 	function result(overrides: Partial<VectorStoreSearchResult> = {}): VectorStoreSearchResult {
 		return {
@@ -174,7 +188,27 @@ describe("CodebaseSearchTool", () => {
 		expect(task.say).not.toHaveBeenCalled()
 	})
 
-	it("reports disabled indexing without searching", async () => {
+	it("reports configuration that has never loaded before checking settings or services", async () => {
+		Object.defineProperties(manager, {
+			isConfigurationLoaded: { value: false },
+			isFeatureEnabled: { value: false },
+			isFeatureConfigured: { value: false },
+			isInitialized: { value: false },
+		})
+
+		await tool.execute({ query }, task, callbacks)
+
+		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(
+			toolNamesSchema.enum.codebase_search,
+			new Error("Code Indexing configuration has not been loaded for this workspace."),
+		)
+		expect(manager.initialize).not.toHaveBeenCalled()
+		expect(manager.searchIndex).not.toHaveBeenCalled()
+		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
+	})
+
+	it.each([true, false])("reports disabled indexing without searching (initialized: %s)", async (initialized) => {
+		Object.defineProperty(manager, "isInitialized", { value: initialized })
 		Object.defineProperty(manager, "isFeatureEnabled", { value: false })
 
 		await tool.execute({ query }, task, callbacks)
@@ -190,20 +224,38 @@ describe("CodebaseSearchTool", () => {
 		expect(task.say).not.toHaveBeenCalled()
 	})
 
-	it("reports missing index configuration without searching", async () => {
-		Object.defineProperty(manager, "isFeatureConfigured", { value: false })
+	it.each([true, false])(
+		"reports missing index configuration without searching (initialized: %s)",
+		async (initialized) => {
+			Object.defineProperty(manager, "isInitialized", { value: initialized })
+			Object.defineProperty(manager, "isFeatureConfigured", { value: false })
+
+			await tool.execute({ query }, task, callbacks)
+
+			expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(
+				toolNamesSchema.enum.codebase_search,
+				new Error("Code Indexing is not configured (Missing OpenAI Key or Qdrant URL)."),
+			)
+			expect(callbacks.pushToolResult).not.toHaveBeenCalled()
+			expect(task.consecutiveMistakeCount).toBe(0)
+			expect(manager.searchIndex).not.toHaveBeenCalled()
+			expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
+			expect(task.say).not.toHaveBeenCalled()
+		},
+	)
+
+	it("reports configured but unready services without initializing or searching", async () => {
+		Object.defineProperty(manager, "isInitialized", { value: false })
 
 		await tool.execute({ query }, task, callbacks)
 
+		expect(manager.initialize).not.toHaveBeenCalled()
 		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(
 			toolNamesSchema.enum.codebase_search,
-			new Error("Code Indexing is not configured (Missing OpenAI Key or Qdrant URL)."),
+			new Error("Code Indexing is not initialized for this workspace."),
 		)
-		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
-		expect(task.consecutiveMistakeCount).toBe(0)
 		expect(manager.searchIndex).not.toHaveBeenCalled()
-		expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
-		expect(task.say).not.toHaveBeenCalled()
+		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
 	})
 
 	it.each([undefined, "src", ""])(
@@ -214,6 +266,7 @@ describe("CodebaseSearchTool", () => {
 				return []
 			})
 			await tool.execute({ query, path }, task, callbacks)
+			expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
 			expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, path)
 			expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(
 				`No relevant code snippets found for the query: "${query}"`,
@@ -253,6 +306,8 @@ describe("CodebaseSearchTool", () => {
 			.mockReturnValueOnce("src/result.ts")
 			.mockReturnValueOnce("lib/other.ts")
 		await tool.execute({ query }, task, callbacks)
+		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined)
 		expect(vscode.workspace.asRelativePath).toHaveBeenCalledTimes(2)
 		expect(vscode.workspace.asRelativePath).toHaveBeenNthCalledWith(1, "/task/src/result.ts", false)
 		expect(vscode.workspace.asRelativePath).toHaveBeenNthCalledWith(2, "/task/lib/other.ts", false)

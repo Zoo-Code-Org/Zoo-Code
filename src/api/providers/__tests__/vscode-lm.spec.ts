@@ -285,6 +285,228 @@ describe("VsCodeLmHandler", () => {
 			})
 		})
 
+		it("returns the original registry name for a tool declared with an encoded name", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const originalName = `read\uD800file`
+
+			// The model echoes the DECLARED name; dispatch must still see the registry name.
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, { a: 1 })
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const tools = [
+				{
+					type: "function" as const,
+					function: { name: originalName, description: "d", parameters: { type: "object" } },
+				},
+			]
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(systemPrompt, [{ role: "user", content: "hi" }], {
+				taskId: "test-task",
+				tools,
+			})) {
+				chunks.push(chunk)
+			}
+
+			const declaredName = mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name
+			expect(declaredName).toBe("read_uD800file")
+			expect(declaredName).toMatch(/^[\w-]+$/)
+
+			const toolCall = chunks.find((chunk) => chunk.type === "tool_call") as { name: string }
+			expect(Array.from({ length: toolCall.name.length }, (_, index) => toolCall.name.charCodeAt(index))).toEqual(
+				Array.from({ length: originalName.length }, (_, index) => originalName.charCodeAt(index)),
+			)
+		})
+
+		it("round-trips a surrogate-free name that looks like the encoding marker", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(systemPrompt, [{ role: "user", content: "hi" }], {
+				taskId: "test-task",
+				tools: [
+					{
+						type: "function" as const,
+						function: { name: "get_uuid", description: "d", parameters: { type: "object" } },
+					},
+				],
+			})) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("get_uuuid")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "get_uuid" })
+		})
+
+		it("preserves an ordinary tool name end to end", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const tools = [
+				{
+					type: "function" as const,
+					function: { name: "get_user", description: "d", parameters: { type: "object" } },
+				},
+			]
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(systemPrompt, [{ role: "user", content: "hi" }], {
+				taskId: "test-task",
+				tools,
+			})) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("get_user")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "get_user" })
+		})
+
+		it("preserves a tool name containing a non-marker u+hex sequence end to end", async () => {
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(
+				"You are a helpful assistant",
+				[{ role: "user", content: "hi" }],
+				{
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: { name: "queue1234", description: "d", parameters: { type: "object" } },
+						},
+					],
+				},
+			)) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("queue1234")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "queue1234" })
+		})
+
+		describe("system prompt sanitization", () => {
+			it("sanitizes lone surrogates in the system prompt", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
+				const stream = handler.createMessage("sys\uD800tem", [{ role: "user" as const, content: "hi" }])
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				expect(vscode.LanguageModelChatMessage.Assistant).toHaveBeenCalledWith("sys\uFFFDtem")
+			})
+
+			it("sanitizes lone surrogates in tool names, descriptions and nested schema strings", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("sys", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: {
+								name: "read\uD800file",
+								description: "desc\uDC00ription",
+								parameters: {
+									type: "object",
+									properties: { path: { type: "string", description: "p\uD800ath" } },
+								},
+							},
+						},
+						{
+							type: "function" as const,
+							function: { name: "read\uD801file", description: "other" },
+						},
+					],
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+				const codeUnits = (value: string): number[] =>
+					Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
+
+				const requestOptions = mockLanguageModelChat.sendRequest.mock.calls[0][1]
+				const sentTool = requestOptions.tools[0]
+				// Copilot rejects declared tool names that do not match this pattern before sending.
+				expect(sentTool.name).toMatch(/^[\w-]+$/)
+				expect(codeUnits(sentTool.name)).toEqual(codeUnits("read_uD800file"))
+				expect(requestOptions.tools[1].name).toBe("read_uD801file")
+				expect(codeUnits(sentTool.description)).toEqual(codeUnits("desc\uFFFDription"))
+				const schemaProperties = (
+					sentTool.inputSchema as { properties: Record<string, { description: string }> }
+				).properties
+				expect(codeUnits(schemaProperties.path.description)).toEqual(codeUnits("p\uFFFDath"))
+			})
+		})
+
 		it("should handle native tool calls when tools are provided", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [

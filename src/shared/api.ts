@@ -125,6 +125,9 @@ export const getModelMaxOutputTokens = ({
 
 	// For "Hybrid" reasoning models, discard the model's actual maxTokens for Anthropic contexts
 	if (model.supportsReasoningBudget && isAnthropicContext) {
+		if (model.supportsMaxTokens && settings?.modelMaxTokens != null && settings.modelMaxTokens > 0) {
+			return model.maxTokens ? Math.min(settings.modelMaxTokens, model.maxTokens) : settings.modelMaxTokens
+		}
 		return ANTHROPIC_DEFAULT_MAX_TOKENS
 	}
 
