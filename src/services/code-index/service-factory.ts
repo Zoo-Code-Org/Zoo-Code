@@ -1,37 +1,33 @@
-import * as vscode from "vscode"
+import type * as vscode from "vscode"
 import { Ignore } from "ignore"
-
-import type { EmbedderProvider } from "@roo-code/types"
-import { TelemetryService } from "@roo-code/telemetry"
-import { TelemetryEventName } from "@roo-code/types"
 
 import { t } from "../../i18n"
 
-import { getDefaultModelId, getModelDimension } from "../../shared/embeddingModels"
-import { Package } from "../../shared/package"
-
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 
-import { OpenAiEmbedder } from "./embedders/openai"
-import { CodeIndexOllamaEmbedder } from "./embedders/ollama"
-import { OpenAICompatibleEmbedder } from "./embedders/openai-compatible"
-import { GeminiEmbedder } from "./embedders/gemini"
-import { MistralEmbedder } from "./embedders/mistral"
-import { VercelAiGatewayEmbedder } from "./embedders/vercel-ai-gateway"
-import { BedrockEmbedder } from "./embedders/bedrock"
-import { OpenRouterEmbedder } from "./embedders/openrouter"
-import { QdrantVectorStore } from "./vector-store/qdrant-client"
-import { codeParser, DirectoryScanner, FileWatcher } from "./processors"
+import { EmbedderFactory } from "./embedders/embedder-factory"
+import { EmbedderValidationManager } from "./embedders/embedder-validation-manager"
+import { VectorStoreFactory } from "./vector-store/vector-store-factory"
+import { codeParser, DirectoryScanner } from "./processors"
+import { DirectoryScannerFactory } from "./processors/directory-scanner-factory"
+import { FileWatcherFactory } from "./processors/file-watcher-factory"
 import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
-import { BATCH_SEGMENT_THRESHOLD } from "./constants"
-import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
  */
 export class CodeIndexServiceFactory {
+	// TODO: Remove all factory and validation manager dependencies below once the workspace scope
+	// supplies them to CodeIndexManager via DI and it calls them directly.
+	// https://github.com/Zoo-Code-Org/Zoo-Code/issues/1817
+	private readonly embedderFactory = new EmbedderFactory()
+	private readonly vectorStoreFactory = new VectorStoreFactory()
+	private readonly directoryScannerFactory = new DirectoryScannerFactory()
+	private readonly fileWatcherFactory = new FileWatcherFactory()
+	private readonly embedderValidationManager = new EmbedderValidationManager()
+
 	constructor(
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
@@ -39,211 +35,14 @@ export class CodeIndexServiceFactory {
 	) {}
 
 	/**
-	 * Creates an embedder instance based on the current configuration.
-	 */
-	public createEmbedder(): IEmbedder {
-		const config = this.configManager.getConfig()
-
-		const provider = config.embedderProvider as EmbedderProvider
-
-		if (provider === "semble") {
-			// Semble is a self-contained search binary that doesn't produce embedding
-			// vectors. The manager branches before reaching this factory (see
-			// _recreateServices). This guard prevents accidental misuse if the factory
-			// is ever called directly with a semble config.
-			throw new Error(
-				"Semble provider handles its own embedding. Do not call createEmbedder() for semble — use SembleProvider instead.",
-			)
-		}
-
-		if (provider === providerIdentifiers.openai) {
-			const apiKey = config.openAiOptions?.openAiNativeApiKey
-
-			if (!apiKey) {
-				throw new Error(t("embeddings:serviceFactory.openAiConfigMissing"))
-			}
-			return new OpenAiEmbedder({
-				...config.openAiOptions,
-				openAiEmbeddingModelId: config.modelId,
-			})
-		} else if (provider === providerIdentifiers.ollama) {
-			if (!config.ollamaOptions?.ollamaBaseUrl) {
-				throw new Error(t("embeddings:serviceFactory.ollamaConfigMissing"))
-			}
-			return new CodeIndexOllamaEmbedder({
-				...config.ollamaOptions,
-				ollamaModelId: config.modelId,
-			})
-		} else if (provider === "openai-compatible") {
-			if (!config.openAiCompatibleOptions?.baseUrl || !config.openAiCompatibleOptions?.apiKey) {
-				throw new Error(t("embeddings:serviceFactory.openAiCompatibleConfigMissing"))
-			}
-			return new OpenAICompatibleEmbedder(
-				config.openAiCompatibleOptions.baseUrl,
-				config.openAiCompatibleOptions.apiKey,
-				config.modelId,
-			)
-		} else if (provider === providerIdentifiers.gemini) {
-			if (!config.geminiOptions?.apiKey) {
-				throw new Error(t("embeddings:serviceFactory.geminiConfigMissing"))
-			}
-			return new GeminiEmbedder(config.geminiOptions.apiKey, config.modelId)
-		} else if (provider === providerIdentifiers.mistral) {
-			if (!config.mistralOptions?.apiKey) {
-				throw new Error(t("embeddings:serviceFactory.mistralConfigMissing"))
-			}
-			return new MistralEmbedder(config.mistralOptions.apiKey, config.modelId)
-		} else if (provider === providerIdentifiers.vercelAiGateway) {
-			if (!config.vercelAiGatewayOptions?.apiKey) {
-				throw new Error(t("embeddings:serviceFactory.vercelAiGatewayConfigMissing"))
-			}
-			return new VercelAiGatewayEmbedder(config.vercelAiGatewayOptions.apiKey, config.modelId)
-		} else if (provider === providerIdentifiers.bedrock) {
-			// Only region is required for Bedrock (profile is optional)
-			if (!config.bedrockOptions?.region) {
-				throw new Error(t("embeddings:serviceFactory.bedrockConfigMissing"))
-			}
-			return new BedrockEmbedder(config.bedrockOptions.region, config.bedrockOptions.profile, config.modelId)
-		} else if (provider === providerIdentifiers.openrouter) {
-			if (!config.openRouterOptions?.apiKey) {
-				throw new Error(t("embeddings:serviceFactory.openRouterConfigMissing"))
-			}
-			return new OpenRouterEmbedder(
-				config.openRouterOptions.apiKey,
-				config.modelId,
-				undefined, // maxItemTokens
-				config.openRouterOptions.specificProvider,
-			)
-		}
-
-		throw new Error(
-			t("embeddings:serviceFactory.invalidEmbedderType", { embedderProvider: config.embedderProvider }),
-		)
-	}
-
-	/**
 	 * Validates an embedder instance to ensure it's properly configured.
 	 * @param embedder The embedder instance to validate
 	 * @returns Promise resolving to validation result
 	 */
-	public async validateEmbedder(embedder: IEmbedder): Promise<{ valid: boolean; error?: string }> {
-		try {
-			return await embedder.validateConfiguration()
-		} catch (error) {
-			// Capture telemetry for the error
-			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-				location: "validateEmbedder",
-			})
-
-			// If validation throws an exception, preserve the original error message
-			return {
-				valid: false,
-				error: error instanceof Error ? error.message : "embeddings:validation.configurationError",
-			}
-		}
-	}
-
-	/**
-	 * Creates a vector store instance using the current configuration.
-	 */
-	public createVectorStore(): IVectorStore {
-		const config = this.configManager.getConfig()
-
-		const provider = config.embedderProvider as EmbedderProvider
-
-		if (provider === "semble") {
-			throw new Error(
-				"Semble provider handles its own vector storage. Do not call createVectorStore() for semble — use SembleProvider instead.",
-			)
-		}
-
-		const defaultModel = getDefaultModelId(provider)
-		// Use the embedding model ID from config, not the chat model IDs
-		const modelId = config.modelId ?? defaultModel
-
-		let vectorSize: number | undefined
-
-		// First try to get the model-specific dimension from profiles
-		vectorSize = getModelDimension(provider, modelId)
-
-		// Only use manual dimension if model doesn't have a built-in dimension
-		if (!vectorSize && config.modelDimension && config.modelDimension > 0) {
-			vectorSize = config.modelDimension
-		}
-
-		if (vectorSize === undefined || vectorSize <= 0) {
-			if (provider === "openai-compatible") {
-				throw new Error(
-					t("embeddings:serviceFactory.vectorDimensionNotDeterminedOpenAiCompatible", { modelId, provider }),
-				)
-			} else {
-				throw new Error(t("embeddings:serviceFactory.vectorDimensionNotDetermined", { modelId, provider }))
-			}
-		}
-
-		if (!config.qdrantUrl) {
-			throw new Error(t("embeddings:serviceFactory.qdrantUrlMissing"))
-		}
-
-		// Assuming constructor is updated: new QdrantVectorStore(workspacePath, url, vectorSize, apiKey?)
-		return new QdrantVectorStore(this.workspacePath, config.qdrantUrl, vectorSize, config.qdrantApiKey)
-	}
-
-	/**
-	 * Creates a directory scanner instance with its required dependencies.
-	 */
-	public createDirectoryScanner(
-		embedder: IEmbedder,
-		vectorStore: IVectorStore,
-		parser: ICodeParser,
-		ignoreInstance: Ignore,
-	): DirectoryScanner {
-		// Get the configurable batch size from VSCode settings
-		let batchSize: number
-		try {
-			batchSize = vscode.workspace
-				.getConfiguration(Package.name)
-				.get<number>("codeIndex.embeddingBatchSize", BATCH_SEGMENT_THRESHOLD)
-		} catch {
-			// In test environment, vscode.workspace might not be available
-			batchSize = BATCH_SEGMENT_THRESHOLD
-		}
-		return new DirectoryScanner(embedder, vectorStore, parser, this.cacheManager, ignoreInstance, batchSize)
-	}
-
-	/**
-	 * Creates a file watcher instance with its required dependencies.
-	 */
-	public createFileWatcher(
-		context: vscode.ExtensionContext,
-		embedder: IEmbedder,
-		vectorStore: IVectorStore,
-		cacheManager: CacheManager,
-		ignoreInstance: Ignore,
-		rooIgnoreController?: RooIgnoreController,
-	): IFileWatcher {
-		// Get the configurable batch size from VSCode settings
-		let batchSize: number
-		try {
-			batchSize = vscode.workspace
-				.getConfiguration(Package.name)
-				.get<number>("codeIndex.embeddingBatchSize", BATCH_SEGMENT_THRESHOLD)
-		} catch {
-			// In test environment, vscode.workspace might not be available
-			batchSize = BATCH_SEGMENT_THRESHOLD
-		}
-		return new FileWatcher(
-			this.workspacePath,
-			context,
-			cacheManager,
-			embedder,
-			vectorStore,
-			ignoreInstance,
-			rooIgnoreController,
-			batchSize,
-		)
+	// TODO: Remove this proxy and have CodeIndexManager call the injected validation manager directly.
+	// https://github.com/Zoo-Code-Org/Zoo-Code/issues/1817
+	public validateEmbedder(embedder: IEmbedder): Promise<{ valid: boolean; error?: string }> {
+		return this.embedderValidationManager.validateEmbedder(embedder)
 	}
 
 	/**
@@ -266,18 +65,26 @@ export class CodeIndexServiceFactory {
 			throw new Error(t("embeddings:serviceFactory.codeIndexingNotConfigured"))
 		}
 
-		const embedder = this.createEmbedder()
-		const vectorStore = this.createVectorStore()
+		const config = this.configManager.getConfig()
+		const embedder = this.embedderFactory.create(config)
+		const vectorStore = this.vectorStoreFactory.create(config, this.workspacePath)
 		const parser = codeParser
-		const scanner = this.createDirectoryScanner(embedder, vectorStore, parser, ignoreInstance)
-		const fileWatcher = this.createFileWatcher(
+		const scanner = this.directoryScannerFactory.create({
+			embedder,
+			vectorStore,
+			parser,
+			cacheManager: this.cacheManager,
+			ignoreInstance,
+		})
+		const fileWatcher = this.fileWatcherFactory.create({
+			workspacePath: this.workspacePath,
 			context,
 			embedder,
 			vectorStore,
 			cacheManager,
 			ignoreInstance,
 			rooIgnoreController,
-		)
+		})
 
 		return {
 			embedder,
