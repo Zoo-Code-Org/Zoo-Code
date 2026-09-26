@@ -2677,6 +2677,33 @@ describe("context-window tool_result truncation", () => {
 			expect(middleOutTruncate("hello world", 100)).toBe("hello world")
 		})
 
+		it("returns text unchanged when its length exactly equals the limit", () => {
+			// Longer than the truncation marker, so `<=` is observable here: the marker-less
+			// fallback for tiny limits would otherwise return the same text under either operator.
+			const text = "A".repeat(200)
+			expect(middleOutTruncate(text, 200)).toBe(text)
+		})
+
+		it("stays within a limit too small to hold the truncation marker", () => {
+			const text = "A".repeat(500)
+			for (const limit of [1, 5, 50]) {
+				const result = middleOutTruncate(text, limit)
+				expect(result).toBe("A".repeat(limit))
+			}
+		})
+
+		it("does not end a marker-less truncation on a lone high surrogate", () => {
+			// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+			const codeUnits = (value: string): number[] =>
+				Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
+
+			// The limit lands between the halves of the pair at index 3, which would otherwise be
+			// emitted alone and make the payload un-encodable as UTF-8.
+			const result = middleOutTruncate(`abc\uD83D\uDE00${"z".repeat(200)}`, 4)
+
+			expect(codeUnits(result)).toEqual(codeUnits("abc"))
+		})
+
 		it("keeps the head and tail and inserts a truncation marker", () => {
 			const text = "A".repeat(500) + "B".repeat(500)
 			const result = middleOutTruncate(text, 200)
@@ -2769,9 +2796,9 @@ describe("context-window tool_result truncation", () => {
 
 			const toolResult = findBlock(messages[1], "tool_result")
 			const parts = toolResult.content as Array<{ type: string; text?: string }>
-			expect(parts[0].type).toBe("text")
 			expect(parts[0].text).toContain("characters truncated")
-			expect(parts.some((part) => part.type === "image")).toBe(true)
+			// Exact shape: a surviving original text part would leave a third element behind.
+			expect(parts.map((part) => part.type)).toEqual(["text", "image"])
 		})
 
 		it("ignores string content and skips messages that cannot hold tool_result blocks", () => {

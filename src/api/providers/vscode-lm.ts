@@ -434,6 +434,14 @@ function writeToolResultText(block: Anthropic.Messages.ContentBlockParam, text: 
  * middle with a marker noting how many characters were removed. Head/tail are preserved because
  * logs and file dumps carry the most signal at their start (structure) and end (recent output).
  */
+/**
+ * Drops a trailing lone high surrogate, whose low half was cut away. A lone surrogate cannot be
+ * encoded as UTF-8, and the backend 400s the whole request when one is present.
+ */
+function trimTrailingHighSurrogate(text: string): string {
+	return text.length > 0 && (text.charCodeAt(text.length - 1) & 0xfc00) === 0xd800 ? text.slice(0, -1) : text
+}
+
 export function middleOutTruncate(text: string, maxChars: number): string {
 	if (maxChars <= 0) {
 		return ""
@@ -447,15 +455,15 @@ export function middleOutTruncate(text: string, maxChars: number): string {
 
 	// Reserve room for the marker, sized against the original length so the result never grows.
 	const reservedMarkerLength = buildMarker(text.length).length
-	const keep = Math.max(0, maxChars - reservedMarkerLength)
+	// A budget too small to hold the marker cannot describe its own truncation without breaking the
+	// maxChars promise this function makes to callers, so drop the marker and keep a bare head.
+	if (maxChars <= reservedMarkerLength) {
+		return trimTrailingHighSurrogate(text.slice(0, maxChars))
+	}
+	const keep = maxChars - reservedMarkerLength
 	const headLength = Math.ceil(keep / 2)
 	const tailLength = keep - headLength
-	let head = text.slice(0, headLength)
-	// Don't end the head on a lone high surrogate — its low half is in the removed middle, and a lone
-	// surrogate cannot be encoded as UTF-8 (the backend 400s the whole request). Drop the split half.
-	if (head.length > 0 && (head.charCodeAt(head.length - 1) & 0xfc00) === 0xd800) {
-		head = head.slice(0, -1)
-	}
+	const head = trimTrailingHighSurrogate(text.slice(0, headLength))
 	let tail = tailLength > 0 ? text.slice(text.length - tailLength) : ""
 	// Likewise, don't start the tail on a lone low surrogate (its high half is in the removed middle).
 	if (tail.length > 0 && (tail.charCodeAt(0) & 0xfc00) === 0xdc00) {
