@@ -402,6 +402,12 @@
 		"getOpencodeGoApiKey": "Opencode Go API Anahtarı Al",
 		"kenariApiKey": "Kenari API Anahtarı",
 		"getKenariApiKey": "Kenari API Anahtarı Al",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API Anahtarı",
+			"getApiKey": "IO Intelligence API Anahtarı Al",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Anahtarı",

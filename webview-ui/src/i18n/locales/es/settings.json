@@ -402,6 +402,12 @@
 		"getOpencodeGoApiKey": "Obtener clave API de Opencode Go",
 		"kenariApiKey": "Clave API de Kenari",
 		"getKenariApiKey": "Obtener clave API de Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Clave API de IO Intelligence",
+			"getApiKey": "Obtener clave API de IO Intelligence",
+			"model": "Modelo"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Clave API de NanoGPT",

@@ -94,6 +94,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -162,6 +164,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -210,6 +214,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -447,6 +453,103 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(getModelsMock).toHaveBeenCalledWith(deepSeekOptions)
 	})
 
+	// One catalog per IO Intelligence key, so a fetch made with the wrong key publishes the wrong catalog.
+	const ioIntelligenceCatalogs: Record<
+		string,
+		Record<string, { contextWindow: number; supportsPromptCache: boolean }>
+	> = {
+		"stored-io-key": { "io/stored-key-model": { contextWindow: 8192, supportsPromptCache: false } },
+		"unsaved-io-key": { "io/unsaved-key-model": { contextWindow: 8192, supportsPromptCache: false } },
+		"": { "io/public-model": { contextWindow: 8192, supportsPromptCache: false } },
+	}
+
+	const mockIoIntelligenceCatalogsByKey = () => {
+		const baseGetModels = getModelsMock.getMockImplementation()
+		getModelsMock.mockImplementation(async (options) =>
+			options?.provider === providerIdentifiers.ioIntelligence
+				? ioIntelligenceCatalogs[options.apiKey]
+				: baseGetModels?.(options),
+		)
+	}
+
+	const expectPublishedIoIntelligenceCatalog = (apiKey: string) => {
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				routerModels: expect.objectContaining({
+					[providerIdentifiers.ioIntelligence]: ioIntelligenceCatalogs[apiKey],
+				}),
+			}),
+		)
+	}
+
+	it("fetches IO Intelligence models with the stored key and does not flush the cache", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { ioIntelligenceApiKey: "stored-io-key" },
+		})
+		mockIoIntelligenceCatalogsByKey()
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		const ioFlushCalls = flushModelsMock.mock.calls.filter(
+			(c) => c[0]?.provider === providerIdentifiers.ioIntelligence,
+		)
+		expect(ioFlushCalls.length).toBe(0)
+
+		const ioCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.ioIntelligence)
+		expect(ioCalls.length).toBe(1)
+		expect(ioCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "stored-io-key" })
+		expectPublishedIoIntelligenceCatalog("stored-io-key")
+	})
+
+	it("flushes IO Intelligence models with an unsaved key from message values instead of the stored key", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { ioIntelligenceApiKey: "stored-io-key" },
+		})
+		mockIoIntelligenceCatalogsByKey()
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { ioIntelligenceApiKey: "unsaved-io-key" },
+		})
+
+		const ioFlushCalls = flushModelsMock.mock.calls.filter(
+			(c) => c[0]?.provider === providerIdentifiers.ioIntelligence,
+		)
+		expect(ioFlushCalls.length).toBe(1)
+		expect(ioFlushCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "unsaved-io-key" })
+
+		const ioCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.ioIntelligence)
+		expect(ioCalls.length).toBe(1)
+		expect(ioCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "unsaved-io-key" })
+		expectPublishedIoIntelligenceCatalog("unsaved-io-key")
+	})
+
+	it("treats an explicitly empty unsaved IO Intelligence key as the public catalog, not the stored key", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { ioIntelligenceApiKey: "stored-io-key" },
+		})
+		mockIoIntelligenceCatalogsByKey()
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { ioIntelligenceApiKey: "" },
+		})
+
+		const ioFlushCalls = flushModelsMock.mock.calls.filter(
+			(c) => c[0]?.provider === providerIdentifiers.ioIntelligence,
+		)
+		expect(ioFlushCalls.length).toBe(1)
+		expect(ioFlushCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "" })
+
+		const ioCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.ioIntelligence)
+		expect(ioCalls.length).toBe(1)
+		expect(ioCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "" })
+		expectPublishedIoIntelligenceCatalog("")
+	})
+
 	it("fetches Moonshot models when stored Moonshot credentials exist", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
@@ -467,6 +570,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -554,6 +659,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -605,6 +712,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:

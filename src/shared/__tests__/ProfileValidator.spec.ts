@@ -26,6 +26,7 @@ describe("ProfileValidator", () => {
 			["ollama", { ollamaModelId: "model" }],
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
+			["ioIntelligence", { ioIntelligenceModelId: "model" }],
 		])("resolves %s model fields through canonical identifiers", (identifierKey, profileSettings) => {
 			const canonicalIdentifier = providerIdentifiers[identifierKey as keyof typeof providerIdentifiers]
 			const modelId = "model"
@@ -279,6 +280,25 @@ describe("ProfileValidator", () => {
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
+		// Test for io-intelligence provider which uses ioIntelligenceModelId
+		it(`should extract ioIntelligenceModelId for io-intelligence provider`, () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.ioIntelligence]: { allowAll: false, models: ["test-model"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceModelId: "test-model",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed({ ...profile, ioIntelligenceModelId: "other-model" }, allowList),
+			).toBe(false)
 		})
 
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {

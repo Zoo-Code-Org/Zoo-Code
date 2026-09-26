@@ -402,6 +402,12 @@
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"kenariApiKey": "Kenari API 密钥",
 		"getKenariApiKey": "获取 Kenari API 密钥",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API 密钥",
+			"getApiKey": "获取 IO Intelligence API 密钥",
+			"model": "模型"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 密钥",

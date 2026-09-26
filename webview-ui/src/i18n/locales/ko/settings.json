@@ -402,6 +402,12 @@
 		"getOpencodeGoApiKey": "Opencode Go API 키 받기",
 		"kenariApiKey": "Kenari API 키",
 		"getKenariApiKey": "Kenari API 키 받기",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API 키",
+			"getApiKey": "IO Intelligence API 키 받기",
+			"model": "모델"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 키",

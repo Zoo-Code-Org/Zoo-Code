@@ -402,6 +402,12 @@
 		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"kenariApiKey": "Khóa API Kenari",
 		"getKenariApiKey": "Lấy khóa API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Khóa API IO Intelligence",
+			"getApiKey": "Lấy khóa API IO Intelligence",
+			"model": "Mô hình"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Khóa API NanoGPT",

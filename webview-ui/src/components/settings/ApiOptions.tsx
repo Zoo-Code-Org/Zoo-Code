@@ -82,6 +82,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -683,6 +684,17 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.kenari && (
 						<Kenari
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.ioIntelligence && (
+						<IOIntelligence
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

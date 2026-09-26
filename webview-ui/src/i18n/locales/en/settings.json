@@ -482,6 +482,12 @@
 		"getOpencodeGoApiKey": "Get Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Get Kenari API Key",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API Key",
+			"getApiKey": "Get IO Intelligence API Key",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",
