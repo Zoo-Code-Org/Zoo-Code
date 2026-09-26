@@ -1070,11 +1070,17 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
 			const remainingChars = estimateMessagesChars(cleanedMessages)
 			if (remainingChars > rawBudgetChars) {
-				throw new Error(
-					"Zoo Code <Language Model API>: The request is too large for this model's context window " +
-						`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
-						`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
-						"breaking tool-call pairing. Condense the conversation or start a new task.",
+				// `status` is what makes checkContextWindowExceededError recognise this as a context
+				// -window failure; without it the task takes its generic retry path and re-sends the
+				// same over-window history instead of condensing.
+				throw Object.assign(
+					new Error(
+						"Zoo Code <Language Model API>: The request is too large for this model's context window " +
+							`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
+							`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
+							"breaking tool-call pairing. Condense the conversation or start a new task.",
+					),
+					{ status: 400 },
 				)
 			}
 		}

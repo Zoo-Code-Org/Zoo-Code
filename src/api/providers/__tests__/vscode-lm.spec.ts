@@ -76,6 +76,7 @@ import {
 	middleOutTruncate,
 	truncateToolResultsToFitWindow,
 } from "../vscode-lm"
+import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
@@ -577,6 +578,36 @@ describe("VsCodeLmHandler", () => {
 				})(),
 			).rejects.toThrow(/too large for this model's context window/)
 			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("refuses with an error the task recognises as a context-window failure", async () => {
+			// Asserted through the real detector: without a recognised shape the task takes its
+			// generic retry path and re-sends the same over-window history instead of condensing.
+			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const refusal = await (async () => {
+				try {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				} catch (error) {
+					return error
+				}
+				throw new Error("expected the request to be refused")
+			})()
+
+			expect(checkContextWindowExceededError(refusal)).toBe(true)
 		})
 
 		it("sends a request that fits within a small positive raw budget", async () => {
