@@ -336,6 +336,41 @@ describe("IOIntelligenceHandler", () => {
 		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: false }), { signal, timeout: 5_000 })
 	})
 
+	it("does not send the OpenAI Compatible custom headers to the fixed endpoint", () => {
+		new IOIntelligenceHandler({
+			ioIntelligenceApiKey: "test-key",
+			openAiHeaders: { "X-Custom-Header": "leaked" },
+		})
+		expect(vi.mocked(OpenAI)).toHaveBeenCalledTimes(1)
+		const clientOptions = vi.mocked(OpenAI).mock.calls[0][0]
+		expect(clientOptions?.defaultHeaders).not.toHaveProperty("X-Custom-Header")
+	})
+
+	it("omits temperature for a model that does not support it", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"openai/o3-mini": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsImages: false,
+				supportsPromptCache: false,
+			},
+		})
+		const handler = new IOIntelligenceHandler({
+			ioIntelligenceModelId: "openai/o3-mini",
+			modelTemperature: 0.7,
+		})
+
+		await collectStream(handler.createMessage("system", messages))
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+
+		mockCreate.mockClear()
+		mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+		expect(await handler.completePrompt("ping")).toBe("ok")
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+	})
+
 	it("completePrompt forwards the configured temperature", async () => {
 		mockCreate.mockResolvedValue({
 			choices: [{ message: { role: "assistant", content: "ok" } }],

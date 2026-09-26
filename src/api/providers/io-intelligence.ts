@@ -32,7 +32,9 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 	/** Creates a new handler bound to the user's API key and selected model. */
 	constructor(options: ApiHandlerOptions) {
 		super({
-			options,
+			// The endpoint is fixed, so the custom headers configured for the
+			// OpenAI Compatible provider must not be sent to it.
+			options: { ...options, openAiHeaders: undefined },
 			name: providerIdentifiers.ioIntelligence,
 			baseURL: IO_INTELLIGENCE_BASE_URL,
 			apiKey: options.ioIntelligenceApiKey,
