@@ -9,6 +9,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
+import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -16,16 +17,23 @@ vi.mock("p-wait-for", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("fs/promises", () => ({
-	mkdir: vi.fn().mockResolvedValue(undefined),
-	writeFile: vi.fn().mockResolvedValue(undefined),
-	readFile: vi.fn().mockResolvedValue(""),
-	readdir: vi.fn().mockResolvedValue([]),
-	unlink: vi.fn().mockResolvedValue(undefined),
-	rmdir: vi.fn().mockResolvedValue(undefined),
-	access: vi.fn().mockResolvedValue(undefined),
-	rm: vi.fn().mockResolvedValue(undefined),
-}))
+vi.mock("fs/promises", () => {
+	// One object shared by the named exports and `default`: importers in this
+	// suite use both `import * as fs` and `import fs from`, and without a
+	// `default` the latter throws at every call site ("No default export is
+	// defined on the fs/promises mock").
+	const fsApi = {
+		mkdir: vi.fn().mockResolvedValue(undefined),
+		writeFile: vi.fn().mockResolvedValue(undefined),
+		readFile: vi.fn().mockResolvedValue(""),
+		readdir: vi.fn().mockResolvedValue([]),
+		unlink: vi.fn().mockResolvedValue(undefined),
+		rmdir: vi.fn().mockResolvedValue(undefined),
+		access: vi.fn().mockResolvedValue(undefined),
+		rm: vi.fn().mockResolvedValue(undefined),
+	}
+	return { ...fsApi, default: fsApi }
+})
 
 vi.mock("axios", () => ({
 	default: {
@@ -411,6 +419,82 @@ describe("ClineProvider Task History Synchronization", () => {
 		await provider.dispose()
 
 		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
+
+	describe("legacy taskHistory cleanup after migration (#1771)", () => {
+		/** Point the mocked globalState at a legacy blob, with or without the migration marker. */
+		const stubLegacyBlob = (items: HistoryItem[], migrated: boolean) => {
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) => {
+				if (key === "taskHistory") return items
+				if (key === "taskHistoryMigratedToFiles") return migrated
+				if (key === "mode") return "code"
+				if (key === "currentApiConfigName") return "current-config"
+				return undefined
+			}) as unknown as typeof mockContext.globalState.get)
+		}
+
+		/** The constructor already ran this once; call it again against the stubbed state. */
+		const runInit = async () => {
+			await provider["initializeTaskHistoryStore"]()
+		}
+
+		it("backs up the migrated blob before removing it from globalState", async () => {
+			const legacy = [createHistoryItem({ id: "legacy-backup", task: "Legacy task" })]
+			stubLegacyBlob(legacy, true)
+			vi.mocked(safeWriteJson).mockClear()
+
+			await runInit()
+
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				expect.stringContaining("legacy-task-history.backup.json"),
+				legacy,
+			)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistory", undefined)
+		})
+
+		it("keeps the blob in globalState when the backup fails", async () => {
+			stubLegacyBlob([createHistoryItem({ id: "legacy-backup-fail", task: "Legacy task" })], true)
+			vi.mocked(safeWriteJson).mockClear().mockRejectedValueOnce(new Error("disk full"))
+
+			await runInit()
+
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+		})
+
+		it("keeps the blob when store initialization fails — the fallback must survive", async () => {
+			stubLegacyBlob([createHistoryItem({ id: "legacy-init-fail", task: "Legacy task" })], true)
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockRejectedValueOnce(new Error("storage broke"))
+			vi.mocked(safeWriteJson).mockClear()
+
+			await runInit()
+
+			expect(safeWriteJson).not.toHaveBeenCalled()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+		})
+
+		it("migrates first and only then clears on the fresh-migration path", async () => {
+			const legacy = [createHistoryItem({ id: "legacy-fresh", task: "Fresh migration" })]
+			stubLegacyBlob(legacy, false)
+			vi.mocked(safeWriteJson).mockClear()
+			vi.mocked(mockContext.globalState.update).mockClear()
+
+			await runInit()
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				expect.stringContaining("legacy-task-history.backup.json"),
+				legacy,
+			)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistory", undefined)
+		})
+
+		it("does nothing when there is no blob to clear", async () => {
+			vi.mocked(mockContext.globalState.update).mockClear()
+
+			await runInit()
+
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+		})
 	})
 
 	describe("updateTaskHistory", () => {
