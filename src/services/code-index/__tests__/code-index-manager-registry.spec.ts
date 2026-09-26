@@ -2,6 +2,7 @@ import * as vscode from "vscode"
 import { makeExtensionContext, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
+import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
 
 vi.mock("vscode", () => ({
 	workspace: { workspaceFolders: undefined, getWorkspaceFolder: vi.fn() },
@@ -114,11 +115,48 @@ describe("CodeIndexManagerRegistry", () => {
 		expect(CodeIndexManagerRegistry.getAllInstances()).toEqual([manager])
 	})
 
+	it("logs each disposal failure, continues cleanup and permits recreation", () => {
+		const logError = vi.spyOn(console, "error").mockImplementation(() => {})
+		const first = CodeIndexManagerRegistry.getOrCreate(context, "/first")!
+		const second = CodeIndexManagerRegistry.getOrCreate(context, "/second")!
+		const third = CodeIndexManagerRegistry.getOrCreate(context, "/third")!
+		const error = new Error("cleanup failed")
+		vi.mocked(first.dispose).mockImplementationOnce(() => {
+			throw error
+		})
+		vi.mocked(second.dispose).mockImplementationOnce(() => {
+			throw "second cleanup failed"
+		})
+
+		expect(() => CodeIndexManagerRegistry.disposeAll()).not.toThrow()
+		for (const manager of [first, second, third]) {
+			expect(manager.dispose).toHaveBeenCalledExactlyOnceWith()
+		}
+		expect(logError).toHaveBeenCalledTimes(2)
+		expect(logError).toHaveBeenNthCalledWith(
+			1,
+			"[CodeIndexManagerRegistry] Failed to dispose workspace scope for /first:",
+			error,
+		)
+		expect(logError).toHaveBeenNthCalledWith(
+			2,
+			"[CodeIndexManagerRegistry] Failed to dispose workspace scope for /second:",
+			"second cleanup failed",
+		)
+		expect(CodeIndexManagerRegistry.getAllInstances()).toEqual([])
+		CodeIndexManagerRegistry.disposeAll()
+		expect(logError).toHaveBeenCalledTimes(2)
+		expect(first.dispose).toHaveBeenCalledTimes(1)
+		expect(CodeIndexManagerRegistry.getOrCreate(context, "/first")).not.toBe(first)
+	})
+
 	it("disposes every manager, supports repeated cleanup and recreates instances", () => {
+		const disposeScope = vi.spyOn(CodeIndexWorkspaceScope.prototype, "dispose")
 		const a = CodeIndexManagerRegistry.getOrCreate(context, "/first")!
 		const b = CodeIndexManagerRegistry.getOrCreate(context, "/second")!
 		CodeIndexManagerRegistry.disposeAll()
 		CodeIndexManagerRegistry.disposeAll()
+		expect(disposeScope).toHaveBeenCalledTimes(2)
 		expect(a.dispose).toHaveBeenCalledTimes(1)
 		expect(b.dispose).toHaveBeenCalledTimes(1)
 		expect(CodeIndexManagerRegistry.getAllInstances()).toEqual([])
