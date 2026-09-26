@@ -115,6 +115,67 @@ describe("CodeIndexConfigManager", () => {
 	})
 
 	describe("loadConfiguration", () => {
+		it("does not mark the synchronous constructor snapshot as loaded", () => {
+			expect(configManager.isConfigurationLoaded).toBe(false)
+		})
+
+		it("marks disabled configuration loaded only after secrets refresh completes", async () => {
+			let finishRefresh!: () => void
+			mockContextProxy.refreshSecrets.mockReturnValue(
+				new Promise<void>((resolve) => {
+					finishRefresh = resolve
+				}),
+			)
+
+			const loading = configManager.loadConfiguration()
+			expect(configManager.isConfigurationLoaded).toBe(false)
+			finishRefresh()
+			await loading
+			expect(configManager.isConfigurationLoaded).toBe(true)
+			expect(configManager.isFeatureEnabled).toBe(false)
+		})
+
+		it("marks enabled but unconfigured settings as loaded", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({ codebaseIndexEnabled: true })
+			await configManager.loadConfiguration()
+			expect(configManager.isConfigurationLoaded).toBe(true)
+			expect(configManager.isFeatureEnabled).toBe(true)
+			expect(configManager.isFeatureConfigured).toBe(false)
+		})
+
+		it.each(["secrets", "configuration", "restart", "payload"] as const)(
+			"retains the last successful load state when %s fails",
+			async (stage) => {
+				const error = new Error(`${stage} failed`)
+				const failNextLoad = () => {
+					if (stage === "secrets") {
+						mockContextProxy.refreshSecrets.mockRejectedValueOnce(error)
+					} else if (stage === "configuration") {
+						mockContextProxy.getGlobalState.mockImplementationOnce(() => {
+							throw error
+						})
+					} else if (stage === "restart") {
+						vi.spyOn(configManager, "doesConfigChangeRequireRestart").mockImplementationOnce(() => {
+							throw error
+						})
+					} else {
+						vi.spyOn(configManager, "currentSearchMinScore", "get").mockImplementationOnce(() => {
+							throw error
+						})
+					}
+				}
+
+				failNextLoad()
+				await expect(configManager.loadConfiguration()).rejects.toThrow(error)
+				expect(configManager.isConfigurationLoaded).toBe(false)
+				await configManager.loadConfiguration()
+				expect(configManager.isConfigurationLoaded).toBe(true)
+				failNextLoad()
+				await expect(configManager.loadConfiguration()).rejects.toThrow(error)
+				expect(configManager.isConfigurationLoaded).toBe(true)
+			},
+		)
+
 		it("should load default configuration when no state exists", async () => {
 			mockContextProxy.getGlobalState.mockReturnValue(undefined)
 			mockContextProxy.getSecret.mockReturnValue(undefined)

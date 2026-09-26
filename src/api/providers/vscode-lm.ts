@@ -15,7 +15,14 @@ import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared
 import { normalizeToolSchema } from "../../utils/json-schema"
 
 import { ApiStream, ApiStreamChunk } from "../transform/stream"
-import { convertToVsCodeLmMessages, extractTextCountFromMessage } from "../transform/vscode-lm-format"
+import {
+	convertToVsCodeLmMessages,
+	decodeToolNameSurrogates,
+	extractTextCountFromMessage,
+	sanitizeSurrogates,
+	sanitizeSurrogatesDeep,
+	sanitizeToolNameSurrogates,
+} from "../transform/vscode-lm-format"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -31,10 +38,13 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 	return tools
 		.filter((tool) => tool.type === "function")
 		.map((tool) => ({
-			name: tool.function.name,
-			description: tool.function.description || "",
+			// Declared names must stay within Copilot's ^[\w-]+$ validation while remaining distinct.
+			name: sanitizeToolNameSurrogates(tool.function.name),
+			description: sanitizeSurrogates(tool.function.description || ""),
 			inputSchema: tool.function.parameters
-				? normalizeToolSchema(tool.function.parameters as Record<string, unknown>)
+				? (sanitizeSurrogatesDeep(
+						normalizeToolSchema(tool.function.parameters as Record<string, unknown>),
+					) as object)
 				: undefined,
 		}))
 }
@@ -835,7 +845,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(systemPrompt),
+			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
 			...convertToVsCodeLmMessages(cleanedMessages),
 		]
 
@@ -908,7 +918,8 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 							yield {
 								type: "tool_call",
 								id: chunk.callId,
-								name: chunk.name,
+								// Undo the declaration-time encoding; dispatch matches registry names.
+								name: decodeToolNameSurrogates(chunk.name),
 								arguments: argumentsString,
 							}
 						}
