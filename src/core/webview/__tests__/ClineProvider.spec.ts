@@ -759,13 +759,17 @@ describe("ClineProvider", () => {
 
 			const shutdown = provider.dispose()
 
-			await vi.waitFor(() => expect(blockedTask.abortTask).toHaveBeenCalledOnce())
+			try {
+				await vi.waitFor(() => expect(blockedTask.abortTask).toHaveBeenCalledOnce())
 
-			expect(BrowserBridgeServer.active(provider)).toBe(false)
-			expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
-
-			releaseAbort()
-			await shutdown
+				expect(BrowserBridgeServer.active(provider)).toBe(false)
+				expect(BrowserBridgeServer.webviewFor(provider)).toBeUndefined()
+			} finally {
+				// Unblock teardown even when the wait or an assertion fails so
+				// the dispose promise never leaks a pending abort.
+				releaseAbort()
+				await shutdown
+			}
 		})
 
 		test("dispose releases the bridge at both the early and the final teardown step", async () => {
@@ -776,12 +780,15 @@ describe("ClineProvider", () => {
 			BrowserBridgeServer.enable(provider)
 			await waitForBridge()
 
-			const disposeForSpy = vi.spyOn(BrowserBridgeServer, "disposeFor").mockImplementation(() => {})
+			// Call through to the real disposeFor so the assertions below can
+			// also observe the actual bridge state after teardown.
+			const disposeForSpy = vi.spyOn(BrowserBridgeServer, "disposeFor")
 
 			await provider.dispose()
 
 			expect(disposeForSpy).toHaveBeenCalledTimes(2)
 			expect(disposeForSpy).toHaveBeenCalledWith(provider)
+			expect(BrowserBridgeServer.active(provider)).toBe(false)
 
 			disposeForSpy.mockRestore()
 		})
