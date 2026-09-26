@@ -177,6 +177,30 @@ export function extractRepositoryName(url: string): string {
 }
 
 /**
+ * Resolves the Git executable command path configured in VS Code settings.
+ * Falls back to the global "git" command if not configured.
+ */
+function getGitCommand(): string {
+	const gitConfig = vscode.workspace.getConfiguration("git")
+	const configuredPath = gitConfig.get<string | string[]>("path")
+
+	if (configuredPath) {
+		if (Array.isArray(configuredPath)) {
+			// Find the first non-empty string path provided in the array
+			const validPath = configuredPath.find(p => typeof p === "string" && p.trim().length > 0)
+			if (validPath) {
+				return `"${validPath.trim()}"`
+			}
+		} else if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
+			return `"${configuredPath.trim()}"`
+		}
+	}
+
+	// Fallback to global path if not set or invalid
+	return "git"
+}
+
+/**
  * Gets git repository information for the current VSCode workspace
  * @returns Git repository information or empty object if not available
  */
@@ -193,7 +217,8 @@ export async function getWorkspaceGitInfo(): Promise<GitRepositoryInfo> {
 
 async function checkGitRepo(cwd: string): Promise<boolean> {
 	try {
-		await execAsync("git rev-parse --git-dir", { cwd })
+		const gitCmd = getGitCommand()
+		await execAsync(`${gitCmd} rev-parse --git-dir`, { cwd })
 		return true
 	} catch (error) {
 		return false
@@ -211,7 +236,8 @@ async function checkGitRepo(cwd: string): Promise<boolean> {
  */
 export async function checkGitInstalled(): Promise<boolean> {
 	try {
-		await execAsync("git --version")
+		const gitCmd = getGitCommand()
+		await execAsync(`${gitCmd} --version`)
 		return true
 	} catch (error) {
 		return false
@@ -232,9 +258,11 @@ export async function searchCommits(query: string, cwd: string): Promise<GitComm
 			return []
 		}
 
+		const gitCmd = getGitCommand()
+
 		// Search commits by hash or message, limiting to 10 results
 		const { stdout } = await execAsync(
-			`git log -n 10 --format="%H%n%h%n%s%n%an%n%ad" --date=short ` + `--grep="${query}" --regexp-ignore-case`,
+			`${gitCmd} log -n 10 --format="%H%n%h%n%s%n%an%n%ad" --date=short ` + `--grep="${query}" --regexp-ignore-case`,
 			{ cwd },
 		)
 
@@ -242,7 +270,7 @@ export async function searchCommits(query: string, cwd: string): Promise<GitComm
 		if (!output.trim() && /^[a-f0-9]+$/i.test(query)) {
 			// If no results from grep search and query looks like a hash, try searching by hash
 			const { stdout: hashStdout } = await execAsync(
-				`git log -n 10 --format="%H%n%h%n%s%n%an%n%ad" --date=short ` + `--author-date-order ${query}`,
+				`${gitCmd} log -n 10 --format="%H%n%h%n%s%n%an%n%ad" --date=short ` + `--author-date-order ${query}`,
 				{ cwd },
 			).catch(() => ({ stdout: "" }))
 
@@ -288,15 +316,17 @@ export async function getCommitInfo(hash: string, cwd: string): Promise<string> 
 			return "Not a git repository"
 		}
 
+		const gitCmd = getGitCommand()
+
 		// Get commit info, stats, and diff separately
-		const { stdout: info } = await execAsync(`git show --format="%H%n%h%n%s%n%an%n%ad%n%b" --no-patch ${hash}`, {
+		const { stdout: info } = await execAsync(`${gitCmd} show --format="%H%n%h%n%s%n%an%n%ad%n%b" --no-patch ${hash}`, {
 			cwd,
 		})
 		const [fullHash, shortHash, subject, author, date, body] = info.trim().split("\n")
 
-		const { stdout: stats } = await execAsync(`git show --stat --format="" ${hash}`, { cwd })
+		const { stdout: stats } = await execAsync(`${gitCmd} show --stat --format="" ${hash}`, { cwd })
 
-		const { stdout: diff } = await execAsync(`git show --format="" ${hash}`, { cwd })
+		const { stdout: diff } = await execAsync(`${gitCmd} show --format="" ${hash}`, { cwd })
 
 		const summary = [
 			`Commit: ${shortHash} (${fullHash})`,
@@ -329,14 +359,16 @@ export async function getWorkingState(cwd: string): Promise<string> {
 			return "Not a git repository"
 		}
 
+		const gitCmd = getGitCommand()
+
 		// Get status of working directory
-		const { stdout: status } = await execAsync("git status --short", { cwd })
+		const { stdout: status } = await execAsync(`${gitCmd} status --short`, { cwd })
 		if (!status.trim()) {
 			return "No changes in working directory"
 		}
 
 		// Get all changes (both staged and unstaged) compared to HEAD
-		const { stdout: diff } = await execAsync("git diff HEAD", { cwd })
+		const { stdout: diff } = await execAsync(`${gitCmd} diff HEAD`, { cwd })
 		const lineLimit = GIT_OUTPUT_LINE_LIMIT
 		const output = `Working directory changes:\n\n${status}\n\n${diff}`.trim()
 		return truncateOutput(output, lineLimit)
@@ -364,8 +396,10 @@ export async function getGitStatus(cwd: string, maxFiles: number = 20): Promise<
 			return null
 		}
 
+		const gitCmd = getGitCommand()
+
 		// Use porcelain v1 format with branch info
-		const { stdout } = await execAsync("git status --porcelain=v1 --branch", { cwd })
+		const { stdout } = await execAsync(`${gitCmd} status --porcelain=v1 --branch`, { cwd })
 
 		if (!stdout.trim()) {
 			return null
