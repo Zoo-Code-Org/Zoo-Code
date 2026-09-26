@@ -472,7 +472,7 @@ input[cmdk-input]:focus {
 }
 
 /*
- * Use geometric precision for codicons to avoid blurriness 
+ * Use geometric precision for codicons to avoid blurriness
  */
 
 .codicon[class*="codicon-"] {
@@ -602,4 +602,84 @@ input[cmdk-input]:focus {
 	border-radius: 4px;
 	padding: 8px;
 	margin: -8px;
+}
+
+/* ChatTextArea marquee border — conic-gradient light beam orbits the ring.
+   mask clips center (content-box) away → text never blocked.
+   1px ring, dark blue beam. Shown only while AI is executing. */
+@property --angle {
+	syntax: "<angle>";
+	initial-value: 0deg;
+	inherits: false;
+}
+
+@keyframes border-spin {
+	from {
+		--angle: 0deg;
+	}
+	to {
+		--angle: 360deg;
+	}
+}
+
+/* ChatTextArea breathing border — pulsing glow + 1px ring.
+   Shown only while AI is executing (isStreaming gate in ChatTextArea)
+   when chatInputEffect is set to "breathing". */
+@keyframes streaming-glow {
+	0%,
+	100% {
+		box-shadow: 0 0 2px color-mix(in srgb, var(--vscode-focusBorder, #03638f) 8%, transparent);
+	}
+	50% {
+		box-shadow:
+			0 0 12px color-mix(in srgb, var(--vscode-focusBorder, #04567b) 45%, transparent),
+			0 0 24px color-mix(in srgb, var(--vscode-focusBorder, #012434) 25%, transparent);
+	}
+}
+
+.animate-streaming-glow {
+	animation: streaming-glow 2s ease-in-out infinite;
+}
+
+/* Breathing border ring — 1px blue ring with pulsing opacity */
+@keyframes border-breathe {
+	0%,
+	100% {
+		opacity: 0.15;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+/* "Thinking..." shimmer — VS Code chat progress style, continuous narrow band.
+   Ported from workbench chat's chat-thinking-shimmer: a light band sweeps
+   continuously across the text on a 2s loop. The workbench-only variable
+   --vscode-chat-thinkingShimmer is not available inside the webview, so the
+   highlight band is synthesized from the foreground color instead. */
+@keyframes thinking-shine {
+	0% {
+		background-position: 100% 0;
+	}
+	100% {
+		background-position: -100% 0;
+	}
+}
+
+.animate-thinking-shine {
+	background-image: linear-gradient(
+		90deg,
+		color-mix(in srgb, var(--vscode-descriptionForeground) 45%, transparent) 0%,
+		color-mix(in srgb, var(--vscode-descriptionForeground) 45%, transparent) 30%,
+		color-mix(in srgb, var(--vscode-foreground) 100%, #ffffff 40%) 50%,
+		color-mix(in srgb, var(--vscode-descriptionForeground) 45%, transparent) 70%,
+		color-mix(in srgb, var(--vscode-descriptionForeground) 45%, transparent) 100%
+	);
+	background-size: 400% auto;
+	background-clip: text;
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	color: transparent;
+	animation: thinking-shine 2s linear infinite;
+	will-change: background-position;
 }

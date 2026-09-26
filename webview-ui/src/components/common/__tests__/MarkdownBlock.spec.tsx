@@ -217,4 +217,18 @@ describe("MarkdownBlock", () => {
 		expect(screen.getByText("Third level ordered")).toBeInTheDocument()
 		expect(screen.getByText("Back to first level")).toBeInTheDocument()
 	})
+
+	it("should not apply table striping by default", () => {
+		const { container } = render(<MarkdownBlock markdown="| A | B |\n| - | - |\n| 1 | 2 |" />)
+
+		const root = container.firstElementChild as HTMLElement
+		expect(root).not.toHaveClass("table-striped")
+	})
+
+	it("should apply table striping when the striped prop is enabled", () => {
+		const { container } = render(<MarkdownBlock markdown="| A | B |\n| - | - |\n| 1 | 2 |" striped={true} />)
+
+		const root = container.firstElementChild as HTMLElement
+		expect(root).toHaveClass("table-striped")
+	})
 })

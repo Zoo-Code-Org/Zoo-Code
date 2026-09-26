@@ -1,5 +1,8 @@
 {
 	"greeting": "Welkom bij Zoo Code!",
+	"searchModel": "Modellen zoeken...",
+	"modelListEmpty": "Geen modellen beschikbaar voor deze provider",
+	"useCustomModel": "Aangepast model gebruiken: {{modelId}}",
 	"task": {
 		"title": "Taak",
 		"expand": "Taak uitvouwen",

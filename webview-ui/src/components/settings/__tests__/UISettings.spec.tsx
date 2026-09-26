@@ -11,6 +11,7 @@ describe("UISettings", () => {
 	const defaultProps = {
 		reasoningBlockCollapsed: false,
 		enterBehavior: "send" as const,
+		chatInputEffect: "marquee" as const,
 		setCachedStateField: vi.fn(),
 	}
 
@@ -173,6 +174,47 @@ describe("UISettings", () => {
 			fireEvent.click(checkbox)
 			await waitFor(() => {
 				expect(setCachedStateField).toHaveBeenCalledWith("autoCloseZooOpenedNewFiles", true)
+			})
+		})
+	})
+
+	describe("chat input effect", () => {
+		it("renders the chat input effect dropdown", () => {
+			const { getByTestId } = render(<UISettings {...defaultProps} />)
+			const dropdown = getByTestId("chat-input-effect-dropdown") as HTMLSelectElement
+			expect(dropdown).toBeTruthy()
+			expect(dropdown.value).toBe("marquee")
+		})
+
+		it("calls setCachedStateField when chat input effect is changed", async () => {
+			const setCachedStateField = vi.fn()
+			const { getByTestId } = render(<UISettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+			const dropdown = getByTestId("chat-input-effect-dropdown")
+			fireEvent.change(dropdown, { target: { value: "breathing" } })
+
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("chatInputEffect", "breathing")
+			})
+		})
+	})
+
+	describe("table striping", () => {
+		it("renders the table striping checkbox unchecked by default", () => {
+			const { getByTestId } = render(<UISettings {...defaultProps} />)
+			const checkbox = getByTestId("table-striped-checkbox") as HTMLInputElement
+			expect(checkbox).toBeTruthy()
+			expect(checkbox.checked).toBe(false)
+		})
+
+		it("calls setCachedStateField when the table striping checkbox is toggled", async () => {
+			const setCachedStateField = vi.fn()
+			const { getByTestId } = render(<UISettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+			fireEvent.click(getByTestId("table-striped-checkbox"))
+
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("tableStriped", true)
 			})
 		})
 	})

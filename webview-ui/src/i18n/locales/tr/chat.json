@@ -1,5 +1,8 @@
 {
 	"greeting": "Zoo Code'a hoş geldin!",
+	"searchModel": "Modelleri ara...",
+	"modelListEmpty": "Bu sağlayıcı için kullanılabilir model yok",
+	"useCustomModel": "Özel model kullan: {{modelId}}",
 	"task": {
 		"title": "Görev",
 		"expand": "Görevi genişlet",

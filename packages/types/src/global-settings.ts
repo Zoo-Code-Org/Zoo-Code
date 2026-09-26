@@ -264,6 +264,19 @@ export const globalSettingsSchema = z.object({
 	 * @default "send"
 	 */
 	enterBehavior: z.enum(["send", "newline"]).optional(),
+	/**
+	 * Controls the border effect on the chat input box while AI is working.
+	 * - "marquee": A conic-gradient light beam orbits the ring (default)
+	 * - "breathing": A pulsing glow + 1px blue border ring
+	 * @default "marquee"
+	 */
+	chatInputEffect: z.enum(["marquee", "breathing"]).optional(),
+	/**
+	 * Opt-in zebra striping (alternating background colors) for rows in
+	 * markdown tables rendered in the chat.
+	 * @default false
+	 */
+	tableStriped: z.boolean().optional(),
 	profileThresholds: z.record(z.string(), z.number()).optional(),
 	hasOpenedModeSelector: z.boolean().optional(),
 	lastModeExportPath: z.string().optional(),

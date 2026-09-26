@@ -1,5 +1,8 @@
 {
 	"greeting": "Benvenuto in Zoo Code!",
+	"searchModel": "Cerca modelli...",
+	"modelListEmpty": "Nessun modello disponibile per questo provider",
+	"useCustomModel": "Usa modello personalizzato: {{modelId}}",
 	"task": {
 		"title": "Attività",
 		"expand": "Espandi attività",

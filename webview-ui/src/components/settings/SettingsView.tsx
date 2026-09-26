@@ -213,6 +213,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		reasoningBlockCollapsed,
 		chatFontSize,
 		enterBehavior,
+		chatInputEffect,
+		tableStriped,
 		includeCurrentTime,
 		includeCurrentCost,
 		maxGitStatusFiles,
@@ -439,6 +441,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
 					enterBehavior: enterBehavior ?? "send",
+					chatInputEffect: chatInputEffect ?? "marquee",
+					tableStriped: tableStriped ?? false,
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
@@ -937,7 +941,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<UISettings
 								reasoningBlockCollapsed={reasoningBlockCollapsed ?? true}
 								enterBehavior={enterBehavior ?? "send"}
+								chatInputEffect={chatInputEffect ?? "marquee"}
 								chatFontSize={chatFontSize ?? undefined}
+								tableStriped={tableStriped ?? false}
 								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
 								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
 								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}

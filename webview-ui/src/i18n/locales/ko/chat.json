@@ -1,5 +1,8 @@
 {
 	"greeting": "Zoo Code에 오신 것을 환영합니다!",
+	"searchModel": "모델 검색...",
+	"modelListEmpty": "이 공급자에 사용 가능한 모델이 없습니다",
+	"useCustomModel": "사용자 지정 모델 사용: {{modelId}}",
 	"task": {
 		"title": "작업",
 		"expand": "작업 펼치기",

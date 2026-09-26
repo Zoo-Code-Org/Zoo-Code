@@ -1122,6 +1122,12 @@
 			"label": "Richiedi {{primaryMod}}+Invio per inviare messaggi",
 			"description": "Quando abilitato, devi premere {{primaryMod}}+Invio per inviare messaggi invece di solo Invio"
 		},
+		"chatInputEffect": {
+			"label": "Effetto della casella di input mentre l'IA lavora",
+			"marquee": "Scorrimento (bordo rotante)",
+			"breathing": "Respirazione (bagliore pulsante)",
+			"description": "Scegli l'effetto di animazione del bordo sulla casella di input della chat mentre l'IA lavora"
+		},
 		"chatFontSize": {
 			"label": "Dimensione carattere della chat",
 			"description": "Imposta la dimensione del carattere (in pixel) per la chat di Zoo Code. Lascia il valore predefinito per adattarsi alla dimensione del carattere di VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Chiudi automaticamente i nuovi file creati",
 			"description": "Quando abilitata, le schede dei file che Zoo ha creato (invece di modificare) vengono chiuse automaticamente dopo l'accettazione della modifica."
+		},
+		"tableStriped": {
+			"label": "Righe della tabella a strisce",
+			"description": "Applica colori di sfondo alternati alle righe delle tabelle markdown"
 		}
 	},
 	"skills": {

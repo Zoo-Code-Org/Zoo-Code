@@ -2,11 +2,13 @@ import { memo, useState } from "react"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 
 import { useCopyToClipboard } from "@src/utils/clipboard"
+import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { StandardTooltip } from "@src/components/ui"
 
 import MarkdownBlock from "../common/MarkdownBlock"
 
 export const Markdown = memo(({ markdown, partial }: { markdown?: string; partial?: boolean }) => {
+	const { tableStriped } = useExtensionState()
 	const [isHovering, setIsHovering] = useState(false)
 
 	// Shorter feedback duration for copy button flash.
@@ -22,7 +24,7 @@ export const Markdown = memo(({ markdown, partial }: { markdown?: string; partia
 			onMouseLeave={() => setIsHovering(false)}
 			style={{ position: "relative" }}>
 			<div style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>
-				<MarkdownBlock markdown={markdown} />
+				<MarkdownBlock markdown={markdown} striped={tableStriped ?? false} />
 			</div>
 			{markdown && !partial && isHovering && (
 				<div

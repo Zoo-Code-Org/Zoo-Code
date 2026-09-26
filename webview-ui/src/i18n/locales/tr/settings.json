@@ -1122,6 +1122,12 @@
 			"label": "Mesaj göndermek için {{primaryMod}}+Enter gerekli",
 			"description": "Etkinleştirildiğinde, sadece Enter yerine mesaj göndermek için {{primaryMod}}+Enter'a basmalısınız"
 		},
+		"chatInputEffect": {
+			"label": "AI çalışırken giriş kutusu efekti",
+			"marquee": "Kayan yazı (dönen kenarlık)",
+			"breathing": "Nefes alma (nabız gibi parlayan)",
+			"description": "AI çalışırken sohbet giriş kutusundaki kenarlık animasyon efektini seçin"
+		},
 		"chatFontSize": {
 			"label": "Sohbet yazı tipi boyutu",
 			"description": "Zoo Code sohbeti için yazı tipi boyutunu (piksel cinsinden) ayarlayın. VS Code yazı tipi boyutuyla eşleşmesi için varsayılan değerde bırakın.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Yeni olusturulan dosyalari otomatik kapat",
 			"description": "Etkinlestirildiginde, Zoo'nun olusturdugu (degistirmedigi) dosyalarin sekmeleri de degisiklik kabul edildikten sonra otomatik olarak kapatilir."
+		},
+		"tableStriped": {
+			"label": "Çizgili tablo satırları",
+			"description": "Markdown tablolarındaki satırlara alternatif arka plan renkleri uygula"
 		}
 	},
 	"skills": {

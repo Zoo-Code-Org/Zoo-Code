@@ -173,6 +173,12 @@
 			"label": "需要 {{primaryMod}}+Enter 傳送訊息",
 			"description": "啟用後，必須按 {{primaryMod}}+Enter 傳送訊息，而不只是 Enter"
 		},
+		"chatInputEffect": {
+			"label": "AI 工作時的輸入框動效",
+			"marquee": "跑馬燈效果（旋轉光暈）",
+			"breathing": "呼吸效果（脈動光暈）",
+			"description": "選擇 AI 工作時聊天輸入框的邊框動畫效果"
+		},
 		"chatFontSize": {
 			"label": "聊天字型大小",
 			"description": "設定 Zoo Code 聊天的字型大小（以像素為單位）。保留預設值以符合 VS Code 的字型大小。",
@@ -189,6 +195,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "自動關閉新建立的檔案",
 			"description": "啟用後，Zoo 新建（而非修改）的檔案分頁在接受變更後也會自動關閉。"
+		},
+		"tableStriped": {
+			"label": "表格隔行著色",
+			"description": "為 Markdown 表格的列套用交替背景色"
 		}
 	},
 	"prompts": {

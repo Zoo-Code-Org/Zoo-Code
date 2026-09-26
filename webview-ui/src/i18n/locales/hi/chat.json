@@ -1,5 +1,8 @@
 {
 	"greeting": "Zoo Code में आपका स्वागत है!",
+	"searchModel": "मॉडल खोजें...",
+	"modelListEmpty": "इस प्रदाता के लिए कोई मॉडल उपलब्ध नहीं है",
+	"useCustomModel": "कस्टम मॉडल का उपयोग करें: {{modelId}}",
 	"task": {
 		"title": "कार्य",
 		"expand": "कार्य विस्तृत करें",

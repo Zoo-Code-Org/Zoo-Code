@@ -27,6 +27,7 @@ import { StandardTooltip } from "@src/components/ui"
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
+import { ChatModelSelector } from "./ChatModelSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -103,6 +104,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			clineMessages,
 			commands,
 			enterBehavior,
+			chatInputEffect,
 			lockApiConfigAcrossModes,
 		} = useExtensionState()
 
@@ -1028,6 +1030,36 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								"overflow-hidden",
 								"rounded-lg",
 							)}>
+							{/* Streaming border effect — marquee (conic-gradient light beam) or breathing (pulsing glow + 1px ring).
+								   Selected via Settings → UI → chatInputEffect. Only shown while AI is executing. */}
+							{!isDraggingOver && isStreaming && (chatInputEffect ?? "marquee") === "marquee" && (
+								<div
+									className="absolute inset-0 rounded-lg overflow-hidden pointer-events-none z-[15] forced-color-adjust-none"
+									data-testid="streaming-border">
+									<div
+										className="absolute inset-0 rounded-lg pointer-events-none animate-[border-spin_3s_linear_infinite] forced-color-adjust-none"
+										style={{
+											padding: "1px",
+											background:
+												"conic-gradient(from var(--angle), transparent 0deg, transparent 300deg, var(--vscode-focusBorder) 330deg, var(--vscode-input-border) 350deg, transparent 360deg)",
+											WebkitMask:
+												"linear-gradient(#000, #000) padding-box, linear-gradient(#000, #000) content-box",
+											WebkitMaskComposite: "exclude",
+											mask: "linear-gradient(#000, #000) padding-box, linear-gradient(#000, #000) content-box",
+											maskComposite: "exclude",
+										}}
+									/>
+								</div>
+							)}
+							{/* Breathing border effect — pulsing glow + 1px blue ring. No overflow-hidden needed (box-shadow would be clipped). */}
+							{!isDraggingOver && isStreaming && chatInputEffect === "breathing" && (
+								<div
+									className="absolute inset-0 rounded-lg pointer-events-none z-[15] forced-color-adjust-none"
+									data-testid="streaming-border">
+									<div className="absolute inset-0 rounded-lg animate-streaming-glow pointer-events-none" />
+									<div className="absolute inset-0 rounded-lg border border-vscode-focusBorder animate-[border-breathe_2s_ease-in-out_infinite] pointer-events-none" />
+								</div>
+							)}
 							<div
 								ref={highlightLayerRef}
 								data-testid="highlight-layer"
@@ -1046,7 +1078,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 										? "border border-vscode-focusBorder outline outline-vscode-focusBorder"
 										: isDraggingOver
 											? "border-2 border-dashed border-vscode-focusBorder"
-											: "border border-transparent",
+											: "border border-vscode-input-border",
 									"pl-2",
 									"py-2",
 									isEditMode ? "pr-20" : "pr-9",
@@ -1110,7 +1142,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 										? "border border-vscode-focusBorder outline outline-vscode-focusBorder"
 										: isDraggingOver
 											? "border-2 border-dashed border-vscode-focusBorder"
-											: "border border-transparent",
+											: "border border-vscode-input-border",
 									isDraggingOver
 										? "bg-[color-mix(in_srgb,var(--vscode-input-background)_95%,var(--vscode-focusBorder))]"
 										: "bg-vscode-input-background",
@@ -1318,6 +1350,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							togglePinnedApiConfig={togglePinnedApiConfig}
 							lockApiConfigAcrossModes={!!lockApiConfigAcrossModes}
 							onToggleLockApiConfig={handleToggleLockApiConfig}
+						/>
+						<ChatModelSelector
+							disabled={selectApiConfigDisabled}
+							title={t("chat:selectModel")}
+							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:min-w-fit min-[310px]:overflow-visible min-[310px]:flex-shrink-0"
 						/>
 						<AutoApproveDropdown triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0" />
 					</div>
