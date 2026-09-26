@@ -961,6 +961,25 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
 		})
 
+		it("onTaskAborted does not call createTaskWithHistoryItem (RSK-19 guard)", async () => {
+			// Store the item so getTaskWithId succeeds: without it, the old branch's catch
+			// swallows the error and the test passes even if the branch comes back.
+			const existing = createHistoryItem({ id: "task-abort-1", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const createSpy = vi.spyOn(provider, "createTaskWithHistoryItem")
+			const abortedListener = vi.fn()
+			provider.on(RooCodeEventName.TaskAborted, abortedListener)
+
+			const fakeTask = { ...makeFakeTask("task-abort-1"), abortReason: "streaming_failed" }
+			// Double cast: taskCreationCallback reads only on/taskId/abortReason from the fake.
+			provider["taskCreationCallback"](fakeTask as unknown as Task)
+			await fakeTask.emit(RooCodeEventName.TaskAborted)
+
+			expect(abortedListener).toHaveBeenCalledExactlyOnceWith("task-abort-1")
+			expect(createSpy).not.toHaveBeenCalled()
+		})
+
 		it("emits delegated completion through the provider after the child is disposed", () => {
 			const listener = vi.fn()
 			provider.on(RooCodeEventName.TaskCompleted, listener)

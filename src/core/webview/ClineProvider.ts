@@ -406,35 +406,7 @@ export class ClineProvider
 				}
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
 			}
-			const onTaskAborted = async () => {
-				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
-
-				try {
-					// Only rehydrate on genuine streaming failures.
-					// User-initiated cancels are handled by cancelTask().
-					if (instance.abortReason === "streaming_failed") {
-						// Defensive safeguard: if another path already replaced this instance, skip
-						const current = this.getCurrentTask()
-						if (current && current.instanceId !== instance.instanceId) {
-							this.log(
-								`[onTaskAborted] Skipping rehydrate: current instance ${current.instanceId} != aborted ${instance.instanceId}`,
-							)
-							return
-						}
-
-						const { historyItem } = await this.getTaskWithId(instance.taskId)
-						const rootTask = instance.rootTask
-						const parentTask = instance.parentTask
-						await this.createTaskWithHistoryItem({ ...historyItem, rootTask, parentTask })
-					}
-				} catch (error) {
-					this.log(
-						`[onTaskAborted] Failed to rehydrate after streaming failure: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-					)
-				}
-			}
+			const onTaskAborted = () => this.emit(RooCodeEventName.TaskAborted, instance.taskId)
 			const onTaskFocused = () => this.emit(RooCodeEventName.TaskFocused, instance.taskId)
 			const onTaskUnfocused = () => this.emit(RooCodeEventName.TaskUnfocused, instance.taskId)
 			const onTaskActive = (taskId: string) => this.emit(RooCodeEventName.TaskActive, taskId)
