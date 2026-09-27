@@ -771,16 +771,34 @@ describe("Cline", () => {
 				expect(JSON.parse(firstApiReq?.text ?? "{}")).toMatchObject({ cancelReason: "streaming_failed" })
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
 
+				let markCancelWaiting: (() => void) | undefined
+				const cancelWaiting = new Promise<void>((resolve) => {
+					markCancelWaiting = resolve
+				})
+				vi.mocked(pWaitFor).mockImplementation((condition, options) =>
+					realPWaitFor(async () => {
+						const done = await condition()
+						if (!done) markCancelWaiting?.()
+						return done
+					}, options),
+				)
+
+				vi.spyOn(mockProvider, "createTaskWithHistoryItem").mockImplementation((historyItem) =>
+					ClineProvider.prototype.createTaskWithHistoryItem.call(mockProvider, historyItem, {
+						startTask: false,
+					}),
+				)
+
 				let cancelSettled = false
 				cancel = mockProvider.cancelTask().then(() => {
 					cancelSettled = true
 				})
-				await new Promise((resolve) => setTimeout(resolve, 200))
+				await Promise.race([cancelWaiting, cancel])
 				expect(cancelSettled, "cancelTask must wait while the retry stream is live").toBe(false)
 
 				releaseRetryStream?.()
 				await cancel
-				await request
+				await expect(request).resolves.toBe(true)
 			} finally {
 				releaseRetryStream?.()
 				await Promise.allSettled([request, cancel])
