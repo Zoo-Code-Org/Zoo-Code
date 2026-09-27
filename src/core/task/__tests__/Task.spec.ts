@@ -6572,6 +6572,11 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 			const mockProvider = makeMockProvider()
 			const task = createTask(mockProvider)
 
+			// Seed a message so the payload assertion is meaningful: clineMessages
+			// starts empty, and an empty-payload save would pass a call-count-only
+			// assertion even if the save dropped the messages field.
+			task.clineMessages = [{ ts: 1, type: "say", say: "text", text: "seeded message" }]
+
 			// abandonSubtask severs the link, then aborts the subtask with
 			// isAbandoned=true; an in-flight fire-and-forget save lands here.
 			task.abandoned = true
@@ -6580,6 +6585,12 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 
 			expect(saved).toBe(false)
 			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
+			expect(saveSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					taskId: task.taskId,
+					messages: expect.arrayContaining([expect.objectContaining({ text: "seeded message" })]),
+				}),
+			)
 			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled() // history link is not reattached
 		} finally {
 			saveSpy.mockRestore()
@@ -6630,6 +6641,11 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 			const mockProvider = makeMockProvider()
 			const task = createTask(mockProvider)
 
+			// Seed a message so the payload assertion is meaningful: clineMessages
+			// starts empty, and an empty-payload save would pass a call-count-only
+			// assertion even if the save dropped the messages field.
+			task.clineMessages = [{ ts: 1, type: "say", say: "text", text: "seeded message" }]
+
 			const savePromise = getTaskTestAccess(task).saveClineMessages()
 
 			// The save is in flight (awaiting saveTaskMessages) when the task is
@@ -6641,6 +6657,11 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 
 			expect(saved).toBe(false)
 			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
+			expect(saveSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([expect.objectContaining({ text: "seeded message" })]),
+				}),
+			)
 			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled() // history link is not reattached
 		} finally {
 			resolveSave?.([]) // settle the deferred save if an assertion failed above
