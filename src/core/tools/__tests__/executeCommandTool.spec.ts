@@ -665,6 +665,110 @@ describe("executeCommandTool", () => {
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
 
+		it("logs a queued-message drain failure after a successful result without a shell-integration warning or a second result", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+			const successfulProcess = Object.assign(Promise.resolve(), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulTerminalProcess = successfulProcess as unknown as RooTerminalProcess
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
+				runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+					void callbacks.onCompleted?.("", successfulTerminalProcess)
+					callbacks.onShellExecutionComplete?.({ exitCode: 0 }, successfulTerminalProcess)
+					return successfulProcess
+				}),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+			const drainError = new Error("queued submission failed")
+			mockCline.processQueuedMessages.mockRejectedValueOnce(drainError)
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+					askApproval: mockAskApproval as unknown as AskApproval,
+					handleError: mockHandleError as unknown as HandleError,
+					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				})
+
+				// The successful result is published exactly once: the drain failure
+				// must not emit a shell-integration warning or push a contradictory
+				// command-failure result on top of it.
+				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Command executed in terminal"))
+				expect(mockCline.say).not.toHaveBeenCalledWith("shell_integration_warning")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				// The failure is logged, not swallowed silently.
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[ExecuteCommandTool] Failed to process queued messages:",
+					drainError,
+				)
+
+				// The message stays queued for a later drain: the next command's
+				// drain still runs.
+				await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+					askApproval: mockAskApproval as unknown as AskApproval,
+					handleError: mockHandleError as unknown as HandleError,
+					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				})
+
+				expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(2)
+				expect(mockPushToolResult).toHaveBeenCalledTimes(2)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("logs a queued-message drain failure after a successful execa fallback retry without a shell-integration warning or a second result", async () => {
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulProcess = Object.assign(Promise.resolve(), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulTerminalProcess = successfulProcess as unknown as RooTerminalProcess
+
+			vitest
+				.mocked(TerminalRegistry.getOrCreateTerminal)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockReturnValue(failedProcess),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+						void callbacks.onCompleted?.("", successfulTerminalProcess)
+						callbacks.onShellExecutionComplete?.({ exitCode: 0 }, successfulTerminalProcess)
+						return successfulProcess
+					}),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+
+			const drainError = new Error("queued submission failed")
+			mockCline.processQueuedMessages.mockRejectedValueOnce(drainError)
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+					askApproval: mockAskApproval as unknown as AskApproval,
+					handleError: mockHandleError as unknown as HandleError,
+					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				})
+
+				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Command executed in terminal"))
+				expect(mockCline.say).not.toHaveBeenCalledWith("shell_integration_warning")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[ExecuteCommandTool] Failed to process queued messages:",
+					drainError,
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
 		it("does not drain when the execa fallback retry hits a working directory failure", async () => {
 			mockToolUse.params.command = "echo test"
 			mockToolUse.params.cwd = "/nonexistent/working/dir"
@@ -896,6 +1000,46 @@ describe("executeCommandTool", () => {
 
 			expect(mockPushToolResult).toHaveBeenCalled()
 			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
+		})
+
+		it("drains messages queued during a background run after publishing the final command_output update", async () => {
+			vitest.useFakeTimers()
+			mockCline.processQueuedMessages.mockResolvedValue(true)
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("npm run dev", 2)
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("server starting...\n", proc)
+
+			// The agent timeout moves the command to the background; the tool
+			// returns its "still running" result and drains immediately.
+			await vitest.advanceTimersByTimeAsync(2_000)
+			await handlePromise
+
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+
+			// When the background command later completes, the messages queued
+			// since the immediate drain are processed after the final
+			// non-partial command_output update is published.
+			await callbacks.onCompleted!("server exited\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			await vitest.advanceTimersByTimeAsync(100)
+
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(2)
+
+			const finalOutputCallIndex = mockCline.say.mock.calls.findIndex(
+				(call: unknown[]) => call[0] === "command_output" && call[3] === false,
+			)
+			expect(finalOutputCallIndex).not.toBe(-1)
+			expect(mockCline.say.mock.invocationCallOrder[finalOutputCallIndex]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[1],
+			)
 		})
 	})
 })

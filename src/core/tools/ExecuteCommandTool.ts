@@ -195,6 +195,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				agentTimeout,
 			}
 
+			let shouldDrainQueuedMessages = false
 			try {
 				const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, options)
 
@@ -205,12 +206,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				pushToolResult(result)
 				// Only drain queued messages when the command actually ran
 				// (early validation failures end the turn without an execution,
-				// matching file tools' error-path behavior). The drain is awaited
-				// so a failed queued-message submission propagates instead of
-				// being dropped after the tool result was already published.
-				if (commandSubmitted) {
-					await task.processQueuedMessages()
-				}
+				// matching file tools' error-path behavior).
+				shouldDrainQueuedMessages = commandSubmitted
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
@@ -230,9 +227,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					}
 
 					pushToolResult(result)
-					if (commandSubmitted) {
-						await task.processQueuedMessages()
-					}
+					shouldDrainQueuedMessages = commandSubmitted
 				} else {
 					// Command was submitted but shell integration lost track of it — show warning.
 					await task.say("shell_integration_warning")
@@ -244,6 +239,19 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					} else {
 						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
 					}
+				}
+			}
+
+			// The drain runs outside the execution catch above and is awaited so a
+			// failed queued-message submission is observable. A drain failure is
+			// logged and the message stays claimed-released for a later drain, so
+			// it must never be misattributed as a shell-integration error after
+			// the tool result was already published.
+			if (shouldDrainQueuedMessages) {
+				try {
+					await task.processQueuedMessages()
+				} catch (error) {
+					console.error("[ExecuteCommandTool] Failed to process queued messages:", error)
 				}
 			}
 
@@ -446,6 +454,18 @@ export async function executeCommandInTerminal(
 			// errors here are UI-only and must not surface to the tool result.
 			commandOutputSayChain
 				.then(() => queueCommandOutputMessage(result, false, true))
+				.then(() => {
+					// The tool returned a "still running" result and drained when the
+					// agent timeout moved the command to the background; process
+					// messages queued since then so they are not held until an
+					// unrelated path drains them.
+					if (!runInBackground) {
+						return
+					}
+					return task.processQueuedMessages().catch((error) => {
+						console.error("[ExecuteCommandTool] Failed to process queued messages:", error)
+					})
+				})
 				.catch((error) => {
 					console.error("[ExecuteCommandTool] Failed to flush final command_output:", error)
 				})
