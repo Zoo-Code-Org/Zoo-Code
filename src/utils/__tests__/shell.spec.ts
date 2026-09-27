@@ -28,6 +28,9 @@ vi.mock("path", async () => {
 	}
 })
 
+// Captured before any test spies patch it, so a suite can restore real profile resolution.
+const getProfileShellOriginal = Terminal.getProfileShell.bind(Terminal)
+
 describe("Shell Detection Tests", () => {
 	let originalPlatform: string
 	let originalEnv: NodeJS.ProcessEnv
@@ -82,6 +85,7 @@ describe("Shell Detection Tests", () => {
 		// Clear Zoo profile override and execa shell path between tests.
 		Terminal.setTerminalProfile(undefined)
 		BaseTerminal.setExecaShellPath(undefined)
+		BaseTerminal.setShellIntegrationDisabled(false)
 	})
 
 	afterEach(() => {
@@ -90,6 +94,7 @@ describe("Shell Detection Tests", () => {
 		vscode.workspace.getConfiguration = originalGetConfig
 		Terminal.setTerminalProfile(undefined)
 		BaseTerminal.setExecaShellPath(undefined)
+		BaseTerminal.setShellIntegrationDisabled(false)
 		vi.clearAllMocks()
 	})
 
@@ -593,6 +598,167 @@ describe("Shell Detection Tests", () => {
 			mockVsCodeConfig("linux", null, {})
 			BaseTerminal.setExecaShellPath("/opt/evil/shell")
 			expect(getShell()).toBe("/bin/bash")
+		})
+	})
+
+	describe("Inline Terminal (execa default shell) — issue #1568", () => {
+		beforeEach(() => {
+			// Earlier suites leak a getProfileShell spy (their afterEach does not
+			// restore spies); force the unpatched implementation in this block.
+			vi.spyOn(Terminal, "getProfileShell").mockImplementation(getProfileShellOriginal)
+		})
+
+		it("win32: reports COMSPEC cmd.exe, not the VS Code PowerShell profile", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation(
+				(p) => String(p) === "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+			)
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+			})
+			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
+		})
+
+		it("win32: without COMSPEC reports the safe cmd.exe default", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockReturnValue(false)
+			mockVsCodeConfig("windows", null, {})
+			// If the COMSPEC fallback ever resolved falsy, resolution would leak
+			// into the userInfo step; the /bin/zsh stub makes that observable.
+			vi.mocked(userInfo).mockReturnValue({
+				uid: 1000,
+				gid: 1000,
+				username: "tester",
+				homedir: "C:\\Users\\tester",
+				shell: "/bin/zsh",
+			})
+			delete process.env.COMSPEC
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
+		})
+
+		it("win32: explicit execa shell path wins over the inline default", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			mockVsCodeConfig("windows", null, {})
+			BaseTerminal.setExecaShellPath("C:\\Program Files\\Git\\bin\\bash.exe")
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("C:\\Program Files\\Git\\bin\\bash.exe")
+		})
+
+		it("win32: non-allowlisted COMSPEC is gated to the safe cmd.exe default", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockReturnValue(false)
+			mockVsCodeConfig("windows", null, {})
+			process.env.COMSPEC = "C:\\Custom\\cmd.exe"
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
+		})
+
+		it("win32: lowercase COMSPEC passes the case-insensitive allowlist verbatim", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockReturnValue(false)
+			mockVsCodeConfig("windows", null, {})
+			process.env.COMSPEC = "c:\\windows\\system32\\cmd.exe"
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("c:\\windows\\system32\\cmd.exe")
+		})
+
+		it("win32: Zoo profile override is ignored when inline is on", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation((p) => String(p) === "C:\\Program Files\\Git\\bin\\bash.exe")
+			mockVsCodeConfig("windows", null, {
+				"Git Bash": { path: "C:\\Program Files\\Git\\bin\\bash.exe" },
+			})
+			Terminal.setTerminalProfile("Git Bash")
+			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
+		})
+
+		it("darwin: reports /bin/sh even when userInfo().shell is /bin/zsh", () => {
+			Object.defineProperty(process, "platform", { value: "darwin" })
+			mockVsCodeConfig("osx", null, {})
+			vi.mocked(userInfo).mockReturnValue({
+				uid: 1000,
+				gid: 1000,
+				username: "tester",
+				homedir: "/home/tester",
+				shell: "/bin/zsh",
+			})
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("/bin/sh")
+		})
+
+		it("linux: reports /bin/sh even when SHELL env is /usr/bin/fish", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			mockVsCodeConfig("linux", null, {})
+			process.env.SHELL = "/usr/bin/fish"
+			BaseTerminal.setShellIntegrationDisabled(true)
+			expect(getShell()).toBe("/bin/sh")
+		})
+
+		it("win32: inline off still reports the VS Code PowerShell profile", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation(
+				(p) => String(p) === "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+			)
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+			})
+			BaseTerminal.setShellIntegrationDisabled(false)
+			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+		})
+	})
+
+	// --------------------------------------------------------------------------
+	// Unseeded static default
+	// --------------------------------------------------------------------------
+	describe("Unseeded inline-terminal default", () => {
+		// A reset module registry reproduces the headless host state: no
+		// resolveWebviewView or updateSettings ever seeds the static, so the
+		// declaration defaults are exactly what a fresh process starts with.
+		it("fresh module exposes inline-terminal default matching the execution default", async () => {
+			vi.resetModules()
+			const { BaseTerminal: FreshBaseTerminal } = await import("../../integrations/terminal/BaseTerminal")
+			expect(FreshBaseTerminal.getShellIntegrationDisabled()).toBe(true)
+		})
+
+		it("unseeded static reports the execa shell, not the VS Code profile", async () => {
+			vi.resetModules()
+			Object.defineProperty(process, "platform", { value: "win32" })
+			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
+			const psPath = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+			// A freshly imported shell.ts resolves its own imports from the reset
+			// registry, so the stubs below must target that generation. The profile
+			// must actually resolve (existsSync true): a non-inline regression would
+			// then report the profile path instead of COMSPEC and fail this test,
+			// whereas a failed profile resolution would mask it via the COMSPEC env.
+			const freshFs = await import("fs")
+			vi.mocked(freshFs.existsSync).mockImplementation((p) => String(p) === psPath)
+			// Object.assign avoids a type assertion: the fresh mock's getConfiguration
+			// carries the generic inspect<T> signature, which a plain literal stub
+			// cannot satisfy without widening.
+			const freshVscode = await import("vscode")
+			Object.assign(freshVscode.workspace, {
+				getConfiguration: (section?: string) => ({
+					get: () => undefined,
+					has: () => false,
+					inspect: (key: string) => {
+						if (section === "terminal.integrated" && key === "defaultProfile.windows") {
+							return { key, globalValue: "PowerShell" }
+						}
+						if (section === "terminal.integrated.profiles" && key === "windows") {
+							return { key, globalValue: { PowerShell: { path: psPath } } }
+						}
+						return undefined
+					},
+					update: async () => {},
+				}),
+			})
+			const { getShell: freshGetShell } = await import("../shell")
+			expect(freshGetShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 	})
 })

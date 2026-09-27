@@ -11,6 +11,13 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
  * Handles loading, validating, and providing access to configuration values.
  */
 export class CodeIndexConfigManager {
+	private _isConfigurationLoaded = false
+
+	/** Whether at least one full asynchronous configuration load has succeeded. */
+	public get isConfigurationLoaded(): boolean {
+		return this._isConfigurationLoaded
+	}
+
 	private codebaseIndexEnabled: boolean = false
 	private embedderProvider: EmbedderProvider = providerIdentifiers.openai
 	private modelId?: string
@@ -207,7 +214,7 @@ export class CodeIndexConfigManager {
 
 		const requiresRestart = this.doesConfigChangeRequireRestart(previousConfigSnapshot)
 
-		return {
+		const result = {
 			configSnapshot: previousConfigSnapshot,
 			currentConfig: {
 				isConfigured: this.isConfigured(),
@@ -228,6 +235,8 @@ export class CodeIndexConfigManager {
 			},
 			requiresRestart,
 		}
+		this._isConfigurationLoaded = true
+		return result
 	}
 
 	/**

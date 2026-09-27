@@ -2,6 +2,8 @@ import axios from "axios"
 import { ModelInfo, ollamaDefaultModelInfo } from "@roo-code/types"
 import { z } from "zod"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 const OllamaModelDetailsSchema = z.object({
 	family: z.string(),
 	families: z.array(z.string()).nullable().optional(),
@@ -107,6 +109,7 @@ export function isIpv4LoopbackHost(host: string): boolean {
 export async function getOllamaModels(
 	baseUrl = "http://localhost:11434",
 	apiKey?: string,
+	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
@@ -135,7 +138,11 @@ export async function getOllamaModels(
 		const cleartextLoopback = credentialGated && new URL(baseUrl).protocol === "http:"
 		const proxyConfig: { proxy?: false } = cleartextLoopback ? { proxy: false } : {}
 
-		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers, ...proxyConfig })
+		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, {
+			headers,
+			...proxyConfig,
+			signal: opts?.signal,
+		})
 		const parsedResponse = OllamaModelsResponseSchema.safeParse(response.data)
 		const modelInfoPromises = []
 
@@ -148,7 +155,7 @@ export async function getOllamaModels(
 							{
 								model: ollamaModel.model,
 							},
-							{ headers, ...proxyConfig },
+							{ headers, ...proxyConfig, signal: opts?.signal },
 						)
 						.then((ollamaModelInfo) => {
 							const modelInfo = parseOllamaModel(ollamaModelInfo.data)
@@ -180,6 +187,11 @@ export async function getOllamaModels(
 			)
 		}
 	}
+
+	// The per-model fan-out tolerates individual request failures, so an abort that
+	// fires mid-fan-out surfaces through those swallowed rejections; without this
+	// guard the caller would receive a partial catalog as a successful result.
+	throwIfAborted(opts?.signal)
 
 	return models
 }
