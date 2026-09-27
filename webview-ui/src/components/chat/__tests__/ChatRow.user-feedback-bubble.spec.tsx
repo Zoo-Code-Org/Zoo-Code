@@ -129,4 +129,27 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(screen.queryByText("chat:feedback.youSaid")).not.toBeInTheDocument()
 		expect(screen.queryByLabelText("User icon")).not.toBeInTheDocument()
 	})
+
+	it("enters edit mode when the edit action is clicked", () => {
+		const { container } = renderRow(makeUserFeedback())
+
+		const editButton = container.querySelector('[aria-label="Edit message icon"]') as HTMLElement | null
+		expect(editButton).toBeTruthy()
+		fireEvent.click(editButton!)
+
+		// Clicking edit enters inline edit mode for the feedback message
+		const textarea = container.querySelector("textarea") as HTMLTextAreaElement | null
+		expect(textarea).toBeTruthy()
+	})
+
+	it("deletes the message when the delete action is clicked", () => {
+		mockPostMessage.mockClear()
+		const { container } = renderRow(makeUserFeedback())
+
+		const deleteButton = container.querySelector('[aria-label="Delete message icon"]') as HTMLElement | null
+		expect(deleteButton).toBeTruthy()
+		fireEvent.click(deleteButton!)
+
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "deleteMessage", value: 1 })
+	})
 })
