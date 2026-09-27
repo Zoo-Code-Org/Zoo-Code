@@ -28,8 +28,8 @@ class TestProvider extends BaseProvider {
 	}
 
 	// Expose protected method for testing
-	public testConvertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
-		return this.convertToolsForOpenAI(tools)
+	public testConvertToolsForOpenAI(tools: any[] | undefined, strict?: boolean): any[] | undefined {
+		return this.convertToolsForOpenAI(tools, strict)
 	}
 }
 
@@ -265,6 +265,56 @@ describe("BaseProvider", () => {
 
 			// MCP tools pass through original parameters in base-provider
 			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+		})
+
+		it("should set strict: false and preserve declared schema when strict is disabled", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "Read a file",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string" },
+								offset: { type: "integer" },
+							},
+							required: ["path"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools, false)
+
+			expect(result?.[0].function.strict).toBe(false)
+			// Declared schema preserved: original required array, no additionalProperties coercion
+			expect(result?.[0].function.parameters).toEqual(tools[0].function.parameters)
+		})
+
+		it("should still set strict: false for MCP tools when strict is disabled", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "mcp--github--get_me",
+						description: "Get current user",
+						parameters: {
+							type: "object",
+							properties: {
+								token: { type: "string" },
+							},
+							required: ["token"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools, false)
+
+			expect(result?.[0].function.strict).toBe(false)
+			expect(result?.[0].function.parameters).toEqual(tools[0].function.parameters)
 		})
 
 		it("should preserve non-function tools unchanged", () => {

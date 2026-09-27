@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import type { ModelInfo } from "@roo-code/types"
+import { DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS, type ModelInfo } from "@roo-code/types"
 
 import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { ApiStream } from "../transform/stream"
@@ -25,9 +25,16 @@ export abstract class BaseProvider implements ApiHandler {
 	/**
 	 * Converts an array of tools to be compatible with OpenAI's strict mode.
 	 * Filters for function tools, applies schema conversion to their parameters,
-	 * and ensures all tools have consistent strict: true values.
+	 * and ensures all tools have consistent strict values.
+	 *
+	 * Pass strict=false to serve endpoints that reject strict: true (e.g.
+	 * strict-unaware OpenAI-compatible proxies): non-MCP tools are then sent
+	 * with strict: false and their declared schemas are preserved as-is.
 	 */
-	protected convertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
+	protected convertToolsForOpenAI(
+		tools: any[] | undefined,
+		strict: boolean = DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
+	): any[] | undefined {
 		if (!tools) {
 			return undefined
 		}
@@ -41,14 +48,19 @@ export abstract class BaseProvider implements ApiHandler {
 			// to preserve optional parameters from the MCP server schema
 			const isMcp = isMcpTool(tool.function.name)
 
+			// Strict mode also rewrites the schema (all properties become
+			// required). When disabled, the declared schema is preserved as-is,
+			// retaining every original required constraint (e.g. nanogpt).
+			const useStrict = !isMcp && strict
+
 			return {
 				...tool,
 				function: {
 					...tool.function,
-					strict: !isMcp,
-					parameters: isMcp
-						? tool.function.parameters
-						: this.convertToolSchemaForOpenAI(tool.function.parameters),
+					strict: useStrict,
+					parameters: useStrict
+						? this.convertToolSchemaForOpenAI(tool.function.parameters)
+						: tool.function.parameters,
 				},
 			}
 		})

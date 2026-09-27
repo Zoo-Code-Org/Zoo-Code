@@ -6,6 +6,14 @@ import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinit
 
 export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
 
+/**
+ * Default for the OpenAI `openAiStrictToolSchemas` setting.
+ * When true (default), non-MCP tools are sent with strict: true and their
+ * schemas are normalized for OpenAI strict mode. Some OpenAI-compatible
+ * proxies reject strict: true; set this to false for those endpoints.
+ */
+export const DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS = true
+
 const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
 	// Prototype-pollution defenses; remaining keys are request-owned, including tool-call protocol controls.
 	"__proto__",
@@ -83,6 +91,7 @@ export const openAiProviderDefinition = createProviderDefinition({
 		openAiBaseUrl: z.string().optional(),
 		openAiApiKey: z.string().optional(),
 		openAiR1FormatEnabled: z.boolean().optional(),
+		openAiStrictToolSchemas: z.boolean().optional(),
 		[OPEN_AI_MODEL_ID_FIELD]: z.string().optional(),
 		openAiCustomModelInfo: modelInfoSchema.nullish(),
 		openAiUseAzure: z.boolean().optional(),

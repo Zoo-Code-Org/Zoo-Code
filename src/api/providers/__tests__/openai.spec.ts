@@ -1738,6 +1738,93 @@ describe("OpenAiHandler", () => {
 	})
 })
 
+describe("OpenAiHandler - strict tool schemas", () => {
+	const systemPrompt = "You are a helpful assistant."
+	const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello!" }]
+	const tools: OpenAI.Chat.ChatCompletionFunctionTool[] = [
+		{
+			type: "function",
+			function: {
+				name: "test_tool",
+				description: "A test tool",
+				parameters: {
+					type: "object",
+					properties: {
+						path: { type: "string" },
+						offset: { type: "integer" },
+					},
+					required: ["path"],
+				},
+			},
+		},
+	]
+	const baseOptions = () =>
+		makeApiHandlerOptions({
+			openAiApiKey: "test-api-key",
+			openAiModelId: "gpt-4",
+			openAiBaseUrl: "https://api.openai.com/v1",
+		})
+
+	beforeEach(() => {
+		mockCreate.mockClear()
+	})
+
+	it("sends strict: true with normalized schemas by default", async () => {
+		const handler = new OpenAiHandler(baseOptions())
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools).toHaveLength(1)
+		expect(request.tools[0].function.strict).toBe(true)
+		expect(request.tools[0].function.parameters.required).toEqual(["path", "offset"])
+		expect(request.tools[0].function.parameters.additionalProperties).toBe(false)
+	})
+
+	it("sends strict: false with the declared schema when openAiStrictToolSchemas is false", async () => {
+		const handler = new OpenAiHandler({ ...baseOptions(), openAiStrictToolSchemas: false })
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		// Declared schema preserved: original required array, no additionalProperties coercion
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
+	it("propagates a gateway 400 that rejects strict tool schemas", async () => {
+		const strictRejection = Object.assign(
+			new Error("strict=true requires generated function arguments to satisfy the declared JSON Schema"),
+			{ status: 400 },
+		)
+		mockCreate.mockRejectedValueOnce(strictRejection)
+
+		const handler = new OpenAiHandler({ ...baseOptions(), openAiStrictToolSchemas: true })
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+
+		let caught: unknown
+		try {
+			await collectStream(stream)
+		} catch (error) {
+			caught = error
+		}
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).message).toContain("OpenAI completion error")
+		expect((caught as Error & { status?: number }).status).toBe(400)
+	})
+
+	it("omits tools when the request carries none", async () => {
+		const handler = new OpenAiHandler(baseOptions())
+		const stream = handler.createMessage(systemPrompt, messages)
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools).toBeUndefined()
+	})
+})
+
 describe("getOpenAiModels", () => {
 	beforeEach(() => {
 		vi.mocked(axios.get).mockClear()

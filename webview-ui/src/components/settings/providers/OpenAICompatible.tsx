@@ -12,6 +12,7 @@ import {
 	azureOpenAiDefaultApiVersion,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
+	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OpenAiModelsMessageType,
 	parseOpenAiExtraBody,
 } from "@roo-code/types"
@@ -187,6 +188,16 @@ export const OpenAICompatible = ({
 				</Checkbox>
 				<div className="text-sm text-vscode-descriptionForeground ml-6">
 					{t("settings:includeMaxOutputTokensDescription")}
+				</div>
+			</div>
+			<div>
+				<Checkbox
+					checked={apiConfiguration?.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS}
+					onChange={handleInputChange("openAiStrictToolSchemas", noTransform)}>
+					{t("settings:providers.openAiStrictToolSchemas")}
+				</Checkbox>
+				<div className="text-sm text-vscode-descriptionForeground ml-6">
+					{t("settings:providers.openAiStrictToolSchemasDescription")}
 				</div>
 			</div>
 			<Checkbox
