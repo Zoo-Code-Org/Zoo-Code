@@ -37,8 +37,10 @@ describe("Task.finalizeStreamingToolCallById", () => {
 		const finalToolUse: ToolUse = { type: "tool_use", name: "read_file", params: {}, partial: false }
 		const finalizeSpy = vi.spyOn(NativeToolCallParser, "finalizeStreamingToolCall").mockReturnValue(finalToolUse)
 
-		const stub = {
-			assistantMessageContent: [{ type: "tool_use", id: "call_abc", name: "read_file", partial: true }],
+		const stub: FinalizeStub = {
+			assistantMessageContent: [
+				{ type: "tool_use", id: "call_abc", name: "read_file", params: {}, partial: true },
+			],
 			streamingToolCallIndices: new Map<string, number>([["call_abc", 0]]),
 			userMessageContentReady: true,
 			presentAssistantMessageSafe: vi.fn(),
@@ -65,7 +67,7 @@ describe("Task.finalizeStreamingToolCallById", () => {
 			params: {},
 			partial: true,
 		}
-		const stub = {
+		const stub: FinalizeStub = {
 			assistantMessageContent: [existingBlock],
 			streamingToolCallIndices: new Map<string, number>([["call_bad", 0]]),
 			userMessageContentReady: true,
@@ -106,8 +108,10 @@ describe("Task.finalizeStreamingToolCallById", () => {
 			.mockReturnValueOnce(finalToolUse)
 			.mockReturnValue(null)
 
-		const stub = {
-			assistantMessageContent: [{ type: "tool_use", id: "call_once", name: "read_file", partial: true }],
+		const stub: FinalizeStub = {
+			assistantMessageContent: [
+				{ type: "tool_use", id: "call_once", name: "read_file", params: {}, partial: true },
+			],
 			streamingToolCallIndices: new Map<string, number>([["call_once", 0]]),
 			userMessageContentReady: true,
 			presentAssistantMessageSafe: vi.fn(),

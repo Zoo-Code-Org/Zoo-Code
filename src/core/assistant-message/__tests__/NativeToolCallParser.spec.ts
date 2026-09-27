@@ -289,6 +289,69 @@ describe("NativeToolCallParser", () => {
 	})
 
 	describe("processStreamingChunk", () => {
+		it("preserves read_file arguments that arrive before the call id and name", () => {
+			const scope = NativeToolCallParser.createScope()
+			const argumentsJson = JSON.stringify({ path: "src/leading.ts", mode: "slice", offset: 1, limit: 2000 })
+			const split = 24
+
+			expect(
+				NativeToolCallParser.processRawChunk({ index: 0, arguments: argumentsJson.slice(0, split) }, scope),
+			).toEqual([])
+
+			const identifiedEvents = NativeToolCallParser.processRawChunk(
+				{ index: 0, id: "call_late_identity", name: "read_file" },
+				scope,
+			)
+			expect(identifiedEvents).toEqual([
+				{ type: "tool_call_start", id: "call_late_identity", name: "read_file" },
+				{
+					type: "tool_call_delta",
+					id: "call_late_identity",
+					delta: argumentsJson.slice(0, split),
+				},
+			])
+
+			NativeToolCallParser.startStreamingToolCall("call_late_identity", "read_file", scope)
+			for (const event of identifiedEvents) {
+				if (event.type === "tool_call_delta") {
+					NativeToolCallParser.processStreamingChunk(event.id, event.delta, scope)
+				}
+			}
+
+			const trailingEvents = NativeToolCallParser.processRawChunk(
+				{ index: 0, arguments: argumentsJson.slice(split) },
+				scope,
+			)
+			expect(trailingEvents).toEqual([
+				{
+					type: "tool_call_delta",
+					id: "call_late_identity",
+					delta: argumentsJson.slice(split),
+				},
+			])
+			for (const event of trailingEvents) {
+				if (event.type === "tool_call_delta") {
+					NativeToolCallParser.processStreamingChunk(event.id, event.delta, scope)
+				}
+			}
+
+			expect(NativeToolCallParser.finalizeRawChunks(scope)).toEqual([
+				{ type: "tool_call_end", id: "call_late_identity" },
+			])
+			const result = NativeToolCallParser.finalizeStreamingToolCall("call_late_identity", scope)
+			expect(result?.type).toBe("tool_use")
+			if (result?.type === "tool_use") {
+				expect(result.nativeArgs).toEqual({ path: "src/leading.ts", mode: "slice", offset: 1, limit: 2000 })
+			}
+		})
+
+		it("does not emit an end event for argument chunks that never receive an identity", () => {
+			const scope = NativeToolCallParser.createScope()
+			NativeToolCallParser.processRawChunk({ index: 0, arguments: '{"path":"orphan.ts"}' }, scope)
+
+			expect(NativeToolCallParser.finalizeRawChunks(scope)).toEqual([])
+		})
+
 		it("retains peer calls until each call in a scope is finalized", () => {
 			const scope = NativeToolCallParser.createScope()
 			NativeToolCallParser.startStreamingToolCall("call_first", "read_file", scope)
@@ -391,13 +454,13 @@ describe("NativeToolCallParser", () => {
 			expect(NativeToolCallParser.finalizeRawChunks(firstScope)).toEqual([])
 			expect(NativeToolCallParser.finalizeStreamingToolCall("call_first", firstScope)).toBeNull()
 			expect(
-				NativeToolCallParser.processRawChunk({ index: 0, arguments: "ignored-after-cleanup" }, firstScope),
+				NativeToolCallParser.processRawChunk({ index: 0, arguments: "buffered-after-cleanup" }, firstScope),
 			).toEqual([])
 			expect(
 				NativeToolCallParser.processRawChunk({ index: 0, id: "call_reprobe", name: "read_file" }, firstScope),
 			).toEqual([
 				{ type: "tool_call_start", id: "call_reprobe", name: "read_file" },
-				{ type: "tool_call_delta", id: "call_reprobe", delta: "ignored-after-cleanup" },
+				{ type: "tool_call_delta", id: "call_reprobe", delta: "buffered-after-cleanup" },
 			])
 		})
 

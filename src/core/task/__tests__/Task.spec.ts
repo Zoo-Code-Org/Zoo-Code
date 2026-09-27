@@ -576,6 +576,47 @@ describe("Cline", () => {
 	})
 
 	describe("native tool-call request isolation", () => {
+		it("reassembles Astra-style read_file arguments that arrive before tool identity", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "late tool identity test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{ type: "tool_call_partial", index: 0, arguments: '{"path":"scripts/final-review-' },
+					{ type: "tool_call_partial", index: 0, id: "call_astra_read", name: "read_file" },
+					{
+						type: "tool_call_partial",
+						index: 0,
+						arguments: 'smoke/driver.mts","mode":"slice","offset":1,"limit":2000}',
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "review the driver" }])
+
+			const assistantMessage = task.apiConversationHistory.find((message) => message.role === "assistant")
+			expect(assistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_astra_read",
+					name: "read_file",
+					input: {
+						path: "scripts/final-review-smoke/driver.mts",
+						mode: "slice",
+						offset: 1,
+						limit: 2000,
+					},
+				},
+			])
+		})
+
 		it("keeps overlapping Task parser state scoped to each request", async () => {
 			const firstTask = new Task({
 				provider: mockProvider,
