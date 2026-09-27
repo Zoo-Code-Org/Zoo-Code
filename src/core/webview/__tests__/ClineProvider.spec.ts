@@ -32,6 +32,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 import { t } from "../../../i18n"
+import type { MdmService } from "../../../services/mdm/MdmService"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -908,10 +909,13 @@ describe("ClineProvider", () => {
 	})
 
 	test("postStateToWebview does not force action navigation for non-compliant MDM state", async () => {
+		// Double assertion (last resort, per AGENTS.md): MdmService's private constructor and
+		// private members block a single structural assertion, but the ClineProvider ctor only
+		// consumes the two MDM methods this test stubs.
 		const mdmService = {
 			requiresCloudAuth: vi.fn().mockReturnValue(true),
 			isCompliant: vi.fn().mockReturnValue({ compliant: false, reason: "auth required" }),
-		} as any
+		} as unknown as MdmService
 
 		provider = new ClineProvider(
 			mockContext,
@@ -922,7 +926,9 @@ describe("ClineProvider", () => {
 		)
 
 		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => undefined)
-		vi.spyOn(provider as any, "getStateToPostToWebview").mockResolvedValue({ version: "1.0.0" })
+		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue({
+			version: "1.0.0",
+		} as unknown as ExtensionState)
 
 		await provider.postStateToWebview()
 
