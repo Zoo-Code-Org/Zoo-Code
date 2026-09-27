@@ -2996,6 +2996,26 @@ describe("ClineProvider", () => {
 			expect(provider.getProviderProfileEntries()).toEqual([otherProfile])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "other-config")
 		})
+
+		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
+			Object.assign(provider, {
+				providerSettingsManager: {
+					deleteConfig: vi.fn().mockRejectedValue(new Error("Config 'other-config' not found")),
+					listConfig: vi.fn().mockResolvedValue([currentProfile, otherProfile]),
+				},
+			})
+
+			const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
+			const updateCallsBefore = vi.mocked(mockContext.globalState.update).mock.calls.length
+
+			await expect(provider.deleteProviderProfile(otherProfile)).rejects.toThrow(
+				"Config 'other-config' not found",
+			)
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("other-config")
+			expect(setValuesSpy).not.toHaveBeenCalled()
+			expect(vi.mocked(mockContext.globalState.update).mock.calls.length).toBe(updateCallsBefore)
+		})
 	})
 })
 
