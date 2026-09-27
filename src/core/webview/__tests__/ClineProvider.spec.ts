@@ -2226,16 +2226,13 @@ describe("ClineProvider", () => {
 				openRouterApiKey: "profile-a-key",
 			})
 
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("profile-b-id"),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Typed spies on the real manager (instance-scoped): the upsert-activate path
+			// reads only these methods, so no manager replacement is needed.
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("profile-b-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			await provider.upsertProviderProfile("profile-b", { apiProvider: providerIdentifiers.anthropic }, true)
@@ -2258,20 +2255,17 @@ describe("ClineProvider", () => {
 				openRouterApiKey: "profile-a-key",
 			})
 
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				activateProfile: vi.fn().mockResolvedValue({
-					name: "profile-b",
-					id: "profile-b-id",
-					apiProvider: providerIdentifiers.anthropic,
-				}),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Typed spies on the real manager (instance-scoped): the direct-activation path
+			// reads only these methods, so no manager replacement is needed.
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-b",
+				id: "profile-b-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			// The direct-activation path (activateProviderProfileUnlocked) carries its own
