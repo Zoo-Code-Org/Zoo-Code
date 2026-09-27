@@ -343,6 +343,46 @@ describe("McpHub", () => {
 			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
 		})
 
+		it("writes the default stub when the existing mcpServers value is null", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// `typeof null === "object"` and `!Array.isArray(null)` both hold, so only
+			// the truthy check on mcpServers stops a null map from being written back
+			// to disk: McpSettingsSchema (z.record) rejects `{ mcpServers: null }` on
+			// the next load, so the stub must replace it instead of preserving it.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: null }))
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the locked read encounters malformed JSON", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// A torn or foreign write leaves the file unparseable. JSON.parse throws
+			// SyntaxError, which the safeWriteJson merge contract treats as a
+			// recoverable absence (existing = null) rather than an I/O failure — the
+			// stub is written and creation succeeds.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce("{ mcpServers: not-json")
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
 		it("rejects creation when the locked read fails with an I/O error (EACCES)", async () => {
 			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
 

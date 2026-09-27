@@ -136,7 +136,7 @@
 	},
 	"api/providers/__tests__/bedrock.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 38
+			"count": 37
 		}
 	},
 	"api/providers/__tests__/deepseek.spec.ts": {
@@ -761,7 +761,7 @@
 	},
 	"core/prompts/tools/filter-tools-for-mode.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 1
 		}
 	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
@@ -966,7 +966,7 @@
 	},
 	"core/tools/__tests__/mcpServerRestriction.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 6
 		}
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
@@ -1041,7 +1041,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 37
+			"count": 27
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
@@ -1301,7 +1301,7 @@
 	},
 	"services/code-index/__tests__/manager.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 89
+			"count": 87
 		}
 	},
 	"services/code-index/__tests__/orchestrator.spec.ts": {

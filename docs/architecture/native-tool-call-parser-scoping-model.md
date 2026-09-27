@@ -12,7 +12,7 @@ For focused debugging, run this submodel directly with:
 pnpm parser-scope:model-check
 ```
 
-The command is composed into the same verification suite, but this remains a separate protocol and state space from the persisted task lifecycle model and shared-store concurrency model. It owns its parser-scoping invariants and adds no parser state to `HistoryItem` or `taskLifecycle.ts`; instead, it replays the public production `NativeToolCallParser` APIs using two independent scope objects.
+The command runs this check sequentially with the other lifecycle checks, but this remains a separate protocol and state space from the persisted task lifecycle model and shared-store concurrency model. It owns its parser-scoping invariants and adds no parser state to `HistoryItem` or `taskLifecycle.ts`; instead, it replays the public production `NativeToolCallParser` APIs using two independent scope objects. The authoritative [lifecycle coverage audit and issue tracker](./task-lifecycle-model.md#coverage-audit) records its evidence class and cross-model limits.
 
 ## Bounds and replay
 
