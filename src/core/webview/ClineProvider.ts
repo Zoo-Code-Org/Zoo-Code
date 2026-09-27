@@ -1146,15 +1146,15 @@ export class ClineProvider
 					this.log("Disposing ClineProvider instance for tab view")
 					await this.dispose()
 				} else {
-					this.log("Clearing webview resources for sidebar view")
-					this.clearWebviewResources()
 					if (this.view === webviewView) {
+						this.log("Clearing webview resources for sidebar view")
+						this.clearWebviewResources()
 						// Drop the disposed view so nothing keeps polling it
 						// (e.g. the recovery watchdog) for the provider's lifetime.
 						this.view = undefined
+						// Reset current workspace manager reference when view is disposed
+						this.codeIndexManager = undefined
 					}
-					// Reset current workspace manager reference when view is disposed
-					this.codeIndexManager = undefined
 				}
 			},
 			null,
@@ -3452,12 +3452,23 @@ export class ClineProvider
 		// Capture the epoch so a disposal or view replacement can invalidate
 		// this operation while the HTML is being generated.
 		const epoch = this.webviewRecoveryEpoch
+		// A heartbeat that arrives while the HTML is being generated means the
+		// renderer is alive again; comparing against the timestamp captured here
+		// lets the post-await check skip the reload in that case.
+		const heartbeatAtRecoveryStart = this.lastWebviewHeartbeatAt
 		try {
 			const html = await this.getWebviewHtml(view.webview)
-			// The await yields; assigning html now that the provider is disposed
-			// or the watched view was disposed/replaced would touch a dead or
-			// unrelated webview.
-			if (this._disposed || this.webviewRecoveryEpoch !== epoch || this.view !== view) {
+			// The await yields; assigning html now that the provider is disposed,
+			// the watched view was disposed/replaced, the renderer heartbeat
+			// recovered, or the view hid again would either touch a dead or
+			// unrelated webview or reload one that no longer needs recovery.
+			if (
+				this._disposed ||
+				this.webviewRecoveryEpoch !== epoch ||
+				this.view !== view ||
+				this.lastWebviewHeartbeatAt !== heartbeatAtRecoveryStart ||
+				view.visible !== true
+			) {
 				return
 			}
 			view.webview.html = html

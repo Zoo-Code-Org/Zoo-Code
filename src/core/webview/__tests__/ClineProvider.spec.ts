@@ -837,19 +837,24 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
 
-			let finishReload: (state: ExtensionState) => void = () => {}
-			vi.spyOn(provider, "getState").mockImplementation(
+			// Defer the recovery reload's own HTML generation so the test proves
+			// the disposal lands while recovery is in flight, not before it starts.
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
 				() =>
-					new Promise<ExtensionState>((resolve) => {
+					new Promise<string>((resolve) => {
 						finishReload = resolve
 					}),
 			)
 
 			await vi.advanceTimersByTimeAsync(120_000)
+			// The stale heartbeat started a recovery reload, and its HTML
+			// generation is still pending.
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
 
 			disposeCallback()
-			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
@@ -859,15 +864,21 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
 
-			let finishReload: (state: ExtensionState) => void = () => {}
-			vi.spyOn(provider, "getState").mockImplementation(
+			// Defer the recovery reload's own HTML generation so the test proves
+			// the replacement lands while recovery is in flight, not before it
+			// starts.
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
 				() =>
-					new Promise<ExtensionState>((resolve) => {
+					new Promise<string>((resolve) => {
 						finishReload = resolve
 					}),
 			)
 
 			await vi.advanceTimersByTimeAsync(120_000)
+			// The stale heartbeat started a recovery reload, and its HTML
+			// generation is still pending.
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
 
 			// VS Code re-resolves a fresh view (e.g. sidebar re-opened) while the
@@ -885,7 +896,59 @@ describe("ClineProvider", () => {
 				visible: true,
 			}
 
-			finishReload({ apiConfiguration: {} } as unknown as ExtensionState)
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("skips the recovery reload when a heartbeat arrives while regenerating HTML", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// The renderer process reported in again while the recovery HTML was
+			// still being generated, so the webview is alive and must not reload.
+			provider.updateWebviewHeartbeat()
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("skips the recovery reload when the view hides while regenerating HTML", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// The view hid while the recovery HTML was still being generated; a
+			// hidden webview throttles heartbeats, so the stale heartbeat no
+			// longer proves a dead renderer.
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
