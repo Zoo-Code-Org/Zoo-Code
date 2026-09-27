@@ -395,7 +395,10 @@ describe("NativeToolCallParser", () => {
 			).toEqual([])
 			expect(
 				NativeToolCallParser.processRawChunk({ index: 0, id: "call_reprobe", name: "read_file" }, firstScope),
-			).toEqual([{ type: "tool_call_start", id: "call_reprobe", name: "read_file" }])
+			).toEqual([
+				{ type: "tool_call_start", id: "call_reprobe", name: "read_file" },
+				{ type: "tool_call_delta", id: "call_reprobe", delta: "ignored-after-cleanup" },
+			])
 		})
 
 		describe("read_file tool", () => {
@@ -459,32 +462,33 @@ describe("NativeToolCallParser", () => {
 		// Returns the ordered event types/ids plus the finalized tool uses by id.
 		const drive = (rawChunks: Array<{ index: number; id?: string; name?: string; arguments?: string }>) => {
 			const events: ToolCallStreamEvent[] = []
+			const scope = NativeToolCallParser.createScope()
 
 			const handleEvent = (event: ToolCallStreamEvent) => {
 				events.push(event)
 				if (event.type === "tool_call_start") {
-					NativeToolCallParser.startStreamingToolCall(event.id, event.name)
+					NativeToolCallParser.startStreamingToolCall(event.id, event.name, scope)
 				} else if (event.type === "tool_call_delta") {
-					NativeToolCallParser.processStreamingChunk(event.id, event.delta)
+					NativeToolCallParser.processStreamingChunk(event.id, event.delta, scope)
 				}
 			}
 
 			for (const chunk of rawChunks) {
-				for (const event of NativeToolCallParser.processRawChunk(chunk)) {
+				for (const event of NativeToolCallParser.processRawChunk(chunk, scope)) {
 					handleEvent(event)
 				}
 			}
 
 			// Task.ts finalizes any tool calls still open at stream end via
 			// finalizeRawChunks(), which emits the tool_call_end events.
-			for (const event of NativeToolCallParser.finalizeRawChunks()) {
+			for (const event of NativeToolCallParser.finalizeRawChunks(scope)) {
 				handleEvent(event)
 			}
 
 			const finalized = new Map<string, ReturnType<typeof NativeToolCallParser.finalizeStreamingToolCall>>()
 			const startIds = events.filter((e) => e.type === "tool_call_start").map((e) => e.id)
 			for (const id of startIds) {
-				finalized.set(id, NativeToolCallParser.finalizeStreamingToolCall(id))
+				finalized.set(id, NativeToolCallParser.finalizeStreamingToolCall(id, scope))
 			}
 
 			return { events, finalized }
@@ -623,6 +627,7 @@ describe("NativeToolCallParser", () => {
 		})
 
 		it("finalizeRawChunks() emits end events and guards against missing id", () => {
+			const scope = NativeToolCallParser.createScope()
 			// Simulate a started tool call: process chunks to populate state
 			const chunks = [
 				{ index: 0, id: "call_finalize", name: "read_file" },
@@ -632,18 +637,18 @@ describe("NativeToolCallParser", () => {
 
 			const events: Array<{ type: string; id?: string }> = []
 			for (const chunk of chunks) {
-				for (const event of NativeToolCallParser.processRawChunk(chunk)) {
+				for (const event of NativeToolCallParser.processRawChunk(chunk, scope)) {
 					events.push(event)
 					if (event.type === "tool_call_start") {
-						NativeToolCallParser.startStreamingToolCall(event.id, event.name)
+						NativeToolCallParser.startStreamingToolCall(event.id, event.name, scope)
 					} else if (event.type === "tool_call_delta") {
-						NativeToolCallParser.processStreamingChunk(event.id, event.delta)
+						NativeToolCallParser.processStreamingChunk(event.id, event.delta, scope)
 					}
 				}
 			}
 
 			// Now finalize the raw chunks to emit the end event
-			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks(scope)
 			for (const event of finalizeEvents) {
 				events.push(event)
 			}
@@ -654,7 +659,7 @@ describe("NativeToolCallParser", () => {
 			expect(ends[0].id).toBe("call_finalize")
 
 			// Finalize the tool call to ensure it contains the complete arguments
-			const result = NativeToolCallParser.finalizeStreamingToolCall("call_finalize")
+			const result = NativeToolCallParser.finalizeStreamingToolCall("call_finalize", scope)
 			expect(result?.type).toBe("tool_use")
 			if (result?.type === "tool_use") {
 				expect((result.nativeArgs as { path: string }).path).toBe("file.ts")
@@ -662,41 +667,41 @@ describe("NativeToolCallParser", () => {
 		})
 
 		it("finalizeRawChunks() does not emit end for tracker without id", () => {
+			const scope = NativeToolCallParser.createScope()
 			// Start a tracker with arguments but no id, then finalize
 			const chunks = [{ index: 0, arguments: '{"incomplete":true}' }]
 
 			for (const chunk of chunks) {
-				NativeToolCallParser.processRawChunk(chunk)
+				NativeToolCallParser.processRawChunk(chunk, scope)
 			}
 
 			// Finalize should not emit an end event if id was never set
-			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks(scope)
 			const ends = finalizeEvents.filter((e) => e.type === "tool_call_end")
 			expect(ends).toHaveLength(0)
 
-			NativeToolCallParser.clearRawChunkState()
+			NativeToolCallParser.clearRawChunkState(scope)
 		})
 
-		it("does not double-fire end events across processFinishReason and finalizeRawChunks", () => {
+		it("does not double-fire end events across repeated finalizeRawChunks calls", () => {
+			const scope = NativeToolCallParser.createScope()
 			// Drive a started tool call through the raw chunk path.
 			const chunks = [
 				{ index: 0, id: "call_dup", name: "read_file" },
 				{ index: 0, arguments: '{"path":"file.ts"}' },
 			]
 			for (const chunk of chunks) {
-				NativeToolCallParser.processRawChunk(chunk)
+				NativeToolCallParser.processRawChunk(chunk, scope)
 			}
 
-			// Task.ts emits ends via processFinishReason, then calls finalizeRawChunks
-			// unconditionally. Both must not emit an end for the same tracker.
-			const finishEvents = NativeToolCallParser.processFinishReason("tool_calls")
-			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+			const finishEvents = NativeToolCallParser.finalizeRawChunks(scope)
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks(scope)
 
 			const allEnds = [...finishEvents, ...finalizeEvents].filter((e) => e.type === "tool_call_end")
 			expect(allEnds).toHaveLength(1)
 			expect(allEnds[0].id).toBe("call_dup")
 
-			NativeToolCallParser.clearRawChunkState()
+			NativeToolCallParser.clearRawChunkState(scope)
 		})
 	})
 })
