@@ -244,6 +244,14 @@ test("coverage cache input contract", async (context) => {
 							throw new Error(`${taskName} hashes foreign spec ${packagePath}`)
 						}
 					}
+					// pr-review-state-workflow.test.ts reads root-level config outside
+					// the src/ package. It must be excluded from every Turbo lane and
+					// run in a dedicated non-Turbo CI step instead.
+					const turboExcludedSpecs = ["services/__tests__/pr-review-state-workflow.test.ts"]
+					for (const file of turboExcludedSpecs) {
+						if (Object.hasOwn(inputs, file))
+							throw new Error(`${taskName} hashes ${file}, which must run in a dedicated non-Turbo step`)
+					}
 				}
 			}
 		})
