@@ -1,4 +1,7 @@
+import { ContextProxy } from "../../../core/config/ContextProxy"
+import { makeExtensionContext } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
+import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
 import type { MockedClass } from "vitest"
 import * as path from "path"
@@ -126,7 +129,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 
 	beforeEach(() => {
 		// Clear all instances before each test
-		CodeIndexManager.disposeAll()
+		CodeIndexManagerRegistry.disposeAll()
 
 		const workspaceStateStore: Record<string, any> = {}
 		const globalStateStore: Record<string, any> = {}
@@ -160,11 +163,71 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			languageModelAccessInformation: {} as any,
 		}
 
-		manager = CodeIndexManager.getInstance(mockContext)!
+		manager = CodeIndexManagerRegistry.getOrCreate(mockContext)!
 	})
 
 	afterEach(() => {
-		CodeIndexManager.disposeAll()
+		CodeIndexManagerRegistry.disposeAll()
+	})
+
+	describe("configuration readiness", () => {
+		it("does not regain readiness when a detached configuration finishes loading", async () => {
+			let finishRefresh!: () => void
+			const contextProxy = new ContextProxy(makeExtensionContext())
+			vi.spyOn(contextProxy, "getGlobalState").mockReturnValue({ codebaseIndexEnabled: false })
+			vi.spyOn(contextProxy, "getSecret").mockReturnValue(undefined)
+			vi.spyOn(contextProxy, "refreshSecrets").mockReturnValue(
+				new Promise<void>((resolve) => {
+					finishRefresh = resolve
+				}),
+			)
+
+			const initialization = manager.initialize(contextProxy)
+			expect(manager.isConfigurationLoaded).toBe(false)
+			await manager.recoverFromError()
+			finishRefresh()
+			await initialization
+			expect(manager.isConfigurationLoaded).toBe(false)
+		})
+
+		it("keeps failed configuration unloaded until a settings refresh succeeds", async () => {
+			const error = new Error("secrets refresh failed")
+			const contextProxy = new ContextProxy(makeExtensionContext())
+			vi.spyOn(contextProxy, "getGlobalState").mockReturnValue({ codebaseIndexEnabled: false })
+			vi.spyOn(contextProxy, "getSecret").mockReturnValue(undefined)
+			vi.spyOn(contextProxy, "refreshSecrets").mockRejectedValueOnce(error).mockResolvedValue(undefined)
+
+			await expect(manager.initialize(contextProxy)).rejects.toThrow(error)
+			expect(manager.isConfigurationLoaded).toBe(false)
+			await manager.handleSettingsChange()
+			expect(manager.isConfigurationLoaded).toBe(true)
+			expect(manager.isInitialized).toBe(false)
+		})
+
+		it("marks disabled configuration loaded only after secrets refresh completes", async () => {
+			let finishRefresh!: () => void
+			const refresh = new Promise<void>((resolve) => {
+				finishRefresh = resolve
+			})
+			const contextProxy = new ContextProxy(makeExtensionContext())
+			vi.spyOn(contextProxy, "getGlobalState").mockReturnValue({ codebaseIndexEnabled: false })
+			vi.spyOn(contextProxy, "getSecret").mockReturnValue(undefined)
+			vi.spyOn(contextProxy, "refreshSecrets").mockReturnValue(refresh)
+
+			expect(manager.isConfigurationLoaded).toBe(false)
+			const initialization = manager.initialize(contextProxy)
+			expect(contextProxy.refreshSecrets).toHaveBeenCalledOnce()
+			expect(manager.isConfigurationLoaded).toBe(false)
+			finishRefresh()
+			await initialization
+
+			expect(manager.isConfigurationLoaded).toBe(true)
+			expect(manager.isFeatureEnabled).toBe(false)
+			expect(manager.isInitialized).toBe(false)
+
+			await manager.recoverFromError()
+			expect(manager.isConfigurationLoaded).toBe(false)
+		})
 	})
 
 	describe("handleSettingsChange", () => {
@@ -733,7 +796,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 		})
 
 		it("should store enablement per folder URI, not per window", async () => {
-			CodeIndexManager.disposeAll()
+			CodeIndexManagerRegistry.disposeAll()
 
 			const vscode = await import("vscode")
 
@@ -764,8 +827,8 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				{ uri: folderBUri, name: "folderB", index: 1 },
 			]
 
-			const managerA = CodeIndexManager.getInstance(sharedContext as any, folderAPath)!
-			const managerB = CodeIndexManager.getInstance(sharedContext as any, folderBPath)!
+			const managerA = CodeIndexManagerRegistry.getOrCreate(sharedContext, folderAPath)!
+			const managerB = CodeIndexManagerRegistry.getOrCreate(sharedContext, folderBPath)!
 
 			// Both start disabled (autoEnableDefault is false via globalState mock)
 			expect(managerA.isWorkspaceEnabled).toBe(false)
@@ -784,7 +847,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			expect(managerA.isWorkspaceEnabled).toBe(false)
 			expect(managerB.isWorkspaceEnabled).toBe(true)
 
-			CodeIndexManager.disposeAll()
+			CodeIndexManagerRegistry.disposeAll()
 		})
 	})
 

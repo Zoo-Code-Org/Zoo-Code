@@ -10,6 +10,7 @@ import {
 	globalSettingsSchema,
 	providerSettingsWithIdSchema,
 	isProviderName,
+	retiredProviderIdentifiers,
 	type GlobalSettings,
 	type ProviderSettingsWithId,
 } from "@roo-code/types"
@@ -114,7 +115,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 		let valueToValidate = rawValue
 
-		if (key === "imageGenerationProvider" && rawValue === "roo") {
+		if (key === "imageGenerationProvider" && rawValue === retiredProviderIdentifiers.roo) {
 			warnings.push(`Setting "${path}" used unsupported value "roo" and was cleared during import.`)
 			valueToValidate = undefined
 		}

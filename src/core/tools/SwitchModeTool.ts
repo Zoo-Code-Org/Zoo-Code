@@ -38,9 +38,7 @@ export class SwitchModeTool extends BaseTool<"switch_mode"> {
 				return
 			}
 
-			// Check if already in requested mode
-			// the task's own mode (awaits taskModeReady and applies the default slug) instead of the provider
-			// state, which may be stale or focused on another task.
+			// Mode belongs to the task; provider state may still reflect its parent.
 			const currentMode = await task.getTaskMode()
 
 			if (currentMode === mode_slug) {

@@ -38,7 +38,7 @@ describe("Kenari Fetchers", () => {
 
 			expect(mockedAxios.get).toHaveBeenCalledWith("https://kenari.id/v1/models", {
 				headers: { Authorization: "Bearer test-key" },
-				timeout: 10_000,
+				signal: undefined,
 			})
 
 			expect(Object.keys(models).sort()).toEqual(["claude-sonnet-5", "glm-5-2"])
@@ -100,6 +100,33 @@ describe("Kenari Fetchers", () => {
 
 			warnSpy.mockRestore()
 		})
+
+		it("forwards the caller's abort signal to the request", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+			const controller = new AbortController()
+
+			await getKenariModels("test-key", { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://kenari.id/v1/models", {
+				headers: { Authorization: "Bearer test-key" },
+				signal: controller.signal,
+			})
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getKenariModels("k", { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
 	})
 
 	describe("parseKenariModel", () => {
@@ -110,7 +137,7 @@ describe("Kenari Fetchers", () => {
 
 			expect(mockedAxios.get).toHaveBeenCalledWith("https://kenari.id/v1/models", {
 				headers: undefined,
-				timeout: 10_000,
+				signal: undefined,
 			})
 		})
 
