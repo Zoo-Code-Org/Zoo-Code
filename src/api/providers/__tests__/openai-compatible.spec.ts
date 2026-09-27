@@ -28,6 +28,7 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { OpenAICompatibleHandler, OpenAICompatibleConfig } from "../openai-compatible"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
+import type { LanguageModel } from "ai"
 
 /** Error shape produced when the upstream API responds with a 4xx/5xx status. */
 type StatusedError = Error & { status: number }
@@ -397,6 +398,34 @@ describe("OpenAICompatibleHandler", () => {
 			}
 			expect(thrownError.status).toBe(500)
 			expect(thrownError.message).toContain("TestProvider")
+		})
+
+		// The language-model lookup fails before generateText() is ever reached: the
+		// completePrompt try block must wrap that failure with status and provider name.
+		it("should wrap a getLanguageModel() failure with status and provider name", async () => {
+			const modelError = Object.assign(new Error("model unavailable"), { status: 401 })
+
+			class FailingModelHandler extends TestOpenAICompatibleHandler {
+				override getLanguageModel(): LanguageModel {
+					throw modelError
+				}
+			}
+			const failingHandler = new FailingModelHandler(mockOptions, mockConfig)
+
+			let thrownError: StatusedError | undefined
+			try {
+				await failingHandler.completePrompt("Test prompt")
+			} catch (e) {
+				thrownError = e as StatusedError
+			}
+
+			expect(thrownError).toBeInstanceOf(Error)
+			if (!thrownError) {
+				throw new Error("Expected completePrompt to throw")
+			}
+			expect(thrownError.status).toBe(401)
+			expect(thrownError.message).toContain("TestProvider")
+			expect(mockGenerateText).not.toHaveBeenCalled()
 		})
 	})
 })
