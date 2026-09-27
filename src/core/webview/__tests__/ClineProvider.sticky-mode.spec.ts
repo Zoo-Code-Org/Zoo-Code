@@ -564,6 +564,66 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
+		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The first write settles after the abort lands; the rollback write rejects:
+			// the failure is logged with its own message and the cancelled switch still
+			// resolves (it must not surface as the switch's persistence error).
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockRejectedValueOnce(new Error("rollback write failed"))
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to roll back mode switch"),
+			)
+		})
+
 		it("proceeds normally when no mutation signal is provided", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
 			// The literal is asserted as Partial<Task> so its private members (_taskMode,
