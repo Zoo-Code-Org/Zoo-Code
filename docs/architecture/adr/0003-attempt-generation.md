@@ -20,7 +20,7 @@ Line references are at commit `7c291bb08`.
 ## Decision
 
 1. Add an optional persisted field, `attemptGeneration`, to the child record. A record without it is read as `g0`.
-2. Increment the generation when a resumed attempt starts to act: after the `resume_task` ask returns, after a pending-action replay's approval and before its commit, and at the start of `Task.resumeAfterDelegation`. Never write the increment to a `completed` record.
+2. Increment the generation when a resumed attempt starts to act: after the `resume_task` ask returns, after a pending-action replay's approval and before its commit, before the task loop starts after a denied replay or a replay answered with feedback, and at the start of `Task.resumeAfterDelegation`. Never write the increment to a `completed` record.
 3. A completion carries the generation of the attempt that produced it. A lock-time generation check in the child file's merge rejects a completion whose generation is not current.
 4. A replay stamps the new generation onto its `pendingAction` at the same point as the increment. Settlement compares `(actionId, generation)`, and so does the pending-action match in `reopenParentFromDelegation`. `actionId` stays `sanitizeToolUseId(toolCallId)`.
 
