@@ -43,7 +43,6 @@ describe("SwitchModeTool", () => {
 		mockGetTaskMode = vi.fn().mockResolvedValue("code")
 
 		mockTask = {
-			getTaskMode: vi.fn().mockResolvedValue("code"),
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			didToolFailInCurrentTurn: false,

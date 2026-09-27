@@ -8,6 +8,7 @@ import {
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	type RooCodeSettings,
+	PROVIDER_SETTINGS_KEYS,
 	RooCodeEventName,
 	providerIdentifiers,
 } from "@roo-code/types"
@@ -304,7 +305,19 @@ vi.mock("../../config/ContextProxy", () => {
 			pinnedApiConfigs: this.stateCache.pinnedApiConfigs ?? defaultState.pinnedApiConfigs,
 		}))
 		getValue = vi.fn().mockImplementation((key: string) => this.stateCache[key])
-		getProviderSettings = vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic })
+		// Mirrors the real ContextProxy contract: the flat provider-settings keys are served
+		// from the state cache, so values written via setProviderSettings round-trip.
+		// The apiProvider default mirrors the schema default for an unwritten store.
+		getProviderSettings = vi.fn().mockImplementation(() => {
+			const flat: Record<string, unknown> = {}
+			for (const key of PROVIDER_SETTINGS_KEYS) {
+				const value = this.stateCache[key]
+				if (value !== undefined) {
+					flat[key] = value
+				}
+			}
+			return { apiProvider: providerIdentifiers.anthropic, ...flat }
+		})
 		setValue = vi.fn().mockImplementation((key: string, value: unknown) => {
 			if (value === undefined || value === null) {
 				delete this.stateCache[key]
@@ -764,6 +777,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/new-model",
 			})
+			// The activation path clears (not seeds) the view-local overlay: the shared
+			// store serves the activated settings, so no per-view snapshot can mask
+			// later shared edits.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -791,6 +808,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.bedrock,
 				awsRegion: "us-east-1",
 			})
+			// Same A-semantics contract: the upsert/activation path clears the overlay
+			// instead of snapshotting the activated settings into it.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -809,6 +829,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
+			// Structural cast: the env mock shapes activateProfile results as getProfile results.
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
 				id: "replacement-id",
@@ -827,12 +848,14 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.listApiConfigMeta).toEqual([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// The view-local buffer must hold the replacement profile's settings rather
-			// than the deleted profile's.
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			// The replacement's settings are served from the shared store through
+			// getState(); the view-local overlay is cleared on the activation path, so
+			// it cannot keep serving the deleted profile's configuration.
+			expect(state.apiConfiguration).toMatchObject({
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
 			})
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			expect(vi.mocked(provider.providerSettingsManager.deleteConfig)).toHaveBeenCalledWith("deleted-profile")
 
 			await provider.dispose()
@@ -1030,11 +1053,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			// The pinning view must take the activation path with the replacement profile...
 			expect(activateSpy).toHaveBeenCalledWith({ name: "replacement-profile" })
-			// ...and its buffer must hold the replacement profile's settings...
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			// ...and the shared store serves the replacement settings through
+			// getState(), while the cleared view-local overlay cannot mask them...
+			expect((await provider.getState()).apiConfiguration).toMatchObject({
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
 			})
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			// ...never the unrelated-pin fallback, which rewrites the shared list via setValues.
 			expect(setValuesSpy).not.toHaveBeenCalledWith(
 				expect.objectContaining({ listApiConfigMeta: expect.anything() }),
@@ -1045,7 +1070,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 	})
 
 	describe("provider profile activation", () => {
-		it("should sync view-local apiConfiguration when activating an upserted profile", async () => {
+		it("should serve the activated profile settings through getState when activating an upserted profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
@@ -1070,7 +1095,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.apiConfiguration).toMatchObject(providerSettings)
 			expect(state.apiConfiguration.apiProvider).toBe("zai")
 			expect(state.apiConfiguration).not.toHaveProperty("openRouterModelId")
-			expect(provider["viewLocalState"].apiConfiguration).toMatchObject(providerSettings)
+			// The upsert/activation path clears the view-local overlay rather than
+			// snapshotting the activated settings into it, so the shared store remains
+			// the single source getState() serves.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -1185,6 +1213,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiConversationHistory: [],
 				updateApiConfiguration: vi.fn(),
 			})
+			// Minimal Task double: handleModeSwitch and addClineToStack only touch the fields above.
 			await provider.addClineToStack(makeTask("focused-task") as unknown as Task)
 			const backgroundTask = makeTask("background-task")
 			await provider["setViewStateId"]("stable-sidebar-view")

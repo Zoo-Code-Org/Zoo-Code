@@ -2020,17 +2020,23 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			}
 			const keeperSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }
-			// @ts-ignore - Replace providerSettingsManager with a test double.
+			// @ts-ignore - Replace providerSettingsManager with a test double: the view was
+			// pinned to the deleted profile, so the deletion takes the activation path and
+			// reads the survivor's settings through activateProfile.
 			provider.providerSettingsManager = {
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
-				getProfile: vi.fn().mockResolvedValue({ name: "keeper-profile", ...keeperSettings }),
+				activateProfile: vi
+					.fn()
+					.mockResolvedValue({ name: "keeper-profile", id: "keeper-id", ...keeperSettings }),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				setModeConfig: vi.fn(),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
 			await provider.setValue("currentApiConfigName", "old-profile")
 			// A stale view-local apiConfiguration (the deleted profile's settings) that would
-			// keep shadowing the surviving profile's settings in getState() if the deletion
-			// path passed a flat ProviderSettings object (a no-op for the buffer updater).
+			// keep shadowing the surviving profile's settings in getState() if the activation
+			// path did not clear this view's buffer overlay.
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "stale-key",
@@ -2042,8 +2048,13 @@ describe("ClineProvider", () => {
 
 			await provider.deleteProviderProfile(oldProfile)
 
-			// The surviving profile's settings must replace the deleted profile's stale buffer.
-			expect(provider.getValues().apiConfiguration).toEqual(keeperSettings)
+			// The shared provider keys are rewritten with the survivor's settings and the
+			// view's stale overlay is cleared, so getState() serves the survivor's
+			// settings instead of the deleted profile's.
+			const state = await provider.getState({ includeTaskHistory: false })
+			expect(state.apiConfiguration).toMatchObject(keeperSettings)
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
 			await provider.dispose()
 		})
 
@@ -2129,31 +2140,34 @@ describe("ClineProvider", () => {
 				openRouterApiKey: "deleted-profile-secret",
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			// @ts-ignore - Replace providerSettingsManager with a test double.
+			// @ts-ignore - Replace providerSettingsManager with a test double: the pinned
+			// view takes the activation path, so the survivor's settings are read through
+			// activateProfile.
 			provider.providerSettingsManager = {
-				getProfile: vi.fn().mockResolvedValue({
+				activateProfile: vi.fn().mockResolvedValue({
 					name: "keeper-profile",
 					id: "keeper-id",
 					apiProvider: providerIdentifiers.anthropic,
 				}),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				setModeConfig: vi.fn(),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			}
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
 			await provider.deleteProviderProfile(oldProfile)
 
-			// The captured pin must still trigger the reconfiguration: the shared
-			// provider keys and the view-local buffer both take the surviving
-			// profile's settings, and the nested overlay is replaced wholesale so
-			// no key of the deleted profile survives.
+			// The pin still names the deleted profile, so the view is reconfigured through
+			// the activation path: the shared provider keys take the surviving profile's
+			// settings and the view's stale overlay is cleared, so no key of the deleted
+			// profile survives in getState().
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
 				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic }),
 			)
 			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
-				id: "keeper-id",
-				apiProvider: providerIdentifiers.anthropic,
-			})
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			const state = await provider.getState({ includeTaskHistory: false })
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
 			await provider.dispose()
 		})
 
