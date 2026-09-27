@@ -4981,13 +4981,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
 			await provider.taskHistoryStore.delete(historyItem.id)
-			provider["taskHistoryStoreInitialized"] = true
 
 			await expect(provider.getTaskWithId(historyItem.id)).rejects.toThrow("Task not found")
 		})
 
 		it("rejects a missing task before file-backed history initialization", async () => {
-			provider["taskHistoryStoreInitialized"] = false
 			vi.mocked(mockContext.globalState.get).mockReturnValue(undefined)
 			await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
 		})

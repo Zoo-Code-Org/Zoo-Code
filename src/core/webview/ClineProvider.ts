@@ -242,7 +242,6 @@ export class ClineProvider
 
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
-	private taskHistoryStoreInitialized = false
 	/**
 	 * Resolves once `initializeTaskHistoryStore` has settled, i.e. after the
 	 * legacy globalState migration has completed (or failed). `taskHistoryStore.initialized`
@@ -531,8 +530,6 @@ export class ClineProvider
 				await this.context.globalState.update(migrationKey, true)
 				this.log("[initializeTaskHistoryStore] Migration complete")
 			}
-
-			this.taskHistoryStoreInitialized = true
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		} finally {
