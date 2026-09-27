@@ -6,7 +6,7 @@ tone_instructions: >-
     comments and unrelated refactors.
 
 chat:
-    allow_non_org_members: false
+    allow_non_org_members: true
 
 knowledge_base:
     web_search:
@@ -55,12 +55,15 @@ reviews:
               repository conventions, tests, and related implementations. When a potential finding depends on
               external behavior, use web search and prefer official documentation, specifications, or upstream
               repositories. Report only concrete, actionable conflicts or failure modes, citing the relevant
-              repository location or external source. Prioritize correctness, security, data loss, lifecycle,
-              and test gaps. Do not report generic best practices, unsupported concerns, speculative style
+              repository location or external source. Prioritize correctness, security, data loss, lifecycle, and
+              test gaps. Do not report generic best practices, unsupported concerns, speculative style
               comments, or unrelated refactors. When changed code introduces a local implementation of a
               cross-cutting concern, check whether it bypasses or duplicates an established repository
               abstraction or nearby convention. Report only a concrete inconsistency with behavioral or
-              maintenance impact, and allow intentional deviations.
+              maintenance impact, and allow intentional deviations. Treat the linked issue and this PR
+              description as the scope boundary. When a confirmed defect needs work beyond that boundary
+              and this PR does not create the hazard, do not request changes for it. List it once in the
+              walkthrough under follow-up candidates, with one line for the trigger.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
