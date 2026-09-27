@@ -366,9 +366,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "🔑 隨處使用你的 Zoo Gateway API 金鑰——可將它用於任何與 OpenAI 相容的用戶端或工作流程：<modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 限時透過 Zoo Gateway 免費使用 MiniMax-M3。",
-			"highlight3": "✨ 全新推出：GPT-6 Astra 和 Claude Fable 5.1 模型。"
+			"highlight1": "✨ 新增 SOTA 模型：在支援的供應商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。",
+			"highlight2": "🧭 更可靠的工作與子工作：隔離委派模式，在重複停止後保留子工作連結，並在斜線命令切換模式時保護協調器設定。",
+			"highlight3": "🛠️ 更可靠的終端機、供應商和程式碼搜尋行為：改善 Windows 和非英語環境中的終端機行為，強化供應商回應與取消處理，並讓程式碼搜尋更穩定地使用正確的工作區。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

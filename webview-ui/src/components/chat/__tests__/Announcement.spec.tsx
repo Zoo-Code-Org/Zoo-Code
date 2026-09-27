@@ -14,7 +14,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.82.0",
+		version: "3.84.0",
 	},
 }))
 
@@ -22,10 +22,6 @@ vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, components }: { i18nKey: string; components?: Record<string, React.ReactElement> }) => {
 		if (i18nKey === "chat:announcement.support" && components?.githubLink) {
 			return React.cloneElement(components.githubLink, undefined, "GitHub")
-		}
-
-		if (i18nKey === "chat:announcement.release.highlight1" && components?.modelsLink) {
-			return React.cloneElement(components.modelsLink, undefined, "https://zoocode.dev/models")
 		}
 
 		return <span>{i18nKey}</span>
@@ -37,10 +33,12 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 		t: (key: string, options?: { version?: string }) => {
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What's New:",
+				"chat:announcement.release.highlight1":
+					"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
 				"chat:announcement.release.highlight2":
-					"🎁 For a limited time, get free access to MiniMax-M3 through Zoo Gateway.",
+					"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
 				"chat:announcement.release.highlight3":
-					"✨ Now available: the brand-new GPT-6 Astra and Claude Fable 5.1 models.",
+					"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
 			}
 
 			if (key === "chat:announcement.title") {
@@ -56,12 +54,21 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.82.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.84.0 Released")).toBeInTheDocument()
 		expect(
-			screen.getByText("🎁 For a limited time, get free access to MiniMax-M3 through Zoo Gateway."),
+			screen.getByText(
+				"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
+			),
 		).toBeInTheDocument()
 		expect(
-			screen.getByText("✨ Now available: the brand-new GPT-6 Astra and Claude Fable 5.1 models."),
+			screen.getByText(
+				"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
+			),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(
+				"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
+			),
 		).toBeInTheDocument()
 	})
 
@@ -77,33 +84,22 @@ describe("Announcement", () => {
 		expect(screen.getByRole("link", { name: "GitHub" })).toHaveAttribute("href", EXTERNAL_LINKS.GITHUB_REPO)
 	})
 
-	it("links the models promo to the Zoo Code models page", () => {
-		render(<Announcement hideAnnouncement={vi.fn()} />)
-
-		expect(screen.getByRole("link", { name: "https://zoocode.dev/models" })).toHaveAttribute(
-			"href",
-			EXTERNAL_LINKS.MODELS,
-		)
-	})
-
 	it("posts each announcement link to the extension host exactly once", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		fireEvent.click(screen.getByRole("link", { name: "https://zoocode.dev/models" }))
 		fireEvent.click(screen.getByRole("link", { name: "GitHub" }))
 		fireEvent.click(screen.getByRole("link", { name: "X" }))
 		fireEvent.click(screen.getByRole("link", { name: "Discord" }))
 		fireEvent.click(screen.getByRole("link", { name: "Reddit" }))
 
-		expect(vscode.postMessage).toHaveBeenCalledTimes(5)
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(1, { type: "openExternal", url: EXTERNAL_LINKS.MODELS })
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(3, { type: "openExternal", url: "https://x.com/ZooCodeDev" })
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(4, {
+		expect(vscode.postMessage).toHaveBeenCalledTimes(4)
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(1, { type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "openExternal", url: "https://x.com/ZooCodeDev" })
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(3, {
 			type: "openExternal",
 			url: "https://discord.gg/VxfP4Vx3gX",
 		})
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(5, {
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(4, {
 			type: "openExternal",
 			url: "https://www.reddit.com/r/ZooCode/",
 		})
