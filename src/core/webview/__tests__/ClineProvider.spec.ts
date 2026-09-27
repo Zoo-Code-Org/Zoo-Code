@@ -2202,10 +2202,7 @@ describe("ClineProvider", () => {
 
 			// Simulate api.setConfiguration (src/extension/api.ts): a global-only
 			// write that does not refresh the view-local buffer.
-			const contextProxyAccess = provider.contextProxy as unknown as {
-				setValues: (values: { apiProvider?: string; openRouterApiKey?: string }) => Promise<void>
-			}
-			await contextProxyAccess.setValues({
+			await provider.contextProxy.setValues({
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "mock-key",
 			})
@@ -2253,10 +2250,7 @@ describe("ClineProvider", () => {
 
 		it("should merge getValues from ContextProxy with view-local values taking precedence", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			const providerAccess = provider as unknown as {
-				saveViewState: (key: keyof ExtensionState, value: unknown) => Promise<void>
-			}
-			const contextProxyAccess = provider.contextProxy as unknown as {
+			const contextProxyAccess = provider.contextProxy as {
 				setValues: (values: Partial<ExtensionState>) => Promise<void>
 			}
 			await contextProxyAccess.setValues({
@@ -2269,9 +2263,9 @@ describe("ClineProvider", () => {
 				customModePrompts: { code: { roleDefinition: "shared" } },
 			})
 
-			await providerAccess.saveViewState("mode", "architect")
-			await providerAccess.saveViewState("currentApiConfigName", "view-profile")
-			await providerAccess.saveViewState("apiConfiguration", {
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "view-profile")
+			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "view-key",
 			})
@@ -2508,18 +2502,12 @@ describe("ClineProvider", () => {
 
 		it("should discard a stale loadViewState when a newer view id is registered during the load", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			const providerAccess = provider as unknown as {
-				viewId: string
-				viewLocalState: { mode?: string; currentApiConfigName?: string }
-				loadViewState(): Promise<void>
-				setViewStateId(id: string): Promise<void>
-			}
 
 			// Seed persisted entries under both ids through the proxy so the loads
 			// observe them via the cached read path: the temporary entry holds a
 			// pre-registration selection, the stable entry the post-registration one.
 			await provider.contextProxy.setValue("viewStates", {
-				[providerAccess.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
+				[provider.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
 				"stable-sidebar-view": { mode: "debug", updatedAt: 2 },
 			})
 
@@ -2530,29 +2518,28 @@ describe("ClineProvider", () => {
 				releaseGhost = resolve
 			})
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockReturnValue(
-				ghostLoad.then(
-					() =>
-						({
-							name: "ghost-profile",
-							id: "ghost-id",
-							apiProvider: providerIdentifiers.anthropic,
-						}) as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+				ghostLoad.then(() =>
+					Object.assign({} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>, {
+						name: "ghost-profile",
+						id: "ghost-id",
+						apiProvider: providerIdentifiers.anthropic,
+					}),
 				),
 			)
 
-			const staleLoad = providerAccess.loadViewState()
+			const staleLoad = provider["loadViewState"]()
 
 			// Register the stable id without awaiting its load: the re-key drops the
 			// temporary entry (the stable one already exists) and the registration's own
 			// load settles on the stable entry immediately.
-			const register = providerAccess.setViewStateId("stable-sidebar-view")
+			const register = provider["setViewStateId"]("stable-sidebar-view")
 			await register
 
 			releaseGhost()
 			await staleLoad
 
 			// The stale (temporary-id) load must not overwrite the stable id's load.
-			expect(providerAccess.viewLocalState).toEqual({ mode: "debug" })
+			expect(provider["viewLocalState"]).toEqual({ mode: "debug" })
 
 			await provider.dispose()
 		})
@@ -2643,7 +2630,10 @@ describe("ClineProvider", () => {
 			// settings; the raw state value still reaches apiConfiguration via
 			// the getState fill-in, which is what this assertion pins.
 			const contextProxy = new ContextProxy(mockContext)
-			const contextProxyAccess = contextProxy as unknown as {
+			// A single structural cast: the raw-state write must carry an
+			// un-sanitizable apiProvider value, which the typed setValues(RooCodeSettings)
+			// signature deliberately rejects.
+			const contextProxyAccess = contextProxy as {
 				setValues: (values: Record<string, unknown>) => Promise<void>
 			}
 			await contextProxyAccess.setValues({ apiProvider: "bogus-provider" })
