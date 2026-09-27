@@ -181,6 +181,10 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
 }
 
+export function queuedImagesEqual(a: string[], b: string[]): boolean {
+	return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
@@ -418,6 +422,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// slot (which would drop the earlier response after both messages were
 	// already removed from the queue).
 	private queuedMessageDrainChain: Promise<unknown> = Promise.resolve()
+	// Snapshot of the last drain-submitted queued message. A successful submit
+	// only posts into the pending ask-response slot; the message stays queued
+	// until an ask actually consumes that response. The consuming ask matches
+	// the returned response against this snapshot to decide whether the
+	// submission was consumed (interception → remove) or overwritten
+	// unconsumed (retain for a later ask).
+	private pendingSubmittedQueuedMessage: { id: string; text: string; images: string[] } | undefined
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -1700,6 +1711,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			text: this.askResponseText,
 			images: this.askResponseImages,
 			queuedMessageId,
+		}
+		// Tie a drain-submitted queued message to actual consumption. The ask
+		// consumed the submission only if it returned the posted response from
+		// the pending slot: the claim path is excluded (durable flows carry
+		// queuedMessageId for later persistence; non-durable flows already
+		// removed the message inline).
+		const pendingSubmitted = this.pendingSubmittedQueuedMessage
+		if (pendingSubmitted) {
+			const consumedViaPendingSlot =
+				result.queuedMessageId === undefined &&
+				result.response === "messageResponse" &&
+				result.text === pendingSubmitted.text &&
+				queuedImagesEqual(result.images ?? [], pendingSubmitted.images)
+			if (consumedViaPendingSlot) {
+				this.messageQueueService.removeMessage(pendingSubmitted.id)
+				this.pendingSubmittedQueuedMessage = undefined
+			} else if (!this.messageQueueService.messages.some((message) => message.id === pendingSubmitted.id)) {
+				// The message was consumed via the ask claim path or discarded
+				// by an existing path; the tracker is stale, so clear it.
+				this.pendingSubmittedQueuedMessage = undefined
+			}
 		}
 		this.askResponse = undefined
 		this.askResponseText = undefined
@@ -5427,8 +5459,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Process the next queued message by claiming and submitting it.
 	 *
-	 * The message is claimed — not dequeued — before submission and is only
-	 * removed after the submission handoff succeeds. When submission fails, the
+	 * The message is claimed — not dequeued — before submission, and the claim
+	 * is released after the submission handoff succeeds so the message STAYS
+	 * queued: removal is tied to ask-consumption (Task.ask claims queued
+	 * messages and removes them via handleQueuedAskResponse, or hands them to
+	 * persistQueuedFeedbackAndAcknowledge), not to submit-return. A message
+	 * submitted between command completion and the next conversational ask is
+	 * therefore retained until an ask actually consumes it, instead of being
+	 * dropped if the turn fails or restarts first. When submission fails, the
 	 * claim is released so the message stays queued for a later drain, and the
 	 * failure propagates to the caller instead of being logged and dropped.
 	 *
@@ -5439,7 +5477,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * drains.
 	 *
 	 * @returns Promise resolving to true when a queued message was submitted
-	 * and durably removed; false when the queue was empty.
+	 * (and remains queued until consumed); false when the queue was empty.
 	 */
 	public processQueuedMessages(): Promise<boolean> {
 		const run = this.queuedMessageDrainChain.then(() => this.claimAndSubmitNextQueuedMessage())
@@ -5467,7 +5505,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.messageQueueService.releaseMessage(queued.id)
 			throw error
 		}
-		this.messageQueueService.removeMessage(queued.id)
+		// Submission succeeded, but the message is only removed once an ask
+		// consumes it. Snapshot the posted response so the consuming ask can
+		// tell interception (consumption → remove) from an unconsumed
+		// overwrite (retain); release the claim so the ask path can claim it.
+		// The snapshot mirrors submitUserMessage's normalization (trim, images
+		// default) so the interception match compares post-trim values.
+		this.pendingSubmittedQueuedMessage = {
+			id: queued.id,
+			text: queued.text.trim(),
+			images: queued.images ?? [],
+		}
+		this.messageQueueService.releaseMessage(queued.id)
 		return true
 	}
 }

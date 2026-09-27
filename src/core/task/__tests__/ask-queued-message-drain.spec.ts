@@ -1,4 +1,4 @@
-import { Task } from "../Task"
+import { queuedImagesEqual, Task } from "../Task"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
@@ -6,12 +6,22 @@ type QueueTaskTestAccess = {
 	addToClineMessages: () => Promise<void>
 	lastMessageTs?: number
 	abort: boolean
+	queuedMessageDrainChain: Promise<unknown>
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
 
 // Keep this test focused: if a queued message arrives while Task.ask() is blocked,
 // it should be consumed and used to fulfill the ask.
+
+describe("queuedImagesEqual", () => {
+	it("compares image arrays by content", () => {
+		expect(queuedImagesEqual([], [])).toBe(true)
+		expect(queuedImagesEqual(["a.png", "b.png"], ["a.png", "b.png"])).toBe(true)
+		expect(queuedImagesEqual(["a.png"], ["b.png"])).toBe(false)
+		expect(queuedImagesEqual(["a.png"], ["a.png", "b.png"])).toBe(false)
+	})
+})
 
 describe("Task.ask queued message drain", () => {
 	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
@@ -24,6 +34,9 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).lastMessageTs = undefined
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
+			// Object.create skips field initializers; the drain chain must exist
+			// for processQueuedMessages to schedule behind it.
+			getQueueTaskTestAccess(task).queuedMessageDrainChain = Promise.resolve()
 			;(task as any).addToClineMessages = vi.fn(async () => {})
 			;(task as any).saveClineMessages = vi.fn(async () => {})
 			;(task as any).updateClineMessage = vi.fn(async () => {})
@@ -46,6 +59,82 @@ describe("Task.ask queued message drain", () => {
 		const result = await askPromise
 		expect(result.response).toBe("messageResponse")
 		expect(result.text).toBe("picked answer")
+	})
+
+	it("removes a drained padded message when its submission intercepts a blocked ask", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		// editQueuedMessage saves untrimmed text; submitUserMessage trims before
+		// posting, so the interception match must compare post-trim values.
+		task.messageQueueService.addMessage("  padded correction  ")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "padded correction" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+
+		setTimeout(() => task.approveAsk(), 0)
+		const nextResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		expect(nextResult).toMatchObject({ response: "yesButtonClicked", text: undefined })
+	})
+
+	it("removes a drained message when its submission intercepts a blocked ask", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		// Park a tool ask in the real pWaitFor: no auto-approval and nothing
+		// queued at ask start, so it blocks.
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		// Let the ask reach its pWaitFor before the drain runs.
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		// Background-completion style drain while the ask is blocked: the real
+		// submit posts the message into the pending ask-response slot.
+		task.messageQueueService.addMessage("queued correction")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+
+		// Interception: the blocked tool ask is answered with the submitted
+		// message (the claim path would have answered yesButtonClicked).
+		expect(result).toMatchObject({ response: "messageResponse", text: "queued correction" })
+		// Interception is consumption: the message is removed, not retained for
+		// a second delivery at the next ask.
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+
+		setTimeout(() => task.approveAsk(), 0)
+		const nextResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		expect(nextResult).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("retains a drained message when a user response overwrites it before consumption", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		// The drain posts the message into the pending slot, but the user
+		// answers the blocked ask directly before any ask consumed it.
+		task.messageQueueService.addMessage("queued correction")
+		await task.processQueuedMessages()
+		setTimeout(() => task.approveAsk(), 0)
+
+		const result = await askPromise
+
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// The overwritten submission was not consumed, so the message stays
+		// queued for a later ask instead of being removed or lost.
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued correction"])
+
+		const nextResult = await task.ask("followup", "Q?", false)
+		expect(nextResult).toMatchObject({ response: "messageResponse", text: "queued correction" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
 	it("does not consume queued messages for command_output asks", async () => {

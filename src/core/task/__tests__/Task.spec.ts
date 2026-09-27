@@ -48,6 +48,7 @@ type TaskTestAccess = {
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
+	checkpointSave: (force?: boolean, suppressMessage?: boolean) => Promise<string | undefined>
 	buildCleanConversationHistory: (
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
@@ -5880,6 +5881,11 @@ describe("Queued message processing after condense", () => {
 		await task.condenseContext()
 
 		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+		// Submission does not remove: the message stays queued until an ask
+		// consumes it.
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
+		const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		expect(result.text).toBe("queued text")
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -5920,7 +5926,16 @@ describe("Queued message processing after condense", () => {
 		await taskB.condenseContext()
 
 		expect(spyB).toHaveBeenCalledWith("B message", undefined)
+		// Drains submit but do not remove; each task retains its own message
+		// until an ask consumes it.
+		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
+		expect(taskB.messageQueueService.messages.map((message) => message.text)).toEqual(["B message"])
+
+		const resultB = await taskB.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		expect(resultB.text).toBe("B message")
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
+		// Consuming B's message must not touch A's queue.
+		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
 	})
 
 	describe("processQueuedMessages drain semantics", () => {
@@ -5932,14 +5947,39 @@ describe("Queued message processing after condense", () => {
 				startTask: false,
 			})
 
-		it("submits and durably removes the next queued message", async () => {
+		it("submits the next queued message and retains it until an ask consumes it", async () => {
 			const task = createQueueTask()
-			const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
 			task.messageQueueService.addMessage("queued text", ["img1.png"])
 
 			await expect(task.processQueuedMessages()).resolves.toBe(true)
 
-			expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+			// The real submit succeeded, but removal is tied to ask-consumption:
+			// the message stays queued until an ask claims it.
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
+
+			const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+
+			expect(result).toMatchObject({ response: "yesButtonClicked", text: "queued text", images: ["img1.png"] })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("delivers queued feedback through the next conversational ask instead of losing it", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("one more change")
+
+			// Command completion drain: the real submit succeeds and the webview
+			// shows the feedback, but no ask has consumed the response yet.
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["one more change"])
+
+			// The next conversational ask discards the unconsumed pending response
+			// at its start; the retained queued message must survive that discard
+			// and be consumed by the ask instead of being dropped.
+			const result = await task.ask("followup", "Anything else?", false)
+
+			expect(result).toMatchObject({ response: "messageResponse", text: "one more change" })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 
@@ -5975,6 +6015,7 @@ describe("Queued message processing after condense", () => {
 
 		it("serializes concurrent drains so a blocked submission holds the next message queued", async () => {
 			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
 			task.messageQueueService.addMessage("first")
 			task.messageQueueService.addMessage("second")
 
@@ -6002,14 +6043,23 @@ describe("Queued message processing after condense", () => {
 			await expect(firstDrain).resolves.toBe(true)
 			await expect(secondDrain).resolves.toBe(true)
 
-			// Both messages are delivered in queue order.
+			// The second drain waited for the first, then re-claimed the
+			// retained head message (submit is idempotent for the same content);
+			// the next queued message was still not submitted early.
 			expect(submitSpy).toHaveBeenCalledTimes(2)
-			expect(submitSpy).toHaveBeenNthCalledWith(2, "second", undefined)
+			expect(submitSpy).toHaveBeenNthCalledWith(2, "first", undefined)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
+
+			const firstResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			expect(firstResult).toMatchObject({ response: "yesButtonClicked", text: "first" })
+			const secondResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			expect(secondResult).toMatchObject({ response: "yesButtonClicked", text: "second" })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 
 		it("does not let a failed drain block later drains", async () => {
 			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
 			vi.spyOn(task, "submitUserMessage").mockRejectedValueOnce(new Error("emit failed")).mockResolvedValue(true)
 			task.messageQueueService.addMessage("retry me")
 			task.messageQueueService.addMessage("still deliverable")
@@ -6019,6 +6069,15 @@ describe("Queued message processing after condense", () => {
 			await expect(task.processQueuedMessages()).resolves.toBe(true)
 			await expect(task.processQueuedMessages()).resolves.toBe(true)
 
+			// The retried submissions stay queued until asks consume them in order.
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual([
+				"retry me",
+				"still deliverable",
+			])
+			const firstResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			expect(firstResult).toMatchObject({ response: "yesButtonClicked", text: "retry me" })
+			const secondResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			expect(secondResult).toMatchObject({ response: "yesButtonClicked", text: "still deliverable" })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 	})
