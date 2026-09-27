@@ -5,6 +5,8 @@ import type { ModelInfo } from "@roo-code/types"
 import { parseApiPrice } from "../../../shared/cost"
 import { toRequestyServiceUrl } from "../../../shared/utils/requesty"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 // Bounded wall-clock limit for the models discovery request. Without it a hung connection
 // would keep the request alive indefinitely; 10_000 ms matches the other in-tree axios
 // fetchers (kenari, opencode-go, nanogpt).
@@ -13,7 +15,7 @@ const REQUESTY_MODELS_TIMEOUT_MS = 10_000
 export async function getRequestyModels(
 	baseUrl?: string,
 	apiKey?: string,
-	signal?: AbortSignal,
+	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
@@ -29,7 +31,7 @@ export async function getRequestyModels(
 
 		const response = await axios.get(modelsUrl.toString(), {
 			headers,
-			...(signal && { signal }),
+			signal: opts?.signal,
 			timeout: REQUESTY_MODELS_TIMEOUT_MS,
 		})
 		const rawModels = response.data.data
@@ -76,9 +78,19 @@ export async function getRequestyModels(
 				modelInfo.supportsTemperature = false
 			}
 
+			if (rawModel.id === "anthropic/claude-opus-5-5") {
+				modelInfo.supportsReasoningBudget = true
+				modelInfo.supportsReasoningBinary = true
+				modelInfo.supportsTemperature = false
+			}
+
 			models[rawModel.id] = modelInfo
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching Requesty models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 	}
 

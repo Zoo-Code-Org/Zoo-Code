@@ -126,6 +126,31 @@ describe("getRequestyModels", () => {
 		expect(opus5.supportsTemperature).toBe(false)
 	})
 
+	it("applies Opus 5.5 overrides when parsing anthropic/claude-opus-5-5", async () => {
+		const rawOpus55 = makeRawModel({
+			id: "anthropic/claude-opus-5-5",
+			max_output_tokens: 128000,
+			context_window: 1000000,
+			supports_caching: true,
+			supports_vision: true,
+			supports_reasoning: true,
+			input_price: "0.000004",
+			output_price: "0.00002",
+			caching_price: "0.000005",
+			cached_price: "0.0000002",
+		})
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [rawOpus55] } })
+
+		const models = await getRequestyModels()
+		const opus55 = models["anthropic/claude-opus-5-5"]
+
+		expect(opus55).toBeDefined()
+		expect(opus55.supportsReasoningBudget).toBe(true)
+		expect(opus55.supportsReasoningBinary).toBe(true)
+		expect(opus55.supportsTemperature).toBe(false)
+	})
+
 	it("does not apply Fable 5 overrides to other models", async () => {
 		const rawSonnet = makeRawModel({
 			id: "anthropic/claude-sonnet-4.6",
@@ -145,7 +170,7 @@ describe("getRequestyModels", () => {
 		const controller = new AbortController()
 		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
 
-		await getRequestyModels(undefined, undefined, controller.signal)
+		await getRequestyModels(undefined, undefined, { signal: controller.signal })
 
 		// The shared axios mock accumulates calls across this file's tests, so assert on
 		// the call this test just made (the last one) rather than a global call count.
@@ -164,5 +189,38 @@ describe("getRequestyModels", () => {
 		const config = calls[calls.length - 1]?.[1]
 		expect(config?.signal).toBeUndefined()
 		expect(config?.timeout).toBe(10_000)
+	})
+
+	it("passes the caller's abort signal to the catalog request", async () => {
+		const controller = new AbortController()
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
+
+		await getRequestyModels(undefined, undefined, { signal: controller.signal })
+
+		expect(mockAxiosGet).toHaveBeenCalledWith("https://router.requesty.ai/v1/models", {
+			headers: {},
+			signal: controller.signal,
+			timeout: 10_000,
+		})
+	})
+
+	it("rejects with an AbortError when the signal aborts the pending request", async () => {
+		const controller = new AbortController()
+		mockAxiosGet.mockImplementation((_url, config) => {
+			// Mirror the HTTP client: a request rejects when its signal fires,
+			// including when the signal was already aborted when the request started.
+			return new Promise<never>((_resolve, reject) => {
+				if (config?.signal?.aborted) {
+					reject(new Error("canceled"))
+					return
+				}
+				config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+			})
+		})
+
+		const fetchPromise = getRequestyModels(undefined, undefined, { signal: controller.signal })
+		controller.abort()
+
+		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
 })
