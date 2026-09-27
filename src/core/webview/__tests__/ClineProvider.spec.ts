@@ -944,12 +944,16 @@ describe("ClineProvider", () => {
 			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
 
-			// Pin the clock so both heartbeats stamp the same millisecond: a
-			// timestamp comparison would see no change, but the heartbeat
-			// revision moved, so the reload must still be skipped.
-			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now())
+			// Pin the clock to the timestamp captured before recovery: both
+			// heartbeats stamp the same millisecond, so a timestamp comparison
+			// would see no change, but the heartbeat revision moved, so the
+			// reload must still be skipped.
+			const heartbeatAtCapture = provider["lastWebviewHeartbeatAt"]
+			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(heartbeatAtCapture)
 			provider.updateWebviewHeartbeat()
+			expect(provider["lastWebviewHeartbeatAt"]).toBe(heartbeatAtCapture)
 			provider.updateWebviewHeartbeat()
+			expect(provider["lastWebviewHeartbeatAt"]).toBe(heartbeatAtCapture)
 			nowSpy.mockRestore()
 
 			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
@@ -988,14 +992,24 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
 
-			// The first recovery blocks on a controlled pending generation.
-			let failReload: (error: Error) => void = () => {}
-			provider["getWebviewHtml"] = vi.fn().mockImplementation(
-				() =>
-					new Promise<string>((_resolve, reject) => {
-						failReload = reject
-					}),
-			)
+			// The first recovery blocks on a controlled pending generation; the
+			// retry (second call) gets its own deferred generation.
+			let failFirst: (error: Error) => void = () => {}
+			let finishRetry: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi
+				.fn()
+				.mockImplementationOnce(
+					() =>
+						new Promise<string>((_resolve, reject) => {
+							failFirst = reject
+						}),
+				)
+				.mockImplementationOnce(
+					() =>
+						new Promise<string>((resolve) => {
+							finishRetry = resolve
+						}),
+				)
 
 			await vi.advanceTimersByTimeAsync(120_000)
 			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
@@ -1009,11 +1023,73 @@ describe("ClineProvider", () => {
 			// The pending generation rejects; the finally block must clear the
 			// in-flight state so a later watchdog tick can start a fresh
 			// recovery instead of being blocked forever.
-			failReload(new Error("reload boom"))
+			failFirst(new Error("reload boom"))
 			await vi.advanceTimersByTimeAsync(0)
 
 			await vi.advanceTimersByTimeAsync(60_000)
 			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
+
+			// The retry's generation resolves with fresh HTML and must land in
+			// the webview.
+			finishRetry("<!DOCTYPE html><html><body>recovered-retry</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView.webview.html).toContain("recovered-retry")
+		})
+
+		test("lets the replacement view's recovery start while a stale one is pending", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Each recovery generation gets its own deferred finish callback.
+			const generations: Array<{ finish: (html: string) => void }> = []
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						generations.push({ finish: resolve })
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// The sidebar view is disposed (bumping webviewRecoveryEpoch) and a
+			// replacement view takes over while recovery A's HTML generation is
+			// still pending, making A stale.
+			disposeCallback()
+			// @ts-ignore - accessing private property for testing
+			provider.view = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+			}
+			const replacementEpoch = provider["webviewRecoveryEpoch"]
+
+			// Recovery B for the new view must start even though A is still
+			// pending: the in-flight guard is scoped to the epoch.
+			void provider["reloadWebviewForRecovery"]()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
+
+			// A's completion is stale: it must not reassign the old view's html,
+			// and its finally must NOT release the ownership B took.
+			generations[0].finish("<!DOCTYPE html><html><body>stale-A</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBe(replacementEpoch)
+
+			// B completes and lands its HTML on the new view, then releases
+			// ownership so future recoveries can start.
+			generations[1].finish("<!DOCTYPE html><html><body>recovered-B</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			// @ts-ignore - accessing private property for testing
+			expect(provider.view.webview.html).toContain("recovered-B")
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBeUndefined()
 		})
 
 		test("reloads only its own webview when multiple providers are active", async () => {

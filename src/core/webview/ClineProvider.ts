@@ -233,9 +233,11 @@ export class ClineProvider
 	// the watched view is disposed; the reload must not reassign webview.html
 	// afterwards.
 	private webviewRecoveryEpoch = 0
-	// True while a recovery reload is awaiting HTML generation; the watchdog
-	// must not pile a second reload onto the same view until this one settles.
-	private webviewRecoveryInFlight = false
+	// Epoch that owns an in-flight recovery reload, if any. Only a recovery
+	// from the same epoch is blocked, so disposing/replacing the view (which
+	// bumps webviewRecoveryEpoch) never makes the replacement wait on the
+	// stale recovery's completion.
+	private webviewRecoveryInFlightEpoch: number | undefined = undefined
 	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
 	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
@@ -3457,15 +3459,17 @@ export class ClineProvider
 		if (!view?.webview) {
 			return
 		}
-		// A recovery already awaiting its HTML generation owns this view; a
-		// second one would only pile another forced reload onto it.
-		if (this.webviewRecoveryInFlight) {
-			return
-		}
-		this.webviewRecoveryInFlight = true
 		// Capture the epoch so a disposal or view replacement can invalidate
 		// this operation while the HTML is being generated.
 		const epoch = this.webviewRecoveryEpoch
+		// A recovery already awaiting its HTML generation owns this view; a
+		// second one would only pile another forced reload onto it. Ownership
+		// is scoped to the epoch so a stale recovery (its view disposed or
+		// replaced, epoch bumped) never blocks the replacement view's recovery.
+		if (this.webviewRecoveryInFlightEpoch === epoch) {
+			return
+		}
+		this.webviewRecoveryInFlightEpoch = epoch
 		// A heartbeat that arrives while the HTML is being generated means the
 		// renderer is alive again; comparing revisions (not timestamps) lets the
 		// post-await check catch heartbeats that land in the same millisecond.
@@ -3489,7 +3493,11 @@ export class ClineProvider
 		} catch (error) {
 			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
 		} finally {
-			this.webviewRecoveryInFlight = false
+			// Clear ownership only while this completion still holds it; a
+			// stale recovery must not release the replacement's in-flight state.
+			if (this.webviewRecoveryInFlightEpoch === epoch) {
+				this.webviewRecoveryInFlightEpoch = undefined
+			}
 		}
 	}
 
