@@ -1041,5 +1041,57 @@ describe("executeCommandTool", () => {
 				mockCline.processQueuedMessages.mock.invocationCallOrder[1],
 			)
 		})
+
+		it("publishes the tool result before draining when a background command completes during the settle delay", async () => {
+			vitest.useFakeTimers()
+			mockCline.processQueuedMessages.mockResolvedValue(true)
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("npm run dev", 2)
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("server starting...\n", proc)
+
+			// The agent timeout moves the command to the background. Advance in
+			// small steps and stop as soon as the transition happens: the tool
+			// then sits in the 50 ms settle delay with the tool result still
+			// pending publication.
+			for (let i = 0; terminal.proc.continue.mock.calls.length === 0 && i < 200; i++) {
+				await vitest.advanceTimersByTimeAsync(25)
+			}
+			expect(terminal.proc.continue).toHaveBeenCalled()
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+
+			// Completion lands inside the settle delay, while the tool result
+			// is still pending publication.
+			await callbacks.onCompleted!("server exited\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			// The background-completion drain is gated on the tool result.
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+
+			await vitest.advanceTimersByTimeAsync(100)
+			await handlePromise
+			await vitest.advanceTimersByTimeAsync(0)
+
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			// Completion already landed, so the tool returns the completed
+			// result rather than a "still running" one.
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("Command executed in terminal")
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("Exit code: 0")
+			// The immediate post-result drain plus the background-completion drain.
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(2)
+			// Queued messages must never be processed before the tool result.
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[1],
+			)
+		})
 	})
 })

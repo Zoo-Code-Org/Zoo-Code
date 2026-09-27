@@ -186,6 +186,21 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// Convert agent-specified timeout from seconds to milliseconds
 			const agentTimeout = resolveAgentTimeoutMs(timeoutSeconds)
 
+			// The background-completion drain inside executeCommandInTerminal
+			// must not run before this command's tool result is published: a
+			// background command can finish during the settle delay while the
+			// result is still pending. Resolve at each pushToolResult site so
+			// the drain waits on a structural signal, not on timer or
+			// microtask ordering.
+			let resolveToolResultPublished: (() => void) | undefined
+			const toolResultPublished = new Promise<void>((resolve) => {
+				resolveToolResultPublished = resolve
+			})
+			const publishToolResult = (result: ToolResponse): void => {
+				pushToolResult(result)
+				resolveToolResultPublished?.()
+			}
+
 			const options: ExecuteCommandOptions = {
 				executionId,
 				command: canonicalCommand,
@@ -193,6 +208,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				terminalShellIntegrationDisabled,
 				commandExecutionTimeout,
 				agentTimeout,
+				toolResultPublished,
 			}
 
 			let shouldDrainQueuedMessages = false
@@ -203,7 +219,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					task.didRejectTool = true
 				}
 
-				pushToolResult(result)
+				publishToolResult(result)
 				// Only drain queued messages when the command actually ran
 				// (early validation failures end the turn without an execution,
 				// matching file tools' error-path behavior).
@@ -226,18 +242,18 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 						task.didRejectTool = true
 					}
 
-					pushToolResult(result)
+					publishToolResult(result)
 					shouldDrainQueuedMessages = commandSubmitted
 				} else {
 					// Command was submitted but shell integration lost track of it — show warning.
 					await task.say("shell_integration_warning")
 
 					if (error instanceof ShellIntegrationError) {
-						pushToolResult(
+						publishToolResult(
 							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
 						)
 					} else {
-						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
+						publishToolResult(`Command failed to execute in terminal due to a shell integration error.`)
 					}
 				}
 			}
@@ -275,6 +291,12 @@ export type ExecuteCommandOptions = {
 	terminalShellIntegrationDisabled?: boolean
 	commandExecutionTimeout?: number
 	agentTimeout?: number
+	/**
+	 * Resolves once the tool result for this command has been published.
+	 * The background-completion drain awaits this before processing queued
+	 * messages so they are never submitted ahead of the current tool result.
+	 */
+	toolResultPublished?: Promise<void>
 }
 
 export async function executeCommandInTerminal(
@@ -286,6 +308,8 @@ export async function executeCommandInTerminal(
 		terminalShellIntegrationDisabled = true,
 		commandExecutionTimeout = 0,
 		agentTimeout = 0,
+		// Direct callers without a tool-result lifecycle drain immediately.
+		toolResultPublished = Promise.resolve(),
 	}: ExecuteCommandOptions,
 ): Promise<[boolean, ToolResponse, boolean]> {
 	// Convert milliseconds back to seconds for display purposes.
@@ -454,14 +478,18 @@ export async function executeCommandInTerminal(
 			// errors here are UI-only and must not surface to the tool result.
 			commandOutputSayChain
 				.then(() => queueCommandOutputMessage(result, false, true))
-				.then(() => {
+				.then(async () => {
 					// The tool returned a "still running" result and drained when the
 					// agent timeout moved the command to the background; process
 					// messages queued since then so they are not held until an
-					// unrelated path drains them.
+					// unrelated path drains them. The tool result for this command
+					// must be published first: completion can land inside the
+					// settle delay while the result is still pending, so wait on
+					// the per-invocation signal instead of timer ordering.
 					if (!runInBackground) {
 						return
 					}
+					await toolResultPublished
 					return task.processQueuedMessages().catch((error) => {
 						console.error("[ExecuteCommandTool] Failed to process queued messages:", error)
 					})
