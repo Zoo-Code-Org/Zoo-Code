@@ -147,7 +147,7 @@ describe("searchReplaceTool", () => {
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
 		mockCline.recordToolUsage = vi.fn()
-		mockCline.processQueuedMessages = vi.fn()
+		mockCline.processQueuedMessages = vi.fn().mockResolvedValue(undefined)
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)

@@ -149,7 +149,7 @@ describe("editFileTool", () => {
 		mockTask.ask = vi.fn().mockResolvedValue(undefined)
 		mockTask.recordToolError = vi.fn()
 		mockTask.recordToolUsage = vi.fn()
-		mockTask.processQueuedMessages = vi.fn()
+		mockTask.processQueuedMessages = vi.fn().mockResolvedValue(undefined)
 		mockTask.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
