@@ -5,6 +5,8 @@ import { Task } from "../Task"
 import { NativeToolCallParser } from "../../assistant-message/NativeToolCallParser"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import type { ProviderSettings } from "@roo-code/types"
+import type { ToolParamName } from "../../../shared/tools"
 import { ApiStreamChunk, type ApiStreamToolCallPartialChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -30,7 +32,7 @@ vi.mock("execa", () => ({
 }))
 
 vi.mock("fs/promises", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, any>
+	const actual = (await importOriginal()) as Record<string, unknown>
 	const mockFunctions = {
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
@@ -104,7 +106,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: <T>(key: string, defaultValue: T) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -145,7 +147,7 @@ vi.mock("../../environment/getEnvironmentDetails", () => ({
 vi.mock("../../ignore/RooIgnoreController")
 
 vi.mock("../../condense", async (importOriginal) => {
-	const actual = (await importOriginal()) as any
+	const actual = (await importOriginal()) as Record<string, unknown>
 	return {
 		...actual,
 		summarizeConversation: vi.fn().mockResolvedValue({
@@ -173,13 +175,13 @@ vi.mock("../../../utils/fs", () => ({
 }))
 
 describe("Task - Streaming Tool Call Handling", () => {
-	let mockProvider: any
-	let mockApiConfig: any
-	let mockOutputChannel: any
+	let mockProvider: ClineProvider
+	let mockApiConfig: ProviderSettings
+	let mockOutputChannel: vscode.OutputChannel
 	let scope: object
 	let mockExtensionContext: vscode.ExtensionContext
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		scope = NativeToolCallParser.createScope()
 		NativeToolCallParser.clearAllStreamingToolCalls(scope)
 		NativeToolCallParser.clearRawChunkState(scope)
@@ -225,8 +227,10 @@ describe("Task - Streaming Tool Call Handling", () => {
 		} as unknown as vscode.ExtensionContext
 
 		mockOutputChannel = {
+			name: "test-output",
 			appendLine: vi.fn(),
 			append: vi.fn(),
+			replace: vi.fn(),
 			clear: vi.fn(),
 			show: vi.fn(),
 			hide: vi.fn(),
@@ -238,7 +242,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
-		) as any
+		)
 
 		mockApiConfig = {
 			apiProvider: providerIdentifiers.anthropic,
@@ -251,7 +255,9 @@ describe("Task - Streaming Tool Call Handling", () => {
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.getTaskWithId = vi.fn().mockResolvedValue(null)
 
+		const state = await mockProvider.getState()
 		vi.spyOn(mockProvider, "getState").mockResolvedValue({
+			...state,
 			apiConfiguration: mockApiConfig,
 			autoApprovalEnabled: false,
 			requestDelaySeconds: 0,
@@ -260,7 +266,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			disabledTools: [],
 			experiments: {},
 			profileThresholds: {},
-		} as any)
+		})
 	})
 
 	afterEach(() => {
@@ -385,7 +391,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(chunk2).toBeDefined()
 
 			// Verify accumulated arguments in streaming state
-			const streamingState = (NativeToolCallParser as any)["streamingToolCallsByScope"].get(scope)!.get(key)
+			const streamingState = NativeToolCallParser.getStreamingToolCallById(id, scope)
 			expect(streamingState).toBeDefined()
 			expect(streamingState!.argumentsAccumulator).toContain('"command":"echo')
 		})
@@ -531,7 +537,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(chunk2?.params).toBeDefined()
 			// The accumulated arguments should be more complete in chunk2
 			if (chunk2?.nativeArgs && typeof chunk2.nativeArgs === "object" && "command" in chunk2.nativeArgs) {
-				expect((chunk2.nativeArgs as any).command).toContain("echo")
+				expect(chunk2.nativeArgs.command).toContain("echo")
 			}
 		})
 
@@ -792,6 +798,16 @@ describe("Task - Streaming Tool Call Handling", () => {
 	})
 
 	describe("Task.ts compound key dedup and streaming paths", () => {
+		// Test-local structural stand-in for the Task.assistantMessageContent entries
+		// this block exercises: partial tool_use objects and parser results.
+		type AssistantContentEntry = {
+			type?: string
+			id?: string
+			name?: string
+			params?: Partial<Record<ToolParamName, string>>
+			partial?: boolean
+		}
+
 		it("should build and use compound streaming keys via makeStreamingKey", () => {
 			const key = NativeToolCallParser.makeStreamingKey("toolu_compound123", "read_file")
 			expect(key).toBe("toolu_compound123::read_file")
@@ -807,7 +823,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 				{ type: "tool_call_start", id: "toolu_dup_compound", name: "read_file" as const },
 				{ type: "tool_call_start", id: "toolu_dup_compound", name: "read_file" as const },
 			]
-			const assistantMessageContent: any[] = []
+			const assistantMessageContent: AssistantContentEntry[] = []
 
 			for (const event of events) {
 				const dedupKey = `${event.id}::${event.name}`
@@ -829,7 +845,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 		it("should use compound key for delta events via getStreamingToolCallById", () => {
 			const streamingToolCallIndices = new Map<string, number>()
-			const assistantMessageContent: any[] = []
+			const assistantMessageContent: AssistantContentEntry[] = []
 
 			NativeToolCallParser.startStreamingToolCall("toolu_delta_compound", "read_file", scope)
 			const dedupKey = NativeToolCallParser.makeStreamingKey("toolu_delta_compound", "read_file")
@@ -855,7 +871,10 @@ describe("Task - Streaming Tool Call Handling", () => {
 			const name = NativeToolCallParser.getStreamingToolName(resolvedKey!, scope)
 			const toolUseIndex = streamingToolCallIndices.get(`${existingEntry!.id}::${name}`)
 			expect(toolUseIndex).toBe(0)
-			assistantMessageContent[toolUseIndex!] = updatedToolUse as any
+			if (!updatedToolUse) {
+				throw new Error("Expected processStreamingChunk to return a tool use")
+			}
+			assistantMessageContent[toolUseIndex!] = updatedToolUse
 
 			expect(assistantMessageContent).toHaveLength(1)
 			expect(assistantMessageContent[0]?.type).toBe("tool_use")
@@ -864,7 +883,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 		it("should finalize and clean up tracking using compound key on tool_call_end", () => {
 			const streamingToolCallIndices = new Map<string, number>()
-			const assistantMessageContent: any[] = []
+			const assistantMessageContent: AssistantContentEntry[] = []
 			const dedupKey = NativeToolCallParser.makeStreamingKey("toolu_cleanup123", "read_file")
 
 			NativeToolCallParser.startStreamingToolCall("toolu_cleanup123", "read_file", scope)
@@ -874,7 +893,10 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 			const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(dedupKey, scope)
 			expect(finalToolUse).not.toBeNull()
-			assistantMessageContent[0] = finalToolUse as any
+			if (!finalToolUse) {
+				throw new Error("Expected finalizeStreamingToolCall to return a tool use")
+			}
+			assistantMessageContent[0] = finalToolUse
 			streamingToolCallIndices.delete(dedupKey)
 
 			expect(assistantMessageContent).toHaveLength(1)
@@ -886,7 +908,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 		it("should handle malformed JSON finalization with compound key cleanup", () => {
 			const streamingToolCallIndices = new Map<string, number>()
-			const assistantMessageContent: any[] = []
+			const assistantMessageContent: AssistantContentEntry[] = []
 			const dedupKey = NativeToolCallParser.makeStreamingKey("toolu_malformed123", "read_file")
 
 			NativeToolCallParser.startStreamingToolCall("toolu_malformed123", "read_file", scope)
@@ -901,7 +923,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 			const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(dedupKey, scope)
 			expect(finalToolUse).toBeNull()
-			;(assistantMessageContent[0] as any).partial = false
+			assistantMessageContent[0].partial = false
 			streamingToolCallIndices.delete(dedupKey)
 
 			expect(assistantMessageContent).toHaveLength(1)

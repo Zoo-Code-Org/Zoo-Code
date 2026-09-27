@@ -27,6 +27,10 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { OpenAICompatibleHandler, OpenAICompatibleConfig } from "../openai-compatible"
 import type { ApiHandlerOptions } from "../../../shared/api"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
+
+/** Error shape produced when the upstream API responds with a 4xx/5xx status. */
+type StatusedError = Error & { status: number }
 
 // Concrete implementation for testing
 class TestOpenAICompatibleHandler extends OpenAICompatibleHandler {
@@ -104,7 +108,7 @@ describe("OpenAICompatibleHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 			for await (const chunk of stream) {
 				chunks.push(chunk)
 			}
@@ -135,7 +139,7 @@ describe("OpenAICompatibleHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 			for await (const chunk of stream) {
 				chunks.push(chunk)
 			}
@@ -161,7 +165,7 @@ describe("OpenAICompatibleHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 			for await (const chunk of stream) {
 				chunks.push(chunk)
 			}
@@ -192,7 +196,7 @@ describe("OpenAICompatibleHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 			for await (const chunk of stream) {
 				chunks.push(chunk)
 			}
@@ -202,8 +206,7 @@ describe("OpenAICompatibleHandler", () => {
 
 		// Test 1: createMessage() with mock 429 response → verify thrown error has .status === 429 and provider name in message
 		it("should throw error with .status 429 when API returns 429", async () => {
-			const rateLimitError = new Error("Rate limited") as Error & { status: number }
-			rateLimitError.status = 429
+			const rateLimitError = Object.assign(new Error("Rate limited"), { status: 429 })
 
 			mockStreamText.mockReturnValue({
 				// eslint-disable-next-line require-yield
@@ -213,24 +216,26 @@ describe("OpenAICompatibleHandler", () => {
 				usage: Promise.resolve({ inputTokens: 0, outputTokens: 0, details: {}, raw: {} }),
 			})
 
-			let thrownError: any
+			let thrownError: StatusedError | undefined
 			try {
 				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
 					void chunk // Use void to satisfy no-unused-expressions rule
 				}
-			} catch (e: any) {
-				thrownError = e
+			} catch (e) {
+				thrownError = e as StatusedError
 			}
 
 			expect(thrownError).toBeInstanceOf(Error)
+			if (!thrownError) {
+				throw new Error("Expected createMessage to throw")
+			}
 			expect(thrownError.status).toBe(429)
 			expect(thrownError.message).toContain("TestProvider")
 		})
 
 		// Test 2: createMessage() with mock 500 response → verify error is properly tagged
 		it("should throw error with .status 500 and provider name when API returns 500", async () => {
-			const serverError = new Error("Internal Server Error") as Error & { status: number }
-			serverError.status = 500
+			const serverError = Object.assign(new Error("Internal Server Error"), { status: 500 })
 
 			mockStreamText.mockReturnValue({
 				// eslint-disable-next-line require-yield
@@ -240,16 +245,19 @@ describe("OpenAICompatibleHandler", () => {
 				usage: Promise.resolve({ inputTokens: 0, outputTokens: 0, details: {}, raw: {} }),
 			})
 
-			let thrownError: any
+			let thrownError: StatusedError | undefined
 			try {
 				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
 					void chunk
 				}
-			} catch (e: any) {
-				thrownError = e
+			} catch (e) {
+				thrownError = e as StatusedError
 			}
 
 			expect(thrownError).toBeInstanceOf(Error)
+			if (!thrownError) {
+				throw new Error("Expected createMessage to throw")
+			}
 			expect(thrownError.status).toBe(500)
 			expect(thrownError.message).toContain("TestProvider")
 		})
@@ -273,40 +281,44 @@ describe("OpenAICompatibleHandler", () => {
 
 		// Test 3: completePrompt() with mock 4xx/5xx → verify error carries .status and provider name
 		it("should throw error with .status and provider name when generateText throws 400", async () => {
-			const badRequestError = new Error("Bad Request") as Error & { status: number }
-			badRequestError.status = 400
+			const badRequestError = Object.assign(new Error("Bad Request"), { status: 400 })
 
 			mockGenerateText.mockRejectedValue(badRequestError)
 
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("TestProvider")
 
-			let thrownError: any
+			let thrownError: StatusedError | undefined
 			try {
 				await handler.completePrompt("Test prompt")
-			} catch (e: any) {
-				thrownError = e
+			} catch (e) {
+				thrownError = e as StatusedError
 			}
 
 			expect(thrownError).toBeInstanceOf(Error)
-			expect((thrownError as any).status).toBe(400)
+			if (!thrownError) {
+				throw new Error("Expected completePrompt to throw")
+			}
+			expect(thrownError.status).toBe(400)
 			expect(thrownError.message).toContain("TestProvider")
 		})
 
 		it("should throw error with .status and provider name when generateText throws 500", async () => {
-			const serverError = new Error("Internal Server Error") as Error & { status: number }
-			serverError.status = 500
+			const serverError = Object.assign(new Error("Internal Server Error"), { status: 500 })
 
 			mockGenerateText.mockRejectedValue(serverError)
 
-			let thrownError: any
+			let thrownError: StatusedError | undefined
 			try {
 				await handler.completePrompt("Test prompt")
-			} catch (e: any) {
-				thrownError = e
+			} catch (e) {
+				thrownError = e as StatusedError
 			}
 
 			expect(thrownError).toBeInstanceOf(Error)
-			expect((thrownError as any).status).toBe(500)
+			if (!thrownError) {
+				throw new Error("Expected completePrompt to throw")
+			}
+			expect(thrownError.status).toBe(500)
 			expect(thrownError.message).toContain("TestProvider")
 		})
 	})

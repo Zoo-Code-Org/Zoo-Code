@@ -204,11 +204,6 @@
 			"count": 16
 		}
 	},
-	"api/providers/__tests__/openai-compatible.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
 	"api/providers/__tests__/openai-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 14
@@ -817,11 +812,6 @@
 	"core/task/__tests__/Task.sticky-profile-race.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
-		}
-	},
-	"core/task/__tests__/Task.streaming-tool-calls.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
 		}
 	},
 	"core/task/__tests__/Task.throttle.test.ts": {
