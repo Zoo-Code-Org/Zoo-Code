@@ -186,6 +186,33 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
 
+		it("does not roll back a secret over a newer same-value write when the older write fails", async () => {
+			await proxy.storeSecret("apiKey", "old-key")
+
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+			const older = proxy.storeSecret("apiKey", "new-key")
+			const newer = proxy.storeSecret("apiKey", "new-key")
+
+			await expect(older).rejects.toThrow("secrets failed")
+			await newer
+
+			expect(proxy.getSecret("apiKey")).toBe("new-key")
+		})
+
+		it("does not restore a pending write into a reset cache", async () => {
+			// The pending write fails after resetAllState cleared the token: without the
+			// token guard its stale previous value would resurrect in a cache the reset
+			// just wiped.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			await proxy.resetAllState()
+			await expect(pending).rejects.toThrow("storage failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 

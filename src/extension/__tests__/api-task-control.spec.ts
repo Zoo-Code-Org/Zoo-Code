@@ -182,6 +182,24 @@ describe("API task controls", () => {
 			)
 			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
 		})
+
+		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
+			const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+			let resolveReady!: () => void
+			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
+				resolveReady = resolve
+			})
+
+			const started = api.startNewTask({ configuration, text: "ready task" })
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			resolveReady()
+
+			await expect(started).resolves.toBe("sidebar-task")
+			// The bound's timer must be cancelled once readiness wins: a live timer would
+			// later reject an unawaited promise and surface as an unhandled rejection.
+			expect(clearSpy).toHaveBeenCalled()
+			clearSpy.mockRestore()
+		})
 	})
 
 	describe("task ask registry", () => {
