@@ -2964,6 +2964,16 @@ describe("ClineProvider", () => {
 						}
 					}),
 					listConfig: vi.fn().mockImplementation(async () => profiles),
+					activateProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+						const profile = profiles.find((entry) => entry.name === name)
+						if (!profile) {
+							throw new Error(`Config '${name}' not found`)
+						}
+						// Include a distinguishing setting so tests can assert the
+						// effective provider settings, not just the name pointers.
+						return { ...profile, openRouterModelId: "other-model" }
+					}),
+					setModeConfig: vi.fn(),
 				},
 			})
 
@@ -2984,6 +2994,9 @@ describe("ClineProvider", () => {
 			expect(await provider.providerSettingsManager.listConfig()).toEqual([currentProfile])
 			expect(provider.getProviderProfileEntries()).toEqual([currentProfile])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "current-config")
+			// Deleting a non-active profile must not trigger activation side effects.
+			expect(provider.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
+			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 		})
 
 		test("switches the active profile when deleting it and purges it from ProviderSettingsManager", async () => {
@@ -2992,9 +3005,18 @@ describe("ClineProvider", () => {
 			await provider.deleteProviderProfile(currentProfile)
 
 			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("current-config")
+			// The replacement is activated through the standard activation path.
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "other-config" })
 			expect(await provider.providerSettingsManager.listConfig()).toEqual([otherProfile])
 			expect(provider.getProviderProfileEntries()).toEqual([otherProfile])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "other-config")
+			// The effective provider settings match the replacement, not just the name pointers.
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "other-model",
+			})
+			// Same side effects as the webview activation path: the mode config is persisted.
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "other-id")
 		})
 
 		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
