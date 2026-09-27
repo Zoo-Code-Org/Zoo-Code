@@ -2089,9 +2089,15 @@ export class ClineProvider
 					// An abort that lands while the history write is in flight has
 					// already persisted the new mode: restore the pre-switch item and
 					// bail before the in-memory task write and the emit, so task
-					// history, task state, and provider mode cannot diverge.
+					// history, task state, and provider mode cannot diverge. A failed
+					// rollback must not surface as the persistence error of the
+					// cancelled switch: log it and keep the cancellation result.
 					if (signal?.aborted) {
-						await this.updateTaskHistory(taskHistoryItem)
+						try {
+							await this.updateTaskHistory(taskHistoryItem)
+						} catch (rollbackError) {
+							this.log(`Failed to roll back mode switch ${task.taskId}: ${String(rollbackError)}`)
+						}
 						return
 					}
 				} else if (signal?.aborted) {
