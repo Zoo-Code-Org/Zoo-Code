@@ -609,7 +609,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 		const secrets: Record<string, string | undefined> = {}
 
-		mockContext = {
+		mockContext = Object.assign({} as vscode.ExtensionContext, {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
@@ -649,17 +649,17 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			globalStorageUri: {
 				fsPath: "/test/storage/path",
 			} as vscode.Uri,
-		} as unknown as vscode.ExtensionContext
+		})
 
-		mockOutputChannel = {
+		mockOutputChannel = Object.assign({} as vscode.OutputChannel, {
 			appendLine: vi.fn(),
 			clear: vi.fn(),
 			dispose: vi.fn(),
-		} as unknown as vscode.OutputChannel
+		})
 	})
 
 	const createMockWebviewView = (postMessage = vi.fn()) =>
-		({
+		Object.assign({} as vscode.WebviewView, {
 			webview: {
 				postMessage,
 				html: "",
@@ -671,7 +671,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			visible: true,
 			onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
 			onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
-		}) as unknown as vscode.WebviewView
+		})
 
 	describe("persisted view state pruning edge cases", () => {
 		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
