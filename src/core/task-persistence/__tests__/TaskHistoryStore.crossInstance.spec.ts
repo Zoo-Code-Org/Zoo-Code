@@ -204,6 +204,27 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(storeB.getAll().length).toBe(10)
 	})
 
+	it("preserves the cached record when rejected-action settlement fails with an unrelated lock error", async () => {
+		await storeA.initialize()
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "action-a",
+			approvalText: "{}",
+			mode: "code",
+			message: "action A",
+			todos: [],
+		}
+		const cached = makeHistoryItem({ id: "settlement-error-task", pendingAction })
+		await storeA.upsert(cached)
+
+		const { safeWriteJson } = await import("../../../utils/safeWriteJson")
+		const lockError = Object.assign(new Error("lock acquisition failed"), { code: "ELOCKED" })
+		vi.mocked(safeWriteJson).mockRejectedValueOnce(lockError)
+
+		await expect(storeA.clearPendingActionIfMatching(cached.id, pendingAction.actionId)).rejects.toBe(lockError)
+		expect(storeA.get(cached.id)).toEqual(cached)
+	})
+
 	/**
 	 * Host B completes a task on disk while host A's cache still has it
 	 * active. Host A's next save updates only totalCost (a full-object
