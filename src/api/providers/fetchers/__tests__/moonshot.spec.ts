@@ -177,4 +177,34 @@ describe("getMoonshotModels", () => {
 			"HTTP 500: Internal Server Error",
 		)
 	})
+
+	it("passes the caller's abort signal to the request", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+		const controller = new AbortController()
+
+		await getMoonshotModels("https://api.moonshot.ai/v1", "mock-key", { signal: controller.signal })
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"https://api.moonshot.ai/v1/models",
+			expect.objectContaining({ signal: controller.signal }),
+		)
+	})
+
+	it("rejects with the abort reason when the caller aborts a pending request", async () => {
+		const controller = new AbortController()
+		vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+			// Mirror the HTTP client: a pending request rejects with the signal's
+			// abort reason when the signal fires.
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+			})
+		})
+
+		const fetchPromise = getMoonshotModels("https://api.moonshot.ai/v1", "mock-key", { signal: controller.signal })
+		controller.abort(new Error("caller canceled"))
+
+		await expect(fetchPromise).rejects.toThrow("caller canceled")
+	})
 })
