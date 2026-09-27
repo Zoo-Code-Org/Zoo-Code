@@ -81,6 +81,30 @@ describe("getModelMaxOutputTokens", () => {
 		expect(result).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS) // Should be 8192, not 64_000
 	})
 
+	test.each([
+		[32_000, 32_000],
+		[160_000, 128_000],
+		[undefined, ANTHROPIC_DEFAULT_MAX_TOKENS],
+		[0, ANTHROPIC_DEFAULT_MAX_TOKENS],
+		[-1, ANTHROPIC_DEFAULT_MAX_TOKENS],
+	])("handles hybrid output override %s without reasoning", (modelMaxTokens, expected) => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			supportsMaxTokens: true,
+		}
+
+		expect(
+			getModelMaxOutputTokens({
+				modelId: "anthropic.claude-sonnet-5",
+				model,
+				settings: { enableReasoningEffort: false, modelMaxTokens },
+			}),
+		).toBe(expected)
+	})
+
 	test("should preserve Anthropic hybrid token handling when a model also supports binary reasoning", () => {
 		const model: ModelInfo = {
 			contextWindow: 1_000_000,
