@@ -923,13 +923,21 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			// The timer id is never consumed (the callback is captured and fired
-			// manually), so bridge the ambient setTimeout signature through unknown.
+			// manually), so the fake returns a structurally-typed handle and a
+			// single cast bridges the ambient setTimeout signature.
+			const timeoutHandle = {
+				hasRef: () => false,
+				ref: () => timeoutHandle,
+				refresh: () => timeoutHandle,
+				unref: () => timeoutHandle,
+				[Symbol.toPrimitive]: () => 1,
+			} as NodeJS.Timeout
 			vitest.spyOn(global, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
 				if (ms === testTimeout) {
 					capturedFn = fn
 				}
-				return 0
-			}) as unknown as typeof setTimeout)
+				return timeoutHandle
+			}) as typeof setTimeout)
 
 			mockChat.mockResolvedValue({
 				message: { content: "Response" },
@@ -1029,9 +1037,16 @@ describe("NativeOllamaHandler", () => {
 
 		it("should remove abort listener and clear timeout when abortSignal fires", async () => {
 			const controller = new AbortController()
-			// The timer id is never consumed directly (clearTimeout is mocked in these
-			// tests), so bridge the ambient setTimeout return type through unknown.
-			const timeoutHandle = 1 as unknown as ReturnType<typeof setTimeout>
+			// The timer id is only compared by identity here (clearTimeout is spied),
+			// so satisfy the ambient NodeJS.Timeout structurally with a single cast
+			// instead of double-casting a number.
+			const timeoutHandle = {
+				hasRef: () => false,
+				ref: () => timeoutHandle,
+				refresh: () => timeoutHandle,
+				unref: () => timeoutHandle,
+				[Symbol.toPrimitive]: () => 1,
+			} as NodeJS.Timeout
 			const clearTimeoutSpy = vitest.spyOn(global, "clearTimeout").mockImplementation(() => {})
 			vitest.spyOn(global, "setTimeout").mockImplementation(() => timeoutHandle)
 			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
@@ -1064,16 +1079,23 @@ describe("NativeOllamaHandler", () => {
 
 		it("should clear timeoutId in finally block on success", async () => {
 			let capturedDelay: number | undefined
-			// The timer id is never consumed directly (clearTimeout is mocked in these
-			// tests), so bridge the ambient setTimeout return type through unknown.
-			const timeoutHandle = 1 as unknown as ReturnType<typeof setTimeout>
+			// The timer id is only compared by identity here (clearTimeout is spied),
+			// so satisfy the ambient NodeJS.Timeout structurally with a single cast
+			// instead of double-casting a number.
+			const timeoutHandle = {
+				hasRef: () => false,
+				ref: () => timeoutHandle,
+				refresh: () => timeoutHandle,
+				unref: () => timeoutHandle,
+				[Symbol.toPrimitive]: () => 1,
+			} as NodeJS.Timeout
 
 			vitest.spyOn(global, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
 				if (ms === 5000) {
 					capturedDelay = ms
 				}
 				return timeoutHandle
-			}) as unknown as typeof setTimeout)
+			}) as typeof setTimeout)
 
 			const clearTimeoutSpy = vitest.spyOn(global, "clearTimeout").mockImplementation(() => {})
 
@@ -2022,13 +2044,21 @@ describe("NativeOllamaHandler", () => {
 			)
 
 			// The timer id is never consumed (the callback is captured and fired
-			// manually), so bridge the ambient setTimeout signature through unknown.
+			// manually), so the fake returns a structurally-typed handle and a
+			// single cast bridges the ambient setTimeout signature.
+			const timeoutHandle = {
+				hasRef: () => false,
+				ref: () => timeoutHandle,
+				refresh: () => timeoutHandle,
+				unref: () => timeoutHandle,
+				[Symbol.toPrimitive]: () => 1,
+			} as NodeJS.Timeout
 			vitest.spyOn(global, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
 				if (ms === testTimeout) {
 					capturedFn = fn
 				}
-				return 0
-			}) as unknown as typeof setTimeout)
+				return timeoutHandle
+			}) as typeof setTimeout)
 
 			const promise = handler.completePrompt("Test prompt", { timeoutMs: testTimeout })
 			expect(capturedFn).toBeDefined()
