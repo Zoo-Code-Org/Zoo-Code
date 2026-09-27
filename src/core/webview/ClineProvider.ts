@@ -1042,6 +1042,14 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		// Replacing the watched view invalidates a recovery reload still
+		// awaiting its HTML (same epoch bump as clearWebviewResources), so the
+		// stale recovery can neither block nor reassign the replacement view's
+		// recovery. Re-resolving the same view, or the first resolve, leaves
+		// the epoch alone.
+		if (this.view && this.view !== webviewView) {
+			this.webviewRecoveryEpoch++
+		}
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
 
