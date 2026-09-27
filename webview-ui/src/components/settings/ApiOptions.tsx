@@ -746,10 +746,14 @@ const ApiOptions = ({
 								setApiConfigurationField={setApiConfigurationField}
 								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
 								models={
-									// MiMo is a dynamic provider: merge the host-fetched model
-									// catalog into the static fallback so models newer than the
-									// shipped catalog (e.g. post-V2.6 releases) are selectable
-									// without an extension update.
+									// MiMo has no dedicated picker component, so it shares the
+									// generic static picker with DeepSeek. MiMo ships new model
+									// generations frequently (the V2.5 line is EOL), so the
+									// host-fetched catalog is merged in here: the picker stays
+									// populated before the router response arrives and post-V2.6
+									// releases become selectable without an extension update.
+									// DeepSeek uses this picker without the merge; Moonshot has
+									// its own router-only picker.
 									activeSelectedProvider === providerIdentifiers.mimo
 										? {
 												...getStaticModelsForProvider(

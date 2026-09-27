@@ -1311,22 +1311,9 @@ export const webviewMessageHandler = async (
 					}
 
 					if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
-						// A refresh failure (bad key/endpoint) must not abort the
-						// aggregate fetch — surface the normal MiMo failure response
-						// and continue so routerModels is still posted.
-						try {
-							await flushModels(mimoOptions, true)
-						} catch (error) {
-							const errorMessage = error instanceof Error ? error.message : String(error)
-							console.error(`Error refreshing models for ${providerIdentifiers.mimo}:`, error)
-
-							await provider.postMessageToWebview({
-								type: RouterModelsMessageType.singleRouterModelFetchResponse,
-								success: false,
-								error: errorMessage,
-								values: { provider: providerIdentifiers.mimo },
-							})
-						}
+						// Unsaved form values win over stored config: flush refreshes the cache
+						// with them before the aggregate fetch (same pattern as DeepSeek/Moonshot).
+						await flushModels(mimoOptions, true)
 					}
 
 					candidates.push({

@@ -26,6 +26,11 @@ describe("getMimoModels", () => {
 		)
 		expect(models["mimo-v2.6-pro"]).toEqual(mimoModels["mimo-v2.6-pro"])
 		expect(models["mimo-v2.6-flash"]).toEqual(mimoModels["mimo-v2.6-flash"])
+
+		// mimo-v2.5-pro is still served today, but this mock response omits it
+		// (post-EOL world): a model absent from the API response must stay absent
+		// from the result, guarding against a wholesale-static-map regression.
+		expect(models["mimo-v2.5-pro"]).toBeUndefined()
 	})
 
 	it("provides MiMo-family defaults for unknown model IDs without pricing", async () => {
@@ -197,6 +202,18 @@ describe("getMimoModels", () => {
 		await expect(getMimoModels("https://token-plan-sgp.xiaomimimo.com@attacker.example/v1", "key")).rejects.toThrow(
 			"must not contain credentials",
 		)
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
+	it("rejects a percent-encoded %40 userinfo form through the allowlist guard", async () => {
+		const fetchSpy = vi.fn()
+		globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+		// containsUserinfo only scans for a literal "@", so the encoded form
+		// reaches the allowlist guard, which rejects it as a non-exact match.
+		await expect(
+			getMimoModels("https://token-plan-sgp.xiaomimimo.com%40attacker.example/v1", "key"),
+		).rejects.toThrow("not an allowed Xiaomi MiMo endpoint")
 		expect(fetchSpy).not.toHaveBeenCalled()
 	})
 

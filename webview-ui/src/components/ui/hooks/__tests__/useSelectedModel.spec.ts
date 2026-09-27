@@ -740,26 +740,20 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.maxTokens).toBe(131_072)
 		})
 
-		it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot, providerIdentifiers.mimo])(
-			"keeps the static %s catalog when the router query has errored",
-			(provider) => {
-				mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isError: true }))
+		it.each([
+			[providerIdentifiers.deepseek, deepSeekDefaultModelId, deepSeekModels[deepSeekDefaultModelId]],
+			[providerIdentifiers.moonshot, moonshotDefaultModelId, moonshotModels[moonshotDefaultModelId]],
+			[providerIdentifiers.mimo, mimoDefaultModelId, mimoModels[mimoDefaultModelId]],
+		])("keeps the static %s catalog when the router query has errored", (provider, expectedId, expectedInfo) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isError: true }))
 
-				const wrapper = createWrapper()
-				const { result } = renderHook(() => useSelectedModel({ apiProvider: provider }), { wrapper })
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: provider }), { wrapper })
 
-				const expectedId =
-					provider === providerIdentifiers.deepseek
-						? deepSeekDefaultModelId
-						: provider === providerIdentifiers.moonshot
-							? moonshotDefaultModelId
-							: mimoDefaultModelId
-				expect(result.current.isError).toBe(true)
-				expect(result.current.id).toBe(expectedId)
-				expect(result.current.info).toBeDefined()
-				expect(result.current.info?.contextWindow).toBeGreaterThan(0)
-			},
-		)
+			expect(result.current.isError).toBe(true)
+			expect(result.current.id).toBe(expectedId)
+			expect(result.current.info).toEqual(expectedInfo)
+		})
 	})
 
 	describe("default behavior", () => {
