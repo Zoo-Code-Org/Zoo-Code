@@ -103,6 +103,11 @@ export class CodeIndexManager {
 		return this._configManager?.isFeatureConfigured ?? false
 	}
 
+	/** Whether configuration loading has succeeded, independently of service or indexing readiness. */
+	public get isConfigurationLoaded(): boolean {
+		return this._configManager?.isConfigurationLoaded ?? false
+	}
+
 	public get isInitialized(): boolean {
 		try {
 			this.assertInitialized()
