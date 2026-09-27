@@ -466,6 +466,7 @@ describe("Moonshot Component", () => {
 			expect.objectContaining({
 				type: "requestRouterModels",
 				values: {
+					provider: providerIdentifiers.moonshot,
 					moonshotApiKey: "test-key",
 					moonshotBaseUrl: "https://api.moonshot.cn/v1",
 				},

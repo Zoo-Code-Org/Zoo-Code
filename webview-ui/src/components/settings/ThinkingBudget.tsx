@@ -74,7 +74,8 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	// Models that advertise a user-configurable max output budget (e.g. Z.ai GLM) but do not
 	// use the reasoning-budget slider. The reasoning-budget branch already renders its own
 	// max-tokens control, so only surface this standalone slider when that branch is inactive.
-	const isMaxTokensConfigurable = !!modelInfo && modelInfo.supportsMaxTokens && !isReasoningBudgetSupported
+	const isMaxTokensConfigurable =
+		!!modelInfo && modelInfo.supportsMaxTokens && (isReasoningSupported || !isReasoningBudgetSupported)
 
 	// "disable" turns off reasoning entirely; "none" is a valid reasoning level.
 	// Both display as "None" in the UI but behave differently.
@@ -99,12 +100,10 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		? ["disable", ...baseAvailableOptions]
 		: baseAvailableOptions
 
-	// Default reasoning effort - use model's default if available
-	// GPT-5 models have "medium" as their default in the model configuration
+	// Use the model's declared default when present; otherwise fall back based on requiredReasoningEffort.
 	const modelDefaultReasoningEffort = modelInfo?.reasoningEffort as ReasoningEffortExtended | undefined
-	const defaultReasoningEffort: ReasoningEffortOption = modelInfo?.requiredReasoningEffort
-		? modelDefaultReasoningEffort || "medium"
-		: "disable"
+	const defaultReasoningEffort: ReasoningEffortOption =
+		modelDefaultReasoningEffort ?? (modelInfo?.requiredReasoningEffort ? "medium" : "disable")
 	// Current reasoning effort from settings, or fall back to default.
 	// Clamp to availableOptions so the Select trigger always renders a valid option.
 	const storedReasoningEffort = apiConfiguration.reasoningEffort as ReasoningEffortOption | undefined
@@ -116,23 +115,16 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		? rawReasoningEffort
 		: fallbackReasoningEffort
 
-	// Set default reasoning effort when model supports it and no value is set
+	// Keep normalized defaults pending so Save persists them to the provider profile.
 	useEffect(() => {
 		if (
 			isReasoningEffortSupported &&
-			modelInfo?.requiredReasoningEffort &&
 			storedReasoningEffort !== currentReasoningEffort &&
 			currentReasoningEffort !== "disable"
 		) {
-			setApiConfigurationField("reasoningEffort", currentReasoningEffort as ReasoningEffortExtended, false)
+			setApiConfigurationField("reasoningEffort", currentReasoningEffort as ReasoningEffortExtended)
 		}
-	}, [
-		isReasoningEffortSupported,
-		storedReasoningEffort,
-		currentReasoningEffort,
-		modelInfo?.requiredReasoningEffort,
-		setApiConfigurationField,
-	])
+	}, [isReasoningEffortSupported, storedReasoningEffort, currentReasoningEffort, setApiConfigurationField])
 
 	// Sync enableReasoningEffort based on selection
 	// "disable" turns off reasoning; "none" is a valid level (reasoning enabled)

@@ -344,9 +344,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "🤖 Essaie GLM-5.3-Flash et Gemini 3.7 Flash à 50 % de réduction pendant 2 semaines, et MiniMax M3 totalement GRATUIT pour les utilisateurs avec un solde sur le nouveau Zoo Gateway : <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Nouveau modèle — GLM-5.3-Flash est désormais disponible via Z AI.",
-			"highlight3": "Correctifs de fiabilité — approbations de sous-tâches restaurées, sortie d'outils vide de Vertex Gemini 3.7, échecs de démarrage du terminal, erreurs du service en arrière-plan et la lisibilité des thèmes d'IDE."
+			"highlight1": "✨ Nouveaux modèles SOTA ajoutés : Utilise GPT-6 Sol, GPT-6 Luna et Claude Opus 5.5 avec les providers compatibles.",
+			"highlight2": "🧭 Tâches et sous-tâches plus fiables : Garde les modes délégués isolés, préserve les liens des sous-tâches après des arrêts répétés et protège les réglages de l'orchestrateur quand les commandes slash changent de mode.",
+			"highlight3": "🛠️ Comportement plus fiable du terminal, des providers et de la recherche de code : Améliore le terminal sous Windows et dans les environnements non anglophones, renforce les réponses et l'annulation des providers et assure-toi que la recherche de code utilise plus systématiquement le bon workspace."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

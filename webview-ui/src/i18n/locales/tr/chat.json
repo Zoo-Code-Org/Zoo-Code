@@ -345,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "🤖 Yeni Zoo Gateway'de bakiyesi olan kullanıcılar GLM-5.3-Flash ve Gemini 3.7 Flash'ı 2 hafta boyunca %50 indirimle, MiniMax M3'ü ise tamamen ÜCRETSİZ deneyebilir: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Yeni model — GLM-5.3-Flash artık Z AI üzerinden kullanılabilir.",
-			"highlight3": "Güvenilirlik düzeltmeleri — alt görev onayları geri getirildi, Vertex Gemini 3.7 boş araç çıktısı, terminal başlatma hataları ve arka plan servis hataları giderildi, IDE temalarındaki okunabilirlik iyileştirildi."
+			"highlight1": "✨ Yeni SOTA modelleri eklendi: Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.",
+			"highlight2": "🧭 Daha güvenilir görevler ve alt görevler: Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.",
+			"highlight3": "🛠️ Daha güvenilir terminal, sağlayıcı ve kod arama davranışı: Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",
