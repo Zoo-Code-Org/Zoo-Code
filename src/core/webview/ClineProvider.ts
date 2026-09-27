@@ -2306,10 +2306,10 @@ export class ClineProvider
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
 						// setProviderSettings writes the shared store directly, bypassing the
-						// view-local mutation path: also refresh this view's buffer so a stale
-						// loaded apiConfiguration cannot keep shadowing the new settings in
-						// getState().
-						this._saveViewLocalStateFromMutation(providerSettings),
+						// view-local mutation path: clear this view's buffered apiConfiguration
+						// overlay (if any) so a stale loaded profile cannot keep shadowing the
+						// new settings in getState().
+						this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 					])
 
 					// Other live views may have buffered this profile's settings earlier;
@@ -2508,10 +2508,10 @@ export class ClineProvider
 				this.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 				// setProviderSettings writes the shared store directly, bypassing the
-				// view-local mutation path: also refresh this view's buffer so a stale
-				// loaded apiConfiguration cannot keep shadowing the new settings in
-				// getState().
-				this._saveViewLocalStateFromMutation(providerSettings),
+				// view-local mutation path: clear this view's buffered apiConfiguration
+				// overlay (if any) so a stale loaded profile cannot keep shadowing the
+				// new settings in getState().
+				this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 			])
 
 			// Other live views may have buffered this profile's settings earlier;
