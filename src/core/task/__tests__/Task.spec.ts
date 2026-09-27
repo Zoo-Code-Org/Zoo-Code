@@ -2692,7 +2692,9 @@ describe("Cline", () => {
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
-				vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "ask" }))
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),
+				)
 				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
 					// Mirror ClineProvider.handleModeSwitch: after validation and persistence
 					// the provider owns the task's mode write.
@@ -2782,7 +2784,7 @@ describe("Cline", () => {
 
 				// Resolve the pending provider state only after the submission has started,
 				// carrying the provider's pre-switch mode.
-				releaseState({ mode: "ask" } as unknown as ProviderState)
+				releaseState(Object.assign({} as ProviderState, { mode: "ask" }))
 
 				await submitted
 

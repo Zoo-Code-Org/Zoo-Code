@@ -25,7 +25,7 @@ vi.mock("../../integrations/terminal/TerminalRegistry", () => ({
 
 describe("API.setConfiguration", () => {
 	it("routes configuration through ClineProvider.setValues so view-local state stays in sync", async () => {
-		const provider = {
+		const provider = Object.assign({} as ClineProvider, {
 			context: {},
 			on: vi.fn(),
 			setValues: vi.fn().mockResolvedValue(undefined),
@@ -36,8 +36,8 @@ describe("API.setConfiguration", () => {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
-		} as unknown as ClineProvider
-		const api = new API({ appendLine: vi.fn() } as unknown as OutputChannel, provider)
+		})
+		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider)
 		const configuration = {
 			apiProvider: providerIdentifiers.bedrock,
 			currentApiConfigName: "default",

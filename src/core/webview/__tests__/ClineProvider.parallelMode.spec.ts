@@ -8,6 +8,7 @@ import {
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	type RooCodeSettings,
+	PROVIDER_SETTINGS_KEYS,
 	RooCodeEventName,
 	providerIdentifiers,
 } from "@roo-code/types"
@@ -15,12 +16,9 @@ import {
 import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
-import { switchModeTool } from "../../tools/SwitchModeTool"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { Task } from "../../task/Task"
-import type { ToolCallbacks } from "../../tools/BaseTool"
-import type { ToolUse } from "../../../shared/tools"
 
 // Mock p-wait-for
 vi.mock("p-wait-for", () => ({
@@ -307,7 +305,19 @@ vi.mock("../../config/ContextProxy", () => {
 			pinnedApiConfigs: this.stateCache.pinnedApiConfigs ?? defaultState.pinnedApiConfigs,
 		}))
 		getValue = vi.fn().mockImplementation((key: string) => this.stateCache[key])
-		getProviderSettings = vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic })
+		// Mirrors the real ContextProxy contract: the flat provider-settings keys are served
+		// from the state cache, so values written via setProviderSettings round-trip.
+		// The apiProvider default mirrors the schema default for an unwritten store.
+		getProviderSettings = vi.fn().mockImplementation(() => {
+			const flat: Record<string, unknown> = {}
+			for (const key of PROVIDER_SETTINGS_KEYS) {
+				const value = this.stateCache[key]
+				if (value !== undefined) {
+					flat[key] = value
+				}
+			}
+			return { apiProvider: providerIdentifiers.anthropic, ...flat }
+		})
 		setValue = vi.fn().mockImplementation((key: string, value: unknown) => {
 			if (value === undefined || value === null) {
 				delete this.stateCache[key]
@@ -612,7 +622,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 		const secrets: Record<string, string | undefined> = {}
 
-		mockContext = {
+		mockContext = Object.assign({} as vscode.ExtensionContext, {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
@@ -652,17 +662,17 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			globalStorageUri: {
 				fsPath: "/test/storage/path",
 			} as vscode.Uri,
-		} as unknown as vscode.ExtensionContext
+		})
 
-		mockOutputChannel = {
+		mockOutputChannel = Object.assign({} as vscode.OutputChannel, {
 			appendLine: vi.fn(),
 			clear: vi.fn(),
 			dispose: vi.fn(),
-		} as unknown as vscode.OutputChannel
+		})
 	})
 
 	const createMockWebviewView = (postMessage = vi.fn()) =>
-		({
+		Object.assign({} as vscode.WebviewView, {
 			webview: {
 				postMessage,
 				html: "",
@@ -674,7 +684,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			visible: true,
 			onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
 			onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
-		}) as unknown as vscode.WebviewView
+		})
 
 	describe("persisted view state pruning edge cases", () => {
 		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
@@ -714,9 +724,28 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const pruned = provider["prunePersistedViewStates"](states)
 
 			expect(Object.keys(pruned)).toHaveLength(50)
-			expect(pruned["view-0"]).toBeDefined()
-			expect(pruned["view-49"]).toBeDefined()
+			expect(pruned["view-0"]).toEqual({ mode: "mode-0", updatedAt: 1 })
+			expect(pruned["view-49"]).toEqual({ mode: "mode-49", updatedAt: 1 })
 			expect(pruned["view-50"]).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("should drop malformed stored entries before pruning", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// Storage can hold corrupted entries (undefined holes or non-object values) after
+			// partial writes: the guard keeps them out of the sorted map so the prune cannot
+			// read updatedAt off a missing entry.
+			const states = Object.assign({} as Parameters<ClineProvider["prunePersistedViewStates"]>[0], {
+				"view-void": undefined,
+				"view-corrupt": "not-an-object",
+				"view-good": { mode: "ask", updatedAt: 1 },
+			})
+
+			const pruned = provider["prunePersistedViewStates"](states)
+
+			expect(Object.keys(pruned)).toEqual(["view-good"])
+			expect(pruned["view-good"]).toEqual({ mode: "ask", updatedAt: 1 })
 
 			await provider.dispose()
 		})
@@ -728,11 +757,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider["setViewStateId"]("tab-to-preserve")
 			await provider.saveViewState("mode", "architect")
-			expect(provider.contextProxy.getValue("viewStates")).toHaveProperty("tab-to-preserve")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"tab-to-preserve": { mode: "architect" },
+			})
 
 			await provider.dispose()
 
-			expect(provider.contextProxy.getValue("viewStates")).toHaveProperty("tab-to-preserve")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"tab-to-preserve": { mode: "architect" },
+			})
 		})
 	})
 
@@ -763,6 +796,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/new-model",
 			})
+			// The activation path clears (not seeds) the view-local overlay: the shared
+			// store serves the activated settings, so no per-view snapshot can mask
+			// later shared edits.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -790,6 +827,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.bedrock,
 				awsRegion: "us-east-1",
 			})
+			// Same A-semantics contract: the upsert/activation path clears the overlay
+			// instead of snapshotting the activated settings into it.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -808,6 +848,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
+			// Structural cast: the env mock shapes activateProfile results as getProfile results.
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
 				id: "replacement-id",
@@ -826,12 +867,14 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.listApiConfigMeta).toEqual([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// The view-local buffer must hold the replacement profile's settings rather
-			// than the deleted profile's.
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			// The replacement's settings are served from the shared store through
+			// getState(); the view-local overlay is cleared on the activation path, so
+			// it cannot keep serving the deleted profile's configuration.
+			expect(state.apiConfiguration).toMatchObject({
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
 			})
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			expect(vi.mocked(provider.providerSettingsManager.deleteConfig)).toHaveBeenCalledWith("deleted-profile")
 
 			await provider.dispose()
@@ -919,9 +962,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 			})
 
-			// The empty viewLocalState takes the unrelated-pin branch (the shared selection
-			// does not reference the deleted profile), so assert on the re-pointed entry
-			// rather than the whole map.
+			// The empty viewLocalState takes the activate branch, which may persist an extra
+			// temporary view entry, so assert on the re-pointed entry rather than the whole map.
 			expect(mockContext.globalState.get("viewStates")).toEqual(
 				expect.objectContaining({
 					"view-legacy": { currentApiConfigName: "keeper-profile", updatedAt: expect.any(Number) },
@@ -1070,11 +1112,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			// The pinning view must take the activation path with the replacement profile...
 			expect(activateSpy).toHaveBeenCalledWith({ name: "replacement-profile" })
-			// ...and its buffer must hold the replacement profile's settings...
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			// ...and the shared store serves the replacement settings through
+			// getState(), while the cleared view-local overlay cannot mask them...
+			expect((await provider.getState()).apiConfiguration).toMatchObject({
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
 			})
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			// ...never the unrelated-pin fallback, which rewrites the shared list via setValues.
 			expect(setValuesSpy).not.toHaveBeenCalledWith(
 				expect.objectContaining({ listApiConfigMeta: expect.anything() }),
@@ -1085,7 +1129,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 	})
 
 	describe("provider profile activation", () => {
-		it("should sync view-local apiConfiguration when activating an upserted profile", async () => {
+		it("should serve the activated profile settings through getState when activating an upserted profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
@@ -1110,7 +1154,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.apiConfiguration).toMatchObject(providerSettings)
 			expect(state.apiConfiguration.apiProvider).toBe("zai")
 			expect(state.apiConfiguration).not.toHaveProperty("openRouterModelId")
-			expect(provider["viewLocalState"].apiConfiguration).toMatchObject(providerSettings)
+			// The upsert/activation path clears the view-local overlay rather than
+			// snapshotting the activated settings into it, so the shared store remains
+			// the single source getState() serves.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -1148,7 +1195,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.handleModeSwitch("architect")
 
 			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
-			expect(postMessage).toHaveBeenCalled()
+			expect(postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state", state: expect.objectContaining({ mode: "architect" }) }),
+			)
 
 			await provider.dispose()
 		})
@@ -1223,6 +1272,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiConversationHistory: [],
 				updateApiConfiguration: vi.fn(),
 			})
+			// Minimal Task double: handleModeSwitch and addClineToStack only touch the fields above.
 			await provider.addClineToStack(makeTask("focused-task") as unknown as Task)
 			const backgroundTask = makeTask("background-task")
 			await provider["setViewStateId"]("stable-sidebar-view")
@@ -1361,41 +1411,50 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider.dispose()
 		})
-	})
 
-	describe("SwitchModeTool routing", () => {
-		// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
-		// when the provider was already disposed the deref is undefined, so the optional chain
-		// must swallow the call and the tool still reports success instead of erroring out.
-		it("should report a successful switch when the provider reference is already released", async () => {
-			const toolTask = {
-				consecutiveMistakeCount: 0,
-				recordToolError: vi.fn(),
-				didToolFailInCurrentTurn: false,
-				sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
-				ask: vi.fn().mockResolvedValue({}),
-				getTaskMode: vi.fn().mockResolvedValue("code"),
-				providerRef: {
-					deref: vi.fn().mockReturnValue(undefined),
-				},
-			} as unknown as Task // structural double: the tool only reads the fields above
-			const callbacks: ToolCallbacks = {
-				askApproval: vi.fn().mockResolvedValue(true),
-				handleError: vi.fn(),
-				pushToolResult: vi.fn(),
-			}
-			const block = {
-				type: "tool_use" as const,
-				name: "switch_mode" as const,
-				params: { mode_slug: "architect", reason: "test" },
-				partial: false,
-				nativeArgs: { mode_slug: "architect", reason: "test" },
-			} as unknown as ToolUse<"switch_mode"> // mirrors createBlock in switchModeTool.spec.ts
+		it("should roll back the shared mode write when the durable write fails", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// The shared store already carries a mode, so the rollback has a concrete value
+			// to restore.
+			await provider.contextProxy.setValue("mode", "code")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				// Only the fresh durable mode write fails; the rollback write succeeds.
+				if (key === "mode" && value !== "code") throw new Error("durable write failed")
+			})
+			// The provider's async initialization can record stray writes on the spy
+			// before this test's mutation starts; start the assertion window clean.
+			setValueSpy.mockClear()
 
-			await switchModeTool.handle(toolTask, block, callbacks)
+			await expect(provider.handleModeSwitch("ask")).rejects.toThrow("durable write failed")
 
-			expect(callbacks.handleError).not.toHaveBeenCalled()
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
+			// The failed write was rolled back to the previous shared mode, so the shared
+			// store cannot be left with the new mode's half-applied state.
+			const modeWrites = setValueSpy.mock.calls.filter(([key]) => key === "mode")
+			expect(modeWrites).toEqual([
+				["mode", "ask"],
+				["mode", "code"],
+			])
+
+			await provider.dispose()
+		})
+
+		it("should log the rollback failure and rethrow the original error when the rollback also fails", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider.contextProxy.setValue("mode", "code")
+			const appendLine = vi.spyOn(mockOutputChannel, "appendLine")
+			const durableError = new Error("durable write failed")
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
+				if (key === "mode") throw durableError
+			})
+
+			await expect(provider.handleModeSwitch("ask")).rejects.toThrow("durable write failed")
+
+			// The rollback failure is logged with its own message and the original error
+			// still propagates: a failed switch must not be swallowed into a logged no-op.
+			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining("Failed to roll back shared mode"))
+			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining('Failed to persist mode "ask"'))
+
+			await provider.dispose()
 		})
 	})
 
