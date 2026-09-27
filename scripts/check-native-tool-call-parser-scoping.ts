@@ -129,7 +129,9 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 					{ index: RAW_TOOL_INDEX, arguments: fragment },
 					scope,
 				)
-				assert.deepEqual(events, [{ type: "tool_call_delta", id: callIds[scopeId], delta: fragment }])
+				assert.deepEqual(events, [
+					{ type: "tool_call_delta", id: callIds[scopeId], name: "read_file", delta: fragment },
+				])
 				appendOwnedEvents(state, scopeId, events)
 				assert.notEqual(
 					NativeToolCallParser.processStreamingChunk(streamingKey(scopeId), fragment, scope),
