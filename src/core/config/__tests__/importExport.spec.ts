@@ -378,11 +378,11 @@ describe("importExport", () => {
 				return {
 					state,
 					writes,
-					proxy: {
+					proxy: Object.assign({} as ContextProxy, {
 						setValues: vi.fn(async (values: Record<string, unknown>) => record(values)),
 						setValue: vi.fn(async (key: string, value: unknown) => record({ [key]: value })),
 						setProviderSettings: vi.fn(async (settings: Record<string, unknown>) => record(settings)),
-					} as unknown as ReturnType<typeof vi.mocked<ContextProxy>>,
+					}),
 				}
 			}
 
