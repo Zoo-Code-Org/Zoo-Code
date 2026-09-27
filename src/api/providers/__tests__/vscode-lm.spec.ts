@@ -1334,6 +1334,74 @@ describe("VsCodeLmHandler", () => {
 			consoleErrorSpy.mockRestore()
 		})
 
+		it("should normalize a superseded request's client-initialization failure to AbortError", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			// B proceeds on its own client and must not pollute A's counters.
+			const clientB = { ...mockLanguageModelChat, sendRequest: vi.fn(), countTokens: vi.fn(async () => 0) }
+			clientB.sendRequest.mockResolvedValue({
+				stream: (async function* () {})(),
+				text: (async function* () {})(),
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			let rejectA: (reason: Error) => void = () => {}
+			const gateA = new Promise<void>((_resolve, reject) => {
+				rejectA = reject
+			})
+			let releaseB: () => void = () => {}
+			const gateB = new Promise<void>((resolve) => {
+				releaseB = resolve
+			})
+			// Gate each client-initialization lookup deterministically (see the
+			// supersession test above for why mockReset() is required here).
+			const selectChatModels = vscode.lm.selectChatModels as Mock
+			selectChatModels.mockReset()
+			let lookup = 0
+			selectChatModels.mockImplementation(() => {
+				const k = lookup++
+				if (k === 0) {
+					return gateA
+				}
+				if (k === 1) {
+					return gateB.then(() => [clientB])
+				}
+				return Promise.resolve([mockLanguageModelChat])
+			})
+			handler["client"] = null
+
+			// A parks inside getClient() on gateA.
+			const streamA = handler.createMessage(systemPrompt, messages)
+			const nextA = streamA.next()
+
+			// B's ensureCleanState() synchronously cancels A's token.
+			const streamB = handler.createMessage(systemPrompt, messages)
+			const nextB = streamB.next()
+			expect(tokenSourceInstance(0).token.isCancellationRequested).toBe(true)
+
+			// A's client initialization fails while A is already superseded: the
+			// catch path must normalize this to AbortError the way completePrompt
+			// does through isAborted() (which includes the token state) instead of
+			// leaking the wrapped client-creation error.
+			rejectA(new Error("boom"))
+			await expect(nextA).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+
+			// Release B so it runs to completion on clientB (empty stream), draining
+			// the request slot so afterEach's dispose() finds a clean handler.
+			releaseB()
+			await nextB
+			await streamB.next()
+			expect(handler["currentRequestCancellation"]).toBeNull()
+			consoleErrorSpy.mockRestore()
+		})
+
 		it("should throw a Zoo Code branded error on stream error with error-like object", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [

@@ -1014,11 +1014,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
-			// When the external signal wins during client initialization (the signal
-			// was already aborted while getClient() was pending or rejected), surface a
-			// standard abort error instead of wrapping the getClient() failure as a
-			// generic stream error.
-			if (externalAbortSignal?.aborted) {
+			// When this request is already cancelled while getClient() was pending or
+			// rejected — the external signal aborted (bridged into the token) or a
+			// newer request superseded this one and cancelled its token — surface a
+			// standard abort error instead of leaking the raw client-initialization
+			// failure. completePrompt normalizes the same case through isAborted(),
+			// which includes the token state; both methods follow that contract.
+			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
 				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
 				abortError.name = "AbortError"
 				throw abortError
