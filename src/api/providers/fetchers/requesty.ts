@@ -5,7 +5,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { parseApiPrice } from "../../../shared/cost"
 import { toRequestyServiceUrl } from "../../../shared/utils/requesty"
 
-import { throwIfAborted } from "../utils/abort-signal"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
 
 // Bounded wall-clock limit for the models discovery request. Without it a hung connection
 // would keep the request alive indefinitely; 10_000 ms matches the other in-tree axios
@@ -29,9 +29,14 @@ export async function getRequestyModels(
 		const resolvedBaseUrl = toRequestyServiceUrl(baseUrl)
 		const modelsUrl = new URL("v1/models", resolvedBaseUrl)
 
+		// Axios's own timeout resets once response headers arrive (follow-redirects),
+		// so a slow body could outlive REQUESTY_MODELS_TIMEOUT_MS. Merge the wall-clock
+		// deadline into the request signal so the fetch is bounded end to end.
+		const requestSignal = mergeAbortSignalAndTimeout(opts?.signal, REQUESTY_MODELS_TIMEOUT_MS)
+
 		const response = await axios.get(modelsUrl.toString(), {
 			headers,
-			signal: opts?.signal,
+			signal: requestSignal,
 			timeout: REQUESTY_MODELS_TIMEOUT_MS,
 		})
 		const rawModels = response.data.data
