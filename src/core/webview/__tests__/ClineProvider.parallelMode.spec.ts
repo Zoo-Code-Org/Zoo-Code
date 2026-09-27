@@ -730,6 +730,25 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider.dispose()
 		})
+
+		it("should drop malformed stored entries before pruning", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// Storage can hold corrupted entries (undefined holes or non-object values) after
+			// partial writes: the guard keeps them out of the sorted map so the prune cannot
+			// read updatedAt off a missing entry.
+			const states = Object.assign({} as Parameters<ClineProvider["prunePersistedViewStates"]>[0], {
+				"view-void": undefined,
+				"view-corrupt": "not-an-object",
+				"view-good": { mode: "ask", updatedAt: 1 },
+			})
+
+			const pruned = provider["prunePersistedViewStates"](states)
+
+			expect(Object.keys(pruned)).toEqual(["view-good"])
+			expect(pruned["view-good"]).toEqual({ mode: "ask", updatedAt: 1 })
+
+			await provider.dispose()
+		})
 	})
 
 	describe("durable editor view state retention (#1065)", () => {
@@ -1349,6 +1368,51 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				}),
 			)
 			expect(provider["viewLocalState"]).toEqual({ mode: "code" })
+
+			await provider.dispose()
+		})
+
+		it("should roll back the shared mode write when the durable write fails", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// The shared store already carries a mode, so the rollback has a concrete value
+			// to restore.
+			await provider.contextProxy.setValue("mode", "code")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				// Only the fresh durable mode write fails; the rollback write succeeds.
+				if (key === "mode" && value !== "code") throw new Error("durable write failed")
+			})
+			// The provider's async initialization can record stray writes on the spy
+			// before this test's mutation starts; start the assertion window clean.
+			setValueSpy.mockClear()
+
+			await expect(provider.handleModeSwitch("ask")).rejects.toThrow("durable write failed")
+
+			// The failed write was rolled back to the previous shared mode, so the shared
+			// store cannot be left with the new mode's half-applied state.
+			const modeWrites = setValueSpy.mock.calls.filter(([key]) => key === "mode")
+			expect(modeWrites).toEqual([
+				["mode", "ask"],
+				["mode", "code"],
+			])
+
+			await provider.dispose()
+		})
+
+		it("should log the rollback failure and rethrow the original error when the rollback also fails", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider.contextProxy.setValue("mode", "code")
+			const appendLine = vi.spyOn(mockOutputChannel, "appendLine")
+			const durableError = new Error("durable write failed")
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
+				if (key === "mode") throw durableError
+			})
+
+			await expect(provider.handleModeSwitch("ask")).rejects.toThrow("durable write failed")
+
+			// The rollback failure is logged with its own message and the original error
+			// still propagates: a failed switch must not be swallowed into a logged no-op.
+			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining("Failed to roll back shared mode"))
+			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining('Failed to persist mode "ask"'))
 
 			await provider.dispose()
 		})
