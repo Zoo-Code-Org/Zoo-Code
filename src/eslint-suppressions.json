@@ -131,7 +131,7 @@
 	},
 	"api/providers/__tests__/bedrock.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 38
+			"count": 37
 		}
 	},
 	"api/providers/__tests__/deepseek.spec.ts": {
@@ -1031,12 +1031,12 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 33
+			"count": 23
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {

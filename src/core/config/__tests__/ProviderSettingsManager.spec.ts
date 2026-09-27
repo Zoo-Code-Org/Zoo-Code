@@ -13,8 +13,8 @@ import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
 import {
-	ProviderConfigNotFoundError,
 	ProviderSettingsManager,
+	ProviderSettingsNotFoundError,
 	ProviderProfiles,
 	SyncCloudProfilesResult,
 } from "../ProviderSettingsManager"
@@ -750,15 +750,14 @@ describe("ProviderSettingsManager", () => {
 				}),
 			)
 
-			const error = (await providerSettingsManager
-				.deleteConfig("nonexistent")
-				.catch((e: unknown) => e)) as ProviderConfigNotFoundError
-
-			// The typed signal carries the identity callers branch on ...
-			expect(error).toBeInstanceOf(ProviderConfigNotFoundError)
-			// ... including the name, so logged rejections are attributable.
-			expect(error.name).toBe("ProviderConfigNotFoundError")
-			expect(error.message).toBe("Config 'nonexistent' not found")
+			// The typed not-found signal is the contract callers branch on: a profile
+			// name containing "not found" must not be matchable via message text.
+			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
+			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toThrow(
+				"Config 'nonexistent' not found",
+			)
 		})
 
 		it("should throw error when trying to delete last remaining config", async () => {
