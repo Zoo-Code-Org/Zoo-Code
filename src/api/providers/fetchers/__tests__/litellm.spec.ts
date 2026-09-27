@@ -35,7 +35,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -56,7 +55,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -77,7 +75,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -98,7 +95,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -119,7 +115,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -140,7 +135,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -161,7 +155,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -213,7 +206,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 
 		expect(result).toEqual({
@@ -334,7 +326,6 @@ describe("getLiteLLMModels", () => {
 				"Content-Type": "application/json",
 				...DEFAULT_HEADERS,
 			},
-			timeout: 5000,
 		})
 	})
 
@@ -456,18 +447,54 @@ describe("getLiteLLMModels", () => {
 		)
 	})
 
-	it("handles timeout parameter correctly", async () => {
+	it("forwards the caller signal and sends no per-call timeout", async () => {
+		const mockResponse = { data: { data: [] } }
+		mockedAxios.get.mockResolvedValue(mockResponse)
+		const controller = new AbortController()
+
+		await getLiteLLMModels("test-api-key", "http://localhost:4000", { signal: controller.signal })
+
+		// Exact-shape assertion: an added per-call option (e.g. a reintroduced
+		// timeout) would fail this match, keeping the request bound single-sourced.
+		expect(mockedAxios.get).toHaveBeenCalledWith("http://localhost:4000/v1/model/info", {
+			headers: {
+				Authorization: "Bearer test-api-key",
+				"Content-Type": "application/json",
+				...DEFAULT_HEADERS,
+			},
+			signal: controller.signal,
+		})
+	})
+
+	it("passes an undefined signal through when no options are provided", async () => {
 		const mockResponse = { data: { data: [] } }
 		mockedAxios.get.mockResolvedValue(mockResponse)
 
 		await getLiteLLMModels("test-api-key", "http://localhost:4000")
 
-		expect(mockedAxios.get).toHaveBeenCalledWith(
-			"http://localhost:4000/v1/model/info",
-			expect.objectContaining({
-				timeout: 5000,
-			}),
-		)
+		expect(mockedAxios.get).toHaveBeenCalledWith("http://localhost:4000/v1/model/info", {
+			headers: {
+				Authorization: "Bearer test-api-key",
+				"Content-Type": "application/json",
+				...DEFAULT_HEADERS,
+			},
+			signal: undefined,
+		})
+	})
+
+	it("rejects with an AbortError when the signal aborts the pending request", async () => {
+		const controller = new AbortController()
+		mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+			// Mirror the HTTP client: a pending request rejects when its signal fires.
+			return new Promise<never>((_resolve, reject) => {
+				config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+			})
+		})
+
+		const fetchPromise = getLiteLLMModels("test-api-key", "http://localhost:4000", { signal: controller.signal })
+		controller.abort()
+
+		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
 
 	it("returns empty object when data array is empty", async () => {
