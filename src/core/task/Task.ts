@@ -3405,29 +3405,40 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 										this.presentAssistantMessageSafe()
 									} else if (event.type === "tool_call_delta") {
-										// Look up the streaming entry by id to get its compound key
-										// (delta events don't carry name, but we stored it during startStreamingToolCall)
-										const existingEntry = NativeToolCallParser.getStreamingToolCallById(
-											event.id,
-											nativeToolCallParserScope,
-										)
-										const streamingKey = existingEntry
-											? NativeToolCallParser.makeStreamingKey(
-													existingEntry.id,
-													existingEntry.name,
-												)
-											: undefined
+										// Deltas from the raw-chunk path carry the tracked name: build the
+										// compound key directly so same-ID calls cannot share an
+										// accumulator. Deltas without a name (legacy provider streams)
+										// keep the deprecated single-entry-per-ID lookup.
+										let streamingKey: string | undefined
 
-										const partialToolUse = NativeToolCallParser.processStreamingChunk(
-											streamingKey ?? event.id,
-											event.delta,
-											nativeToolCallParserScope,
-										)
+										if (event.name !== undefined) {
+											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										} else {
+											const legacyEntry = NativeToolCallParser.getStreamingToolCallById(
+												event.id,
+												nativeToolCallParserScope,
+											)
+											streamingKey = legacyEntry
+												? NativeToolCallParser.makeStreamingKey(
+														legacyEntry.id,
+														legacyEntry.name,
+													)
+												: undefined
+										}
 
-										if (partialToolUse) {
+										const partialToolUse =
+											streamingKey === undefined
+												? null
+												: NativeToolCallParser.processStreamingChunk(
+														streamingKey,
+														event.delta,
+														nativeToolCallParserScope,
+													)
+
+										if (partialToolUse && streamingKey !== undefined) {
 											// Retrieve name from NativeToolCallParser's streaming state
 											const name = NativeToolCallParser.getStreamingToolName(
-												streamingKey ?? event.id,
+												streamingKey,
 												nativeToolCallParserScope,
 											)
 											const dedupKey = `${event.id}::${name}`
@@ -3819,17 +3830,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
-						const eventName = event.name ?? event.id
-						const dedupKey = `${event.id}::${eventName}`
+						let eventName = event.name ?? event.id
+						let dedupKey = `${event.id}::${eventName}`
 
 						// Finalize the streaming tool call
-						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
 							NativeToolCallParser.makeStreamingKey(event.id, eventName),
 							nativeToolCallParserScope,
 						)
 
 						// Get the index for this tool call using compound key
-						const toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+						let toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+
+						// Defensive resolution: if the end event's name does not match the start
+						// name (provider quirk), the compound-key lookup above misses and both the
+						// parser entry and the dedup tracking would stay stale. Resolve the tracked
+						// entry by id and target the real compound key for finalization and cleanup.
+						if (finalToolUse === null && toolUseIndex === undefined) {
+							const resolved = NativeToolCallParser.getStreamingToolCallById(
+								event.id,
+								nativeToolCallParserScope,
+							)
+							if (resolved) {
+								eventName = resolved.name
+								dedupKey = `${resolved.id}::${resolved.name}`
+								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+									NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name),
+									nativeToolCallParserScope,
+								)
+								toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+							}
+						}
 
 						if (finalToolUse) {
 							// Store the tool call ID

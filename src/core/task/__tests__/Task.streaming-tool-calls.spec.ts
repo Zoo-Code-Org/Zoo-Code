@@ -10,6 +10,7 @@ import type { ToolParamName } from "../../../shared/tools"
 import { ApiStreamChunk, type ApiStreamToolCallPartialChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
 import { TelemetryService } from "@roo-code/telemetry"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 
 // Mock delay before any imports that might use it
 vi.mock("delay", () => ({
@@ -554,17 +555,16 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 			expect(partialResult).toBeDefined()
 			expect(partialResult?.partial).toBe(true)
-			// Even severely malformed JSON like '{invalid' gets parsed by partial-json-parser
-			// It returns an empty object, which is still a valid (though incomplete) result
-			const veryPartial = NativeToolCallParser.processStreamingChunk("toolu_fail123", "{invalid", scope)
-			// partial-json-parser handles this gracefully - it may return an empty object or null
-			// The key point is it doesn't throw an error and the streaming continues
-			if (veryPartial != null) {
-				expect(veryPartial.partial).toBe(true)
-			} else {
-				// null is also acceptable for severely malformed JSON
-				expect(veryPartial).toBeNull()
+			// Severely malformed JSON carries no executable args: processStreamingChunk still
+			// returns the display-layer partial (partial: true, no nativeArgs) so the stream
+			// continues and the accumulator is retried on the next chunk.
+			const veryPartial = NativeToolCallParser.processStreamingChunk(key, "{invalid", scope)
+			expect(veryPartial?.type).toBe("tool_use")
+			if (veryPartial?.type !== "tool_use") {
+				throw new Error("Expected a partial tool_use")
 			}
+			expect(veryPartial.partial).toBe(true)
+			expect(veryPartial.nativeArgs).toBeUndefined()
 		})
 	})
 
@@ -931,6 +931,126 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(assistantMessageContent[0]?.name).toBe("read_file")
 			expect(assistantMessageContent[0]?.partial).toBe(false)
 			expect(streamingToolCallIndices.has("toolu_malformed123::read_file")).toBe(false)
+		})
+	})
+
+	describe("real Task streaming integration (attemptApiRequest)", () => {
+		// Structural access to the private Task state these tests assert against.
+		type TaskStreamingTestAccess = {
+			safeEnsureModelFetched: () => Promise<unknown>
+			presentAssistantMessageSafe: () => void
+			saveClineMessages: () => Promise<boolean>
+			streamingToolCallIndices: Map<string, number>
+			assistantMessageContent: unknown[]
+		}
+
+		function getTaskStreamingAccess(task: Task): TaskStreamingTestAccess {
+			return task as unknown as TaskStreamingTestAccess
+		}
+
+		type FinalizedEntry = {
+			type: string
+			name: string
+			partial: boolean
+			nativeArgs?: { path?: string; content?: string }
+		}
+
+		async function createStreamingTask() {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskStreamingAccess(task), "safeEnsureModelFetched").mockResolvedValue({
+				id: mockApiConfig.apiModelId!,
+				maxTokens: 8192,
+				contextWindow: 180000,
+				supportsImages: false,
+				inputPrice: 0.3,
+				outputPrice: 1.5,
+			})
+			vi.spyOn(getTaskStreamingAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(getTaskStreamingAccess(task), "saveClineMessages").mockResolvedValue(true)
+			return task
+		}
+
+		it("routes same-ID tool calls through the real Task dedup state", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "toolu_real",
+						name: "read_file",
+						arguments: '{"path":"a.ts"}',
+					},
+					{
+						type: "tool_call_partial",
+						index: 1,
+						id: "toolu_real",
+						name: "write_to_file",
+						arguments: '{"path":"b.ts","content":"hi"}',
+					},
+					// Duplicate start for the same compound key (id, name): must be ignored.
+					{ type: "tool_call_partial", index: 2, id: "toolu_real", name: "read_file" },
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// Real Task tracking state after finalization: both compound keys cleaned up.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices).toHaveLength(0)
+
+			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
+			expect(content).toHaveLength(2)
+			expect(content[0].type).toBe("tool_use")
+			expect(content[0].name).toBe("read_file")
+			expect(content[0].partial).toBe(false)
+			expect(content[0].nativeArgs).toMatchObject({ path: "a.ts" })
+			expect(content[1].type).toBe("tool_use")
+			expect(content[1].name).toBe("write_to_file")
+			expect(content[1].partial).toBe(false)
+			expect(content[1].nativeArgs).toMatchObject({ path: "b.ts" })
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Ignoring duplicate tool_call_start for ID: toolu_real"),
+			)
+			warnSpy.mockRestore()
+		})
+
+		it("keeps the start name when a later same-index chunk carries a different name", async () => {
+			const task = await createStreamingTask()
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "toolu_lc",
+						name: "read_file",
+						arguments: '{"path":"a.ts"}',
+					},
+					// Same index and ID with a different name: the start name must win so the
+					// end event's compound key still resolves the tracked entry.
+					{ type: "tool_call_partial", index: 0, id: "toolu_lc", name: "write_to_file" },
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// No stale tracking: the finalized entry is cleaned up under the start name.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices).toHaveLength(0)
+
+			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
+			expect(content).toHaveLength(1)
+			expect(content[0].type).toBe("tool_use")
+			expect(content[0].name).toBe("read_file")
+			expect(content[0].partial).toBe(false)
+			expect(content[0].nativeArgs).toMatchObject({ path: "a.ts" })
 		})
 	})
 })

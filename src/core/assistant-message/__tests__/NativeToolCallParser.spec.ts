@@ -356,11 +356,22 @@ describe("NativeToolCallParser", () => {
 				secondScope,
 			)
 
+			// Delta events carry the tracked name so consumers can build compound keys.
 			expect(firstDelta).toEqual([
-				{ type: "tool_call_delta", id: "call_first", delta: JSON.stringify({ path: "first.ts" }) },
+				{
+					type: "tool_call_delta",
+					id: "call_first",
+					name: "read_file",
+					delta: JSON.stringify({ path: "first.ts" }),
+				},
 			])
 			expect(secondDelta).toEqual([
-				{ type: "tool_call_delta", id: "call_second", delta: JSON.stringify({ path: "second.ts" }) },
+				{
+					type: "tool_call_delta",
+					id: "call_second",
+					name: "read_file",
+					delta: JSON.stringify({ path: "second.ts" }),
+				},
 			])
 			if (firstDelta[0]?.type !== "tool_call_delta" || secondDelta[0]?.type !== "tool_call_delta") {
 				throw new Error("Expected argument delta events")
@@ -572,6 +583,75 @@ describe("NativeToolCallParser", () => {
 			// Verify compound keys would be unique
 			const dedupKeys = new Set(events.map((e) => (e.type === "tool_call_end" ? `${e.id}::${e.name}` : e.id)))
 			expect(dedupKeys.size).toBe(2)
+		})
+
+		it("should keep distinct nativeArgs when same-ID calls route deltas through their own compound keys", () => {
+			const scope = NativeToolCallParser.createScope()
+
+			// Two raw chunks share the same tool call ID but carry different names.
+			const events1 = NativeToolCallParser.processRawChunk(
+				{
+					index: 30,
+					id: "toolu_route",
+					name: "read_file",
+					arguments: '{"path":"a.ts"}',
+				},
+				scope,
+			)
+			const events2 = NativeToolCallParser.processRawChunk(
+				{
+					index: 31,
+					id: "toolu_route",
+					name: "write_to_file",
+					arguments: '{"path":"b.ts","content":"hi"}',
+				},
+				scope,
+			)
+
+			const start1 = events1.find((e) => e.type === "tool_call_start")
+			const delta1 = events1.find((e) => e.type === "tool_call_delta")
+			const start2 = events2.find((e) => e.type === "tool_call_start")
+			const delta2 = events2.find((e) => e.type === "tool_call_delta")
+
+			if (
+				!start1 ||
+				start1.type !== "tool_call_start" ||
+				!delta1 ||
+				delta1.type !== "tool_call_delta" ||
+				!start2 ||
+				start2.type !== "tool_call_start" ||
+				!delta2 ||
+				delta2.type !== "tool_call_delta"
+			) {
+				throw new Error("Expected start and delta events for both calls")
+			}
+
+			// Delta events carry the tracked name so the consumer can build the
+			// unambiguous compound key without an id-only lookup.
+			expect(delta1.name).toBe("read_file")
+			expect(delta2.name).toBe("write_to_file")
+
+			// Route the deltas exactly like Task does: through the compound key.
+			NativeToolCallParser.startStreamingToolCall(start1.id, start1.name, scope)
+			NativeToolCallParser.startStreamingToolCall(start2.id, start2.name, scope)
+			const key1 = NativeToolCallParser.makeStreamingKey(start1.id, start1.name)
+			const key2 = NativeToolCallParser.makeStreamingKey(start2.id, start2.name)
+			const partial1 = NativeToolCallParser.processStreamingChunk(key1, delta1.delta, scope)
+			const partial2 = NativeToolCallParser.processStreamingChunk(key2, delta2.delta, scope)
+			expect(partial1).not.toBeNull()
+			expect(partial2).not.toBeNull()
+
+			// Each call finalizes under its own compound key with its own arguments.
+			const final1 = NativeToolCallParser.finalizeStreamingToolCall(key1, scope)
+			const final2 = NativeToolCallParser.finalizeStreamingToolCall(key2, scope)
+			if (!final1 || !final2 || final1.type !== "tool_use" || final2.type !== "tool_use") {
+				throw new Error("Expected both calls to finalize as tool_use")
+			}
+			expect(final1.name).toBe("read_file")
+			expect(final2.name).toBe("write_to_file")
+			expect(final1.nativeArgs).toMatchObject({ path: "a.ts" })
+			expect(final2.nativeArgs).toMatchObject({ path: "b.ts" })
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(false)
 		})
 	})
 })

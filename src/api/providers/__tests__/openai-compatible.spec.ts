@@ -123,7 +123,7 @@ describe("OpenAICompatibleHandler", () => {
 			async function* mockFullStream() {
 				yield { type: "text-delta", text: "First part" }
 				yield { type: "text-delta", text: "Second part" }
-				yield { type: "tool-call", toolCallId: "123", name: "test_tool", args: "{}" }
+				yield { type: "tool-call", toolCallId: "123", toolName: "test_tool", input: "{}" }
 			}
 
 			const mockUsage = Promise.resolve({
@@ -149,6 +149,12 @@ describe("OpenAICompatibleHandler", () => {
 			expect(textChunks).toHaveLength(2)
 			expect(textChunks[0].text).toBe("First part")
 			expect(textChunks[1].text).toBe("Second part")
+
+			const toolChunks = chunks.filter((chunk) => chunk.type === "tool_call")
+			expect(toolChunks).toHaveLength(1)
+			expect(toolChunks[0].id).toBe("123")
+			expect(toolChunks[0].name).toBe("test_tool")
+			expect(toolChunks[0].arguments).toBe("{}")
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks).toHaveLength(1)
@@ -178,9 +184,9 @@ describe("OpenAICompatibleHandler", () => {
 		it("should handle tool-call events in stream", async () => {
 			async function* mockFullStream() {
 				yield { type: "text-delta", text: "Calling tool" }
-				yield { type: "tool-call-start", toolCallId: "tc_1", name: "read_file" }
-				yield { type: "tool-call-delta", toolCallId: "tc_1", delta: '{"path":"test.ts"}' }
-				yield { type: "tool-call-end", toolCallId: "tc_1" }
+				yield { type: "tool-input-start", id: "tc_1", toolName: "read_file" }
+				yield { type: "tool-input-delta", id: "tc_1", delta: '{"path":"test.ts"}' }
+				yield { type: "tool-input-end", id: "tc_1" }
 			}
 
 			const mockUsage = Promise.resolve({
@@ -201,7 +207,20 @@ describe("OpenAICompatibleHandler", () => {
 				chunks.push(chunk)
 			}
 
-			expect(chunks.length).toBeGreaterThan(0)
+			const toolChunks = chunks.filter(
+				(chunk) =>
+					chunk.type === "tool_call_start" ||
+					chunk.type === "tool_call_delta" ||
+					chunk.type === "tool_call_end",
+			)
+			expect(toolChunks.map((chunk) => chunk.type)).toEqual([
+				"tool_call_start",
+				"tool_call_delta",
+				"tool_call_end",
+			])
+			expect(toolChunks[0]).toMatchObject({ type: "tool_call_start", id: "tc_1", name: "read_file" })
+			expect(toolChunks[1]).toMatchObject({ type: "tool_call_delta", id: "tc_1", delta: '{"path":"test.ts"}' })
+			expect(toolChunks[2]).toMatchObject({ type: "tool_call_end", id: "tc_1" })
 		})
 
 		// Test 1: createMessage() with mock 429 response → verify thrown error has .status === 429 and provider name in message
@@ -259,6 +278,62 @@ describe("OpenAICompatibleHandler", () => {
 				throw new Error("Expected createMessage to throw")
 			}
 			expect(thrownError.status).toBe(500)
+			expect(thrownError.message).toContain("TestProvider")
+		})
+
+		it("should surface a streamed error part through handleOpenAIError with status and provider name", async () => {
+			const rateLimitError = Object.assign(new Error("Rate limited"), { status: 429 })
+
+			mockStreamText.mockReturnValue({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "partial" }
+					yield { type: "error", error: rateLimitError }
+				})(),
+				usage: Promise.resolve({ inputTokens: 0, outputTokens: 0, details: {}, raw: {} }),
+			})
+
+			const chunks: ApiStreamChunk[] = []
+			let thrownError: StatusedError | undefined
+			try {
+				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
+					chunks.push(chunk)
+				}
+			} catch (e) {
+				thrownError = e as StatusedError
+			}
+
+			// The text delta before the error part is still yielded; the error part itself
+			// must throw the wrapped error instead of being emitted as a chunk.
+			expect(chunks).toEqual([{ type: "text", text: "partial" }])
+			expect(thrownError).toBeInstanceOf(Error)
+			if (!thrownError) {
+				throw new Error("Expected createMessage to throw")
+			}
+			expect(thrownError.status).toBe(429)
+			expect(thrownError.message).toContain("TestProvider")
+		})
+
+		it("should wrap a synchronous streamText() failure with status and provider name", async () => {
+			const rateLimitError = Object.assign(new Error("Rate limited"), { status: 429 })
+
+			mockStreamText.mockImplementation(() => {
+				throw rateLimitError
+			})
+
+			let thrownError: StatusedError | undefined
+			try {
+				// The generator body runs on the first next(): the synchronous streamText()
+				// throw must surface here as a wrapped error with status and provider name.
+				await handler.createMessage(systemPrompt, messages).next()
+			} catch (e) {
+				thrownError = e as StatusedError
+			}
+
+			expect(thrownError).toBeInstanceOf(Error)
+			if (!thrownError) {
+				throw new Error("Expected createMessage to throw")
+			}
+			expect(thrownError.status).toBe(429)
 			expect(thrownError.message).toContain("TestProvider")
 		})
 	})

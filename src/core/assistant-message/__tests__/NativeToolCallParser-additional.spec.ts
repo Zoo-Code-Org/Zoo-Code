@@ -64,7 +64,12 @@ describe("NativeToolCallParser - Additional Coverage", () => {
 				scope,
 			)
 
-			expect(NativeToolCallParser.getStreamingToolName(testId, scope)).toBeUndefined()
+			expect(
+				NativeToolCallParser.getStreamingToolName(
+					NativeToolCallParser.makeStreamingKey(testId, "codebase_search"),
+					scope,
+				),
+			).toBeUndefined()
 		})
 
 		it("should return the name for MCP tools", () => {
@@ -180,8 +185,18 @@ describe("NativeToolCallParser - Additional Coverage", () => {
 			NativeToolCallParser.clearAllStreamingToolCalls(scope)
 
 			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(false)
-			expect(NativeToolCallParser.getStreamingToolName("toolu_clear_stream_1", scope)).toBeUndefined()
-			expect(NativeToolCallParser.getStreamingToolName("toolu_clear_stream_2", scope)).toBeUndefined()
+			expect(
+				NativeToolCallParser.getStreamingToolName(
+					NativeToolCallParser.makeStreamingKey("toolu_clear_stream_1", "read_file"),
+					scope,
+				),
+			).toBeUndefined()
+			expect(
+				NativeToolCallParser.getStreamingToolName(
+					NativeToolCallParser.makeStreamingKey("toolu_clear_stream_2", "write_to_file"),
+					scope,
+				),
+			).toBeUndefined()
 		})
 	})
 })

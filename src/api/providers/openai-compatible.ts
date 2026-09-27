@@ -183,6 +183,14 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 
 			// Process the full stream to get all events
 			for await (const part of result.fullStream) {
+				// A streamed provider error arrives as an `error` part rather than a throw:
+				// route it through handleOpenAIError so the thrown error preserves its status
+				// and provider name, matching the non-streamed failure paths. Abort parts are
+				// a normal termination and fall through to processAiSdkStreamPart's ignore case.
+				if (part.type === "error") {
+					throw handleOpenAIError(part.error, this.config.providerName)
+				}
+
 				// Use the processAiSdkStreamPart utility to convert stream parts
 				for (const chunk of processAiSdkStreamPart(part)) {
 					yield chunk

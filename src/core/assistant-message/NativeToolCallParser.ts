@@ -147,8 +147,10 @@ export class NativeToolCallParser {
 			return events
 		}
 
-		// Update name if present in chunk and not yet set
-		if (name) {
+		// Lock the name once the tool call has started: the end events and the
+		// consumer's compound keys use the start name, so a later chunk carrying a
+		// different name must not rekey the tracked entry and orphan its state.
+		if (name && !tracked.hasStarted) {
 			tracked.name = name
 		}
 
@@ -166,6 +168,7 @@ export class NativeToolCallParser {
 				events.push({
 					type: "tool_call_delta",
 					id: tracked.id,
+					name: tracked.name,
 					delta: bufferedDelta,
 				})
 			}
@@ -178,6 +181,7 @@ export class NativeToolCallParser {
 				events.push({
 					type: "tool_call_delta",
 					id: tracked.id,
+					name: tracked.name,
 					delta: args,
 				})
 			} else {
