@@ -2444,7 +2444,13 @@ export class ClineProvider
 		}
 
 		// This view pins an unrelated profile, which must survive the deletion: the
-		// shared list was already staged above; post the updated state only.
+		// shared list was already staged above. If the shared selection itself referenced
+		// the deleted profile, repair that slot through the proxy only — getValues() and
+		// getState() overlay this view's pin, so this view keeps it while sibling views
+		// read the replacement instead of the deleted name.
+		if (globalSettings.currentApiConfigName === profileToDelete.name) {
+			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
+		}
 
 		await this.postStateToWebview()
 	}
@@ -3852,18 +3858,23 @@ export class ClineProvider
 	 * The durable clear runs on the serialized viewStates write queue so it is ordered
 	 * against every in-flight savePersistedViewState: a queued save that ran after a
 	 * direct clear would re-read the emptied map and re-create its captured per-view pin,
-	 * leaving a stale selection that rehydrates after a reload.
+	 * leaving a stale selection that rehydrates after a reload. The in-memory buffer is
+	 * cleared only after the queued clear has run, because a save enqueued before it
+	 * writes its captured value back into the buffer when its durable write completes.
 	 */
 	async broadcastResetToAllInstances(): Promise<void> {
 		const allInstances = ClineProvider.getAllInstances()
 		for (const instance of allInstances) {
-			instance._clearViewLocalState()
-
 			const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 				await instance.contextProxy.setValue("viewStates", undefined)
 			})
 			ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 			await write
+
+			// Clear the in-memory buffer after the queued durable clear: a save enqueued
+			// before the clear updates its buffer when the durable write completes, so an
+			// immediate clear would let that stale pin survive in the live state.
+			instance._clearViewLocalState()
 
 			if (instance !== this) {
 				// A sibling's post can throw mid-reset (state generation reaches the

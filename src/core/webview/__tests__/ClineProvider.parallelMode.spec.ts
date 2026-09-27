@@ -1564,15 +1564,24 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			// Stall the saver's durable write so the broadcast's clear lands while it is
 			// still in the serialized write queue: a direct (un-queued) clear would let
-			// the save run after the clear and re-create its captured per-view pin.
+			// the save run after the clear and re-create its captured per-view pin. The
+			// stalled write still reaches storage once the gate opens, so the storage
+			// assertion below only passes if the clear actually ran after the save.
 			let resolveWrite: (value: undefined) => void = () => {}
 			const writeGate = new Promise<undefined>((resolve) => (resolveWrite = resolve))
-			const setValueSpy = vi.spyOn(saver.contextProxy, "setValue")
-			setValueSpy.mockImplementation(async (key, _value) => {
-				if (key === "viewStates") {
+			// The proxy's setValue is already a vi.fn: vi.spyOn on it would return the same
+			// function, so a delegating spy would recurse into itself. Wrap the mock's
+			// existing implementation instead: gate the non-clear write, then delegate to
+			// the original store write so the stalled save still reaches storage.
+			const setValueMock = vi.mocked(saver.contextProxy.setValue)
+			const originalSetValueImplementation = setValueMock.getMockImplementation()
+			setValueMock.mockImplementation(async (key, value): Promise<void> => {
+				if (key === "viewStates" && value !== undefined) {
 					await writeGate
 				}
+				await originalSetValueImplementation?.(key, value)
 			})
+			const setValueSpy = setValueMock
 
 			const save = saver.saveViewState("mode", "architect")
 			await vi.waitFor(() => expect(setValueSpy).toHaveBeenCalledWith("viewStates", expect.anything()))
@@ -1586,6 +1595,49 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await broadcast
 
 			// The clear won: the save's captured pin was not resurrected after the reset.
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+			expect(saver["viewLocalState"]).toEqual({})
+
+			await caller.dispose()
+			await saver.dispose()
+		})
+
+		it("clears the buffer of a first-constructed saving provider after a queued reset", async () => {
+			// The saver is constructed first so the broadcast reaches its buffer before the
+			// caller does: with the clear queued behind the in-flight save, the buffer must
+			// still end empty and the durable map cleared even though the save writes its
+			// captured pin back into the buffer when its durable write completes.
+			const saver = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const caller = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await saver.resolveWebviewView(createMockWebviewView())
+			await caller.resolveWebviewView(createMockWebviewView())
+
+			let resolveWrite: (value: undefined) => void = () => {}
+			const writeGate = new Promise<undefined>((resolve) => (resolveWrite = resolve))
+			// The proxy's setValue is already a vi.fn: vi.spyOn on it would return the same
+			// function, so a delegating spy would recurse into itself. Wrap the mock's
+			// existing implementation instead: gate the non-clear write, then delegate to
+			// the original store write so the stalled save still reaches storage.
+			const setValueMock = vi.mocked(saver.contextProxy.setValue)
+			const originalSetValueImplementation = setValueMock.getMockImplementation()
+			setValueMock.mockImplementation(async (key, value): Promise<void> => {
+				if (key === "viewStates" && value !== undefined) {
+					await writeGate
+				}
+				await originalSetValueImplementation?.(key, value)
+			})
+			const setValueSpy = setValueMock
+
+			const save = saver.saveViewState("mode", "architect")
+			await vi.waitFor(() => expect(setValueSpy).toHaveBeenCalledWith("viewStates", expect.anything()))
+
+			const broadcast = caller.broadcastResetToAllInstances()
+
+			resolveWrite(undefined)
+			await save
+			await broadcast
+
 			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
 			expect(saver["viewLocalState"]).toEqual({})
 

@@ -2099,10 +2099,11 @@ describe("ClineProvider", () => {
 			await provider.deleteProviderProfile(deletedProfile)
 
 			// The pin survives in the buffer: the deletion must not route through the
-			// replacement activation for an unrelated view pin, and the shared slot is
-			// left untouched so the buffer keeps the pin.
+			// replacement activation for an unrelated view pin. The shared slot is
+			// repaired to the replacement so sibling views stop reading the deleted
+			// name, while this view's buffer keeps its pin.
 			expect(provider.getValues().currentApiConfigName).toBe("view-pin")
-			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("shared-victim")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("replacement-profile")
 			// The shared list sync drops the deleted entry.
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([replacementProfile, pinnedProfile])
 			await provider.dispose()
