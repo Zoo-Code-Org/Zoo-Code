@@ -273,9 +273,9 @@ import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistr
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("webviewMessageHandler - webviewDidLaunch", () => {
-	// Structural view of the provider members this suite reassigns at runtime: the
-	// double literal does not declare them and some are readonly on the class, so a
-	// cast of the mock target alone cannot express these reassignments without any.
+	// Single structural view of the provider members this suite reassigns at runtime:
+	// the class type declares several of them as getters / readonly, so the fixture
+	// type is the writable view of the same object (no cast through unknown needed).
 	type LaunchProviderFixture = {
 		setViewStateId: (viewStateId: string) => Promise<void>
 		workspaceTracker: { initializeFilePaths: () => Promise<void> }
@@ -287,14 +287,16 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		getMcpHub: () => unknown
 		getStateToPostToWebview: () => Promise<{ telemetrySetting: string }>
 	}
-	const double = mockClineProvider as unknown as LaunchProviderFixture
+	const double = mockClineProvider as LaunchProviderFixture
 
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.mocked(mockClineProvider.getState).mockResolvedValue({
-			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
-			currentApiConfigName: "view-local-profile",
-		} as unknown as Awaited<ReturnType<typeof mockClineProvider.getState>>)
+		vi.mocked(mockClineProvider.getState).mockResolvedValue(
+			Object.assign({} as Awaited<ReturnType<typeof mockClineProvider.getState>>, {
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				currentApiConfigName: "view-local-profile",
+			}),
+		)
 		double.setViewStateId = vi.fn().mockResolvedValue(undefined)
 		double.workspaceTracker = { initializeFilePaths: vi.fn().mockResolvedValue(undefined) }
 		double.providerSettingsManager = {
@@ -2268,8 +2270,10 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 	// per-test doubles. Snapshot the module-level originals at collection time and
 	// restore them in the afterEach below so the launch stubs never leak into other
 	// tests of this file.
+	// Single structural cast: the class types these members as a method / a
+	// readonly property, which cannot be re-assigned to swap in a per-test double.
 	const launchSuiteSnapshot = (() => {
-		const view = mockClineProvider as unknown as {
+		const view = mockClineProvider as {
 			getMcpHub: unknown
 			providerSettingsManager: unknown
 			getStateToPostToWebview: unknown
@@ -2451,7 +2455,7 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 	})
 
 	afterEach(() => {
-		const view = mockClineProvider as unknown as {
+		const view = mockClineProvider as {
 			getMcpHub: unknown
 			providerSettingsManager: unknown
 			getStateToPostToWebview: unknown
