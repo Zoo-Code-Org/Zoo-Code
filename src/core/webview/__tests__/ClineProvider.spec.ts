@@ -2248,6 +2248,41 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// Seed the per-view buffer with profile A's settings, as loadViewState would
+			// after a restart with a pinned profile.
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "profile-a-key",
+			})
+
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "profile-b",
+					id: "profile-b-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The direct-activation path (activateProviderProfileUnlocked) carries its own
+			// overlay-clearing call, distinct from upsertProviderProfile's.
+			await provider.activateProviderProfile({ name: "profile-b" })
+
+			const state = await provider.getState({ includeTaskHistory: false })
+
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+			await provider.dispose()
+		})
+
 		it("should merge getValues from ContextProxy with view-local values taking precedence", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const contextProxyAccess = provider.contextProxy as {
