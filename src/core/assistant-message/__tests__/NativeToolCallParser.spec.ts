@@ -653,5 +653,38 @@ describe("NativeToolCallParser", () => {
 			expect(final2.nativeArgs).toMatchObject({ path: "b.ts" })
 			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(false)
 		})
+
+		it("keeps delimiter-colliding (id, name) pairs separate", () => {
+			// The encoder must be injective: a pair whose segments contain the raw
+			// delimiter must not collide with a pair that splits on it.
+			const key1 = NativeToolCallParser.makeStreamingKey("a::b", "c")
+			const key2 = NativeToolCallParser.makeStreamingKey("a", "b::c")
+			expect(key1).not.toBe(key2)
+
+			const scope = NativeToolCallParser.createScope()
+			NativeToolCallParser.startStreamingToolCall("a::b", "c", scope)
+			NativeToolCallParser.startStreamingToolCall("a", "b::c", scope)
+
+			// Each pair keeps its own accumulator and name; a shared key would collapse
+			// the second start into the first entry.
+			expect(NativeToolCallParser.getStreamingToolName(key1, scope)).toBe("c")
+			expect(NativeToolCallParser.getStreamingToolName(key2, scope)).toBe("b::c")
+
+			const partial1 = NativeToolCallParser.processStreamingChunk(key1, '{"x":1}', scope)
+			const partial2 = NativeToolCallParser.processStreamingChunk(key2, '{"y":2}', scope)
+			expect(partial1).not.toBeNull()
+			expect(partial2).not.toBeNull()
+
+			// The accumulators must stay separate: a shared key would merge the deltas.
+			const entry1 = NativeToolCallParser.getStreamingToolCallById("a::b", scope)
+			const entry2 = NativeToolCallParser.getStreamingToolCallById("a", scope)
+			expect(entry1).not.toBeNull()
+			expect(entry2).not.toBeNull()
+			if (!entry1 || !entry2) {
+				throw new Error("Expected both tracked entries")
+			}
+			expect(entry1.argumentsAccumulator).toBe('{"x":1}')
+			expect(entry2.argumentsAccumulator).toBe('{"y":2}')
+		})
 	})
 })

@@ -3361,7 +3361,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// be added to assistantMessageContent, causing API 400 errors:
 										// "tool_use ids must be unique"
 										// Use compound key (id, name) to distinguish different tools with the same call ID.
-										const dedupKey = `${event.id}::${event.name}`
+										const dedupKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										if (this.streamingToolCallIndices.has(dedupKey)) {
 											console.warn(
 												`[Task#${this.taskId}] Ignoring duplicate tool_call_start for ID: ${event.id} (tool: ${event.name})`,
@@ -3436,13 +3436,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 													)
 
 										if (partialToolUse && streamingKey !== undefined) {
-											// Retrieve name from NativeToolCallParser's streaming state
-											const name = NativeToolCallParser.getStreamingToolName(
-												streamingKey,
-												nativeToolCallParserScope,
-											)
-											const dedupKey = `${event.id}::${name}`
-											const toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+											// Reuse the compound key built above: it is exactly the key the start event
+											// registered under, so the delta lookup needs no second encoding.
+											const toolUseIndex = this.streamingToolCallIndices.get(streamingKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
 												;(partialToolUse as any).id = event.id
@@ -3831,7 +3827,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
 						let eventName = event.name ?? event.id
-						let dedupKey = `${event.id}::${eventName}`
+						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
 						// Finalize the streaming tool call
 						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
@@ -3853,7 +3849,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							)
 							if (resolved) {
 								eventName = resolved.name
-								dedupKey = `${resolved.id}::${resolved.name}`
+								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
 								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
 									NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name),
 									nativeToolCallParserScope,

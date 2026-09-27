@@ -61,9 +61,13 @@ export class NativeToolCallParser {
 
 	/**
 	 * Generate a compound key from id and name for streaming tool call tracking.
+	 *
+	 * The encoding is injective: the delimiter is escaped inside each segment, so distinct
+	 * (id, name) pairs — e.g. ("a::b", "c") and ("a", "b::c") — never share a key.
 	 */
 	public static makeStreamingKey(id: string, name: string): string {
-		return `${id}::${name}`
+		const encode = (value: string) => value.split("::").join("\\::")
+		return `${encode(id)}::${encode(name)}`
 	}
 
 	// Raw chunk tracking state (keyed by index from one API stream)

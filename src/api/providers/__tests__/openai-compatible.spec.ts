@@ -339,6 +339,37 @@ describe("OpenAICompatibleHandler", () => {
 			expect(thrownError.status).toBe(429)
 			expect(thrownError.message).toContain("TestProvider")
 		})
+
+		// The usage read happens after the stream drains: a rejection there must still be
+		// wrapped once with status and provider name by the same catch path.
+		it("should wrap a result.usage failure with status and provider name", async () => {
+			const usageError = Object.assign(new Error("usage failed"), { status: 500 })
+
+			mockStreamText.mockReturnValue({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "done" }
+				})(),
+				usage: Promise.reject(usageError),
+			})
+
+			const chunks: ApiStreamChunk[] = []
+			let thrownError: StatusedError | undefined
+			try {
+				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
+					chunks.push(chunk)
+				}
+			} catch (e) {
+				thrownError = e as StatusedError
+			}
+
+			expect(chunks).toEqual([{ type: "text", text: "done" }])
+			expect(thrownError).toBeInstanceOf(Error)
+			if (!thrownError) {
+				throw new Error("Expected createMessage to throw")
+			}
+			expect(thrownError.status).toBe(500)
+			expect(thrownError.message).toBe("TestProvider completion error: usage failed")
+		})
 	})
 
 	describe("completePrompt", () => {

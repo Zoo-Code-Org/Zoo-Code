@@ -903,7 +903,9 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(assistantMessageContent[0]?.type).toBe("tool_use")
 			expect(assistantMessageContent[0]?.name).toBe("read_file")
 			expect(assistantMessageContent[0]?.partial).toBe(false)
-			expect(streamingToolCallIndices.has("toolu_cleanup123::read_file")).toBe(false)
+			expect(
+				streamingToolCallIndices.has(NativeToolCallParser.makeStreamingKey("toolu_cleanup123", "read_file")),
+			).toBe(false)
 		})
 
 		it("should handle malformed JSON finalization with compound key cleanup", () => {
@@ -930,7 +932,9 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(assistantMessageContent[0]?.type).toBe("tool_use")
 			expect(assistantMessageContent[0]?.name).toBe("read_file")
 			expect(assistantMessageContent[0]?.partial).toBe(false)
-			expect(streamingToolCallIndices.has("toolu_malformed123::read_file")).toBe(false)
+			expect(
+				streamingToolCallIndices.has(NativeToolCallParser.makeStreamingKey("toolu_malformed123", "read_file")),
+			).toBe(false)
 		})
 	})
 
@@ -1051,6 +1055,36 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(content[0].name).toBe("read_file")
 			expect(content[0].partial).toBe(false)
 			expect(content[0].nativeArgs).toMatchObject({ path: "a.ts" })
+		})
+
+		it("completes malformed arguments gracefully for a compound-keyed tool call", async () => {
+			const task = await createStreamingTask()
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "toolu_badargs",
+						name: "read_file",
+						arguments: '{"path":"a.ts", broken',
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// Malformed arguments must not crash the stream or leave stale compound-key
+			// tracking: the block is completed without executable args.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices).toHaveLength(0)
+
+			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
+			expect(content).toHaveLength(1)
+			expect(content[0].type).toBe("tool_use")
+			expect(content[0].name).toBe("read_file")
+			expect(content[0].partial).toBe(false)
+			expect(content[0].nativeArgs).toBeUndefined()
+			expect((content[0] as { params?: unknown }).params).toEqual({})
 		})
 	})
 })
