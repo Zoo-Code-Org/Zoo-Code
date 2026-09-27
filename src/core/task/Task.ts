@@ -3751,8 +3751,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
+									this.abortReason ??= "user_cancelled"
 									await this.abortTask()
 									break
 								}

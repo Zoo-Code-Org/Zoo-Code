@@ -961,7 +961,7 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
 		})
 
-		it("onTaskAborted does not call createTaskWithHistoryItem (RSK-19 guard)", async () => {
+		it("onTaskAborted does not call createTaskWithHistoryItem", async () => {
 			// Store the item so getTaskWithId succeeds: without it, the old branch's catch
 			// swallows the error and the test passes even if the branch comes back.
 			const existing = createHistoryItem({ id: "task-abort-1", task: "T" })

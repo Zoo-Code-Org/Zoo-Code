@@ -120,7 +120,7 @@ function makeMockProvider() {
 	}
 }
 
-describe("Task abort-reason race (RSK-19 regression)", () => {
+describe("Task abort-reason race", () => {
 	let mockApiConfig: ProviderSettings
 
 	beforeEach(() => {
@@ -173,7 +173,44 @@ describe("Task abort-reason race (RSK-19 regression)", () => {
 		// The outer catch in recursivelyMakeClineRequests swallows the abort throw and returns true.
 		const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "help me" }])
 		expect(result).toBe(true)
+		expect(task.didFinishAbortingStream).toBe(true)
 		expect(abortTaskSpy).toHaveBeenCalledOnce()
 		expect(task.abortReason).toBe("user_cancelled")
+	})
+
+	it("keeps pre-existing abortReason when cancel lands during retry backoff", async () => {
+		const mockProvider = makeMockProvider()
+		// autoApprovalEnabled causes the else branch to call backoffAndAnnounce.
+		mockProvider.getState = vi.fn().mockResolvedValue({ autoApprovalEnabled: true })
+
+		// Double cast: plain object satisfies only the methods called by this code path.
+		const task = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+
+		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+		vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+		// eslint-disable-next-line require-yield -- intentional error-only async source
+		task["attemptApiRequest"] = async function* () {
+			throw new Error("mid-stream failure")
+		}
+
+		// Simulate cancel landing during backoff: cancelTask sets abortReason before abort=true.
+		// Use a distinct seed value so ??= (keeps it) is distinguishable from = (overwrites).
+		task["backoffAndAnnounce"] = async () => {
+			task["abortReason"] = "streaming_failed"
+			task["abort"] = true
+		}
+
+		const abortTaskSpy = vi.spyOn(task, "abortTask")
+		// break after backoff exits the while loop; the outer try returns false.
+		const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "help me" }])
+		expect(result).toBe(false)
+		expect(abortTaskSpy).toHaveBeenCalledOnce()
+		expect(task.abortReason).toBe("streaming_failed")
 	})
 })
