@@ -3369,6 +3369,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											continue
 										}
 
+										// A call ID that already appears under a different tool name cannot be
+										// round-tripped: the API history builder dedupes tool_use blocks by ID and
+										// results are matched by tool_use_id, so a second entry with the same ID
+										// would be orphaned. Reject it before presentation; the first call wins.
+										const collidesWithDifferentName = this.assistantMessageContent.some(
+											(entry) =>
+												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
+												entry.name !== event.name &&
+												(entry as { id?: string }).id === event.id,
+										)
+										if (collidesWithDifferentName) {
+											console.warn(
+												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} under a different name (tool: ${event.name})`,
+											)
+											continue
+										}
+
 										// Initialize streaming in NativeToolCallParser
 										NativeToolCallParser.startStreamingToolCall(
 											event.id,

@@ -661,6 +661,12 @@ describe("NativeToolCallParser", () => {
 			const key2 = NativeToolCallParser.makeStreamingKey("a", "b::c")
 			expect(key1).not.toBe(key2)
 
+			// Backslash-colliding pairs must stay separate as well: escaping the delimiter
+			// alone is not enough when a segment ends in a backslash.
+			const key3 = NativeToolCallParser.makeStreamingKey("a\\", "b::c")
+			const key4 = NativeToolCallParser.makeStreamingKey("a::b\\", "c")
+			expect(key3).not.toBe(key4)
+
 			const scope = NativeToolCallParser.createScope()
 			NativeToolCallParser.startStreamingToolCall("a::b", "c", scope)
 			NativeToolCallParser.startStreamingToolCall("a", "b::c", scope)

@@ -66,7 +66,10 @@ export class NativeToolCallParser {
 	 * (id, name) pairs — e.g. ("a::b", "c") and ("a", "b::c") — never share a key.
 	 */
 	public static makeStreamingKey(id: string, name: string): string {
-		const encode = (value: string) => value.split("::").join("\\::")
+		// Escape the escape character first, then every colon: a segment can then never
+		// contain a raw colon (let alone the :: delimiter), and a trailing escaped
+		// backslash cannot fuse with the delimiter to forge a new escape pair.
+		const encode = (value: string) => value.split("\\").join("\\\\").split(":").join("\\:")
 		return `${encode(id)}::${encode(name)}`
 	}
 

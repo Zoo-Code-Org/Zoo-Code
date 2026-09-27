@@ -980,7 +980,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			return task
 		}
 
-		it("routes same-ID tool calls through the real Task dedup state", async () => {
+		it("rejects a same-ID call under a different name so the history stays reconcilable", async () => {
 			const task = await createStreamingTask()
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
@@ -993,6 +993,8 @@ describe("Task - Streaming Tool Call Handling", () => {
 						name: "read_file",
 						arguments: '{"path":"a.ts"}',
 					},
+					// Same call ID under a different tool name: the history builder dedupes
+					// tool_use blocks by ID, so retaining both would orphan the second call.
 					{
 						type: "tool_call_partial",
 						index: 1,
@@ -1000,26 +1002,24 @@ describe("Task - Streaming Tool Call Handling", () => {
 						name: "write_to_file",
 						arguments: '{"path":"b.ts","content":"hi"}',
 					},
-					// Duplicate start for the same compound key (id, name): must be ignored.
+					// True duplicate of the accepted start: still ignored.
 					{ type: "tool_call_partial", index: 2, id: "toolu_real", name: "read_file" },
 				]),
 			)
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
 
-			// Real Task tracking state after finalization: both compound keys cleaned up.
-			expect(getTaskStreamingAccess(task).streamingToolCallIndices).toHaveLength(0)
+			// Only the first call survives: the cross-name call is rejected and the true
+			// duplicate is ignored, so tracking is fully cleaned up.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices.size).toBe(0)
 
 			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
-			expect(content).toHaveLength(2)
+			expect(content).toHaveLength(1)
 			expect(content[0].type).toBe("tool_use")
 			expect(content[0].name).toBe("read_file")
 			expect(content[0].partial).toBe(false)
 			expect(content[0].nativeArgs).toMatchObject({ path: "a.ts" })
-			expect(content[1].type).toBe("tool_use")
-			expect(content[1].name).toBe("write_to_file")
-			expect(content[1].partial).toBe(false)
-			expect(content[1].nativeArgs).toMatchObject({ path: "b.ts" })
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("reusing call ID toolu_real"))
 			expect(warnSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Ignoring duplicate tool_call_start for ID: toolu_real"),
 			)
@@ -1047,7 +1047,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
 
 			// No stale tracking: the finalized entry is cleaned up under the start name.
-			expect(getTaskStreamingAccess(task).streamingToolCallIndices).toHaveLength(0)
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices.size).toBe(0)
 
 			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
 			expect(content).toHaveLength(1)
@@ -1076,7 +1076,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 
 			// Malformed arguments must not crash the stream or leave stale compound-key
 			// tracking: the block is completed without executable args.
-			expect(getTaskStreamingAccess(task).streamingToolCallIndices).toHaveLength(0)
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices.size).toBe(0)
 
 			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
 			expect(content).toHaveLength(1)
