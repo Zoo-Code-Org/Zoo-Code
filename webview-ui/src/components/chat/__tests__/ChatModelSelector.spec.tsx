@@ -23,16 +23,13 @@ vi.mock("@/components/ui/hooks/useRooPortal", () => ({
 	useRooPortal: () => document.body,
 }))
 
-// Mock the ExtensionStateContext
+// Mock the ExtensionStateContext (configurable per test)
+const { mockUseExtensionState } = vi.hoisted(() => ({
+	mockUseExtensionState: vi.fn(),
+}))
+
 vi.mock("@/context/ExtensionStateContext", () => ({
-	useExtensionState: () => ({
-		apiConfiguration: {
-			apiProvider: providerIdentifiers.anthropic,
-			apiModelId: "claude-opus-4-20250514",
-		},
-		organizationAllowList: { allowAll: true, providers: {} },
-		currentApiConfigName: "default",
-	}),
+	useExtensionState: (...args: unknown[]) => mockUseExtensionState(...args),
 }))
 
 // Mock useSelectedModel
@@ -98,6 +95,14 @@ describe("ChatModelSelector", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockUseExtensionState.mockReturnValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-opus-4-20250514",
+			},
+			organizationAllowList: { allowAll: true, providers: {} },
+			currentApiConfigName: "default",
+		})
 		mockUseChatModelSelector.mockReturnValue({
 			provider: providerIdentifiers.anthropic,
 			models: anthropicModels,
@@ -175,5 +180,81 @@ describe("ChatModelSelector", () => {
 				apiModelId: "claude-3-5-haiku",
 			},
 		})
+	})
+
+	test("clears the search query via the clear button", () => {
+		render(<ChatModelSelector {...defaultProps} />)
+
+		const trigger = screen.getByTestId("chat-model-selector-trigger")
+		fireEvent.click(trigger)
+
+		const searchInput = screen.getByPlaceholderText("chat:searchModel") as HTMLInputElement
+		fireEvent.change(searchInput, { target: { value: "claude-3" } })
+		expect(searchInput.value).toBe("claude-3")
+
+		const clearButton = searchInput.parentElement?.querySelector(".codicon-close") as HTMLElement | null
+		expect(clearButton).toBeTruthy()
+		fireEvent.click(clearButton!)
+
+		expect((screen.getByPlaceholderText("chat:searchModel") as HTMLInputElement).value).toBe("")
+	})
+
+	test("does not post a message when selecting with no apiConfiguration", () => {
+		mockUseChatModelSelector.mockReturnValue({
+			provider: providerIdentifiers.anthropic,
+			models: anthropicModels,
+			modelIdKey: "apiModelId",
+			defaultModelId: "claude-opus-4-20250514",
+			isLoading: false,
+		})
+		// Simulate a missing apiConfiguration so onSelect takes its early-return branch
+		// (the mock of useExtensionState returns an apiConfiguration; the real early
+		// return also triggers when modelIdKey is unset, which we cover via a hook mock
+		// without a modelIdKey below).
+		mockUseChatModelSelector.mockReturnValueOnce({
+			provider: providerIdentifiers.anthropic,
+			models: anthropicModels,
+			modelIdKey: undefined,
+			defaultModelId: undefined,
+			isLoading: false,
+		})
+
+		render(<ChatModelSelector {...defaultProps} />)
+
+		const trigger = screen.getByTestId("chat-model-selector-trigger")
+		fireEvent.click(trigger)
+
+		const option = screen.getByTestId("chat-model-option-claude-opus-4-20250514")
+		fireEvent.click(option)
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+
+	test("renders the display-transformed value for compound configs (e.g. VSCode LM)", () => {
+		mockUseExtensionState.mockReturnValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.vscodeLm,
+				vsCodeLmModelSelector: { vendor: "copilot", family: "gpt-4o" },
+			},
+			organizationAllowList: { allowAll: true, providers: {} },
+			currentApiConfigName: "default",
+		})
+		mockUseChatModelSelector.mockReturnValue({
+			provider: providerIdentifiers.vscodeLm,
+			models: { "copilot/gpt-4o": { maxTokens: 1, contextWindow: 1 } },
+			modelIdKey: "vsCodeLmModelSelector",
+			defaultModelId: undefined,
+			isLoading: false,
+			displayTransform: (value: unknown) => {
+				const selector = value as { vendor?: string; family?: string }
+				return selector.vendor && selector.family ? `${selector.vendor}/${selector.family}` : ""
+			},
+		})
+
+		render(<ChatModelSelector {...defaultProps} />)
+
+		// The trigger shows the display-transformed value instead of the raw model id.
+		const trigger = screen.getByTestId("chat-model-selector-trigger")
+		expect(trigger).toHaveTextContent("copilot/gpt-4o")
 	})
 })

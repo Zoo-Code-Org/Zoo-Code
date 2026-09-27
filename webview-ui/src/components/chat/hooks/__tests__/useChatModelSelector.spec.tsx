@@ -155,6 +155,91 @@ describe("useChatModelSelector", () => {
 		})
 	})
 
+	describe("requesty (dynamic router provider)", () => {
+		it("reads requesty models from the react-query routerModels", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: { [providerIdentifiers.requesty]: { "openai/gpt-5.1": { maxTokens: 1, contextWindow: 1 } } },
+				isLoading: false,
+				isError: false,
+			})
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.requesty, requestyModelId: "openai/gpt-5.1" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.modelIdKey).toBe("requestyModelId")
+			expect(result.current.defaultModelId).toBeTruthy()
+			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-5.1"])
+		})
+	})
+
+	describe("unbound (dynamic router provider)", () => {
+		it("reads unbound models from the react-query routerModels", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: { [providerIdentifiers.unbound]: { "openai/gpt-4o": { maxTokens: 1, contextWindow: 1 } } },
+				isLoading: false,
+				isError: false,
+			})
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.unbound, unboundModelId: "openai/gpt-4o" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.modelIdKey).toBe("unboundModelId")
+			expect(result.current.defaultModelId).toBeTruthy()
+			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-4o"])
+		})
+	})
+
+	describe("vercel-ai-gateway (dynamic router provider)", () => {
+		it("reads vercel-ai-gateway models from the react-query routerModels", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					[providerIdentifiers.vercelAiGateway]: { "openai/gpt-4o-mini": { maxTokens: 1, contextWindow: 1 } },
+				},
+				isLoading: false,
+				isError: false,
+			})
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.vercelAiGateway,
+					vercelAiGatewayModelId: "openai/gpt-4o-mini",
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.modelIdKey).toBe("vercelAiGatewayModelId")
+			expect(result.current.defaultModelId).toBeTruthy()
+			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-4o-mini"])
+		})
+	})
+
+	describe("kimi-code (dynamic router provider)", () => {
+		it("reads kimi-code models from the react-query routerModels using apiModelId", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: { [providerIdentifiers.kimiCode]: { "kimi-k2": { maxTokens: 1, contextWindow: 1 } } },
+				isLoading: false,
+				isError: false,
+			})
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.kimiCode, apiModelId: "kimi-k2" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.modelIdKey).toBe("apiModelId")
+			expect(result.current.defaultModelId).toBeTruthy()
+			expect(Object.keys(result.current.models!)).toEqual(["kimi-k2"])
+		})
+	})
+
 	describe("openai (OpenAI compatible)", () => {
 		it("requests openAi models on mount when baseUrl and apiKey are set", () => {
 			mockUseExtensionState.mockReturnValue({
@@ -295,6 +380,28 @@ describe("useChatModelSelector", () => {
 			expect(mockPostMessage).toHaveBeenCalledWith({ type: "requestLmStudioModels" })
 		})
 
+		it("uses models delivered through the lmStudioModels message", async () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.lmstudio, lmStudioModelId: "local-model" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			act(() => {
+				emitMessage({
+					type: "lmStudioModels",
+					lmStudioModels: { "local-model": { maxTokens: 1, contextWindow: 1 } },
+				})
+			})
+
+			await waitFor(() => {
+				expect(result.current.models).not.toBeNull()
+			})
+			expect(result.current.modelIdKey).toBe("lmStudioModelId")
+			expect(Object.keys(result.current.models!)).toEqual(["local-model"])
+		})
+
 		it("requests vsCodeLm models on mount and builds model records", async () => {
 			mockUseExtensionState.mockReturnValue({
 				apiConfiguration: { apiProvider: providerIdentifiers.vscodeLm },
@@ -317,6 +424,37 @@ describe("useChatModelSelector", () => {
 			})
 			expect(Object.keys(result.current.models!)).toEqual(["copilot/gpt-4o"])
 			expect(result.current.modelIdKey).toBe("vsCodeLmModelSelector")
+		})
+
+		it("transforms vsCodeLm model ids to vendor/family and formats display values", async () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { vendor: "copilot", family: "gpt-4o" },
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			act(() => {
+				emitMessage({
+					type: "vsCodeLmModels",
+					vsCodeLmModels: [{ vendor: "copilot", family: "gpt-4o" }],
+				})
+			})
+
+			await waitFor(() => {
+				expect(result.current.models).not.toBeNull()
+			})
+
+			// valueTransform: "copilot/gpt-4o" -> { vendor: "copilot", family: "gpt-4o" }
+			expect(result.current.valueTransform!("copilot/gpt-4o")).toEqual({ vendor: "copilot", family: "gpt-4o" })
+			// displayTransform: { vendor, family } -> "copilot/gpt-4o"
+			expect(result.current.displayTransform!({ vendor: "copilot", family: "gpt-4o" })).toBe("copilot/gpt-4o")
+			// displayTransform returns "" for missing values
+			expect(result.current.displayTransform!(undefined)).toBe("")
+			expect(result.current.displayTransform!({ vendor: "copilot" })).toBe("")
 		})
 	})
 
