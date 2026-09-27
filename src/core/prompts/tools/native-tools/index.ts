@@ -6,7 +6,7 @@ import askFollowupQuestion from "./ask_followup_question"
 import attemptCompletion from "./attempt_completion"
 import codebaseSearch from "./codebase_search"
 import editTool from "./edit"
-import executeCommand from "./execute_command"
+import executeCommand, { createExecuteCommandTool } from "./execute_command"
 import generateImage from "./generate_image"
 import listFiles from "./list_files"
 import newTask from "./new_task"
@@ -31,6 +31,8 @@ export type { ReadFileToolOptions } from "./read_file"
 export interface NativeToolsOptions {
 	/** Whether the model supports image processing (default: false) */
 	supportsImages?: boolean
+	/** Keep strict required-nullable command fields unless the integration opts out. */
+	executeCommandStrict?: boolean
 }
 
 /**
@@ -40,7 +42,7 @@ export interface NativeToolsOptions {
  * @returns Array of native tool definitions
  */
 export function getNativeTools(options: NativeToolsOptions = {}): OpenAI.Chat.ChatCompletionTool[] {
-	const { supportsImages = false } = options
+	const { supportsImages = false, executeCommandStrict = true } = options
 
 	const readFileOptions: ReadFileToolOptions = {
 		supportsImages,
@@ -53,7 +55,7 @@ export function getNativeTools(options: NativeToolsOptions = {}): OpenAI.Chat.Ch
 		askFollowupQuestion,
 		attemptCompletion,
 		codebaseSearch,
-		executeCommand,
+		executeCommandStrict ? executeCommand : createExecuteCommandTool({ strict: false }),
 		generateImage,
 		listFiles,
 		newTask,

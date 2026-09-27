@@ -9,7 +9,7 @@
 import type OpenAI from "openai"
 import type * as vscode from "vscode"
 
-import type { McpServer, ModeConfig, ModelInfo } from "@roo-code/types"
+import { providerIdentifiers, type McpServer, type ModeConfig, type ModelInfo } from "@roo-code/types"
 
 import type { ClineProvider } from "../../webview/ClineProvider"
 import type { McpHub } from "../../../services/mcp/McpHub"
@@ -61,6 +61,71 @@ function toolNames(tools: OpenAI.Chat.ChatCompletionTool[]): string[] {
 		.filter((t): t is OpenAI.Chat.ChatCompletionFunctionTool => "function" in t && Boolean(t.function))
 		.map((t) => t.function.name)
 }
+
+describe("NanoGPT command parameter optionality", () => {
+	it("preserves every other native tool and required nullable MCP fields", async () => {
+		const inputSchema = {
+			type: "object",
+			properties: { timeout: { type: ["number", "null"] } },
+			required: ["timeout"],
+		}
+		const options = {
+			provider: makeProvider([
+				{
+					name: "test-server",
+					config: "{}",
+					status: "connected",
+					tools: [{ name: "test_tool", description: "test", inputSchema }],
+				},
+			]),
+			cwd: "/test/path",
+			mode: "code",
+			customModes: undefined,
+			experiments: {},
+		}
+		const nano = await buildNativeToolsArrayWithRestrictions({
+			...options,
+			apiConfiguration: { apiProvider: providerIdentifiers.nanogpt },
+		})
+		const control = await buildNativeToolsArrayWithRestrictions({
+			...options,
+			apiConfiguration: { apiProvider: providerIdentifiers.openai },
+		})
+		const withoutCommand = (tools: OpenAI.Chat.ChatCompletionTool[]) =>
+			tools.filter((tool) => tool.type !== "function" || tool.function.name !== "execute_command")
+		expect(withoutCommand(nano.tools)).toEqual(withoutCommand(control.tools))
+		expect(
+			nano.tools.find((tool) => tool.type === "function" && tool.function.name.startsWith("mcp--")),
+		).toMatchObject({ function: { parameters: { required: ["timeout"] } } })
+	})
+
+	it.each([providerIdentifiers.nanogpt, providerIdentifiers.openai, undefined])(
+		"builds the command schema for %s without changing other tools",
+		async (apiProvider) => {
+			const result = await buildNativeToolsArrayWithRestrictions({
+				provider: makeProvider(),
+				cwd: "/test/path",
+				mode: "code",
+				customModes: undefined,
+				experiments: {},
+				apiConfiguration: apiProvider ? { apiProvider } : undefined,
+			})
+			const command = result.tools.find(
+				(tool) => tool.type === "function" && tool.function.name === "execute_command",
+			)
+			const isNanoGpt = apiProvider === providerIdentifiers.nanogpt
+			expect(command).toMatchObject({
+				function: {
+					strict: !isNanoGpt,
+					parameters: { required: isNanoGpt ? ["command"] : ["command", "cwd", "timeout"] },
+				},
+			})
+			expect(
+				result.tools.find((tool) => tool.type === "function" && tool.function.name === "attempt_completion"),
+			).toMatchObject({ function: { strict: true, parameters: { required: ["result"] } } })
+		},
+	)
+})
 
 describe("buildNativeToolsArrayWithRestrictions — Gemini includeAllToolsWithRestrictions", () => {
 	const provider = makeProvider()

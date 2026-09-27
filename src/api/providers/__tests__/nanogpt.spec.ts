@@ -10,6 +10,7 @@ import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { createReadFileTool } from "../../../core/prompts/tools/native-tools/read_file"
+import { createExecuteCommandTool } from "../../../core/prompts/tools/native-tools/execute_command"
 import { NanoGptHandler } from "../nanogpt"
 import { getModels } from "../fetchers/modelCache"
 
@@ -60,6 +61,75 @@ describe("NanoGptHandler", () => {
 
 	it("is constructed by the backend provider registry", () => {
 		expect(buildApiHandler({ apiProvider: providerIdentifiers.nanogpt })).toBeInstanceOf(NanoGptHandler)
+	})
+
+	it("disables strict generation without relaxing required fields in a supplied strict schema", async () => {
+		const tool = createExecuteCommandTool()
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages, {
+				taskId: "test-command-schema",
+				tools: [tool],
+			}),
+		)
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tools: [
+					expect.objectContaining({
+						function: expect.objectContaining({
+							strict: false,
+							parameters: expect.objectContaining({ required: ["command", "cwd", "timeout"] }),
+						}),
+					}),
+				],
+			}),
+			expect.anything(),
+		)
+		expect(tool.function.strict).toBe(true)
+	})
+
+	it.each([undefined, null, 30])("preserves command arguments with timeout %s", async (timeout) => {
+		const args = JSON.stringify({
+			command: "printf test",
+			...(timeout === undefined ? {} : { cwd: null, timeout }),
+		})
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call-command",
+										function: {
+											name: "execute_command",
+											arguments: args,
+										},
+									},
+								],
+							},
+						},
+					],
+				},
+			]),
+		)
+		const tool = createExecuteCommandTool({ strict: false })
+		const chunks = await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages, {
+				taskId: "test-command-arguments",
+				tools: [tool],
+				tool_choice: "auto",
+			}),
+		)
+		expect(mockCreate.mock.calls[0][0].tools[0].function).toMatchObject({
+			strict: false,
+			parameters: { required: ["command"] },
+		})
+		expect(chunks).toEqual([
+			{ type: "tool_call_partial", index: 0, id: "call-command", name: "execute_command", arguments: args },
+		])
+		expect(tool.function.parameters?.required).toEqual(["command"])
 	})
 
 	it("keeps the canonical model ID while applying request-only routing", async () => {

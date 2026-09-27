@@ -2,7 +2,7 @@ import path from "path"
 
 import type OpenAI from "openai"
 
-import type { ProviderSettings, ModeConfig, ModelInfo } from "@roo-code/types"
+import { providerIdentifiers, type ProviderSettings, type ModeConfig, type ModelInfo } from "@roo-code/types"
 import { customToolRegistry, formatNative } from "@roo-code/core"
 
 import type { ClineProvider } from "../webview/ClineProvider"
@@ -115,6 +115,8 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	// Build native tools with dynamic read_file tool based on settings.
 	const nativeTools = getNativeTools({
 		supportsImages,
+		// NanoGPT uses non-strict generation; retain the command executor's optional inputs.
+		executeCommandStrict: apiConfiguration?.apiProvider !== providerIdentifiers.nanogpt,
 	})
 
 	// Resolve mode config to get allowedMcpServers for MCP server filtering.

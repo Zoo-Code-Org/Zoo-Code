@@ -25,7 +25,7 @@ const CWD_PARAMETER_DESCRIPTION = `Optional working directory for the command, r
 
 const TIMEOUT_PARAMETER_DESCRIPTION = `Timeout in seconds. When exceeded, the command continues running in the background and output collected so far is returned. Use this for long-running processes like dev servers, file watchers, or any command that may not exit on its own`
 
-export default {
+const executeCommand = {
 	type: "function",
 	function: {
 		name: "execute_command",
@@ -52,3 +52,22 @@ export default {
 		},
 	},
 } satisfies OpenAI.Chat.ChatCompletionTool
+
+export function createExecuteCommandTool({
+	strict = true,
+}: { strict?: boolean } = {}): OpenAI.Chat.ChatCompletionFunctionTool {
+	return {
+		...executeCommand,
+		function: {
+			...executeCommand.function,
+			strict,
+			parameters: {
+				...executeCommand.function.parameters,
+				// Strict generation requires all fields; the executor only requires command.
+				required: strict ? [...executeCommand.function.parameters.required] : ["command"],
+			},
+		},
+	}
+}
+
+export default executeCommand

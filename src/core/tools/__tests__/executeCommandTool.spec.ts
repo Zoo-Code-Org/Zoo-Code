@@ -498,6 +498,11 @@ describe("executeCommandTool", () => {
 	})
 
 	describe("Command execution timeout configuration", () => {
+		it.each([undefined, null])("uses the same default wait for timeout %s", (timeout) => {
+			delete process.env.ROO_CLI_RUNTIME
+			expect(executeCommandModule.resolveAgentTimeoutMs(timeout)).toBe(0)
+		})
+
 		it("should include timeout parameter in ExecuteCommandOptions", () => {
 			// This test verifies that the timeout configuration is properly typed
 			// The actual timeout logic is tested in integration tests
