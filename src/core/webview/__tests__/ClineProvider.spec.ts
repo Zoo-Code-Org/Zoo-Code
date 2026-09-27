@@ -5157,6 +5157,68 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			// The Task module is mocked in this spec; provide the method under test.
 			task["setTaskApiConfigName"] = vi.fn()
 			await provider.addClineToStack(task)
+
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "sticky-profile",
+				id: undefined,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			provider["updateTaskApiHandlerIfNeeded"] = vi.fn()
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory"
+					? [{ ...legacyItem, id: task.taskId }]
+					: undefined) as typeof mockContext.globalState.get)
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const activationPromise = provider.activateProviderProfile({ name: "sticky-profile" })
+
+			// The provider profile must not be persisted while migration is in flight.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+
+			releaseMigration()
+			await initPromise
+			await activationPromise
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: task.taskId, apiConfigName: "sticky-profile" }),
+			)
+		})
+
+		it("skips sticky persistence when the mutation signal is already aborted", async () => {
+			const task = new Task(defaultTaskOptions)
+			// The Task module is mocked in this spec; provide the method under test.
+			task["setTaskApiConfigName"] = vi.fn()
+			await provider.addClineToStack(task)
+
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const controller = new AbortController()
+			controller.abort()
+
+			await provider["persistStickyProviderProfileToCurrentTask"]("sticky-profile", {}, controller.signal)
+
+			// The aborted mutation must not touch in-memory or persisted state.
+			expect(task["setTaskApiConfigName"]).not.toHaveBeenCalled()
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+		})
+
+		it("a mode switch held by the readiness gate does not block unrelated queued mutations", async () => {
+			const task = new Task(defaultTaskOptions)
 			const taskLegacyItem = { ...legacyItem, id: task.taskId }
 
 			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
@@ -5175,67 +5237,26 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			const initPromise = provider["initializeTaskHistoryStore"]()
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
-			const persistPromise = provider["persistStickyProviderProfileToCurrentTask"]("sticky-profile")
+			const switchPromise = provider.handleModeSwitch("architect", task)
 
-			// The provider profile must not be persisted while migration is in flight.
+			// The mode switch parks on the gate before it enters the queue, so a
+			// mutation enqueued behind it must still run while migration is in flight.
 			await new Promise((resolve) => setTimeout(resolve, 50))
 			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			await expect(
+				provider["enqueueProviderProfileMutation"](async () => "unrelated-mutation-result"),
+			).resolves.toBe("unrelated-mutation-result")
 
 			releaseMigration()
 			await initPromise
-			await persistPromise
+			await switchPromise
 
 			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
-				expect.objectContaining({ id: task.taskId, apiConfigName: "sticky-profile" }),
+				expect.objectContaining({ id: task.taskId, mode: "architect" }),
 			)
 		})
 
-		it("aborts a mode switch that stays gated past the mutation timeout", async () => {
-			vi.useFakeTimers()
-			try {
-				const task = new Task(defaultTaskOptions)
-
-				vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
-				vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
-					key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
-				let releaseMigration!: () => void
-				const migrationGate = new Promise<void>((resolve) => {
-					releaseMigration = resolve
-				})
-				vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
-					await migrationGate
-					for (const entry of entries) {
-						provider.taskHistoryStore["cache"].set(entry.id, entry)
-					}
-				})
-
-				const initPromise = provider["initializeTaskHistoryStore"]()
-				const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
-				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
-				const switchPromise = provider.handleModeSwitch("architect", task)
-				const switchOutcome = expect(switchPromise).rejects.toThrow("Provider profile mutation timed out")
-
-				// Hold the readiness gate past PENDING_OPERATION_TIMEOUT_MS so the
-				// queue aborts the mutation while it waits.
-				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
-				await switchOutcome
-
-				// The queue has aborted the mutation and moved on; releasing the
-				// gate must not let the dead mutation write task history, update
-				// in-memory mode, or advance the global mode.
-				releaseMigration()
-				await initPromise
-				await Promise.resolve()
-
-				expect(updateTaskHistorySpy).not.toHaveBeenCalled()
-				expect(task).not.toHaveProperty("_taskMode")
-				expect(setValueSpy).not.toHaveBeenCalledWith("mode", "architect")
-			} finally {
-				vi.useRealTimers()
-			}
-		})
-
-		it("aborts a sticky profile persistence that stays gated past the mutation timeout", async () => {
+		it("a profile activation held by the readiness gate does not block unrelated queued mutations", async () => {
 			const task = new Task(defaultTaskOptions)
 			// The Task module is mocked in this spec; provide the method under test.
 			task["setTaskApiConfigName"] = vi.fn()
@@ -5267,27 +5288,24 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			})
 
 			const initPromise = provider["initializeTaskHistoryStore"]()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const activationPromise = provider.activateProviderProfile({ name: "sticky-profile" })
 
-			vi.useFakeTimers()
-			try {
-				const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
-				const activation = provider.activateProviderProfile({ name: "sticky-profile" })
-				const activationOutcome = expect(activation).rejects.toThrow("Provider profile mutation timed out")
+			// The activation parks on the gate before it enters the queue, so a
+			// mutation enqueued behind it must still run while migration is in flight.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			await expect(
+				provider["enqueueProviderProfileMutation"](async () => "unrelated-mutation-result"),
+			).resolves.toBe("unrelated-mutation-result")
 
-				// Hold the readiness gate past PENDING_OPERATION_TIMEOUT_MS so the
-				// queue aborts the mutation while it waits.
-				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
-				await activationOutcome
+			releaseMigration()
+			await initPromise
+			await activationPromise
 
-				// Releasing the gate must not let the dead mutation write task history.
-				releaseMigration()
-				await initPromise
-				await Promise.resolve()
-
-				expect(updateTaskHistorySpy).not.toHaveBeenCalled()
-			} finally {
-				vi.useRealTimers()
-			}
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: task.taskId, apiConfigName: "sticky-profile" }),
+			)
 		})
 
 		it("settles waiting lookups when store initialization rejects", async () => {
@@ -5368,6 +5386,38 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			expect(migrateSpy).toHaveBeenCalledTimes(2)
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		})
+
+		it("serves legacy history on the launch after a failed migration", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			let attempts = 0
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				attempts++
+				if (attempts <= 2) {
+					throw new Error("persistent disk failure")
+				}
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			// First launch: both migration attempts fail; the legacy entries must
+			// remain the migration source for the next launch.
+			const firstInit = provider["initializeTaskHistoryStore"]()
+			await expect(provider.getTaskWithId("legacy-task-1")).rejects.toThrow("Task not found")
+			await firstInit
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+
+			// Second launch: the untouched legacy history migrates and is served.
+			const secondInit = provider["initializeTaskHistoryStore"]()
+			await expect(provider.getTaskWithId("legacy-task-1")).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+			await secondInit
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
 		})
 
 		it("overlapping initializations settle only their own gate", async () => {

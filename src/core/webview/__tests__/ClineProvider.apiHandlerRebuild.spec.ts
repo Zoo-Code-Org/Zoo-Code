@@ -452,7 +452,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
+			// Flush pending microtasks (the pre-enqueue readiness await plus the
+			// queue handoff) so the first mutation has started; the second must
+			// still be waiting behind it.
+			await new Promise((resolve) => setTimeout(resolve, 0))
 			expect(events).toEqual(["first:start"])
 
 			resolveFirst()

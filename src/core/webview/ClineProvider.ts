@@ -257,6 +257,19 @@ export class ClineProvider
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
+	/**
+	 * Await the task-history store readiness gate before enqueueing a
+	 * provider-profile mutation.
+	 *
+	 * The gate is awaited before enqueue (not inside the queued callback) so a
+	 * slow or stuck migration cannot park a mutation inside the serialized
+	 * queue and hold up unrelated mutations behind it. Once the gate settles,
+	 * queued callbacks can assume the store is ready.
+	 */
+	private async awaitTaskHistoryStoreReady(): Promise<void> {
+		await this.taskHistoryStoreReady
+	}
+
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
@@ -1769,6 +1782,7 @@ export class ClineProvider
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+		await this.awaitTaskHistoryStoreReady()
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
@@ -1787,12 +1801,9 @@ export class ClineProvider
 
 			try {
 				// Update the task history with the new mode first.
-				// Await the migration gate so a legacy task not yet migrated
-				// from globalState is still found.
-				await this.taskHistoryStoreReady
-
 				// The queue aborts this mutation after PENDING_OPERATION_TIMEOUT_MS
-				// and advances; once aborted it must not resume writing here.
+				// (including time spent waiting in the queue) and advances; once
+				// aborted it must not resume writing here.
 				if (signal?.aborted) return
 
 				const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
@@ -1942,6 +1953,7 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
+			await this.awaitTaskHistoryStoreReady()
 			return await this.enqueueProviderProfileMutation(async (signal) => {
 				// TODO: Do we need to be calling `activateProfile`? It's not
 				// clear to me what the source of truth should be; in some cases
@@ -2035,14 +2047,6 @@ export class ClineProvider
 			// been persisted into taskHistory (it will be captured on the next save).
 			task.setTaskApiConfigName(apiConfigName)
 
-			// Await the migration gate so a legacy task not yet migrated
-			// from globalState is still found.
-			await this.taskHistoryStoreReady
-
-			// The queue may have aborted this mutation while it waited on the
-			// gate; once aborted it must not resume writing here.
-			if (signal?.aborted) return
-
 			const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 			if (taskHistoryItem) {
@@ -2066,6 +2070,7 @@ export class ClineProvider
 			skipCurrentTaskRebuild?: boolean
 		},
 	) {
+		await this.awaitTaskHistoryStoreReady()
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.activateProviderProfileUnlocked(args, options, signal),
 		)
