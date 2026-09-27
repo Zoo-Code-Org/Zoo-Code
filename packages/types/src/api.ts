@@ -113,15 +113,6 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	approveCurrentAsk(): Promise<void>
 	/**
-	 * Programmatically approves the pending ask for a task by ID. Intended for use in tests only.
-	 */
-	approveTaskAsk(taskId: string): Promise<boolean>
-	/**
-	 * Simulates selecting a follow-up suggestion for a task by ID, including its optional mode switch.
-	 * Intended for use in tests only.
-	 */
-	selectTaskFollowupSuggestion(options: { taskId: string; answer: string; mode?: string }): Promise<boolean>
-	/**
 	 * Returns true if the API is ready to use.
 	 */
 	isReady(): boolean
@@ -137,10 +128,6 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * @param values An object containing key-value pairs to set.
 	 */
 	setConfiguration(values: RooCodeSettings): Promise<void>
-	/**
-	 * Returns a value from VS Code globalState. Intended for use in tests only.
-	 */
-	getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K]
 	/**
 	 * Returns a list of all configured profile names
 	 * @returns Array of profile names
@@ -202,6 +189,34 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+}
+
+/**
+ * Test-only extension API surface.
+ *
+ * These methods expose raw global-state reads and task ask control by ID that
+ * production callers must not rely on. The implementation is gated at runtime
+ * against VS Code ExtensionMode.Production, so only test hosts and the e2e
+ * harness keep access.
+ */
+export interface RooCodeTestOnlyApi {
+	/**
+	 * Programmatically approves the pending ask for a task by ID. Intended for use in tests only.
+	 */
+	approveTaskAsk(taskId: string): Promise<boolean>
+	/**
+	 * Programmatically denies the pending ask for a task by ID. Intended for use in tests only.
+	 */
+	denyTaskAsk(taskId: string): Promise<boolean>
+	/**
+	 * Simulates selecting a follow-up suggestion for a task by ID, including its optional mode switch.
+	 * Intended for use in tests only.
+	 */
+	selectTaskFollowupSuggestion(options: { taskId: string; answer: string; mode?: string }): Promise<boolean>
+	/**
+	 * Returns a value from VS Code globalState. Intended for use in tests only.
+	 */
+	getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K]
 }
 
 export interface RooCodeTestAPI extends RooCodeAPI {

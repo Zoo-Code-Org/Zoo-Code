@@ -157,6 +157,17 @@ describe("ContextProxy", () => {
 	})
 
 	describe("updateGlobalState", () => {
+		it("restores the previous cached value when the durable write fails", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "anthropic")).rejects.toThrow("storage failed")
+
+			// A failed durable write must not leave the cache ahead of storage.
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+		})
+
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 

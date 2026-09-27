@@ -1419,6 +1419,9 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).toHaveBeenCalledWith("/mock/global/storage")
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
+		// The updateSettings flow must route through the provider-level mutation path so the
+		// durable view pin write stays ordered with the shared write.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 

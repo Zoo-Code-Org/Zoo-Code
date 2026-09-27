@@ -1198,6 +1198,40 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("rolls the shared value back when the durable view-state write fails on setValue", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider["setViewStateId"]("rollback-view")
+
+			await provider.setValue("mode", "code")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+
+			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(new Error("persist failed"))
+
+			await expect(provider.setValue("mode", "architect")).rejects.toThrow("persist failed")
+
+			// The shared write landed before the durable viewStates write failed: it must be
+			// rolled back so the cache cannot run ahead of storage.
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+
+			await provider.dispose()
+		})
+
+		it("rolls the shared values back when the durable view-state write fails on setValues", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider["setViewStateId"]("rollback-view")
+
+			await provider.setValues({ mode: "code" })
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+
+			vi.spyOn(provider.contextProxy, "setValues").mockRejectedValueOnce(new Error("persist failed"))
+
+			await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("persist failed")
+
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+
+			await provider.dispose()
+		})
+
 		it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
 			const provider1 = new ClineProvider(
 				mockContext,
@@ -1324,6 +1358,36 @@ describe("ClineProvider", () => {
 			})
 
 			await provider.dispose()
+		})
+
+		it("resolves viewStateReadiness once the stable id is registered", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const readiness = provider.viewStateReadiness
+
+			const settled = readiness.then(
+				() => true,
+				() => false,
+			)
+
+			await provider["setViewStateId"]("ready-view")
+
+			expect(await settled).toBe(true)
+
+			await provider.dispose()
+		})
+
+		it("resolves viewStateReadiness when the provider disposes before the id is registered", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const readiness = provider.viewStateReadiness
+
+			const settled = readiness.then(
+				() => true,
+				() => false,
+			)
+
+			await provider.dispose()
+
+			expect(await settled).toBe(true)
 		})
 	})
 
@@ -2041,6 +2105,46 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("shared-victim")
 			// The shared list sync drops the deleted entry.
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([replacementProfile, pinnedProfile])
+			await provider.dispose()
+		})
+
+		it("re-points the persisted view pin before the settings deletion can fail", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			// Persist this view's pin under the deleted profile so the deletion must re-point it.
+			await provider.contextProxy.setValue("viewStates", {
+				"pinning-view": { currentApiConfigName: "old-profile", updatedAt: Date.now() },
+			})
+			// @ts-ignore - Replace providerSettingsManager with a double whose deletion fails.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockRejectedValue(new Error("storage down")),
+				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider["setViewStateId"]("pinning-view")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("old-profile")
+
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("storage down")
+
+			// The durable pin re-point must have landed before the failure so a reload never
+			// rehydrates the deleted profile name.
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"pinning-view": { currentApiConfigName: "keeper-profile" },
+			})
+
 			await provider.dispose()
 		})
 	})

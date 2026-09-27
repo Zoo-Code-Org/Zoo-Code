@@ -368,8 +368,15 @@ export class ContextProxy {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		// Update the cache first so reads reflect the new value immediately, but restore
+		// the previous value if the durable write fails so the cache cannot diverge from
+		// storage.
+		const previous = this.stateCache[key]
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error) => {
+			this.stateCache[key] = previous
+			throw error
+		})
 	}
 
 	private getAllGlobalState(): GlobalState {
@@ -386,13 +393,21 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
-		// Update cache.
+		// Update the cache first so reads reflect the new value immediately, but restore
+		// the previous value if the durable write fails so the cache cannot diverge from
+		// storage.
+		const previous = this.secretCache[key]
 		this.secretCache[key] = value
 
 		// Write directly to context.
-		return value === undefined
-			? this.originalContext.secrets.delete(key)
-			: this.originalContext.secrets.store(key, value)
+		return Promise.resolve(
+			value === undefined
+				? this.originalContext.secrets.delete(key)
+				: this.originalContext.secrets.store(key, value),
+		).catch((error) => {
+			this.secretCache[key] = previous
+			throw error
+		})
 	}
 
 	/**

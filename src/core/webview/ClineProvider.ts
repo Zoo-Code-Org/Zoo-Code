@@ -735,6 +735,25 @@ export class ClineProvider
 	}
 
 	/**
+	 * Resolves once this view's stable state id has been registered (setViewStateId) and
+	 * its persisted view state loaded, or when the provider disposes. API-driven task
+	 * creation awaits this (bounded by a timeout) so a task cannot consume shared
+	 * default mode/profile state before the view's own persisted selections are loaded.
+	 */
+	private viewStateReadinessResolve?: () => void
+
+	private viewStateReadinessPromise?: Promise<void>
+
+	public get viewStateReadiness(): Promise<void> {
+		if (!this.viewStateReadinessPromise) {
+			this.viewStateReadinessPromise = new Promise<void>((resolve) => {
+				this.viewStateReadinessResolve = resolve
+			})
+		}
+		return this.viewStateReadinessPromise
+	}
+
+	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */
@@ -768,6 +787,10 @@ export class ClineProvider
 			// the failed id.
 			this.viewStateId = previousViewStateId
 			throw error
+		} finally {
+			// The stable id is now registered (or restored): API-driven task creation
+			// can proceed against this view's loaded state.
+			this.viewStateReadinessResolve?.()
 		}
 	}
 
@@ -1190,6 +1213,10 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+
+		// A disposed provider will never register a stable view state id: release
+		// any API-driven task creation that is awaiting viewStateReadiness.
+		this.viewStateReadinessResolve?.()
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
@@ -2365,6 +2392,30 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
+		// Stage the durable view-pin re-point before the secret deletion so a
+		// deleteConfig failure cannot leave persisted pins referencing a deleted
+		// profile.
+		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+
+		const viewPinsDeletedProfile =
+			this.viewLocalState.currentApiConfigName === profileToDelete.name ||
+			// No view-local pin: the view follows the shared selection, so it only needs the
+			// replacement activation when that shared selection referenced the deleted profile;
+			// an unrelated deletion must not rebuild this view's task handler.
+			(this.viewLocalState.currentApiConfigName === undefined &&
+				globalSettings.currentApiConfigName === profileToDelete.name)
+
+		// Stage the profile-list write before the secret deletion when this view keeps an
+		// unrelated pin: a deleteConfig failure then leaves a consistent list with no
+		// dangling pins. The activation path below writes the list itself after the
+		// deletion, because it re-reads the profile entries from the settings store.
+		if (!viewPinsDeletedProfile) {
+			const survivingEntries = this.getProviderProfileEntries().filter(
+				({ name }) => name !== profileToDelete.name,
+			)
+			await this.contextProxy.setValue("listApiConfigMeta", survivingEntries)
+		}
+
 		// Remove the profile from the settings store (context.secrets) so it cannot be
 		// resurrected by a later listApiConfigMeta sync. A "not found" rejection means
 		// the secret was already gone (e.g. pruned by an earlier run): treat it as an
@@ -2383,18 +2434,6 @@ export class ClineProvider
 			)
 		}
 
-		// Re-point any persisted view pin that referenced the deleted profile so views
-		// do not rehydrate a missing profile name after a reload.
-		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
-
-		const viewPinsDeletedProfile =
-			this.viewLocalState.currentApiConfigName === profileToDelete.name ||
-			// No view-local pin: the view follows the shared selection, so it only needs the
-			// replacement activation when that shared selection referenced the deleted profile;
-			// an unrelated deletion must not rebuild this view's task handler.
-			(this.viewLocalState.currentApiConfigName === undefined &&
-				globalSettings.currentApiConfigName === profileToDelete.name)
-
 		if (viewPinsDeletedProfile) {
 			// Apply the replacement through the activation path so this view's
 			// viewLocalState.apiConfiguration and the current task's api handler are
@@ -2404,15 +2443,8 @@ export class ClineProvider
 			return
 		}
 
-		// This view pins an unrelated profile, which must survive the deletion: sync the
-		// shared profile list and post the updated state only.
-		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
-
-		// Write only the changed key: the shared current-profile slot is left untouched so
-		// the view-local buffer keeps the surviving pin, and the other keys (including
-		// viewStates, which concurrent views mutate directly in storage) are not replayed
-		// from the snapshot captured before the awaits above.
-		await this.contextProxy.setValue("listApiConfigMeta", entries)
+		// This view pins an unrelated profile, which must survive the deletion: the
+		// shared list was already staged above; post the updated state only.
 
 		await this.postStateToWebview()
 	}
@@ -3665,8 +3697,19 @@ export class ClineProvider
 			}
 		}
 
+		// Capture the previous shared value before the ContextProxy write so a failed
+		// durable viewStates write can roll it back: otherwise the shared mode/profile
+		// would remain persisted without this view's pin.
+		const previousValue = this.contextProxy.getValue(key)
+
 		await this.contextProxy.setValue(key, value)
-		await this._saveViewLocalStateFromMutation({ [key]: value })
+
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error) {
+			await this.contextProxy.setValue(key, previousValue)
+			throw error
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3692,8 +3735,22 @@ export class ClineProvider
 			}
 		}
 
+		// Capture the previous shared values for the keys being written so a failed
+		// durable viewStates write can roll the ContextProxy mutation back.
+		const previousValues = Object.fromEntries(
+			(Object.keys(sanitizedValues) as (keyof RooCodeSettings)[])
+				.filter((key) => sanitizedValues[key] !== undefined)
+				.map((key) => [key, this.contextProxy.getValue(key)] as [string, unknown]),
+		) as Partial<RooCodeSettings>
+
 		await this.contextProxy.setValues(sanitizedValues)
-		await this._saveViewLocalStateFromMutation(sanitizedValues)
+
+		try {
+			await this._saveViewLocalStateFromMutation(sanitizedValues)
+		} catch (error) {
+			await this.contextProxy.setValues(previousValues as RooCodeSettings)
+			throw error
+		}
 	}
 
 	/**
