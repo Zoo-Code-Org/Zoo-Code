@@ -224,11 +224,18 @@ export class ClineProvider
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
 	private lastWebviewHeartbeatAt = 0
+	// Bumped on every accepted heartbeat, including multiple heartbeats in the
+	// same millisecond; the recovery reload compares revisions around its
+	// awaited HTML generation so no accepted heartbeat is missed.
+	private webviewHeartbeatRevision = 0
 	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
 	// Bumped to invalidate an in-flight recovery reload when the provider or
 	// the watched view is disposed; the reload must not reassign webview.html
 	// afterwards.
 	private webviewRecoveryEpoch = 0
+	// True while a recovery reload is awaiting HTML generation; the watchdog
+	// must not pile a second reload onto the same view until this one settles.
+	private webviewRecoveryInFlight = false
 	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
 	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
@@ -3407,6 +3414,7 @@ export class ClineProvider
 	/** Records that the webview renderer is alive; called on every webviewHeartbeat message. */
 	public updateWebviewHeartbeat(): void {
 		this.lastWebviewHeartbeatAt = Date.now()
+		this.webviewHeartbeatRevision++
 	}
 
 	/**
@@ -3449,13 +3457,19 @@ export class ClineProvider
 		if (!view?.webview) {
 			return
 		}
+		// A recovery already awaiting its HTML generation owns this view; a
+		// second one would only pile another forced reload onto it.
+		if (this.webviewRecoveryInFlight) {
+			return
+		}
+		this.webviewRecoveryInFlight = true
 		// Capture the epoch so a disposal or view replacement can invalidate
 		// this operation while the HTML is being generated.
 		const epoch = this.webviewRecoveryEpoch
 		// A heartbeat that arrives while the HTML is being generated means the
-		// renderer is alive again; comparing against the timestamp captured here
-		// lets the post-await check skip the reload in that case.
-		const heartbeatAtRecoveryStart = this.lastWebviewHeartbeatAt
+		// renderer is alive again; comparing revisions (not timestamps) lets the
+		// post-await check catch heartbeats that land in the same millisecond.
+		const heartbeatRevision = this.webviewHeartbeatRevision
 		try {
 			const html = await this.getWebviewHtml(view.webview)
 			// The await yields; assigning html now that the provider is disposed,
@@ -3466,7 +3480,7 @@ export class ClineProvider
 				this._disposed ||
 				this.webviewRecoveryEpoch !== epoch ||
 				this.view !== view ||
-				this.lastWebviewHeartbeatAt !== heartbeatAtRecoveryStart ||
+				this.webviewHeartbeatRevision !== heartbeatRevision ||
 				view.visible !== true
 			) {
 				return
@@ -3474,6 +3488,8 @@ export class ClineProvider
 			view.webview.html = html
 		} catch (error) {
 			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
+		} finally {
+			this.webviewRecoveryInFlight = false
 		}
 	}
 

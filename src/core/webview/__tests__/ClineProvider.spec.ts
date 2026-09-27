@@ -928,6 +928,36 @@ describe("ClineProvider", () => {
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
 		})
 
+		test("skips the recovery reload when two heartbeats land in the same millisecond during recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// Pin the clock so both heartbeats stamp the same millisecond: a
+			// timestamp comparison would see no change, but the heartbeat
+			// revision moved, so the reload must still be skipped.
+			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now())
+			provider.updateWebviewHeartbeat()
+			provider.updateWebviewHeartbeat()
+			nowSpy.mockRestore()
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
 		test("skips the recovery reload when the view hides while regenerating HTML", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
@@ -952,6 +982,38 @@ describe("ClineProvider", () => {
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not start a second recovery while one is in flight and recovers after a failure", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// The first recovery blocks on a controlled pending generation.
+			let failReload: (error: Error) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((_resolve, reject) => {
+						failReload = reject
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// The watchdog ticks again while the first recovery still awaits
+			// its HTML; no second generation may start for the same view.
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// The pending generation rejects; the finally block must clear the
+			// in-flight state so a later watchdog tick can start a fresh
+			// recovery instead of being blocked forever.
+			failReload(new Error("reload boom"))
+			await vi.advanceTimersByTimeAsync(0)
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
 		})
 
 		test("reloads only its own webview when multiple providers are active", async () => {
