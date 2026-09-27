@@ -920,6 +920,14 @@ describe("ClineProvider", () => {
 				const htmlBeforeA = mockWebviewView.webview.html
 				const htmlBeforeB = mockWebviewViewB.webview.html
 
+				// The pre-PR reload path fired the global
+				// workbench.action.webview.reloadWebviewAction command, which
+				// resets every webview. The html assertions below cannot catch a
+				// regression back to that command because the vscode mock
+				// swallows executeCommand without touching any view, so also
+				// assert the global command was never invoked.
+				const executeCommandMock = vscode.commands.executeCommand as ReturnType<typeof vi.fn>
+
 				await vi.advanceTimersByTimeAsync(119_000)
 				// B's view is still alive; refresh its heartbeat so a stale one
 				// would reload it too, leaving only A's watchdog to fire.
@@ -928,6 +936,7 @@ describe("ClineProvider", () => {
 
 				expect(mockWebviewView.webview.html).not.toBe(htmlBeforeA)
 				expect(mockWebviewViewB.webview.html).toBe(htmlBeforeB)
+				expect(executeCommandMock).not.toHaveBeenCalledWith("workbench.action.webview.reloadWebviewAction")
 			} finally {
 				await providerB.dispose()
 			}
