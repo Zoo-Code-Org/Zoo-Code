@@ -199,6 +199,29 @@ describe("ContextProxy", () => {
 			expect(proxy.getSecret("apiKey")).toBe("new-key")
 		})
 
+		it("restores the previous secret when the durable write fails", async () => {
+			await proxy.storeSecret("apiKey", "old-key")
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+
+			await expect(proxy.storeSecret("apiKey", "new-key")).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("apiKey")).toBe("old-key")
+		})
+
+		it("does not roll a pre-refresh secret write back over refreshed values", async () => {
+			await proxy.storeSecret("apiKey", "old-key")
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+			const pending = proxy.storeSecret("apiKey", "stale-write")
+
+			// The refresh re-syncs the cache from storage and drops the pending write's
+			// token: its later failure must not restore its previous value.
+			mockSecrets.get.mockResolvedValueOnce("refreshed-value")
+			await proxy.refreshSecrets()
+
+			await expect(pending).rejects.toThrow("secrets failed")
+			expect(proxy.getSecret("apiKey")).toBe("refreshed-value")
+		})
+
 		it("does not restore a pending write into a reset cache", async () => {
 			// The pending write fails after resetAllState cleared the token: without the
 			// token guard its stale previous value would resurrect in a cache the reset
