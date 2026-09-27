@@ -2635,11 +2635,12 @@ describe("Cline", () => {
 					task: "initial task",
 					startTask: false,
 				})
-				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
 
 				const submitted = await task.submitUserMessage("test message", ["image1.png"])
 
 				expect(submitted).toBe(true)
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
 			})
 
 			it("returns false when there is nothing to submit", async () => {
@@ -5970,6 +5971,55 @@ describe("Queued message processing after condense", () => {
 			await expect(task.processQueuedMessages()).rejects.toThrow("emit failed")
 
 			expect(task.messageQueueService.claimNextMessage()?.text).toBe("retry me too")
+		})
+
+		it("serializes concurrent drains so a blocked submission holds the next message queued", async () => {
+			const task = createQueueTask()
+			task.messageQueueService.addMessage("first")
+			task.messageQueueService.addMessage("second")
+
+			// Block the first submission mid-handoff so its response stays pending.
+			let releaseFirstSubmission!: () => void
+			const firstSubmission = new Promise<boolean>((resolve) => {
+				releaseFirstSubmission = () => resolve(true)
+			})
+			const submitSpy = vi
+				.spyOn(task, "submitUserMessage")
+				.mockReturnValueOnce(firstSubmission)
+				.mockResolvedValue(true)
+
+			const firstDrain = task.processQueuedMessages()
+			const secondDrain = task.processQueuedMessages()
+
+			// The first drain reaches its blocked submission; the serialized
+			// second drain must not claim or submit the next message yet.
+			await Promise.resolve()
+			expect(submitSpy).toHaveBeenCalledTimes(1)
+			expect(submitSpy).toHaveBeenCalledWith("first", undefined)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
+
+			releaseFirstSubmission()
+			await expect(firstDrain).resolves.toBe(true)
+			await expect(secondDrain).resolves.toBe(true)
+
+			// Both messages are delivered in queue order.
+			expect(submitSpy).toHaveBeenCalledTimes(2)
+			expect(submitSpy).toHaveBeenNthCalledWith(2, "second", undefined)
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("does not let a failed drain block later drains", async () => {
+			const task = createQueueTask()
+			vi.spyOn(task, "submitUserMessage").mockRejectedValueOnce(new Error("emit failed")).mockResolvedValue(true)
+			task.messageQueueService.addMessage("retry me")
+			task.messageQueueService.addMessage("still deliverable")
+
+			await expect(task.processQueuedMessages()).rejects.toThrow("emit failed")
+			// The failed claim is released; the next drain retries it in order.
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+
+			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 	})
 })

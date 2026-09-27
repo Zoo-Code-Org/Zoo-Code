@@ -123,7 +123,8 @@ describe("ApplyDiffTool.execute - queued message drain failures", () => {
 			// Flush the fire-and-forget drain promise so its rejection is logged.
 			await new Promise((resolve) => setTimeout(resolve, 0))
 
-			expect(mockTask.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult).not.toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				"[ApplyDiffTool] Failed to process queued messages:",

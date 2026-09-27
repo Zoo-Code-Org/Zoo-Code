@@ -525,10 +525,11 @@ describe("executeCommandTool", () => {
 			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(false)
 		})
 
-		it("warns without draining when the terminal fails with a non-shell-integration error", async () => {
+		it("routes a generic terminal-start error to the execution error path without draining", async () => {
+			const runError = new Error("terminal process failed to start")
 			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValueOnce({
 				runCommand: vitest.fn().mockImplementation(() => {
-					throw new Error("terminal process failed to start")
+					throw runError
 				}),
 				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
 			} as never)
@@ -539,14 +540,15 @@ describe("executeCommandTool", () => {
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
 			})
 
-			expect(mockCline.say).toHaveBeenCalledWith("shell_integration_warning")
-			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
-			expect(mockPushToolResult).toHaveBeenCalledWith(
-				"Command failed to execute in terminal due to a shell integration error.",
-			)
+			// A generic terminal failure is an ordinary execution error, not a
+			// shell-integration failure: the shell-integration warning and its
+			// dedicated result must not appear (see the ShellIntegrationError
+			// test for that distinct path).
+			expect(mockHandleError).toHaveBeenCalledWith("executing command", runError)
+			expect(mockCline.say).not.toHaveBeenCalledWith("shell_integration_warning")
+			expect(mockPushToolResult).not.toHaveBeenCalled()
 			// The command never ran, so queued messages must not be drained.
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
-			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 
 		it("selects the Execa fallback provider for cmd.exe shell integration", () => {
@@ -1220,6 +1222,15 @@ describe("executeCommandTool", () => {
 				await vitest.advanceTimersByTimeAsync(100)
 
 				expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(2)
+				// The final non-partial command_output update is published before
+				// the background-completion drain runs.
+				const finalOutputCallIndex = mockCline.say.mock.calls.findIndex(
+					(call: unknown[]) => call[0] === "command_output" && call[3] === false,
+				)
+				expect(finalOutputCallIndex).not.toBe(-1)
+				expect(mockCline.say.mock.invocationCallOrder[finalOutputCallIndex]).toBeLessThan(
+					mockCline.processQueuedMessages.mock.invocationCallOrder[1],
+				)
 				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(

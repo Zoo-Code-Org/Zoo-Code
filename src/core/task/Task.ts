@@ -412,6 +412,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
 	private messageQueueStateChangedHandler: (() => void) | undefined
+	// Serializes queued-message drains: a drain claims and submits only after
+	// the previous drain's submission handoff finished, so two concurrent
+	// drains cannot submit different messages into the single ask-response
+	// slot (which would drop the earlier response after both messages were
+	// already removed from the queue).
+	private queuedMessageDrainChain: Promise<unknown> = Promise.resolve()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -5426,10 +5432,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * claim is released so the message stays queued for a later drain, and the
 	 * failure propagates to the caller instead of being logged and dropped.
 	 *
+	 * Drains are serialized per task: each run claims only after the previous
+	 * run's submission handoff completed, so the background-completion drain
+	 * and the post-result drain cannot interleave two different messages into
+	 * the single pending ask-response. A rejected drain does not block later
+	 * drains.
+	 *
 	 * @returns Promise resolving to true when a queued message was submitted
 	 * and durably removed; false when the queue was empty.
 	 */
-	public async processQueuedMessages(): Promise<boolean> {
+	public processQueuedMessages(): Promise<boolean> {
+		const run = this.queuedMessageDrainChain.then(() => this.claimAndSubmitNextQueuedMessage())
+		// A rejected drain must not poison the chain for later drains; the
+		// caller still receives this run's outcome through the returned promise.
+		this.queuedMessageDrainChain = run.then(
+			() => {},
+			() => {},
+		)
+		return run
+	}
+
+	private async claimAndSubmitNextQueuedMessage(): Promise<boolean> {
 		const queued = this.messageQueueService.claimNextMessage()
 		if (!queued) {
 			return false

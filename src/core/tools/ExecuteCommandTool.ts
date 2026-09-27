@@ -244,17 +244,18 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 					publishToolResult(result)
 					shouldDrainQueuedMessages = commandSubmitted
-				} else {
+				} else if (error instanceof ShellIntegrationError) {
 					// Command was submitted but shell integration lost track of it — show warning.
 					await task.say("shell_integration_warning")
-
-					if (error instanceof ShellIntegrationError) {
-						publishToolResult(
-							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
-						)
-					} else {
-						publishToolResult(`Command failed to execute in terminal due to a shell integration error.`)
-					}
+					publishToolResult(
+						"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
+					)
+				} else {
+					// Ordinary execution error (e.g. the terminal failed to start) —
+					// not a shell-integration failure, so it must not emit the
+					// shell-integration warning; surface it through the tool's
+					// error path instead.
+					throw error
 				}
 			}
 
