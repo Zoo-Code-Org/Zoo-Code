@@ -2251,8 +2251,10 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 	// per-test doubles. Snapshot the module-level originals at collection time and
 	// restore them in the afterEach below so the launch stubs never leak into other
 	// tests of this file.
+	// Single structural cast: the class types these members as a method / a
+	// readonly property, which cannot be re-assigned to swap in a per-test double.
 	const launchSuiteSnapshot = (() => {
-		const view = mockClineProvider as unknown as {
+		const view = mockClineProvider as {
 			getMcpHub: unknown
 			providerSettingsManager: unknown
 			getStateToPostToWebview: unknown
@@ -2434,7 +2436,7 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 	})
 
 	afterEach(() => {
-		const view = mockClineProvider as unknown as {
+		const view = mockClineProvider as {
 			getMcpHub: unknown
 			providerSettingsManager: unknown
 			getStateToPostToWebview: unknown
