@@ -2627,6 +2627,97 @@ describe("Cline", () => {
 				// Restore console.error
 				consoleErrorSpy.mockRestore()
 			})
+
+			it("returns true when the message is handed to the ask-response channel", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				const submitted = await task.submitUserMessage("test message", ["image1.png"])
+
+				expect(submitted).toBe(true)
+			})
+
+			it("returns false when there is nothing to submit", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
+
+				// Empty text without images.
+				await expect(task.submitUserMessage("", [])).resolves.toBe(false)
+				// Whitespace-only text without images.
+				await expect(task.submitUserMessage("   ", [])).resolves.toBe(false)
+
+				expect(handleResponseSpy).not.toHaveBeenCalled()
+			})
+
+			it("returns false when the provider reference is lost", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				Object.defineProperty(task, "providerRef", {
+					value: { deref: () => undefined },
+					writable: false,
+					configurable: true,
+				})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				try {
+					await expect(task.submitUserMessage("test message")).resolves.toBe(false)
+					expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#submitUserMessage] Provider reference lost")
+				} finally {
+					consoleErrorSpy.mockRestore()
+				}
+			})
+
+			it("returns false when the submission handoff throws", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {
+					throw new Error("emit failed")
+				})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				try {
+					await expect(task.submitUserMessage("test message")).resolves.toBe(false)
+					expect(consoleErrorSpy).toHaveBeenCalledWith(
+						"[Task#submitUserMessage] Failed to submit user message:",
+						expect.any(Error),
+					)
+				} finally {
+					consoleErrorSpy.mockRestore()
+				}
+			})
+
+			it("coerces a nullish text into an images-only submission", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				// Runtime callers outside the type system can pass a nullish text;
+				// the guard coerces it so an images-only message still submits.
+				const submitted = await task.submitUserMessage(undefined as unknown as string, ["image1.png"])
+
+				expect(submitted).toBe(true)
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "", ["image1.png"])
+			})
 		})
 	})
 

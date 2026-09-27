@@ -677,6 +677,27 @@ describe("editFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
 			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
 		})
+
+		it("logs a queued-message drain failure after a successful edit without changing the tool result", async () => {
+			const drainError = new Error("queued submission failed")
+			mockTask.processQueuedMessages.mockRejectedValue(drainError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				const result = await executeEditFileTool()
+
+				// Flush the fire-and-forget drain promise so its rejection is logged.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				expect(result).toBe("Tool result message")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[EditFileTool] Failed to process queued messages:",
+					drainError,
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
 	})
 
 	describe("file tracking", () => {
