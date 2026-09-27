@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -16,13 +15,18 @@
 
         ## Kami adalah Zoo Code
 
-> Kamu mungkin sudah melihat [pengumuman terbaru](https://x.com/mattrubens/status/2046636598859559114) dari tim Roo 🦘🦘🦘. Singkatnya, tim sedang mengurangi pengembangan aktif Roo Code secara bertahap sambil memusatkan perhatian pada [Roomote](https://roomote.dev/). Kabar ini berat bagi banyak pengguna Roo; plugin ini sangat berarti bagi komunitas ini.
+> Zoo Code melanjutkan pengembangan proyek ini setelah tim Roo menghentikan
+> pengembangan aktif Roo Code untuk fokus pada [Roomote](https://roomote.dev/).
+> Terima kasih kepada tim Roo atas semua yang telah mereka bangun.
 >
-> Kami ingin berterima kasih kepada seluruh tim Roo atas kerja yang mereka curahkan ke plugin ini. Kami tidak akan menyebut satu per satu nama mereka di sini, tetapi kita semua bisa sepakat bahwa mereka adalah developer yang luar biasa dan, sama pentingnya, orang-orang yang hebat. Terima kasih untuk tim Roo.
->
-> Pengguna Roo datang dari berbagai macam latar belakang. Ada yang memakainya secara profesional dalam pekerjaan sehari-hari, ada juga yang memakainya untuk merancang workflow yang sangat rumit. Sebagian memakainya untuk meningkatkan Roo itu sendiri, sementara yang lain memakainya untuk meningkatkan model yang digunakan Roo (super meta). Intinya, komunitas ini beragam, dan meskipun kanguru 🦘🦘🦘 adalah hewan yang gagah dan mulia, kami merasa "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 lebih mencerminkan keberagaman pengguna plugin ini.
->
-> Jadi kami ingin mengumumkan bahwa **Zoo Code** akan melanjutkan pengembangan proyek penting ini. Tim inti kami terdiri dari para developer yang sebelumnya pernah berkontribusi ke Roo dan sangat peduli pada plugin ini. Kami akan terus menghadirkan pembaruan model, memperbaiki bug, dan merilis fitur. Namun lebih dari segalanya, kami ingin mendengarkan kamu, komunitas yang membuat plugin ini begitu istimewa. Jadi silakan bergabung ke [Discord](https://discord.gg/VxfP4Vx3gX) kami, [Reddit](https://www.reddit.com/r/ZooCode) kami, atau [buat PR atau issue](https://github.com/Zoo-Code-Org/Zoo-Code); tetapi yang paling penting, kami meminta kamu untuk tetap terlibat, terhubung, dan aktif sebagai komunitas.
+> Tim inti kami terdiri dari para developer yang sebelumnya pernah
+> berkontribusi ke Roo dan sangat peduli pada plugin ini. Kami akan terus
+> menghadirkan pembaruan model, memperbaiki bug, dan merilis fitur, dan kami
+> berencana untuk mendengarkan dengan saksama komunitas yang membuat plugin
+> ini begitu istimewa. Gabung bersama kami di
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), atau
+> [buka PR atau issue](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
@@ -30,15 +34,23 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.68.0
+## Yang Ditambahkan Zoo Code Sejak Roo Code
 
-- **Provider Friendli dengan dukungan GLM-5.2** — gunakan model GLM terbaru lewat Friendli.
-- **Dukungan thinking/reasoning native untuk Ollama** — pertahankan keluaran penalaran dari awal hingga akhir saat kamu memakai model Ollama.
-- **Perbaikan `apiModelId` kustom Anthropic** — ID model Anthropic kustom kini tetap terpilih alih-alih diam-diam kembali ke `claude-sonnet-4-5`.
-- Perbaikan: penanganan hasil tool penyedia Ollama dan pemadatan konteks yang terlalu dini.
-- Perbaikan: pertahankan tautan induk-anak tugas saat subtugas yang didelegasikan terputus.
-- Peningkatan penanganan blok konten Claude Anthropic Vertex untuk respons yang lebih andal.
-- Pembaruan CI, publikasi nightly, dan dependensi/tooling.
+Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memperluasnya dengan:
+
+- **Kecerdasan codebase Semble** — pencarian kode semantik yang cepat dan sesuai permintaan, dengan penyiapan otomatis dan tanpa workflow pengindeksan terpisah.
+- **Workflow Orchestrator yang lebih kuat** — delegasi yang lebih aman, koordinasi task paralel, pemulihan task induk/anak yang andal, serta isolasi yang lebih baik antara subtask dan profil provider.
+- **Proses otonom yang lebih panjang dengan Destructive Command Guard (DCG)** — memblokir perintah berbahaya secara otomatis sementara pekerjaan tepercaya terus berjalan tanpa permintaan persetujuan berulang.
+- **Model terbaru** — dukungan berkelanjutan untuk keluarga model Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax, dan lainnya.
+- **Lebih banyak cara untuk terhubung** — provider baru dan yang diperluas, termasuk Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go, dan banyak lagi.
+- **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
+- **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
+
+## Yang Baru di v3.84.0
+
+- ✨ **Model SOTA baru ditambahkan:** Gunakan GPT-6 Sol, GPT-6 Luna, dan Claude Opus 5.5 melalui provider yang didukung.
+- 🧭 **Task dan subtask yang lebih andal:** Jaga mode yang didelegasikan tetap terisolasi, pertahankan tautan subtask setelah Stop berulang, dan lindungi pengaturan orchestrator saat slash command mengganti mode.
+- 🛠️ **Perilaku terminal, provider, dan pencarian kode yang lebih andal:** Tingkatkan terminal di Windows dan lingkungan non-Inggris, perkuat respons serta pembatalan provider, dan pastikan pencarian kode lebih konsisten menggunakan workspace yang tepat.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
@@ -62,24 +74,9 @@ Zoo Code beradaptasi dengan cara Anda bekerja, bukan sebaliknya:
 
 Pelajari lebih lanjut: [Menggunakan Mode](https://docs.zoocode.dev/basic-usage/using-modes) • [Mode Kustom](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Video Tutorial & Fitur
-
-<div align="center">
-
-|                                                                                                                                                                           |                                                                                                                                                                             |                                                                                                                                                                               |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Menginstal Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Mengonfigurasi Profil</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Pengindeksan Basis Kode</b> |
-|     <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Mode Kustom</b>     |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Pos Pemeriksaan</b>    |    <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Manajemen Konteks</b>    |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Video tutorial dan fitur cepat lainnya...</a>
-</p>
-
 ## Sumber daya
 
 - **[Dokumentasi](https://docs.zoocode.dev):** Panduan resmi untuk menginstal, mengonfigurasi, dan menguasai Zoo Code.
-- **[Saluran YouTube](https://youtube.com/@roocodeyt?feature=shared):** Tonton tutorial dan lihat fitur-fitur dalam aksi.
 - **[Server Discord](https://discord.gg/VxfP4Vx3gX):** Bergabunglah dengan komunitas untuk bantuan dan diskusi real-time.
 - **[Komunitas Reddit](https://www.reddit.com/r/ZooCode):** Bagikan pengalaman Anda dan lihat apa yang sedang dibangun orang lain.
 - **[Masalah GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Laporkan bug dan lacak pengembangan.

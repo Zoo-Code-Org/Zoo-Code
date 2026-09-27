@@ -1,9 +1,7 @@
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent, waitFor } from "@/utils/test-utils"
 
 import type { RuleMetadata } from "@roo-code/types"
 
-import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { vscode } from "@/utils/vscode"
 
 import { RulesSettings } from "../RulesSettings"
@@ -108,25 +106,12 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 
 const renderRulesSettings = (rules: RuleMetadata[] = mockRules, cwd?: string) => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: { retry: false },
-			mutations: { retry: false },
-		},
-	})
-
 	mockExtensionState = {
 		rules,
 		cwd: cwd !== undefined ? cwd : "/workspace",
 	}
 
-	return render(
-		<QueryClientProvider client={queryClient}>
-			<ExtensionStateContextProvider>
-				<RulesSettings />
-			</ExtensionStateContextProvider>
-		</QueryClientProvider>,
-	)
+	return renderWithExtensionState(<RulesSettings />)
 }
 
 describe("RulesSettings", () => {

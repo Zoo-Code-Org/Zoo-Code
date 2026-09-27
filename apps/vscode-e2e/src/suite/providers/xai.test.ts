@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -336,7 +337,7 @@ async function runXAIToolProbe(
 
 	try {
 		await api.setConfiguration({
-			apiProvider: "xai" as const,
+			apiProvider: providerIdentifiers.xai,
 			xaiApiKey: XAI_API_KEY ?? "mock-key",
 			apiModelId: modelId,
 		})
@@ -549,7 +550,7 @@ suite("xAI provider", function () {
 		)
 
 		await globalThis.api.setConfiguration({
-			apiProvider: "xai" as const,
+			apiProvider: providerIdentifiers.xai,
 			xaiApiKey: XAI_API_KEY ?? "mock-key",
 			apiModelId: XAI_MODEL_ID,
 		})
@@ -569,7 +570,7 @@ suite("xAI provider", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),

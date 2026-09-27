@@ -3,6 +3,8 @@
 import { VercelAiGatewayEmbedder } from "../vercel-ai-gateway"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock the OpenAICompatibleEmbedder
 vi.mock("../openai-compatible", () => ({
 	OpenAICompatibleEmbedder: vi.fn(),
@@ -24,7 +26,7 @@ describe("VercelAiGatewayEmbedder", () => {
 	let mockOpenAICompatibleEmbedder: any
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockOpenAICompatibleEmbedder = {
 			createEmbeddings: vi.fn(),
 			validateConfiguration: vi.fn(),

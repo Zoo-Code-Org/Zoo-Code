@@ -7,7 +7,7 @@ import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions } from "../../shared/api"
 import { getOllamaModels } from "./fetchers/ollama"
 import { TagMatcher } from "../../utils/tag-matcher"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 interface OllamaChatOptions {
 	temperature: number
@@ -550,7 +550,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
 			const client = this.ensureClient()
 			const { id: modelId } = await this.fetchModel()

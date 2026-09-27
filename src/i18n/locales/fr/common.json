@@ -55,6 +55,7 @@
 		"failed_remove_directory": "Échec de la suppression du répertoire de tâches : {{error}}",
 		"custom_storage_path_unusable": "Le chemin de stockage personnalisé \"{{path}}\" est inutilisable, le chemin par défaut sera utilisé",
 		"cannot_access_path": "Impossible d'accéder au chemin {{path}} : {{error}}",
+		"path_outside_workspace": "Le chemin est à l'extérieur de l'espace de travail",
 		"settings_import_failed": "Échec de l'importation des paramètres : {{error}}",
 		"mistake_limit_guidance": "Cela peut indiquer un échec dans le processus de réflexion du modèle ou une incapacité à utiliser un outil correctement, ce qui peut être atténué avec des conseils de l'utilisateur (par ex. \"Essaie de diviser la tâche en étapes plus petites\").",
 		"violated_organization_allowlist": "Échec de l'exécution de la tâche : le profil actuel n'est pas compatible avec les paramètres de votre organisation",
@@ -72,6 +73,10 @@
 		"url_fetch_failed": "Échec de récupération du contenu de l'URL : {{error}}",
 		"url_fetch_error_with_url": "Erreur lors de la récupération du contenu pour {{url}} : {{error}}",
 		"command_timeout": "L'exécution de la commande a expiré après {{seconds}} secondes",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard est activé, mais n'est pas disponible pour cette plateforme",
+			"enableFailed": "Impossible d'activer Destructive Command Guard : {{error}}"
+		},
 		"share_task_failed": "Échec du partage de la tâche. Veuillez réessayer.",
 		"share_no_active_task": "Aucune tâche active à partager",
 		"share_auth_required": "Authentification requise. Veuillez vous connecter pour partager des tâches.",

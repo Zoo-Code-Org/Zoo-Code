@@ -36,10 +36,10 @@ export class TaskHistoryLock {
 			},
 		)
 
-		this.queue = result.then(
-			() => undefined,
-			() => undefined,
-		)
+		// The queue may hold a rejected promise; the next caller's .then(onFulfilled, onRejected)
+		// pair handles both outcomes, so no normalization hop is needed (and its no-op
+		// arrows would be unobservable mutation targets).
+		this.queue = result
 
 		return result
 	}

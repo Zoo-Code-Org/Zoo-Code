@@ -2,6 +2,7 @@ import { forwardRef } from "react"
 import { cn } from "@src/lib/utils"
 import { Button, StandardTooltip } from "@src/components/ui"
 import { Loader2, LucideIcon } from "lucide-react"
+import { disabledChatControlClassName, enabledChatControlClassName } from "./chatControlStyles"
 
 interface LucideIconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 	icon: LucideIcon
@@ -27,9 +28,8 @@ export const LucideIconButton = forwardRef<HTMLButtonElement, LucideIconButtonPr
 						"text-vscode-foreground opacity-85",
 						"transition-all duration-150",
 						"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-						"active:bg-[rgba(255,255,255,0.1)]",
-						!disabled && "cursor-pointer hover:opacity-100 hover:bg-[rgba(255,255,255,0.03)]",
-						disabled && "cursor-not-allowed opacity-40 hover:bg-transparent active:bg-transparent",
+						!disabled && cn("cursor-pointer", enabledChatControlClassName),
+						disabled && disabledChatControlClassName,
 						className,
 					)}
 					disabled={disabled}

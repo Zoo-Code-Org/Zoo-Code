@@ -3,6 +3,7 @@
 import * as vscode from "vscode"
 import { execSync } from "child_process"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -218,7 +219,7 @@ async function testTerminalCommand(
 		const eventHandlers = (vscode as any).__eventHandlers
 
 		// Execute the command first to set up the process
-		terminalProcess.run(command)
+		const runPromise = terminalProcess.run(command)
 
 		// Trigger the start terminal shell execution event through VSCode mock
 		if (eventHandlers.startTerminalShellExecution) {
@@ -257,6 +258,7 @@ async function testTerminalCommand(
 
 		// Wait for the command to complete or timeout
 		await Promise.race([completedPromise, timeoutPromise])
+		await runPromise
 		// Calculate execution time in microseconds
 		// If endTime wasn't set (unlikely but possible), set it now
 		if (!timeRecorded) {
@@ -298,7 +300,7 @@ describe("TerminalProcess with Bash Command Output", () => {
 	beforeEach(() => {
 		// Reset the terminals array before each test
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses Bash-specific commands to test the same functionality

@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -25,7 +26,7 @@ suite("Roo Code execute_command Tool", function () {
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "anthropic/claude-sonnet-4.5",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -51,7 +52,7 @@ suite("Roo Code execute_command Tool", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),

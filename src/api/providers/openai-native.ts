@@ -13,6 +13,8 @@ import {
 	type ReasoningEffort,
 	type VerbosityLevel,
 	type ReasoningEffortExtended,
+	OpenAiServiceTier,
+	SERVICE_TIER_KEY,
 	type ServiceTier,
 	ApiProviderError,
 } from "@roo-code/types"
@@ -26,7 +28,8 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import { NOT_PROVIDED } from "./constants"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
@@ -93,7 +96,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		if (this.options.enableResponsesReasoningSummary === undefined) {
 			this.options.enableResponsesReasoningSummary = true
 		}
-		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
+		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
 		// Include originator, session_id, and User-Agent headers for API tracking and debugging
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
 		this.client = new OpenAI({
@@ -119,11 +122,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const hasCacheMissTokens = typeof inputDetails?.cache_miss_tokens === "number"
 		const cachedFromDetails = hasCachedTokens ? inputDetails.cached_tokens : 0
 		const missFromDetails = hasCacheMissTokens ? inputDetails.cache_miss_tokens : 0
+		const writesFromDetails =
+			typeof inputDetails?.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0
 
 		// If total input tokens are missing but we have details, derive from them
 		let totalInputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
-		if (totalInputTokens === 0 && inputDetails && (cachedFromDetails > 0 || missFromDetails > 0)) {
-			totalInputTokens = cachedFromDetails + missFromDetails
+		if (
+			totalInputTokens === 0 &&
+			inputDetails &&
+			(cachedFromDetails > 0 || missFromDetails > 0 || writesFromDetails > 0)
+		) {
+			totalInputTokens = cachedFromDetails + missFromDetails + writesFromDetails
 		}
 
 		const totalOutputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0
@@ -131,7 +140,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Note: missFromDetails is NOT used as fallback for cache writes
 		// Cache miss tokens represent tokens that weren't found in cache (part of input)
 		// Cache write tokens represent tokens being written to cache for future use
-		const cacheWriteTokens = usage.cache_creation_input_tokens ?? usage.cache_write_tokens ?? 0
+		const cacheWriteTokens = usage.cache_creation_input_tokens ?? usage.cache_write_tokens ?? writesFromDetails
 
 		const cacheReadTokens =
 			usage.cache_read_input_tokens ?? usage.cache_read_tokens ?? usage.cached_tokens ?? cachedFromDetails ?? 0
@@ -318,7 +327,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			max_output_tokens?: number
 			store?: boolean
 			instructions?: string
-			service_tier?: ServiceTier
+			[SERVICE_TIER_KEY]?: ServiceTier
 			include?: string[]
 			/** Prompt cache retention policy: "in_memory" (default) or "24h" for extended caching */
 			prompt_cache_retention?: "in_memory" | "24h"
@@ -334,8 +343,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		}
 
 		// Validate requested tier against model support; if not supported, omit.
-		const requestedTier = (this.options.openAiNativeServiceTier as ServiceTier | undefined) || undefined
-		const allowedTierNames = new Set(model.info.tiers?.map((t) => t.name).filter(Boolean) || [])
+		const serviceTier = this.getAllowedServiceTier(model)
 
 		// Decide whether to enable extended prompt cache retention for this request
 		const promptCacheRetention = this.getPromptCacheRetention(model)
@@ -368,10 +376,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Use the per-request reserved output computed by Roo (params.maxTokens from getModelParams).
 			...(model.maxTokens ? { max_output_tokens: model.maxTokens } : {}),
 			// Include tier when selected and supported by the model, or when explicitly "default"
-			...(requestedTier &&
-				(requestedTier === "default" || allowedTierNames.has(requestedTier)) && {
-					service_tier: requestedTier,
-				}),
+			...(serviceTier && { [SERVICE_TIER_KEY]: serviceTier }),
 			// Enable extended prompt cache retention for models that support it.
 			// This uses the OpenAI Responses API `prompt_cache_retention` parameter.
 			...(promptCacheRetention ? { prompt_cache_retention: promptCacheRetention } : {}),
@@ -557,7 +562,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
-		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
+		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
 		const url = `${baseUrl}/v1/responses`
 
@@ -705,8 +710,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							const parsed = JSON.parse(data)
 
 							// Capture resolved service tier if present
-							if (parsed.response?.service_tier) {
-								this.lastServiceTier = parsed.response.service_tier as ServiceTier
+							if (parsed.response?.[SERVICE_TIER_KEY]) {
+								this.lastServiceTier = parsed.response[SERVICE_TIER_KEY] as ServiceTier
 							}
 							// Capture complete output array (includes reasoning items with encrypted_content)
 							if (parsed.response?.output && Array.isArray(parsed.response.output)) {
@@ -1015,10 +1020,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 									)
 								}
 							} else if (parsed.type === "response.completed" || parsed.type === "response.done") {
-								// Capture resolved service tier if present
-								if (parsed.response?.service_tier) {
-									this.lastServiceTier = parsed.response.service_tier as ServiceTier
-								}
 								// Capture top-level response id
 								if (parsed.response?.id) {
 									this.lastResponseId = parsed.response.id as string
@@ -1146,8 +1147,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 */
 	private async *processEvent(event: any, model: OpenAiNativeModel): ApiStream {
 		// Capture resolved service tier when available
-		if (event?.response?.service_tier) {
-			this.lastServiceTier = event.response.service_tier as ServiceTier
+		if (event?.response?.[SERVICE_TIER_KEY]) {
+			this.lastServiceTier = event.response[SERVICE_TIER_KEY] as ServiceTier
 		}
 		// Capture complete output array (includes reasoning items with encrypted_content)
 		if (event?.response?.output && Array.isArray(event.response.output)) {
@@ -1391,9 +1392,20 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	}
 
 	private getReasoningEffort(model: OpenAiNativeModel): ReasoningEffortExtended | undefined {
-		// Single source of truth: user setting overrides, else model default (from types).
-		const selected = (this.options.reasoningEffort as any) ?? (model.info.reasoningEffort as any)
-		return selected && selected !== "disable" ? (selected as any) : undefined
+		const supported = model.info.supportsReasoningEffort
+		const configured = this.options.reasoningEffort
+		const fallback = model.info.reasoningEffort
+
+		if (configured === "disable" && !model.info.requiredReasoningEffort) return undefined
+		if (this.options.enableReasoningEffort === false && !model.info.requiredReasoningEffort) return undefined
+
+		if (Array.isArray(supported)) {
+			if (configured && configured !== "disable" && supported.includes(configured)) return configured
+			return fallback && supported.includes(fallback) ? fallback : undefined
+		}
+
+		const selected = configured === "disable" ? fallback : (configured ?? fallback)
+		return selected
 	}
 
 	/**
@@ -1418,7 +1430,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * If no tier or no overrides exist, the original ModelInfo is returned.
 	 */
 	private applyServiceTierPricing(info: ModelInfo, tier?: ServiceTier): ModelInfo {
-		if (!tier || tier === "default") return info
+		if (!tier || tier === OpenAiServiceTier.Default) return info
 
 		// Find the tier with matching name in the tiers array
 		const tierInfo = info.tiers?.find((t) => t.name === tier)
@@ -1431,6 +1443,15 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			cacheReadsPrice: tierInfo.cacheReadsPrice ?? info.cacheReadsPrice,
 			cacheWritesPrice: tierInfo.cacheWritesPrice ?? info.cacheWritesPrice,
 		}
+	}
+
+	private getAllowedServiceTier(model: OpenAiNativeModel): ServiceTier | undefined {
+		const requestedTier = this.options.openAiNativeServiceTier
+		const allowedTierNames = new Set(model.info.tiers?.map(({ name }) => name).filter(Boolean))
+
+		return requestedTier === OpenAiServiceTier.Default || (requestedTier && allowedTierNames.has(requestedTier))
+			? requestedTier
+			: undefined
 	}
 
 	// Removed isResponsesApiModel method as ALL models now use the Responses API
@@ -1484,14 +1505,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	getResponseId(): string | undefined {
 		return this.lastResponseId
 	}
-
-	async completePrompt(prompt: string): Promise<string> {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
-
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
+			this.abortController = new AbortController()
+
 			const model = this.getModel()
-			const { verbosity, reasoning } = model
+			const { verbosity } = model
 
 			// Resolve reasoning effort for models that support it
 			const reasoningEffort = this.getReasoningEffort(model)
@@ -1512,10 +1531,9 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Include service tier if selected and supported
-			const requestedTier = (this.options.openAiNativeServiceTier as ServiceTier | undefined) || undefined
-			const allowedTierNames = new Set(model.info.tiers?.map((t) => t.name).filter(Boolean) || [])
-			if (requestedTier && (requestedTier === "default" || allowedTierNames.has(requestedTier))) {
-				requestBody.service_tier = requestedTier
+			const serviceTier = this.getAllowedServiceTier(model)
+			if (serviceTier) {
+				requestBody[SERVICE_TIER_KEY] = serviceTier
 			}
 
 			// Add reasoning if supported

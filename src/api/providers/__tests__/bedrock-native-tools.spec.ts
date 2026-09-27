@@ -32,6 +32,8 @@ import { AwsBedrockHandler } from "../bedrock"
 import { ConverseStreamCommand } from "@aws-sdk/client-bedrock-runtime"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
 
 // Test tool definitions in OpenAI format
@@ -71,7 +73,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 	let handler: AwsBedrockHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		// Create handler with a model that supports native tools
 		handler = new AwsBedrockHandler({

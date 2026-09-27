@@ -4,7 +4,7 @@ import fs from "fs/promises"
 import NodeCache from "node-cache"
 import sanitize from "sanitize-filename"
 
-import type { ModelRecord } from "@roo-code/types"
+import { providerIdentifiers, type ModelRecord } from "@roo-code/types"
 
 import { ContextProxy } from "../../../core/config/ContextProxy"
 import { RouterName } from "../../../shared/api"
@@ -44,7 +44,7 @@ export const getModelEndpoints = async ({
 }): Promise<ModelRecord> => {
 	// OpenRouter is the only provider that supports model endpoints, but you
 	// can see how we'd extend this to other providers in the future.
-	if (router !== "openrouter" || !modelId || !endpoint) {
+	if (router !== providerIdentifiers.openrouter || !modelId || !endpoint) {
 		return {}
 	}
 
@@ -61,7 +61,7 @@ export const getModelEndpoints = async ({
 	// Copy model-level capabilities from the parent model to each endpoint
 	// These are capabilities that don't vary by provider (tools, reasoning, etc.)
 	if (Object.keys(modelProviders).length > 0) {
-		const parentModels = await getModels({ provider: "openrouter" })
+		const parentModels = await getModels({ provider: providerIdentifiers.openrouter })
 		const parentModel = parentModels[modelId]
 
 		if (parentModel) {

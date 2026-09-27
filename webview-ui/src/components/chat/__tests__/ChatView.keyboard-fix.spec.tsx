@@ -1,10 +1,8 @@
 // npx vitest run src/components/chat/__tests__/ChatView.keyboard-fix.spec.tsx
 
 import React from "react"
-import { render, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, fireEvent } from "@/utils/test-utils"
 
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 
 import ChatView, { ChatViewProps } from "../ChatView"
@@ -120,16 +118,8 @@ const defaultProps: ChatViewProps = {
 	hideAnnouncement: () => {},
 }
 
-const queryClient = new QueryClient()
-
 const renderChatView = (props: Partial<ChatViewProps> = {}) => {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatView {...defaultProps} {...props} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+	return renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 }
 
 describe("ChatView - Keyboard Shortcut Fix for Dvorak", () => {

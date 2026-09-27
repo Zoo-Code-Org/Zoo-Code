@@ -10,9 +10,11 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { RequestyHandler } from "../requesty"
-import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 const mockCreate = vitest.fn()
 
@@ -64,6 +66,20 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 1,
 				description: "Claude Fable 5",
 			},
+			"anthropic/claude-fable-5.1": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 0.25,
+				description: "Claude Fable 5.1",
+			},
 			"anthropic/claude-sonnet-5": {
 				maxTokens: 128000,
 				contextWindow: 1000000,
@@ -78,17 +94,35 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 0.3,
 				description: "Claude Sonnet 5",
 			},
+			"anthropic/claude-opus-5": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 5,
+				outputPrice: 25,
+				cacheWritesPrice: 6.25,
+				cacheReadsPrice: 0.5,
+				description: "Claude Opus 5",
+			},
 		})
+	}),
+	refreshModels: vitest.fn(async (options) => {
+		const { getModels } = await import("../fetchers/modelCache")
+		return getModels(options)
 	}),
 }))
 
 describe("RequestyHandler", () => {
-	const mockOptions: ApiHandlerOptions = {
+	const mockOptions = makeApiHandlerOptions({
 		requestyApiKey: "test-key",
 		requestyModelId: "coding/claude-4-sonnet",
-	}
+	})
 
-	beforeEach(() => vitest.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("initializes with correct options", () => {
 		const handler = new RequestyHandler(mockOptions)
@@ -168,38 +202,31 @@ describe("RequestyHandler", () => {
 		it("generates correct stream chunks", async () => {
 			const handler = new RequestyHandler(mockOptions)
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						id: mockOptions.requestyModelId,
-						choices: [{ delta: { content: "test response" } }],
-					}
-					yield {
-						id: "test-id",
-						choices: [{ delta: {} }],
-						usage: {
-							prompt_tokens: 10,
-							completion_tokens: 20,
-							prompt_tokens_details: {
-								caching_tokens: 5,
-								cached_tokens: 2,
-							},
-						},
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					id: mockOptions.requestyModelId,
+					choices: [{ delta: { content: "test response" } }],
 				},
-			}
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: {
+						prompt_tokens: 10,
+						completion_tokens: 20,
+						prompt_tokens_details: {
+							caching_tokens: 5,
+							cached_tokens: 2,
+						},
+					},
+				},
+			])
 
 			mockCreate.mockResolvedValue(mockStream)
 
 			const systemPrompt = "test system prompt"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "test message" }]
 
-			const generator = handler.createMessage(systemPrompt, messages)
-			const chunks = []
-
-			for await (const chunk of generator) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			// Verify stream chunks
 			expect(chunks).toHaveLength(2) // One text chunk and one usage chunk
@@ -236,22 +263,22 @@ describe("RequestyHandler", () => {
 		})
 
 		it("uses adaptive thinking for Claude Fable 5 when reasoning is enabled", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-fable-5",
-				enableReasoningEffort: true,
-				modelMaxTokens: 32768,
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						id: "test-id",
-						choices: [{ delta: {} }],
-						usage: { prompt_tokens: 10, completion_tokens: 20 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 20 },
 				},
-			}
+			])
 
 			mockCreate.mockResolvedValue(mockStream)
 
@@ -268,23 +295,56 @@ describe("RequestyHandler", () => {
 			)
 		})
 
-		it("uses adaptive thinking for Claude Sonnet 5 when reasoning is enabled", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-sonnet-5",
-				enableReasoningEffort: true,
-				modelMaxTokens: 32768,
-			})
+		it("uses adaptive thinking for Claude Fable 5.1 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5.1",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
 						id: "test-id",
 						choices: [{ delta: {} }],
 						usage: { prompt_tokens: 10, completion_tokens: 20 },
-					}
+					},
+				]),
+			)
+
+			const generator = handler.createMessage("test system prompt", [{ role: "user" as const, content: "test" }])
+			await generator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5.1",
+					max_tokens: 32768,
+					thinking: { type: "adaptive" },
+					temperature: undefined,
+				}),
+			)
+		})
+
+		it("uses adaptive thinking for Claude Sonnet 5 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-sonnet-5",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
+
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 20 },
 				},
-			}
+			])
 
 			mockCreate.mockResolvedValue(mockStream)
 
@@ -294,6 +354,39 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "anthropic/claude-sonnet-5",
+					max_tokens: 32768,
+					thinking: { type: "adaptive" },
+					temperature: undefined,
+				}),
+			)
+		})
+
+		it("uses adaptive thinking for Claude Opus 5 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-opus-5",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
+
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 20 },
+				},
+			])
+
+			mockCreate.mockResolvedValue(mockStream)
+
+			const generator = handler.createMessage("test system prompt", [{ role: "user" as const, content: "test" }])
+			await generator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-opus-5",
 					max_tokens: 32768,
 					thinking: { type: "adaptive" },
 					temperature: undefined,
@@ -312,43 +405,37 @@ describe("RequestyHandler", () => {
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
 			const handler = new RequestyHandler(mockOptions)
-			mockCreate.mockResolvedValue({
-				async *[Symbol.asyncIterator]() {
-					yield { id: "1", choices: [{ delta: { reasoning_content: "thinking..." } }] }
-					yield { id: "1", choices: [{ delta: { content: "answer" } }] }
-					yield {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning_content: "thinking..." } }] },
+					{ id: "1", choices: [{ delta: { content: "answer" } }] },
+					{
 						id: "1",
 						choices: [{ delta: {} }],
 						usage: { prompt_tokens: 1, completion_tokens: 1 },
-					}
-				},
-			})
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }]))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
 			const handler = new RequestyHandler(mockOptions)
-			mockCreate.mockResolvedValue({
-				async *[Symbol.asyncIterator]() {
-					yield { id: "1", choices: [{ delta: { reasoning: "router-style thought" } }] }
-					yield {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning: "router-style thought" } }] },
+					{
 						id: "1",
 						choices: [{ delta: {} }],
 						usage: { prompt_tokens: 1, completion_tokens: 1 },
-					}
-				},
-			})
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }]))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
@@ -356,9 +443,9 @@ describe("RequestyHandler", () => {
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
 			const handler = new RequestyHandler(mockOptions)
 
-			mockCreate.mockResolvedValue({
-				async *[Symbol.asyncIterator]() {
-					yield {
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
 						id: "1",
 						choices: [
 							{
@@ -368,20 +455,16 @@ describe("RequestyHandler", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						id: "1",
 						choices: [{ delta: {} }],
 						usage: { prompt_tokens: 1, completion_tokens: 1 },
-					}
-				},
-			})
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }]))
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 
@@ -412,15 +495,14 @@ describe("RequestyHandler", () => {
 			]
 
 			beforeEach(() => {
-				const mockStream = {
-					async *[Symbol.asyncIterator]() {
-						yield {
+				mockCreate.mockResolvedValue(
+					asyncStreamFrom([
+						{
 							id: "test-id",
 							choices: [{ delta: { content: "test response" } }],
-						}
-					},
-				}
-				mockCreate.mockResolvedValue(mockStream)
+						},
+					]),
+				)
 			})
 
 			it("should include tools in request when tools are provided", async () => {
@@ -451,9 +533,9 @@ describe("RequestyHandler", () => {
 			})
 
 			it("should handle tool_call_partial chunks in streaming response", async () => {
-				const mockStreamWithToolCalls = {
-					async *[Symbol.asyncIterator]() {
-						yield {
+				mockCreate.mockResolvedValue(
+					asyncStreamFrom([
+						{
 							id: "test-id",
 							choices: [
 								{
@@ -471,8 +553,8 @@ describe("RequestyHandler", () => {
 									},
 								},
 							],
-						}
-						yield {
+						},
+						{
 							id: "test-id",
 							choices: [
 								{
@@ -488,15 +570,14 @@ describe("RequestyHandler", () => {
 									},
 								},
 							],
-						}
-						yield {
+						},
+						{
 							id: "test-id",
 							choices: [{ delta: {} }],
 							usage: { prompt_tokens: 10, completion_tokens: 20 },
-						}
-					},
-				}
-				mockCreate.mockResolvedValue(mockStreamWithToolCalls)
+						},
+					]),
+				)
 
 				const metadata: ApiHandlerCreateMessageMetadata = {
 					taskId: "test-task",
@@ -504,10 +585,7 @@ describe("RequestyHandler", () => {
 				}
 
 				const handler = new RequestyHandler(mockOptions)
-				const chunks = []
-				for await (const chunk of handler.createMessage(systemPrompt, messages, metadata)) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages, metadata))
 
 				// Expect two tool_call_partial chunks and one usage chunk
 				expect(chunks).toHaveLength(3)
@@ -554,10 +632,12 @@ describe("RequestyHandler", () => {
 		})
 
 		it("omits temperature for Claude Fable 5 in completePrompt", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-fable-5",
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5",
+				}),
+			)
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
 
 			await handler.completePrompt("test prompt")
@@ -571,16 +651,37 @@ describe("RequestyHandler", () => {
 		})
 
 		it("omits temperature for Claude Sonnet 5 in completePrompt", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-sonnet-5",
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-sonnet-5",
+				}),
+			)
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
 
 			await handler.completePrompt("test prompt")
 
 			expect(mockCreate).toHaveBeenCalledWith({
 				model: "anthropic/claude-sonnet-5",
+				max_tokens: 8192,
+				messages: [{ role: "system", content: "test prompt" }],
+				temperature: undefined,
+			})
+		})
+
+		it("omits temperature for Claude Opus 5 in completePrompt", async () => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-opus-5",
+				}),
+			)
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
+
+			await handler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith({
+				model: "anthropic/claude-opus-5",
 				max_tokens: 8192,
 				messages: [{ role: "system", content: "test prompt" }],
 				temperature: undefined,

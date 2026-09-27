@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
@@ -129,7 +130,7 @@ describe("OpenCodeGo", () => {
 
 			expect(postMessageMock).toHaveBeenCalledWith({
 				type: "requestRouterModels",
-				values: { provider: "opencode-go", refresh: true, opencodeGoApiKey: "my-key" },
+				values: { provider: providerIdentifiers.opencodeGo, refresh: true, opencodeGoApiKey: "my-key" },
 			})
 		})
 
@@ -160,7 +161,7 @@ describe("OpenCodeGo", () => {
 			dispatchMessage({
 				type: "singleRouterModelFetchResponse",
 				success: false,
-				values: { provider: "opencode-go" },
+				values: { provider: providerIdentifiers.opencodeGo },
 				error: "Invalid API key",
 			})
 
@@ -174,7 +175,7 @@ describe("OpenCodeGo", () => {
 			dispatchMessage({
 				type: "singleRouterModelFetchResponse",
 				success: false,
-				values: { provider: "opencode-go" },
+				values: { provider: providerIdentifiers.opencodeGo },
 			})
 
 			expect(screen.getByText("settings:providers.refreshModels.error")).toBeInTheDocument()
@@ -187,7 +188,7 @@ describe("OpenCodeGo", () => {
 			dispatchMessage({
 				type: "singleRouterModelFetchResponse",
 				success: false,
-				values: { provider: "openrouter" },
+				values: { provider: providerIdentifiers.openrouter },
 				error: "should not show",
 			})
 
@@ -208,7 +209,7 @@ describe("OpenCodeGo", () => {
 						data: {
 							type: "singleRouterModelFetchResponse",
 							success: false,
-							values: { provider: "opencode-go" },
+							values: { provider: providerIdentifiers.opencodeGo },
 							error: "boom",
 						},
 					}),

@@ -2,6 +2,7 @@
 
 import * as vscode from "vscode"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -158,7 +159,7 @@ async function testPowerShellCommand(
 		const eventHandlers = (vscode as any).__eventHandlers
 
 		// Execute the command first to set up the process
-		terminalProcess.run(command)
+		const runPromise = terminalProcess.run(command)
 
 		// Trigger the start terminal shell execution event through VSCode mock
 		if (eventHandlers.startTerminalShellExecution) {
@@ -207,6 +208,7 @@ async function testPowerShellCommand(
 
 		// Wait for the command to complete or timeout
 		await Promise.race([completedPromise, timeoutPromise])
+		await runPromise
 
 		// Calculate execution time in microseconds
 		if (!timeRecorded) {
@@ -245,7 +247,7 @@ describePlatform("TerminalProcess with PowerShell Command Output", () => {
 	beforeEach(() => {
 		// Reset state between tests
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses PowerShell-specific commands to test the same functionality

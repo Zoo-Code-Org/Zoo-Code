@@ -47,5 +47,7 @@
 	"subtaskTag": "Podzadanie",
 	"deleteWithSubtasks": "Spowoduje to usunięcie {{count}} podzadania(ń). Jesteś pewny?",
 	"expandSubtasks": "Rozwiń podzadania",
-	"collapseSubtasks": "Zwiń podzadania"
+	"collapseSubtasks": "Zwiń podzadania",
+	"delegatedTag": "Oczekuje na podzadanie",
+	"interruptedTag": "Przerwane"
 }

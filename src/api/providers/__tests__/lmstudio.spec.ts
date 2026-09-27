@@ -1,4 +1,6 @@
 // Mock OpenAI client - must come before other imports
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
@@ -26,32 +28,30 @@ vi.mock("openai", () => {
 								}
 							}
 
-							return {
-								[Symbol.asyncIterator]: async function* () {
-									yield {
-										choices: [
-											{
-												delta: { content: "Test response" },
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-									yield {
-										choices: [
-											{
-												delta: {},
-												index: 0,
-											},
-										],
-										usage: {
-											prompt_tokens: 10,
-											completion_tokens: 5,
-											total_tokens: 15,
+							return asyncStreamFrom([
+								{
+									choices: [
+										{
+											delta: { content: "Test response" },
+											index: 0,
 										},
-									}
+									],
+									usage: null,
 								},
-							}
+								{
+									choices: [
+										{
+											delta: {},
+											index: 0,
+										},
+									],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
+									},
+								},
+							])
 						}),
 					},
 				},
@@ -104,11 +104,7 @@ describe("LmStudioHandler", () => {
 		]
 
 		it("should handle streaming responses", async () => {
-			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -116,16 +112,97 @@ describe("LmStudioHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
+		it("streams reasoning chunks from delta.reasoning_content", async () => {
+			// Regression: Qwen3 / DeepSeek-R1 style models served by LM Studio emit
+			// thinking via reasoning_content, not <think> tags inside content.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
+			expect(chunks).toContainEqual({ type: "text", text: "answer" })
+		})
+
+		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
+		})
+
+		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
+			// When both reasoning_content and reasoning are set, only reasoning_content
+			// should be emitted as a reasoning chunk (not both).
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									reasoning_content: "primary thought",
+									reasoning: "fallback thought",
+								},
+								index: 0,
+							},
+						],
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
+
+			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
+		})
+
+		it("still parses <think> tags embedded in content", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "<think>tagged thought</think>visible" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "tagged thought" })
+			expect(chunks).toContainEqual({ type: "text", text: "visible" })
+		})
+
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 
 			const stream = handler.createMessage(systemPrompt, messages)
 
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should not reach here
-				}
-			}).rejects.toThrow("Please check the LM Studio developer logs to debug what went wrong")
+			await expect(collectStream(stream)).rejects.toThrow(
+				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
+			)
 		})
 	})
 
@@ -144,7 +221,7 @@ describe("LmStudioHandler", () => {
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
-				"Please check the LM Studio developer logs to debug what went wrong",
+				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		})
 

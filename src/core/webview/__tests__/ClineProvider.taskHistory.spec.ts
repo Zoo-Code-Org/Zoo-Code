@@ -2,10 +2,12 @@
 
 import * as vscode from "vscode"
 import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
+import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
-import { taskHistoryLock } from "../../task-persistence/TaskHistoryLock"
+import { Task } from "../../task/Task"
+import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
 
 // Mock setup
@@ -117,11 +119,7 @@ vi.mock("vscode", () => ({
 		showInformationMessage: vi.fn(),
 		showWarningMessage: vi.fn(),
 		showErrorMessage: vi.fn(),
-		createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
-		tabGroups: {
-			onDidChangeTabs: vi.fn(() => ({ dispose: vi.fn() })),
-		},
 	},
 	workspace: {
 		getConfiguration: vi.fn().mockReturnValue({
@@ -137,12 +135,6 @@ vi.mock("vscode", () => ({
 		onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
-		createFileSystemWatcher: vi.fn(() => ({
-			onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
-			onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
-			onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
-			dispose: vi.fn(),
-		})),
 	},
 	env: {
 		uriScheme: "vscode",
@@ -272,8 +264,6 @@ describe("ClineProvider Task History Synchronization", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
-		taskHistoryLock.reset()
-		vi.spyOn(taskHistoryLock, "withLock").mockImplementation(async (_globalStoragePath, fn) => fn())
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -396,6 +386,32 @@ describe("ClineProvider Task History Synchronization", () => {
 	const findCallsByType = (calls: any[][], type: string) => {
 		return calls.filter((call) => call[0]?.type === type)
 	}
+
+	it("uses per-task files without registering a globalState write-through callback", () => {
+		expect(provider.taskHistoryStore["onWrite"]).toBeUndefined()
+	})
+
+	it("does not write task history to globalState after a history mutation", async () => {
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.updateTaskHistory(createHistoryItem({ id: "file-backed-task", task: "File-backed task" }), {
+			broadcast: false,
+		})
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
+
+	it("does not write task history to globalState during disposal", async () => {
+		await provider.updateTaskHistory(
+			createHistoryItem({ id: "disposed-file-backed-task", task: "Disposed file-backed task" }),
+			{ broadcast: false },
+		)
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.dispose()
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
 
 	describe("updateTaskHistory", () => {
 		it("broadcasts task history update by default", async () => {
@@ -653,6 +669,91 @@ describe("ClineProvider Task History Synchronization", () => {
 	})
 
 	describe("task history includes all workspaces", () => {
+		it("uses the default profile name when no task is active and no profile is saved", async () => {
+			await provider["updateGlobalState"]("currentApiConfigName", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.currentTaskId).toBeUndefined()
+			expect(state.currentApiConfigName).toBe("default")
+		})
+
+		it("projects the active task's local mode and provider profile", async () => {
+			const activeTask = {
+				taskId: "task-local-context",
+				taskMode: "ask",
+				taskApiConfigName: undefined,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "task-local-model",
+				},
+				clineMessages: [],
+				todoList: [],
+				messageQueueService: { messages: [] },
+			}
+			// The module-level Task mock intentionally implements only the fields this provider-state test reads.
+			provider["taskRegistry"].push(activeTask as unknown as Task)
+			await provider.updateTaskHistory(
+				createHistoryItem({
+					id: activeTask.taskId,
+					task: "Task-local context",
+					mode: "ask",
+					apiConfigName: undefined,
+				}),
+				{ broadcast: false },
+			)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.mode).toBe("ask")
+			expect(state.currentApiConfigName).toBeUndefined()
+			expect(state.apiConfiguration).toEqual(activeTask.apiConfiguration)
+			expect(state.currentTaskId).toBe(activeTask.taskId)
+		})
+
+		it("validates and applies the delegated child's effective profile", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "allowed-child-model",
+				consecutiveMistakeLimit: 7,
+			}
+			const isProfileAllowed = vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(true)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await provider.createTask("child", undefined, parentTask, {
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "allowed-child",
+					apiConfiguration: effectiveConfiguration,
+				},
+			})
+
+			expect(isProfileAllowed).toHaveBeenCalledWith(effectiveConfiguration, expect.anything())
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(expect.objectContaining({ consecutiveMistakeLimit: 7 }))
+		})
+
+		it("rejects a delegated child when its effective profile is not allowed", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "blocked-child-model",
+			}
+			vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(false)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await expect(
+				provider.createTask("child", undefined, parentTask, {
+					startTask: false,
+					handoffExecutionContext: {
+						mode: "ask",
+						apiConfigName: "blocked-child",
+						apiConfiguration: effectiveConfiguration,
+					},
+				}),
+			).rejects.toThrow("errors.violated_organization_allowlist")
+			expect(vi.mocked(Task)).not.toHaveBeenCalled()
+		})
+
 		it("getStateToPostToWebview returns tasks from all workspaces", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
@@ -793,182 +894,81 @@ describe("ClineProvider Task History Synchronization", () => {
 			// The second write (tokensIn: 222) should be the last one since writes are serialized
 			expect(item!.tokensIn).toBe(222)
 		})
+	})
 
-		it("routes concurrent updateTaskHistory calls from two parallel instances through the shared lock", async () => {
-			const provider2 = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-			)
-			await provider2.taskHistoryStore.initialized
-			await new Promise((resolve) => setTimeout(resolve, 10))
-			vi.mocked(taskHistoryLock.withLock).mockClear()
-
-			const provider1Upsert = vi
-				.spyOn(provider.taskHistoryStore, "upsert")
-				.mockImplementation(async (item: HistoryItem) => [item])
-			const provider2Upsert = vi
-				.spyOn(provider2.taskHistoryStore, "upsert")
-				.mockImplementation(async (item: HistoryItem) => [item])
-
-			try {
-				await Promise.all([
-					provider.updateTaskHistory(createHistoryItem({ id: "parallel-provider-1", task: "Provider 1" }), {
-						broadcast: false,
-					}),
-					provider2.updateTaskHistory(createHistoryItem({ id: "parallel-provider-2", task: "Provider 2" }), {
-						broadcast: false,
-					}),
-				])
-
-				expect(provider1Upsert).toHaveBeenCalledTimes(1)
-				expect(provider2Upsert).toHaveBeenCalledTimes(1)
-				expect(taskHistoryLock.withLock).toHaveBeenCalledWith(
-					mockContext.globalStorageUri.fsPath,
-					expect.any(Function),
-				)
-				expect(taskHistoryLock.withLock).toHaveBeenCalledTimes(2)
-			} finally {
-				await provider2.dispose()
-			}
-		})
-
-		it("routes 5+ concurrent updateTaskHistory calls from different tabs through the shared lock", async () => {
-			const providers = [provider]
-
-			for (let i = 1; i < 5; i++) {
-				const nextProvider = new ClineProvider(
-					mockContext,
-					mockOutputChannel,
-					"sidebar",
-					new ContextProxy(mockContext),
-				)
-				await nextProvider.taskHistoryStore.initialized
-				providers.push(nextProvider)
-			}
-			await new Promise((resolve) => setTimeout(resolve, 10))
-			vi.mocked(taskHistoryLock.withLock).mockClear()
-
-			try {
-				providers.forEach((currentProvider) => {
-					vi.spyOn(currentProvider.taskHistoryStore, "upsert").mockImplementation(
-						async (item: HistoryItem) => [item],
-					)
-				})
-
-				await Promise.all(
-					providers.map((currentProvider, index) =>
-						currentProvider.updateTaskHistory(
-							createHistoryItem({ id: `parallel-tab-${index}`, task: `Parallel Tab ${index}` }),
-							{ broadcast: false },
-						),
-					),
-				)
-
-				expect(taskHistoryLock.withLock).toHaveBeenCalledTimes(5)
-				for (const call of vi.mocked(taskHistoryLock.withLock).mock.calls) {
-					expect(call[0]).toBe(mockContext.globalStorageUri.fsPath)
-				}
-			} finally {
-				for (const currentProvider of providers.slice(1)) {
-					await currentProvider.dispose()
-				}
-			}
-		})
-
-		it("routes normal deleteTaskWithId deleteMany mutations through the shared lock", async () => {
-			const deleteManySpy = vi.spyOn(provider.taskHistoryStore, "deleteManyLocked").mockResolvedValue(undefined)
-			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			vi.spyOn(provider.taskHistoryStore, "reconcile").mockResolvedValue(undefined)
-			vi.spyOn(provider.taskHistoryStore, "get").mockImplementation((taskId: string) =>
-				taskId === "delete-normal"
-					? createHistoryItem({ id: "delete-normal", task: "Delete normal" })
-					: undefined,
-			)
-
-			await provider.deleteTaskWithId("delete-normal", false)
-
-			expect(deleteManySpy).toHaveBeenCalledWith(["delete-normal"])
-			expect(taskHistoryLock.withLock).toHaveBeenCalledWith(
-				mockContext.globalStorageUri.fsPath,
-				expect.any(Function),
-			)
-			expect(postStateSpy).toHaveBeenCalled()
-		})
-
-		it("collects cascade delete descendants from the locked persisted snapshot", async () => {
-			let insideSharedLock = false
-			vi.mocked(taskHistoryLock.withLock).mockImplementationOnce(async (_globalStoragePath, fn) => {
-				insideSharedLock = true
-				return fn()
-			})
-
-			const deleteManySpy = vi.spyOn(provider.taskHistoryStore, "deleteManyLocked").mockResolvedValue(undefined)
-			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			vi.spyOn(provider.taskHistoryStore, "reconcile").mockResolvedValue(undefined)
-			vi.spyOn(provider.taskHistoryStore, "get").mockImplementation((taskId: string) => {
-				if (!insideSharedLock) {
-					return undefined
-				}
-				if (taskId === "delete-parent") {
-					return createHistoryItem({ id: "delete-parent", task: "Delete parent", childIds: ["late-child"] })
-				}
-				if (taskId === "late-child") {
-					return createHistoryItem({ id: "late-child", task: "Late child", childIds: [] })
-				}
-				return undefined
-			})
-
-			await provider.deleteTaskWithId("delete-parent", true)
-
-			expect(deleteManySpy).toHaveBeenCalledWith(["delete-parent", "late-child"])
-		})
-
-		it("rechecks migration state inside the shared lock before migrating legacy globalState history", async () => {
-			let locked = false
-			const legacyHistory = [createHistoryItem({ id: "legacy-task", task: "Legacy task" })]
-			const get = vi.fn((key: string) => {
-				if (key === "taskHistoryMigratedToFiles") {
-					return locked
-				}
-				if (key === "taskHistory") {
-					return locked ? [] : legacyHistory
-				}
-				return undefined
-			})
-			const update = vi.fn().mockResolvedValue(undefined)
-			const migrateFromGlobalState = vi.fn().mockResolvedValue(undefined)
-			vi.mocked(taskHistoryLock.withLock).mockImplementationOnce(async (_globalStoragePath, fn) => {
-				locked = true
-				return fn()
-			})
-
-			await (ClineProvider.prototype as any).initializeTaskHistoryStore.call({
-				taskHistoryStore: {
-					initialize: vi.fn().mockResolvedValue(undefined),
-					migrateFromGlobalState,
+	describe("taskCreationCallback — onTaskCompleted listener", () => {
+		function makeFakeTask(taskId: string) {
+			const listeners: Record<string, ((...args: unknown[]) => unknown)[]> = {}
+			return {
+				taskId,
+				on: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners[event] = listeners[event] ?? []
+					listeners[event].push(fn)
 				},
-				context: { globalState: { get, update } },
-				contextProxy: { globalStorageUri: { fsPath: mockContext.globalStorageUri.fsPath } },
-				log: vi.fn(),
-			})
+				// Returns a promise that resolves when all async listeners have settled.
+				emit: async (event: string, ...args: unknown[]) => {
+					await Promise.all((listeners[event] ?? []).map((fn) => Promise.resolve(fn(...args))))
+				},
+			}
+		}
 
-			expect(migrateFromGlobalState).not.toHaveBeenCalled()
-			expect(update).not.toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		it("writes completed status when task is not already completed", async () => {
+			const existing = createHistoryItem({ id: "task-cb-1", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const fakeTask = makeFakeTask("task-cb-1")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-1", {}, {})
+
+			const stored = provider.taskHistoryStore.get("task-cb-1")
+			expect(stored?.status).toBe("completed")
 		})
 
-		it("routes fallback deleteTaskFromState mutations through the shared lock", async () => {
-			const deleteSpy = vi.spyOn(provider.taskHistoryStore, "delete").mockResolvedValue(undefined)
-			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		it("skips the write when task is already completed", async () => {
+			const existing = createHistoryItem({ id: "task-cb-2", task: "T", status: "completed" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
 
-			await provider.deleteTaskFromState("cross-delete")
+			const updateSpy = vi.spyOn(provider, "updateTaskHistory")
 
-			expect(deleteSpy).toHaveBeenCalledWith("cross-delete")
-			expect(taskHistoryLock.withLock).toHaveBeenCalledWith(
-				mockContext.globalStorageUri.fsPath,
-				expect.any(Function),
-			)
+			const fakeTask = makeFakeTask("task-cb-2")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-2", {}, {})
+
+			// updateTaskHistory is called initially to store the item, but should NOT be
+			// called again by onTaskCompleted since it's already completed.
+			const onTaskCompletedCalls = updateSpy.mock.calls.filter((c) => {
+				const item = c[0] as HistoryItem
+				return item?.id === "task-cb-2" && item?.status === "completed"
+			})
+			// It was written with completed status already; the callback must not re-write.
+			expect(onTaskCompletedCalls.length).toBe(0)
+		})
+
+		it("logs and does not throw when updateTaskHistory rejects", async () => {
+			const existing = createHistoryItem({ id: "task-cb-3", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			vi.spyOn(provider, "updateTaskHistory").mockRejectedValueOnce(new Error("disk full"))
+			const logSpy = vi.spyOn(provider as any, "log")
+
+			const fakeTask = makeFakeTask("task-cb-3")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
+
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
+		})
+
+		it("emits delegated completion through the provider after the child is disposed", () => {
+			const listener = vi.fn()
+			provider.on(RooCodeEventName.TaskCompleted, listener)
+
+			provider.emitDelegatedTaskCompleted("child-task", {} as never, {})
+
+			expect(listener).toHaveBeenCalledTimes(1)
+			expect(listener).toHaveBeenCalledWith("child-task", {}, {})
 		})
 	})
 })

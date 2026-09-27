@@ -52,9 +52,15 @@ export const VSCodeLink = ({ children, href, ...props }: any) => (
 	</a>
 )
 
-export const VSCodeTextField = ({ value, onInput, "data-testid": dataTestId, children, ...props }: any) => (
-	<div>
-		<input data-testid={dataTestId} value={value} onInput={onInput} {...props} />
+export const VSCodeTextField = ({ value, onInput, "data-testid": dataTestId, children, className, ...props }: any) => (
+	<div className={className}>
+		<input
+			className="vscode-text-field-mock w-full"
+			data-testid={dataTestId}
+			value={value}
+			onInput={onInput}
+			{...props}
+		/>
 		{children}
 	</div>
 )

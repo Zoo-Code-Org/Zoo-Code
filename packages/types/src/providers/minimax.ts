@@ -5,9 +5,24 @@ import type { ModelInfo } from "../model.js"
 // https://platform.minimax.io/docs/guides/pricing-paygo
 // https://platform.minimax.io/docs/guides/pricing-tokenplan
 export type MinimaxModelId = keyof typeof minimaxModels
-export const minimaxDefaultModelId: MinimaxModelId = "MiniMax-M2.7"
+export const minimaxDefaultModelId: MinimaxModelId = "MiniMax-M3"
 
 export const minimaxModels = {
+	"MiniMax-M3": {
+		maxTokens: 16_384,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		includedTools: ["search_and_replace"],
+		excludedTools: ["apply_diff"],
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.375,
+		cacheReadsPrice: 0.06,
+		description:
+			"MiniMax M3, MiniMax's frontier coding model with native multimodal (image and video) input and a 1M token context window, built for agent reasoning, tool calling, and long-context tasks. Prices reflect the permanent 50% discount; input, output, and cache read prices double for requests with over 512k input tokens. See pricing at https://platform.minimax.io/docs/guides/pricing-paygo. Note: When using TokenPlan, usage is billed per request, not per token.",
+	},
 	"MiniMax-M2.5": {
 		maxTokens: 16_384,
 		contextWindow: 204_800,

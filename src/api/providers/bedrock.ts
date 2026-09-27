@@ -10,9 +10,12 @@ import {
 	ToolConfiguration,
 	ToolChoice,
 } from "@aws-sdk/client-bedrock-runtime"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
 import OpenAI from "openai"
 import { fromIni } from "@aws-sdk/credential-providers"
 import { Anthropic } from "@anthropic-ai/sdk"
+import { HttpProxyAgent } from "http-proxy-agent"
+import { HttpsProxyAgent } from "https-proxy-agent"
 
 import {
 	type ModelInfo,
@@ -27,9 +30,11 @@ import {
 	BEDROCK_DEFAULT_CONTEXT,
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_THINKING_DISABLE_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
+	SERVICE_TIER_KEY,
 	ApiProviderError,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -44,7 +49,10 @@ import { convertToBedrockConverseMessages as sharedConverter } from "../transfor
 import { getModelParams } from "../transform/model-params"
 import { shouldUseReasoningBudget } from "../../shared/api"
 import { normalizeToolSchema } from "../../utils/json-schema"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import { getSystemProxyUrl } from "../../utils/networkProxy"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { OutputTokenLimitError } from "./utils/output-token-limit-error"
 
 /************************************************************************************
  *
@@ -72,6 +80,7 @@ interface BedrockAdditionalModelFields {
 				// "summarized" shows thinking content in UI; omit to keep thinking internal only
 				display?: "summarized" | "none"
 		  }
+		| { type: "disabled" }
 	output_config?: {
 		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
 		effort: string
@@ -95,7 +104,7 @@ interface BedrockPayload {
 // AWS Bedrock service tiers (STANDARD, FLEX, PRIORITY) are specified at the top level
 // https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html
 type BedrockPayloadWithServiceTier = BedrockPayload & {
-	service_tier?: BedrockServiceTier
+	[SERVICE_TIER_KEY]?: BedrockServiceTier
 }
 
 // Define specific types for content block events to avoid 'as any' usage
@@ -294,6 +303,25 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 		}
 
+		// When a corporate proxy is configured, Node resolves DNS locally before tunneling,
+		// causing ENOTFOUND for endpoints that only the proxy can reach. HttpProxyAgent and
+		// HttpsProxyAgent use CONNECT tunneling so the proxy handles DNS resolution instead.
+		//
+		// A custom endpoint (e.g. a VPC endpoint) is passed so NO_PROXY can bypass the proxy
+		// for directly-reachable hosts. For the default managed endpoint we don't reconstruct
+		// the hostname (the AWS SDK resolves it internally, and it varies by partition), so the
+		// proxy always applies there.
+		const proxyUrl = getSystemProxyUrl(
+			typeof clientConfig.endpoint === "string" ? clientConfig.endpoint : undefined,
+		)
+		if (proxyUrl) {
+			clientConfig.requestHandler = new NodeHttpHandler({
+				httpAgent: new HttpProxyAgent(proxyUrl),
+				httpsAgent: new HttpsProxyAgent(proxyUrl),
+				requestTimeout: 0,
+			})
+		}
+
 		this.client = new BedrockRuntimeClient(clientConfig)
 	}
 
@@ -301,12 +329,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * Detect models that require the adaptive-thinking API contract.
 	 *
 	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
-	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5, and Claude Sonnet 5, Anthropic
-	 * removed sampling parameters (temperature/top_p/top_k) and replaced
+	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5/5.1, Claude Sonnet 5, and Claude Opus 5,
+	 * Anthropic removed sampling parameters (temperature/top_p/top_k) and replaced
 	 * budget_tokens-based thinking with `thinking.type: "adaptive"` plus
 	 * `output_config.effort`. The migration guide from 4.7 → 4.8 confirms there
-	 * are no further breaking API changes, and Fable 5 / Sonnet 5 keep the same
-	 * adaptive-thinking contract, so a single guard matches all generations.
+	 * are no further breaking API changes, and Fable 5+ / Sonnet 5 / Opus 5 keep the
+	 * same adaptive-thinking contract, so a single guard matches all generations.
 	 * Shared by createMessage and completePrompt so both request paths omit
 	 * temperature for these models (sending it causes a 400).
 	 *
@@ -318,6 +346,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		return (
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
+			baseModelId.includes("opus-5") ||
 			baseModelId.includes("fable-5") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8") ||
@@ -461,6 +490,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				modelId: modelConfig.id,
 				thinking: additionalModelRequestFields?.thinking,
 			})
+		} else if ((BEDROCK_THINKING_DISABLE_MODEL_IDS as readonly string[]).includes(baseModelId)) {
+			// Omitting thinking enables it by default on these models. Adaptive-only
+			// models (Fable 5/5.1, Opus 5.5) reject "disabled", so they keep the omit behavior.
+			additionalModelRequestFields = { thinking: { type: "disabled" } }
 		}
 
 		const inferenceConfig: BedrockInferenceConfig = {
@@ -529,24 +562,45 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(thinkingEnabled && { anthropic_version: "bedrock-2023-05-31" }),
 			toolConfig,
 			// Add service_tier as a top-level parameter (not inside additionalModelRequestFields)
-			...(useServiceTier && { service_tier: this.options.awsBedrockServiceTier }),
+			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
 		}
 
-		// Create AbortController with 10 minute timeout
-		const controller = new AbortController()
+		// Create a request-local AbortController with 10 minute timeout. Keeping it
+		// request-local (and detaching the bridge listener in the finally block) means
+		// a completed request can never leave a stale listener on the caller's signal.
+		// A manual setTimeout (rather than AbortSignal.timeout()) is required here
+		// because clearTimeout in the finally block needs a cancelable handle —
+		// AbortSignal.timeout() self-manages its timer and cannot be cleared.
+		const requestController = new AbortController()
 		let timeoutId: NodeJS.Timeout | undefined
+
+		// Bridge external abort signal to the request controller using the standard
+		// abort bridge pattern:
+		// - pre-aborted guard: a listener on an already-aborted signal may never fire,
+		//   so abort the local controller directly in that case
+		// - { once: true }: the listener auto-removes on first abort event
+		let abortListener: (() => void) | undefined
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				requestController.abort()
+			} else {
+				abortListener = () => requestController.abort()
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
+			}
+		}
 
 		try {
 			timeoutId = setTimeout(
 				() => {
-					controller.abort()
+					requestController.abort()
 				},
 				10 * 60 * 1000,
 			)
 
 			const command = new ConverseStreamCommand(payload)
 			const response = await this.client.send(command, {
-				abortSignal: controller.signal,
+				abortSignal: requestController.signal,
 			})
 
 			if (!response.stream) {
@@ -554,6 +608,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				throw new Error("No stream available in the response")
 			}
 
+			let outputLimitReached = false
 			for await (const chunk of response.stream) {
 				// Parse the chunk as JSON if it's a string (for tests)
 				let streamEvent: StreamEvent
@@ -737,8 +792,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				}
 				// Handle message stop
 				if (streamEvent.messageStop) {
+					outputLimitReached = streamEvent.messageStop.stopReason === "max_tokens"
 					continue
 				}
+			}
+			// Bedrock sends usage metadata after messageStop. Preserve it before reporting truncation.
+			if (outputLimitReached) {
+				throw new OutputTokenLimitError()
 			}
 			// Clear timeout after stream completes
 			clearTimeout(timeoutId)
@@ -753,6 +813,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			// Check if this is a throttling error that should trigger retry logic
 			const errorType = this.getErrorType(error)
+
+			// Truncation is deterministic: rethrow as-is so the task loop can tell it apart
+			// from transient stream failures and skip the automatic retry.
+			if (error instanceof OutputTokenLimitError) {
+				throw error
+			}
 
 			// For throttling errors, throw immediately without yielding chunks
 			// This allows the retry mechanism in attemptApiRequest() to catch and handle it
@@ -795,10 +861,21 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			} else {
 				throw new Error("An unknown error occurred")
 			}
+		} finally {
+			// Clear the request timeout as soon as the generator ends. This also covers
+			// early termination by the caller (break/destroy), which bypasses the normal
+			// timeout-clearing path after the stream completes.
+			clearTimeout(timeoutId)
+
+			// Detach the bridge listener once the request ends (success or error) so the
+			// external signal keeps no reference to this request's controller.
+			if (abortListener) {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
+			}
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
 			const modelConfig = this.getModel()
 
@@ -840,7 +917,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 
 			const command = new ConverseCommand(payload)
-			const response = await this.client.send(command)
+
+			// Build request options with abortSignal and/or timeoutMs.
+			// The shared helper keeps Bedrock aligned with other providers:
+			// positive timeout values create request-local cancellation, while
+			// zero/negative timeout values mean "no timeout".
+			const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+			const sendOptions = mergedAbortSignal ? { abortSignal: mergedAbortSignal } : undefined
+			const response = await this.client.send(command, sendOptions)
 
 			if (
 				response?.output?.message?.content &&
@@ -1552,6 +1636,7 @@ Please check:
 
 		// Check each error type's patterns in order of specificity (most specific first)
 		const errorTypeOrder = [
+			"ABORT", // Classify cancellations (user abort or request timeout) before any other pattern
 			"SERVICE_QUOTA_EXCEEDED", // Most specific - check before THROTTLING
 			"MODEL_NOT_READY",
 			"TOO_MANY_TOKENS",

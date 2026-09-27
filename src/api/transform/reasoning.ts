@@ -129,6 +129,25 @@ export const getOpenAiReasoning = ({
 	reasoningEffort,
 	settings,
 }: GetModelReasoningOptions): OpenAiReasoningParams | undefined => {
+	// A persisted effort from another provider may fall outside this model's
+	// capability array; fall back to the model's default effort (mirrors the
+	// Gemini path) so the request still carries a valid value.
+	const capability = model.supportsReasoningEffort
+	if (
+		settings?.enableReasoningEffort !== false &&
+		Array.isArray(capability) &&
+		model.reasoningEffort &&
+		(capability as ReadonlyArray<string>).includes(model.reasoningEffort) &&
+		settings?.reasoningEffort &&
+		settings.reasoningEffort !== "disable" &&
+		settings.reasoningEffort !== "none" &&
+		!(capability as ReadonlyArray<string>).includes(settings.reasoningEffort)
+	) {
+		return {
+			reasoning_effort: model.reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"],
+		}
+	}
+
 	if (!shouldUseReasoningEffort({ model, settings })) return undefined
 	if (reasoningEffort === "disable" || !reasoningEffort) return undefined
 

@@ -10,6 +10,8 @@ vitest.mock("../utils/timeout-config", () => ({
 
 import { getApiRequestTimeout } from "../utils/timeout-config"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock OpenAI and AzureOpenAI
 const mockOpenAIConstructor = vitest.fn()
 const mockAzureOpenAIConstructor = vitest.fn()
@@ -42,7 +44,7 @@ vitest.mock("openai", () => {
 
 describe("OpenAiHandler timeout configuration", () => {
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("should use default timeout for standard OpenAI", () => {

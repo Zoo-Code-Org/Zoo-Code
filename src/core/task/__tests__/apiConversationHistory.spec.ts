@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { prepareApiConversationMessage } from "../apiConversationHistory.js"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("prepareApiConversationMessage", () => {
 	beforeEach(() => {
@@ -20,7 +21,7 @@ describe("prepareApiConversationMessage", () => {
 				getResponseId: () => "response-1",
 				getThoughtSignature: () => "signature-1",
 			} as any,
-			apiConfiguration: { apiProvider: "anthropic", apiModelId: "claude-3-5-sonnet" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" } as any,
 			apiConversationHistory: [],
 		}) as any
 
@@ -40,7 +41,7 @@ describe("prepareApiConversationMessage", () => {
 			message: { role: "assistant", content: "answer" },
 			reasoning: "visible reasoning",
 			api: {} as any,
-			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "openai/gpt-4" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" } as any,
 			apiConversationHistory: [],
 		}) as any
 
@@ -55,7 +56,7 @@ describe("prepareApiConversationMessage", () => {
 			message: { role: "assistant", content: "answer" },
 			reasoning: "private reasoning",
 			api: {} as any,
-			apiConfiguration: { apiProvider: "anthropic", apiModelId: "claude-3-5-sonnet" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" } as any,
 			apiConversationHistory: [],
 		}) as any
 
@@ -72,7 +73,7 @@ describe("prepareApiConversationMessage", () => {
 			api: {
 				getEncryptedContent: () => ({ encrypted_content: "encrypted", id: "reasoning-1" }),
 			} as any,
-			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "openai/gpt-4" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" } as any,
 			apiConversationHistory: [],
 		}) as any
 
@@ -89,7 +90,7 @@ describe("prepareApiConversationMessage", () => {
 				getThoughtSignature: () => "signature-1",
 				getReasoningDetails: () => [{ type: "reasoning", text: "detail" }],
 			} as any,
-			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "openai/gpt-4" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" } as any,
 			apiConversationHistory: [],
 		}) as any
 
@@ -107,7 +108,7 @@ describe("prepareApiConversationMessage", () => {
 				content: [{ type: "tool_result", tool_use_id: "wrong-id", content: "done" }],
 			},
 			api: {} as any,
-			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "openai/gpt-4" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" } as any,
 			apiConversationHistory: [
 				{
 					role: "assistant",
@@ -130,7 +131,7 @@ describe("prepareApiConversationMessage", () => {
 				],
 			},
 			api: {} as any,
-			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "openai/gpt-4" } as any,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" } as any,
 			apiConversationHistory: [{ role: "user", content: "previous user message" } as any],
 		}) as any
 

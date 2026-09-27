@@ -4,6 +4,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { MessageEnhancer } from "../messageEnhancer"
 import * as singleCompletionHandlerModule from "../../../utils/single-completion-handler"
 import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock dependencies
 vi.mock("../../../utils/single-completion-handler")
@@ -14,7 +15,7 @@ describe("MessageEnhancer", () => {
 	let mockSingleCompletionHandler: ReturnType<typeof vi.fn<(config: any, prompt: string) => Promise<string>>>
 
 	const mockApiConfiguration: ProviderSettings = {
-		apiProvider: "openai",
+		apiProvider: providerIdentifiers.openai,
 		apiKey: "test-key",
 		apiModelId: "gpt-4",
 	}
@@ -32,7 +33,7 @@ describe("MessageEnhancer", () => {
 		mockProviderSettingsManager = {
 			getProfile: vi.fn().mockResolvedValue({
 				name: "Enhancement Config",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "enhancement-key",
 				apiModelId: "claude-3",
 			}),
@@ -94,7 +95,7 @@ describe("MessageEnhancer", () => {
 
 			// Verify the enhancement config was used instead of default
 			const expectedConfig = {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "enhancement-key",
 				apiModelId: "claude-3",
 			}

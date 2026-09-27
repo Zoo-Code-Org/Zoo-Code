@@ -1,0 +1,20 @@
+import { z } from "zod"
+
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
+
+export const deepSeekProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.deepseek,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	schema: {
+		...apiModelIdProviderModelShape,
+		deepSeekBaseUrl: z.string().optional(),
+		deepSeekApiKey: z.string().optional(),
+	},
+})

@@ -3,7 +3,7 @@ import { memo, useEffect, useRef, useState } from "react"
 import { useRemark } from "react-remark"
 
 import { cn } from "@/lib/utils"
-import { Collapsible, CollapsibleTrigger } from "@/components/ui"
+import { Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 import { StyledMarkdown } from "./styles"
 

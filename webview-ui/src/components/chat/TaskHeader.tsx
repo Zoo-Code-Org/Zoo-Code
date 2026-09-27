@@ -1,6 +1,14 @@
 import { memo, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronUp, ChevronDown, HardDriveDownload, HardDriveUpload, ListChevronsDownUp, ArrowLeft } from "lucide-react"
+import {
+	ChevronUp,
+	ChevronDown,
+	HardDriveDownload,
+	HardDriveUpload,
+	ListChevronsDownUp,
+	ArrowLeft,
+	ArrowRight,
+} from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
 import type { ClineMessage } from "@roo-code/types"
@@ -15,7 +23,6 @@ import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { vscode } from "@src/utils/vscode"
 
 import Thumbnails from "../common/Thumbnails"
-
 import { TaskActions } from "./TaskActions"
 import { ContextWindowProgress } from "./ContextWindowProgress"
 import { Mention } from "./Mention"
@@ -99,6 +106,15 @@ const TaskHeader = ({
 		}
 	}
 
+	// Is this task itself a delegated parent still waiting on a subtask? See #559.
+	const awaitingChildId = currentTaskItem?.status === "delegated" ? currentTaskItem.awaitingChildId : undefined
+
+	const handleGoToSubtask = () => {
+		if (awaitingChildId) {
+			vscode.postMessage({ type: "showTaskWithId", text: awaitingChildId })
+		}
+	}
+
 	return (
 		<div className="group pt-2 pb-0 px-3">
 			{isSubtask && (
@@ -110,6 +126,19 @@ const TaskHeader = ({
 						className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
 						<ArrowLeft className="size-3" />
 						{t("chat:task.backToParentTask")}
+					</Button>
+				</div>
+			)}
+			{awaitingChildId && (
+				<div className="mb-2" onClick={(e) => e.stopPropagation()}>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleGoToSubtask}
+						className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
+						<span className="codicon codicon-sync text-[11px]" />
+						{t("chat:task.waitingOnSubtask")}
+						<ArrowRight className="size-3" />
 					</Button>
 				</div>
 			)}

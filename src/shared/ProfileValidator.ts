@@ -1,4 +1,4 @@
-import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
+import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
 
 export class ProfileValidator {
 	public static isProfileAllowed(profile: ProviderSettings, allowList: OrganizationAllowList): boolean {
@@ -51,36 +51,36 @@ export class ProfileValidator {
 
 	private static getModelIdFromProfile(profile: ProviderSettings): string | undefined {
 		switch (profile.apiProvider) {
-			case "openai":
+			case providerIdentifiers.openai:
 				return profile.openAiModelId
-			case "anthropic":
-			case "openai-native":
-			case "bedrock":
-			case "vertex":
-			case "gemini":
-			case "mistral":
-			case "deepseek":
-			case "xai":
-			case "sambanova":
-			case "fireworks":
-			case "friendli":
+			case providerIdentifiers.anthropic:
+			case providerIdentifiers.openaiNative:
+			case providerIdentifiers.bedrock:
+			case providerIdentifiers.vertex:
+			case providerIdentifiers.gemini:
+			case providerIdentifiers.mistral:
+			case providerIdentifiers.deepseek:
+			case providerIdentifiers.xai:
+			case providerIdentifiers.sambanova:
+			case providerIdentifiers.fireworks:
+			case providerIdentifiers.friendli:
 				return profile.apiModelId
-			case "litellm":
+			case providerIdentifiers.litellm:
 				return profile.litellmModelId
-			case "lmstudio":
+			case providerIdentifiers.lmstudio:
 				return profile.lmStudioModelId
-			case "vscode-lm":
+			case providerIdentifiers.vscodeLm:
 				// We probably need something more flexible for this one, if we need to really support it here.
 				return profile.vsCodeLmModelSelector?.id
-			case "openrouter":
+			case providerIdentifiers.openrouter:
 				return profile.openRouterModelId
-			case "ollama":
+			case providerIdentifiers.ollama:
 				return profile.ollamaModelId
-			case "requesty":
+			case providerIdentifiers.requesty:
 				return profile.requestyModelId
-			case "unbound":
+			case providerIdentifiers.unbound:
 				return profile.unboundModelId
-			case "fake-ai":
+			case providerIdentifiers.fakeAi:
 			default:
 				return undefined
 		}

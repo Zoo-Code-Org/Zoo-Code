@@ -236,7 +236,7 @@ describe("addCustomInstructions", () => {
 		expect(prompt).toMatchFileSnapshot("./__snapshots__/add-custom-instructions/ask-mode-prompt.snap")
 	})
 
-	it("should exclude MCP server creation info when disabled", async () => {
+	it("should generate the prompt when the MCP hub has no servers", async () => {
 		const mockMcpHub = createMockMcpHub(false)
 
 		const prompt = await SYSTEM_PROMPT(
@@ -255,8 +255,7 @@ describe("addCustomInstructions", () => {
 			undefined, // partialReadsEnabled
 		)
 
-		expect(prompt).not.toContain("Creating an MCP Server")
-		expect(prompt).toMatchFileSnapshot("./__snapshots__/add-custom-instructions/mcp-server-creation-disabled.snap")
+		expect(prompt).toMatchFileSnapshot("./__snapshots__/add-custom-instructions/no-mcp-servers.snap")
 	})
 
 	it("should prioritize mode-specific rules for code mode", async () => {

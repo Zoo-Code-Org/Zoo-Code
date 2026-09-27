@@ -4,6 +4,7 @@ import { existsSync } from "fs"
 
 import * as vscode from "vscode"
 
+import { restoreGlobals } from "../../../test-utils/reset"
 import { Terminal } from "../Terminal"
 import { TerminalRegistry } from "../TerminalRegistry"
 import { ShellIntegrationManager } from "../ShellIntegrationManager"
@@ -73,7 +74,7 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 	afterEach(() => {
 		Terminal.setTerminalProfile(undefined)
-		vi.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	describe("getTerminalProfile / setTerminalProfile", () => {
@@ -748,7 +749,7 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			Terminal.setTerminalZdotdir(false)
 			Terminal.setTerminalProfile(undefined)
 			TerminalRegistry["terminals"] = []
-			vi.restoreAllMocks()
+			restoreGlobals()
 		})
 
 		it("sets ZDOTDIR when zdotdir is enabled and no profile is configured", () => {

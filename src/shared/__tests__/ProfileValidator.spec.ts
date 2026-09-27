@@ -1,18 +1,85 @@
 // npx vitest run src/shared/__tests__/ProfileValidator.spec.ts
 
-import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
+import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
 
 import { ProfileValidator } from "../ProfileValidator"
 
 describe("ProfileValidator", () => {
 	describe("isProfileAllowed", () => {
+		it.each([
+			["openai", { openAiModelId: "model" }],
+			["anthropic", { apiModelId: "model" }],
+			["openaiNative", { apiModelId: "model" }],
+			["bedrock", { apiModelId: "model" }],
+			["vertex", { apiModelId: "model" }],
+			["gemini", { apiModelId: "model" }],
+			["mistral", { apiModelId: "model" }],
+			["deepseek", { apiModelId: "model" }],
+			["xai", { apiModelId: "model" }],
+			["sambanova", { apiModelId: "model" }],
+			["fireworks", { apiModelId: "model" }],
+			["friendli", { apiModelId: "model" }],
+			["litellm", { litellmModelId: "model" }],
+			["lmstudio", { lmStudioModelId: "model" }],
+			["vscodeLm", { vsCodeLmModelSelector: { id: "model" } }],
+			["openrouter", { openRouterModelId: "model" }],
+			["ollama", { ollamaModelId: "model" }],
+			["requesty", { requestyModelId: "model" }],
+			["unbound", { unboundModelId: "model" }],
+		])("resolves %s model fields through canonical identifiers", (identifierKey, profileSettings) => {
+			const canonicalIdentifier = providerIdentifiers[identifierKey as keyof typeof providerIdentifiers]
+			const modelId = "model"
+
+			const profile = {
+				apiProvider: canonicalIdentifier,
+				...profileSettings,
+			} as ProviderSettings
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[canonicalIdentifier]: { allowAll: false, models: [modelId] },
+				},
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+
+			const negativeAllowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[canonicalIdentifier]: { allowAll: false, models: ["other-model"] },
+				},
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, negativeAllowList)).toBe(false)
+		})
+
+		it.each([
+			{ providerAllowAll: false, expected: false },
+			{ providerAllowAll: true, expected: true },
+		])(
+			"preserves missing-model fallback behavior when provider allowAll is $providerAllowAll",
+			({ providerAllowAll, expected }) => {
+				const profile: ProviderSettings = {
+					apiProvider: providerIdentifiers.openai,
+				}
+				const allowList: OrganizationAllowList = {
+					allowAll: false,
+					providers: {
+						[providerIdentifiers.openai]: { allowAll: providerAllowAll },
+					},
+				}
+
+				expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(expected)
+			},
+		)
+
 		it("should allow any profile when allowAll is true", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: true,
 				providers: {},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -40,7 +107,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -55,7 +122,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "any-model-id",
 			}
 
@@ -70,7 +137,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(false)
@@ -84,7 +151,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -99,7 +166,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -114,7 +181,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -129,7 +196,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 
@@ -144,7 +211,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiModelId: "claude-3-opus",
 			}
 
@@ -159,7 +226,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "ollama",
+				apiProvider: providerIdentifiers.ollama,
 				ollamaModelId: "llama3",
 			}
 
@@ -168,17 +235,17 @@ describe("ProfileValidator", () => {
 
 		// Test specific providers that use apiModelId
 		const apiModelProviders = [
-			"anthropic",
-			"openai-native",
-			"bedrock",
-			"vertex",
-			"gemini",
-			"mistral",
-			"deepseek",
-			"xai",
-			"sambanova",
-			"fireworks",
-			"friendli",
+			providerIdentifiers.anthropic,
+			providerIdentifiers.openaiNative,
+			providerIdentifiers.bedrock,
+			providerIdentifiers.vertex,
+			providerIdentifiers.gemini,
+			providerIdentifiers.mistral,
+			providerIdentifiers.deepseek,
+			providerIdentifiers.xai,
+			providerIdentifiers.sambanova,
+			providerIdentifiers.fireworks,
+			providerIdentifiers.friendli,
 		]
 
 		apiModelProviders.forEach((provider) => {
@@ -190,7 +257,7 @@ describe("ProfileValidator", () => {
 					},
 				}
 				const profile: ProviderSettings = {
-					apiProvider: provider as any, // Type assertion needed here
+					apiProvider: provider,
 					apiModelId: "test-model",
 				}
 
@@ -203,11 +270,11 @@ describe("ProfileValidator", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,
 				providers: {
-					litellm: { allowAll: false, models: ["test-model"] },
+					[providerIdentifiers.litellm]: { allowAll: false, models: ["test-model"] },
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "litellm" as any,
+				apiProvider: providerIdentifiers.litellm,
 				litellmModelId: "test-model",
 			}
 
@@ -218,11 +285,11 @@ describe("ProfileValidator", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,
 				providers: {
-					"vscode-lm": { allowAll: false, models: ["copilot-gpt-3.5"] },
+					[providerIdentifiers.vscodeLm]: { allowAll: false, models: ["copilot-gpt-3.5"] },
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "vscode-lm",
+				apiProvider: providerIdentifiers.vscodeLm,
 				vsCodeLmModelSelector: { id: "copilot-gpt-3.5" },
 			}
 
@@ -237,7 +304,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "lmstudio",
+				apiProvider: providerIdentifiers.lmstudio,
 				lmStudioModelId: "lmstudio-model",
 			}
 
@@ -252,7 +319,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter-model",
 			}
 
@@ -267,7 +334,7 @@ describe("ProfileValidator", () => {
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "requesty",
+				apiProvider: providerIdentifiers.requesty,
 				requestyModelId: "requesty-model",
 			}
 
@@ -278,11 +345,11 @@ describe("ProfileValidator", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,
 				providers: {
-					"fake-ai": { allowAll: false },
+					[providerIdentifiers.fakeAi]: { allowAll: false },
 				},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "fake-ai",
+				apiProvider: providerIdentifiers.fakeAi,
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(false)
@@ -294,7 +361,7 @@ describe("ProfileValidator", () => {
 				providers: {},
 			}
 			const profile: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4",
 			}
 

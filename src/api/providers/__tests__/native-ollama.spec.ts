@@ -6,6 +6,8 @@ import { NativeOllamaHandler } from "../native-ollama"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { getOllamaModels } from "../fetchers/ollama"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock the ollama package
 const mockChat = vitest.fn()
 vitest.mock("ollama", () => {
@@ -30,7 +32,7 @@ describe("NativeOllamaHandler", () => {
 	let handler: NativeOllamaHandler
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 
 		// Default mock for getOllamaModels
 		mockGetOllamaModels.mockResolvedValue({
@@ -330,7 +332,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			for (const [effort, expected] of cases) {
-				vitest.clearAllMocks()
+				clearAllMocks()
 				mockGetOllamaModels.mockResolvedValue({
 					qwen3: { contextWindow: 4096, maxTokens: 4096, supportsImages: false, supportsPromptCache: false },
 				})

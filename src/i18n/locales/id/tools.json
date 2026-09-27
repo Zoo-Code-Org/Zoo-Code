@@ -8,8 +8,18 @@
 	},
 	"toolRepetitionLimitReached": "Zoo tampaknya terjebak dalam loop, mencoba aksi yang sama ({{toolName}}) berulang kali. Ini mungkin menunjukkan masalah dengan strategi saat ini. Pertimbangkan untuk mengubah frasa tugas, memberikan instruksi yang lebih spesifik, atau mengarahkannya ke pendekatan yang berbeda.",
 	"unknownToolError": "Zoo mencoba menggunakan alat yang tidak dikenal: \"{{toolName}}\". Mencoba lagi...",
+	"missingToolParameter": "Zoo mencoba menggunakan {{toolName}} tanpa nilai untuk parameter wajib '{{paramName}}'. Mencoba lagi...",
+	"missingToolParameterWithPath": "Zoo mencoba menggunakan {{toolName}} untuk '{{relPath}}' tanpa nilai untuk parameter wajib '{{paramName}}'. Mencoba lagi...",
 	"codebaseSearch": {
 		"approval": "Mencari '{{query}}' di codebase..."
+	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard memblokir perintah ini.",
+			"blockedWithReason": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard memblokir perintah ini. (Aturan: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}} (Aturan: {{ruleId}})"
+		}
 	},
 	"searchFiles": {
 		"workspaceBoundaryError": "Tidak dapat mencari di luar workspace. Path '{{path}}' berada di luar workspace saat ini."

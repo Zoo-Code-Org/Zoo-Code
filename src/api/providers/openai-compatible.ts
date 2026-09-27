@@ -17,7 +17,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
  * Configuration options for creating an OpenAI-compatible provider.
@@ -197,7 +197,7 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	/**
 	 * Complete a prompt using the AI SDK generateText.
 	 */
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const languageModel = this.getLanguageModel()
 
 		const { text } = await generateText({

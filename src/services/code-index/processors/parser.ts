@@ -45,7 +45,7 @@ export class CodeParser implements ICodeParser {
 		let content: string
 		let fileHash: string
 
-		if (options?.content) {
+		if (options?.content !== undefined) {
 			content = options.content
 			fileHash = options.fileHash || this.createFileHash(content)
 		} else {

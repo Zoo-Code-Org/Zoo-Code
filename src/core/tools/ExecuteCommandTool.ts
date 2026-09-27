@@ -8,6 +8,7 @@ import { CommandExecutionStatus, DEFAULT_TERMINAL_OUTPUT_PREVIEW_SIZE, Persisted
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../task/Task"
+import type { ClineProvider } from "../webview/ClineProvider"
 
 import { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
@@ -17,7 +18,6 @@ import {
 	ExitCodeDetails,
 	RooTerminalCallbacks,
 	RooTerminalProvider,
-	RooTerminalProcess,
 	ShellIntegrationError,
 	ShellIntegrationErrorDetails,
 } from "../../integrations/terminal/types"
@@ -51,6 +51,22 @@ interface ExecuteCommandParams {
 	timeout?: number | null
 }
 
+export function formatDcgBlockedMessage(reason?: string, ruleId?: string): string {
+	if (reason && ruleId) {
+		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReasonAndRule", { reason, ruleId })
+	}
+
+	if (reason) {
+		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReason", { reason })
+	}
+
+	if (ruleId) {
+		return t("tools:executeCommand.destructiveCommandGuard.blockedWithRule", { ruleId })
+	}
+
+	return t("tools:executeCommand.destructiveCommandGuard.blocked")
+}
+
 export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined): number {
 	const requestedAgentTimeout = typeof timeoutSeconds === "number" && timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0
 
@@ -58,6 +74,12 @@ export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined)
 	// solely by commandExecutionTimeout (user setting), not model-provided
 	// background timeouts.
 	return process.env.ROO_CLI_RUNTIME === "1" ? 0 : requestedAgentTimeout
+}
+
+// Fire-and-forget: some call sites are synchronous terminal callbacks that cannot await,
+// and postMessageToWebview swallows its own errors, so void is enough.
+function postCommandExecutionStatus(provider: ClineProvider | undefined, status: CommandExecutionStatus): void {
+	void provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 }
 
 export class ExecuteCommandTool extends BaseTool<"execute_command"> {
@@ -100,22 +122,47 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					status: "error",
 					message: parseError.message,
 				}
-				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(errorStatus) })
+				postCommandExecutionStatus(provider, errorStatus)
 				task.didToolFailInCurrentTurn = true
 				pushToolResult(formatResponse.toolError(parseError.message))
 				return
 			}
 
-			const didApprove = await askApproval("command", canonicalCommand)
+			const provider = await task.providerRef.deref()
+			let dcgBlocked = false
+			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
+				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
+				// Resolve through the managed installer on use so an extension update
+				// automatically installs the newly pinned and verified DCG version.
+				const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
+				if (!binaryPath) {
+					throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
+				}
+				const workingDirectory = customCwd
+					? path.isAbsolute(customCwd)
+						? customCwd
+						: path.resolve(task.cwd, customCwd)
+					: task.cwd
+				const dcgResult = await runDcg(binaryPath, canonicalCommand, workingDirectory)
+				dcgBlocked = dcgResult.decision === "deny"
+				if (dcgResult.decision === "deny") {
+					await task.say("error", formatDcgBlockedMessage(dcgResult.reason, dcgResult.ruleId))
+				}
+			}
+
+			// DCG-approved commands are auto-approved by checkAutoApproval. A DCG
+			// block is presented as Zoo's normal command prompt, with isProtected
+			// forcing the user to explicitly choose whether to execute it.
+			const didApprove = dcgBlocked
+				? await askApproval("command", canonicalCommand, undefined, true)
+				: await askApproval("command", canonicalCommand)
 
 			if (!didApprove) {
 				return
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
-			const provider = await task.providerRef.deref()
 			const providerState = await provider?.getState()
-
 			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
 
 			// Get command execution timeout from VSCode configuration (in seconds)
@@ -163,7 +210,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				if (canRetryShellIntegrationError(error)) {
 					// Silent retry via execa — shell startup race, command was not submitted.
 					const status: CommandExecutionStatus = { executionId, status: "fallback" }
-					provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+					postCommandExecutionStatus(provider, status)
 
 					const [rejected, result] = await executeCommandInTerminal(task, {
 						...options,
@@ -240,14 +287,12 @@ export async function executeCommandInTerminal(
 		return [false, `Working directory '${workingDir}' does not exist.`]
 	}
 
-	let message: { text?: string; images?: string[] } | undefined
 	let runInBackground = false
 	let completed = false
 	let result: string = ""
 	let persistedResult: PersistedCommandOutput | undefined
 	let exitDetails: ExitCodeDetails | undefined
 	let shellIntegrationError: ShellIntegrationError | undefined
-	let hasAskedForCommandOutput = false
 
 	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
@@ -256,7 +301,7 @@ export async function executeCommandInTerminal(
 	// panel immediately (same effect as the retry-fallback path).
 	if (isCmdExeFallback) {
 		const status: CommandExecutionStatus = { executionId, status: "fallback" }
-		provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+		postCommandExecutionStatus(provider, status)
 	}
 
 	// Get global storage path for persisted output artifacts
@@ -341,7 +386,7 @@ export async function executeCommandInTerminal(
 	})
 
 	const callbacks: RooTerminalCallbacks = {
-		onLine: async (lines: string, process: RooTerminalProcess) => {
+		onLine: async (lines: string) => {
 			accumulatedOutput += lines
 
 			// Trim accumulated output to prevent unbounded memory growth
@@ -356,27 +401,8 @@ export async function executeCommandInTerminal(
 			const compressedOutput = Terminal.compressTerminalOutput(accumulatedOutput)
 			latestCompressedOutput = compressedOutput
 			const status: CommandExecutionStatus = { executionId, status: "output", output: compressedOutput }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 			schedulePartialCommandOutputUpdate()
-
-			if (runInBackground || hasAskedForCommandOutput) {
-				return
-			}
-
-			// Mark that we've asked to prevent multiple concurrent asks
-			hasAskedForCommandOutput = true
-
-			try {
-				const { response, text, images } = await task.ask("command_output", "")
-				runInBackground = true
-
-				if (response === "messageResponse") {
-					message = { text, images }
-					process.continue()
-				}
-			} catch (_error) {
-				// Silently handle ask errors (e.g., "Current ask promise was ignored")
-			}
 		},
 		onCompleted: async (output: string | undefined) => {
 			clearTimeout(pendingCommandOutputEmitTimer)
@@ -414,11 +440,11 @@ export async function executeCommandInTerminal(
 		},
 		onShellExecutionStarted: (pid: number | undefined) => {
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 		},
 		onShellExecutionComplete: (details: ExitCodeDetails) => {
 			const status: CommandExecutionStatus = { executionId, status: "exited", exitCode: details.exitCode }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 			exitDetails = details
 		},
 	}
@@ -487,7 +513,7 @@ export async function executeCommandInTerminal(
 	} catch (error) {
 		if (isUserTimedOut) {
 			const status: CommandExecutionStatus = { executionId, status: "timeout" }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 			await task.say("error", t("common:errors:command_timeout", { seconds: commandExecutionTimeoutSeconds }))
 			task.didToolFailInCurrentTurn = true
 			task.terminalProcess = undefined
@@ -525,22 +551,7 @@ export async function executeCommandInTerminal(
 		await onCompletedPromise
 	}
 
-	if (message) {
-		const { text, images } = message
-		await task.say("user_feedback", text, images)
-
-		return [
-			true,
-			formatResponse.toolResult(
-				[
-					`Command is still running in terminal from '${terminal.getCurrentWorkingDirectory().toPosix()}'.`,
-					result.length > 0 ? `Here's the output so far:\n${result}\n` : "\n",
-					`<user_message>\n${text}\n</user_message>`,
-				].join("\n"),
-				images,
-			),
-		]
-	} else if (completed || exitDetails) {
+	if (completed || exitDetails) {
 		const currentWorkingDir = terminal.getCurrentWorkingDirectory().toPosix()
 
 		// Use persisted output format when output was truncated and spilled to disk

@@ -12,6 +12,7 @@ import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 import { OpenAiHandler } from "./openai"
+import { NOT_PROVIDED } from "./constants"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
@@ -27,7 +28,7 @@ export class MimoHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
-			openAiApiKey: options.mimoApiKey ?? "not-provided",
+			openAiApiKey: options.mimoApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? mimoDefaultModelId,
 			openAiBaseUrl: options.mimoBaseUrl || "https://token-plan-sgp.xiaomimimo.com/v1",
 			openAiStreamingEnabled: true,
@@ -121,16 +122,16 @@ export class MimoHandler extends OpenAiHandler {
 					}
 				: delta
 
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
 			if (delta.content) {
 				yield {
 					type: "text",
 					text: delta.content,
 				}
-			}
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
 			}
 
 			yield* this.processToolCalls(sanitizedDelta, finishReason, activeToolCallIds)

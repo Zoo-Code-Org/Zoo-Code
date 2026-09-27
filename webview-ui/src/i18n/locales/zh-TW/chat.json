@@ -17,7 +17,9 @@
 		"delete": "刪除工作（按住 Shift 並點選可跳過確認）",
 		"openApiHistory": "開啟 API 歷史紀錄",
 		"openUiHistory": "開啟 UI 歷史紀錄",
-		"backToParentTask": "上層工作"
+		"backToParentTask": "上層工作",
+		"waitingOnSubtask": "等待子任務",
+		"goToSubtask": "前往子任務"
 	},
 	"unpin": "取消釘選",
 	"pin": "釘選",
@@ -226,7 +228,7 @@
 		"didLoad": "Zoo 載入了技能"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo 想要取得詳細指示以協助目前工作"
+		"wantsToFetch": "Zoo 想要取得詳細指示以協助目前工作"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo 想要讀取此檔案",
@@ -277,6 +279,7 @@
 		"exitStatus": "已結束，狀態碼 {{exitCode}}",
 		"malformedCommand": "命令格式錯誤：shell 語法錯誤",
 		"manageCommands": "自動核准的命令",
+		"denied": "命令已拒絕",
 		"addToAllowed": "新增至允許清單",
 		"removeFromAllowed": "從允許清單中移除",
 		"addToDenied": "新增至拒絕清單",
@@ -363,9 +366,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "支援 GLM-5.2 的 Friendli 供應商 — 透過 Friendli 使用最新的 GLM 模型。",
-			"highlight2": "Ollama 原生 thinking/reasoning 支援 — 使用 Ollama 模型時可端對端保留 reasoning 輸出。",
-			"highlight3": "Anthropic 自訂 `apiModelId` 修正 — 自訂 Anthropic 模型 ID 現在會保持選取，不再靜默回退到 `claude-sonnet-4-5`。"
+			"highlight1": "✨ 新增 SOTA 模型：在支援的供應商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。",
+			"highlight2": "🧭 更可靠的工作與子工作：隔離委派模式，在重複停止後保留子工作連結，並在斜線命令切換模式時保護協調器設定。",
+			"highlight3": "🛠️ 更可靠的終端機、供應商和程式碼搜尋行為：改善 Windows 和非英語環境中的終端機行為，強化供應商回應與取消處理，並讓程式碼搜尋更穩定地使用正確的工作區。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

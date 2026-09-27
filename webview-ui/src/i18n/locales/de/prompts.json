@@ -9,7 +9,7 @@
 		"editModesConfig": "Moduskonfiguration bearbeiten",
 		"editGlobalModes": "Globale Modi bearbeiten",
 		"editProjectModes": "Projektmodi bearbeiten (.roomodes)",
-		"createModeHelpText": "Modi sind spezialisierte Personas, die Roos Verhalten anpassen. <0>Erfahre mehr über die Verwendung von Modi</0> oder <1>die Anpassung von Modi.</1>",
+		"createModeHelpText": "Modi sind spezialisierte Personas, die Zoos Verhalten anpassen. <0>Erfahre mehr über die Verwendung von Modi</0> oder <1>die Anpassung von Modi.</1>",
 		"selectMode": "Modi suchen"
 	},
 	"apiConfiguration": {
@@ -33,7 +33,7 @@
 	"roleDefinition": {
 		"title": "Rollendefinition",
 		"resetToDefault": "Auf Standardwerte zurücksetzen",
-		"description": "Definiere Roos Expertise und Persönlichkeit für diesen Modus. Diese Beschreibung prägt, wie Zoo sich präsentiert und an Aufgaben herangeht."
+		"description": "Definiere Zoos Expertise und Persönlichkeit für diesen Modus. Diese Beschreibung prägt, wie Zoo sich präsentiert und an Aufgaben herangeht."
 	},
 	"description": {
 		"title": "Kurzbeschreibung (für Menschen)",
@@ -167,7 +167,7 @@
 		},
 		"roleDefinition": {
 			"label": "Rollendefinition",
-			"description": "Definiere Roos Expertise und Persönlichkeit für diesen Modus."
+			"description": "Definiere Zoos Expertise und Persönlichkeit für diesen Modus."
 		},
 		"whenToUse": {
 			"label": "Wann zu verwenden (optional)",

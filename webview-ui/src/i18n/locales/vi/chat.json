@@ -17,7 +17,9 @@
 		"condenseContext": "Cô đọng ngữ cảnh thông minh",
 		"openApiHistory": "Mở lịch sử API",
 		"openUiHistory": "Mở lịch sử UI",
-		"backToParentTask": "Nhiệm vụ cha"
+		"backToParentTask": "Nhiệm vụ cha",
+		"waitingOnSubtask": "Đang chờ nhiệm vụ con",
+		"goToSubtask": "Đến nhiệm vụ con"
 	},
 	"unpin": "Bỏ ghim khỏi đầu",
 	"pin": "Ghim lên đầu",
@@ -185,7 +187,7 @@
 		"current": "Hiện tại"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
+		"wantsToFetch": "Zoo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo muốn đọc tệp này",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo muốn chỉnh sửa tệp này bên ngoài không gian làm việc",
 		"wantsToEditProtected": "Zoo muốn chỉnh sửa tệp cấu hình được bảo vệ",
 		"wantsToCreate": "Zoo muốn tạo một tệp mới",
-		"wantsToSearchReplace": "Roo muốn thực hiện tìm kiếm và thay thế trong tệp này",
-		"didSearchReplace": "Roo đã thực hiện tìm kiếm và thay thế trong tệp này",
+		"wantsToSearchReplace": "Zoo muốn thực hiện tìm kiếm và thay thế trong tệp này",
+		"didSearchReplace": "Zoo đã thực hiện tìm kiếm và thay thế trong tệp này",
 		"wantsToInsert": "Zoo muốn chèn nội dung vào tệp này",
 		"wantsToInsertWithLineNumber": "Zoo muốn chèn nội dung vào dòng {{lineNumber}} của tệp này",
 		"wantsToInsertAtEnd": "Zoo muốn thêm nội dung vào cuối tệp này",
@@ -231,6 +233,7 @@
 		"exitStatus": "Đã thoát với trạng thái {{exitCode}}",
 		"malformedCommand": "Lệnh không hợp lệ: lỗi cú pháp shell",
 		"manageCommands": "Quản lý quyền lệnh",
+		"denied": "Lệnh bị từ chối",
 		"commandManagementDescription": "Quản lý quyền lệnh: Nhấp vào ✓ để cho phép tự động thực thi, ✗ để từ chối thực thi. Các mẫu có thể được bật/tắt hoặc xóa khỏi danh sách. <settingsLink>Xem tất cả cài đặt</settingsLink>",
 		"addToAllowed": "Thêm vào danh sách cho phép",
 		"removeFromAllowed": "Xóa khỏi danh sách cho phép",
@@ -342,9 +345,9 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới:",
-			"highlight1": "Nhà cung cấp Friendli với hỗ trợ GLM-5.2 — dùng mẫu GLM mới nhất qua Friendli.",
-			"highlight2": "Hỗ trợ thinking/reasoning gốc cho Ollama — giữ đầu ra suy luận xuyên suốt khi bạn dùng các mẫu Ollama.",
-			"highlight3": "Sửa lỗi `apiModelId` tùy chỉnh của Anthropic — ID mẫu Anthropic tùy chỉnh giờ sẽ tiếp tục được chọn thay vì âm thầm rơi về `claude-sonnet-4-5`."
+			"highlight1": "✨ Đã thêm các model SOTA mới: Dùng GPT-6 Sol, GPT-6 Luna và Claude Opus 5.5 trên các provider được hỗ trợ.",
+			"highlight2": "🧭 Task và subtask đáng tin cậy hơn: Giữ các mode được ủy quyền tách biệt, duy trì liên kết subtask sau nhiều lần Stop và bảo vệ cài đặt orchestrator khi slash command chuyển mode.",
+			"highlight3": "🛠️ Terminal, provider và tìm kiếm code đáng tin cậy hơn: Cải thiện hoạt động terminal trên Windows và môi trường không dùng tiếng Anh, tăng độ ổn định của phản hồi và thao tác hủy từ provider, đồng thời giúp tìm kiếm code sử dụng đúng workspace nhất quán hơn."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

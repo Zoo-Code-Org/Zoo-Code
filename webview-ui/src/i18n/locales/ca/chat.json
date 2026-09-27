@@ -17,7 +17,9 @@
 		"condenseContext": "Condensar context de forma intel·ligent",
 		"openApiHistory": "Obrir historial d'API",
 		"openUiHistory": "Obrir historial d'UI",
-		"backToParentTask": "Tasca principal"
+		"backToParentTask": "Tasca principal",
+		"waitingOnSubtask": "Esperant subtasca",
+		"goToSubtask": "Anar a la subtasca"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",
@@ -185,7 +187,7 @@
 		"current": "Actual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo vol obtenir instruccions detallades per ajudar amb la tasca actual."
+		"wantsToFetch": "Zoo vol obtenir instruccions detallades per ajudar amb la tasca actual."
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo vol llegir aquest fitxer",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo vol editar aquest fitxer fora de l'espai de treball",
 		"wantsToEditProtected": "Zoo vol editar un fitxer de configuració protegit",
 		"wantsToCreate": "Zoo vol crear un nou fitxer",
-		"wantsToSearchReplace": "Roo vol realitzar cerca i substitució en aquest fitxer",
-		"didSearchReplace": "Roo ha realitzat cerca i substitució en aquest fitxer",
+		"wantsToSearchReplace": "Zoo vol realitzar cerca i substitució en aquest fitxer",
+		"didSearchReplace": "Zoo ha realitzat cerca i substitució en aquest fitxer",
 		"wantsToInsert": "Zoo vol inserir contingut en aquest fitxer",
 		"wantsToInsertWithLineNumber": "Zoo vol inserir contingut a la línia {{lineNumber}} d'aquest fitxer",
 		"wantsToInsertAtEnd": "Zoo vol afegir contingut al final d'aquest fitxer",
@@ -231,6 +233,7 @@
 		"exitStatus": "S'ha sortit amb l'estat {{exitCode}}",
 		"malformedCommand": "Ordre mal formada: error de sintaxi del shell",
 		"manageCommands": "Comandes aprovades automàticament",
+		"denied": "Ordre denegada",
 		"addToAllowed": "Afegeix a la llista permesa",
 		"removeFromAllowed": "Elimina de la llista permesa",
 		"addToDenied": "Afegeix a la llista denegada",
@@ -341,9 +344,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Proveïdor Friendli amb suport per a GLM-5.2 — utilitza el model GLM més recent a través de Friendli.",
-			"highlight2": "Suport natiu de thinking/reasoning per a Ollama — conserva la sortida de raonament d'extrem a extrem quan fas servir models d'Ollama.",
-			"highlight3": "Correcció del `apiModelId` personalitzat d'Anthropic — els identificadors de model personalitzats d'Anthropic ara es mantenen seleccionats en lloc de tornar en silenci a `claude-sonnet-4-5`."
+			"highlight1": "✨ Nous models SOTA afegits: Utilitza GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 amb els proveïdors compatibles.",
+			"highlight2": "🧭 Tasques i subtasques més fiables: Mantén aïllats els modes delegats, conserva els enllaços de les subtasques després d'aturades repetides i protegeix la configuració de l'orquestrador quan les ordres amb barra canvien de mode.",
+			"highlight3": "🛠️ Comportament més fiable del terminal, els proveïdors i la cerca de codi: Millora el terminal a Windows i en entorns que no són en anglès, reforça les respostes i la cancel·lació dels proveïdors i fes que la cerca de codi utilitzi l'espai de treball correcte de manera més consistent."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

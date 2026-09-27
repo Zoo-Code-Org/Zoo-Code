@@ -55,6 +55,7 @@
 		"failed_remove_directory": "Nie udało się usunąć katalogu zadania: {{error}}",
 		"custom_storage_path_unusable": "Niestandardowa ścieżka przechowywania \"{{path}}\" nie jest użyteczna, zostanie użyta domyślna ścieżka",
 		"cannot_access_path": "Nie można uzyskać dostępu do ścieżki {{path}}: {{error}}",
+		"path_outside_workspace": "Ścieżka znajduje się poza obszarem roboczym",
 		"settings_import_failed": "Nie udało się zaimportować ustawień: {{error}}.",
 		"mistake_limit_guidance": "To może wskazywać na błąd w procesie myślowym modelu lub niezdolność do prawidłowego użycia narzędzia, co można złagodzić poprzez wskazówki użytkownika (np. \"Spróbuj podzielić zadanie na mniejsze kroki\").",
 		"violated_organization_allowlist": "Nie udało się uruchomić zadania: bieżący profil nie jest kompatybilny z ustawieniami Twojej organizacji",
@@ -72,6 +73,10 @@
 		"url_fetch_failed": "Błąd pobierania zawartości URL: {{error}}",
 		"url_fetch_error_with_url": "Błąd pobierania zawartości dla {{url}}: {{error}}",
 		"command_timeout": "Przekroczono limit czasu wykonania polecenia po {{seconds}} sekundach",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard jest włączony, ale nie jest dostępny dla tej platformy",
+			"enableFailed": "Nie udało się włączyć Destructive Command Guard: {{error}}"
+		},
 		"share_task_failed": "Nie udało się udostępnić zadania",
 		"share_no_active_task": "Brak aktywnego zadania do udostępnienia",
 		"share_auth_required": "Wymagana autoryzacja. Zaloguj się, aby udostępniać zadania.",

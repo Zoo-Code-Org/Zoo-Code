@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -211,7 +212,7 @@ async function runDeepSeekToolProbe(
 
 	try {
 		await api.setConfiguration({
-			apiProvider: "deepseek" as const,
+			apiProvider: providerIdentifiers.deepseek,
 			deepSeekApiKey: aimockUrl && !isRecord ? "mock-key" : DEEPSEEK_API_KEY!,
 			...(aimockUrl && { deepSeekBaseUrl: `${aimockUrl}/v1` }),
 			apiModelId: modelId,
@@ -336,7 +337,7 @@ suite("DeepSeek V4 provider", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl
 				? isRecord
 					? (process.env.OPENROUTER_API_KEY ?? "mock-key")

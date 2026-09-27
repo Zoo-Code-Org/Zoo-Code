@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 // pnpm test src/__tests__/CloudSettingsService.parsing.test.ts
 
 import type { ExtensionContext } from "vscode"
@@ -97,7 +98,7 @@ describe("CloudSettingsService - Response Parsing", () => {
 				providerProfiles: {
 					default: {
 						id: "default",
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiModelId: "claude-3-opus-20240229",
 						apiKey: "test-key",
 						modelTemperature: 0.7,

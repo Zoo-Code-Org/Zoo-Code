@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -16,29 +15,43 @@
 
         ## Som Zoo Code
 
-> Potser has vist el [recent anunci](https://x.com/mattrubens/status/2046636598859559114) de l'equip de Roo 🦘🦘🦘. El resum és que l'equip està reduint gradualment el desenvolupament actiu de Roo Code mentre es concentra en [Roomote](https://roomote.dev/). Aquesta notícia va ser difícil per a molts usuaris de Roo; aquest plugin significa molt per a aquesta comunitat.
+> Zoo Code continua el desenvolupament d'aquest projecte després que l'equip de
+> Roo aturés el desenvolupament actiu de Roo Code per centrar-se en
+> [Roomote](https://roomote.dev/). Gràcies a l'equip de Roo per tot el que van
+> construir.
 >
-> Volem donar les gràcies a tot l'equip de Roo per la feina que han posat en aquest plugin. No destacarem cada persona pel seu nom aquí, però tots podem coincidir que són desenvolupadors excepcionals i, igual d'important, persones increïbles. Gràcies a l'equip de Roo.
->
-> Els qui fem servir Roo venim de tota mena de perfils. Alguns l'utilitzen professionalment cada dia, altres el fan servir per imaginar fluxos de treball inimaginablement complexos. Alguns milloren Roo mateix, mentre que altres milloren els mateixos models que Roo utilitza (super meta). El que volem dir és que la comunitat és diversa i, tot i que un cangur 🦘🦘🦘 és un animal distingit i noble, vam sentir que un "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 reflectia millor aquesta diversitat d'usuaris del plugin.
->
-> Per això volem anunciar que **Zoo Code** continuarà desenvolupant aquest projecte tan important. L'equip principal està format per desenvolupadors que ja havien contribuït a Roo i que valoren profundament aquest plugin. Continuarem actualitzant models, corregint errors i publicant funcionalitats. Però, per damunt de tot, pensem escoltar-vos a vosaltres, la comunitat, que heu fet aquest plugin tan especial. Així que uneix-te al nostre [Discord](https://discord.gg/VxfP4Vx3gX), al nostre [Reddit](https://www.reddit.com/r/ZooCode), o [crea un PR o una issue](https://github.com/Zoo-Code-Org/Zoo-Code); però, sobretot, et demanem que continuïs implicat, connectat i actiu com a comunitat.
+> L'equip principal és un grup de desenvolupadors que ja havien contribuït a
+> Roo anteriorment i que valoren profundament aquest plugin. Continuarem
+> actualitzant models, corregint errors i publicant funcionalitats, i tenim
+> intenció d'escoltar de prop la comunitat que ha fet aquest plugin tan
+> especial. Uneix-te a nosaltres a
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), o
+> [obre una PR o issue](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
 ## Migració de Roo Code a Zoo Code
 
-Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
+Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o algun dubte, entra i pregunta.
 
-## Novetats a la v3.68.0
+## Què ha afegit Zoo Code des de Roo Code
 
-- **Proveïdor Friendli amb suport per a GLM-5.2** — utilitza el model GLM més recent a través de Friendli.
-- **Suport natiu de thinking/reasoning per a Ollama** — conserva la sortida de raonament d'extrem a extrem quan fas servir models d'Ollama.
-- **Correcció del `apiModelId` personalitzat d'Anthropic** — els identificadors de model personalitzats d'Anthropic ara es mantenen seleccionats en lloc de tornar en silenci a `claude-sonnet-4-5`.
-- Correcció: gestió dels resultats d'eines del proveïdor Ollama i condensació prematura del context.
-- Correcció: conserva l'enllaç pare-fill de la tasca quan s'interromp una subtasca delegada.
-- Millora la gestió dels blocs de contingut de Claude a Anthropic Vertex per obtenir respostes més fiables.
-- Actualitzacions de CI, publicació nightly i dependències/eines.
+Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
+
+- **Intel·ligència de bases de codi amb Semble** — cerca semàntica de codi ràpida i sota demanda, amb configuració automàtica i sense cap procés d'indexació separat.
+- **Fluxos de treball d'Orchestrator més sòlids** — delegació més segura, coordinació de tasques en paral·lel, recuperació fiable de tasques pare/filla i millor aïllament entre subtasques i perfils de proveïdor.
+- **Execucions autònomes més llargues amb Destructive Command Guard (DCG)** — bloqueja automàticament les ordres perilloses mentre el treball de confiança continua sense sol·licituds d'aprovació repetides.
+- **Els models més recents** — compatibilitat contínua amb les noves famílies de models Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax i altres.
+- **Més maneres de connectar-se** — proveïdors nous i ampliats, com ara Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go i molts més.
+- **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
+- **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
+
+## Novetats a la v3.84.0
+
+- ✨ **Nous models SOTA afegits:** Utilitza GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 amb els proveïdors compatibles.
+- 🧭 **Tasques i subtasques més fiables:** Mantén aïllats els modes delegats, conserva els enllaços de les subtasques després d'aturades repetides i protegeix la configuració de l'orquestrador quan les ordres amb barra canvien de mode.
+- 🛠️ **Comportament més fiable del terminal, els proveïdors i la cerca de codi:** Millora el terminal a Windows i en entorns que no són en anglès, reforça les respostes i la cancel·lació dels proveïdors i fes que la cerca de codi utilitzi l'espai de treball correcte de manera més consistent.
 
 ## Què pot fer Zoo Code per TU?
 
@@ -62,24 +75,9 @@ Zoo Code s'adapta a la teva manera de treballar, no a l'inrevés:
 
 Més informació: [Ús de Modes](https://docs.zoocode.dev/basic-usage/using-modes) • [Modes personalitzats](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Tutorials i vídeos de funcionalitats
-
-<div align="center">
-
-|                                                                                                                                                                                                                      |                                                                                                                                                                                                                     |                                                                                                                                                                                                                                  |
-| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" alt="Tutorial d'instal·lació de Zoo Code" width="100%"></a><br><b>Instal·lant Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" alt="Tutorial de configuració de perfils" width="100%"></a><br><b>Configurant perfils</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" alt="Tutorial d'indexació de la base de codi" width="100%"></a><br><b>Indexació de la base de codi</b> |
-|  <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" alt="Tutorial de modes personalitzats" width="100%"></a><br><b>Modes personalitzats</b>   |      <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" alt="Tutorial de punts de control" width="100%"></a><br><b>Punts de control</b>      |           <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" alt="Tutorial de gestió de context" width="100%"></a><br><b>Gestió de Context</b>            |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Més tutorials ràpids i vídeos de funcionalitats...</a>
-</p>
-
 ## Recursos
 
 - **[Documentació](https://docs.zoocode.dev):** La guia oficial per instal·lar, configurar i dominar Zoo Code.
-- **[Canal de YouTube](https://youtube.com/@roocodeyt?feature=shared):** Mira tutorials i veu les funcionalitats en acció.
 - **[Servidor de Discord](https://discord.gg/VxfP4Vx3gX):** Uneix-te a la comunitat per obtenir ajuda i discutir en temps real.
 - **[Comunitat de Reddit](https://www.reddit.com/r/ZooCode):** Comparteix les teves experiències i veu què estan construint altres.
 - **[Incidències de GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Informa d'errors i segueix el desenvolupament.

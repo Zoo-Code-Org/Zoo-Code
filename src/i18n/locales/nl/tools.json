@@ -8,8 +8,18 @@
 	},
 	"toolRepetitionLimitReached": "Zoo lijkt vast te zitten in een lus, waarbij hij herhaaldelijk dezelfde actie ({{toolName}}) probeert. Dit kan duiden op een probleem met de huidige strategie. Overweeg de taak te herformuleren, specifiekere instructies te geven of Zoo naar een andere aanpak te leiden.",
 	"unknownToolError": "Zoo probeerde een onbekende tool te gebruiken: \"{{toolName}}\". Opnieuw proberen...",
+	"missingToolParameter": "Zoo probeerde {{toolName}} te gebruiken zonder waarde voor de vereiste parameter '{{paramName}}'. Opnieuw proberen...",
+	"missingToolParameterWithPath": "Zoo probeerde {{toolName}} te gebruiken voor '{{relPath}}' zonder waarde voor de vereiste parameter '{{paramName}}'. Opnieuw proberen...",
 	"codebaseSearch": {
 		"approval": "Zoeken naar '{{query}}' in codebase..."
+	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard heeft deze opdracht geblokkeerd.",
+			"blockedWithReason": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. (Regel: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}} (Regel: {{ruleId}})"
+		}
 	},
 	"newTask": {
 		"errors": {

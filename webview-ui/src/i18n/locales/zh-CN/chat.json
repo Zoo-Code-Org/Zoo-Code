@@ -17,7 +17,9 @@
 		"condenseContext": "智能压缩上下文",
 		"openApiHistory": "打开 API 历史",
 		"openUiHistory": "打开 UI 历史",
-		"backToParentTask": "父任务"
+		"backToParentTask": "父任务",
+		"waitingOnSubtask": "等待子任务",
+		"goToSubtask": "前往子任务"
 	},
 	"unpin": "取消置顶",
 	"pin": "置顶",
@@ -128,7 +130,7 @@
 		"title": "模式",
 		"marketplace": "模式市场",
 		"settings": "模式设置",
-		"description": "专门定制Roo行为的角色。",
+		"description": "专门定制Zoo行为的角色。",
 		"searchPlaceholder": "搜索模式...",
 		"noResults": "未找到结果"
 	},
@@ -142,7 +144,7 @@
 	"diffError": {
 		"title": "编辑失败"
 	},
-	"troubleMessage": "Roo遇到问题...",
+	"troubleMessage": "Zoo遇到问题...",
 	"apiRequest": {
 		"title": "API请求",
 		"failed": "API请求失败",
@@ -185,7 +187,7 @@
 		"current": "当前"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo 想要获取详细指示以协助当前任务"
+		"wantsToFetch": "Zoo 想要获取详细指示以协助当前任务"
 	},
 	"fileOperations": {
 		"wantsToRead": "需要读取文件",
@@ -231,6 +233,7 @@
 		"exitStatus": "已退出，状态码 {{exitCode}}",
 		"malformedCommand": "命令格式错误：shell 语法错误",
 		"manageCommands": "管理命令权限",
+		"denied": "命令已拒绝",
 		"commandManagementDescription": "管理命令权限：点击 ✓ 允许自动执行，点击 ✗ 拒绝执行。可以打开/关闭模式或从列表中删除。<settingsLink>查看所有设置</settingsLink>",
 		"addToAllowed": "添加到允许列表",
 		"removeFromAllowed": "从允许列表中删除",
@@ -251,8 +254,8 @@
 		"youSaid": "你说"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo想在{{serverName}} MCP上使用工具",
-		"wantsToAccessResource": "Roo想访问{{serverName}} MCP服务上的资源"
+		"wantsToUseTool": "Zoo想在{{serverName}} MCP上使用工具",
+		"wantsToAccessResource": "Zoo想访问{{serverName}} MCP服务上的资源"
 	},
 	"modes": {
 		"wantsToSwitch": "即将切换至{{mode}}模式",
@@ -261,8 +264,8 @@
 		"didSwitchWithReason": "已切换至{{mode}}模式（原因：{{reason}}）"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo想在<code>{{mode}}</code>模式下创建新子任务",
-		"wantsToFinish": "Roo想完成此子任务",
+		"wantsToCreate": "Zoo想在<code>{{mode}}</code>模式下创建新子任务",
+		"wantsToFinish": "Zoo想完成此子任务",
 		"newTaskContent": "子任务说明",
 		"completionContent": "子任务已完成",
 		"resultContent": "子任务结果",
@@ -271,7 +274,7 @@
 		"goToSubtask": "查看任务"
 	},
 	"questions": {
-		"hasQuestion": "Roo有一个问题"
+		"hasQuestion": "Zoo有一个问题"
 	},
 	"taskCompleted": "任务完成",
 	"modelResponseIncomplete": "模型响应不完整",
@@ -342,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "支持 GLM-5.2 的 Friendli 提供商 — 通过 Friendli 使用最新的 GLM 模型。",
-			"highlight2": "Ollama 原生 thinking/reasoning 支持 — 使用 Ollama 模型时可端到端保留 reasoning 输出。",
-			"highlight3": "Anthropic 自定义 `apiModelId` 修复 — 自定义 Anthropic 模型 ID 现在会保持选中，不再静默回退到 `claude-sonnet-4-5`。"
+			"highlight1": "✨ 新增 SOTA 模型：在支持的提供商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。",
+			"highlight2": "🧭 更可靠的任务和子任务：隔离委派模式，在重复停止后保留子任务链接，并在斜杠命令切换模式时保护编排器设置。",
+			"highlight3": "🛠️ 更可靠的终端、提供商和代码搜索行为：改进 Windows 和非英语环境中的终端行为，增强提供商响应与取消处理，并让代码搜索更稳定地使用正确的工作区。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",
@@ -379,7 +382,7 @@
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "已达到自动批准的费用限额",
-			"description": "Roo已经达到了${{count}}的自动批准成本限制。您想重置成本并继续任务吗？",
+			"description": "Zoo已经达到了${{count}}的自动批准成本限制。您想重置成本并继续任务吗？",
 			"button": "重置并继续"
 		}
 	},

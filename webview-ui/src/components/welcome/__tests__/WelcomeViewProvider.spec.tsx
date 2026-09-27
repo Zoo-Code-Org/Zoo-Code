@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/welcome/__tests__/WelcomeViewProvider.spec.tsx
 
 import React from "react"
@@ -134,7 +135,7 @@ describe("WelcomeViewProvider", () => {
 		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openrouter")
 		expect(screen.getByTestId("api-options")).toHaveAttribute("data-model", openRouterDefaultModelId)
 		expect(setApiConfiguration).toHaveBeenCalledWith({
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterModelId: openRouterDefaultModelId,
 		})
 		expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
@@ -154,7 +155,7 @@ describe("WelcomeViewProvider", () => {
 	it("treats the built-in Anthropic default as empty onboarding config", () => {
 		const { setApiConfiguration } = renderWelcomeViewProvider({
 			apiConfiguration: {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiModelId: "claude-sonnet-4-5",
 			},
 		})
@@ -164,7 +165,7 @@ describe("WelcomeViewProvider", () => {
 		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openrouter")
 		expect(screen.getByTestId("api-options")).toHaveAttribute("data-model", openRouterDefaultModelId)
 		expect(setApiConfiguration).toHaveBeenCalledWith({
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterModelId: openRouterDefaultModelId,
 		})
 	})
@@ -233,7 +234,7 @@ describe("WelcomeViewProvider", () => {
 
 	it("saves the configured provider from setup", () => {
 		const apiConfiguration = {
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: "test-key",
 			openRouterModelId: openRouterDefaultModelId,
 		}

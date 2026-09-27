@@ -155,6 +155,7 @@ vi.mock("../../../utils/fs", () => ({
 
 // Import Task AFTER all vi.mock() calls - Vitest hoists mocks so this works
 import { Task } from "../Task"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("Task reasoning preservation", () => {
 	let mockProvider: Partial<ClineProvider>
@@ -179,7 +180,7 @@ describe("Task reasoning preservation", () => {
 		}
 
 		mockApiConfiguration = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiKey: "test-key",
 		} as ProviderSettings
 	})

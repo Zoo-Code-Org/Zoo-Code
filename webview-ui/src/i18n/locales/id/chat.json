@@ -17,7 +17,9 @@
 		"delete": "Hapus Tugas (Shift + Klik untuk lewati konfirmasi)",
 		"openApiHistory": "Buka Riwayat API",
 		"openUiHistory": "Buka Riwayat UI",
-		"backToParentTask": "Tugas Induk"
+		"backToParentTask": "Tugas Induk",
+		"waitingOnSubtask": "Menunggu subtugas",
+		"goToSubtask": "Pergi ke subtugas"
 	},
 	"history": {
 		"title": "Riwayat"
@@ -229,7 +231,7 @@
 		"didLoad": "Zoo telah memuat keterampilan"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo ingin mengambil instruksi detail untuk membantu tugas saat ini"
+		"wantsToFetch": "Zoo ingin mengambil instruksi detail untuk membantu tugas saat ini"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo ingin membaca file ini",
@@ -246,8 +248,8 @@
 		"wantsToGenerateImageProtected": "Zoo ingin menghasilkan gambar di lokasi yang dilindungi",
 		"didGenerateImage": "Zoo telah menghasilkan gambar",
 		"wantsToCreate": "Zoo ingin membuat file baru",
-		"wantsToSearchReplace": "Roo ingin mencari dan mengganti di file ini",
-		"didSearchReplace": "Roo melakukan pencarian dan penggantian pada file ini",
+		"wantsToSearchReplace": "Zoo ingin mencari dan mengganti di file ini",
+		"didSearchReplace": "Zoo melakukan pencarian dan penggantian pada file ini",
 		"wantsToInsert": "Zoo ingin menyisipkan konten ke file ini",
 		"wantsToInsertWithLineNumber": "Zoo ingin menyisipkan konten ke file ini di baris {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo ingin menambahkan konten ke akhir file ini"
@@ -282,6 +284,7 @@
 		"exitStatus": "Keluar dengan status {{exitCode}}",
 		"malformedCommand": "Perintah tidak valid: kesalahan sintaks shell",
 		"manageCommands": "Perintah yang disetujui secara otomatis",
+		"denied": "Perintah ditolak",
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
@@ -370,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Provider Friendli dengan dukungan GLM-5.2 — gunakan model GLM terbaru lewat Friendli.",
-			"highlight2": "Dukungan thinking/reasoning native untuk Ollama — pertahankan keluaran penalaran dari awal hingga akhir saat kamu memakai model Ollama.",
-			"highlight3": "Perbaikan `apiModelId` kustom Anthropic — ID model Anthropic kustom kini tetap terpilih alih-alih diam-diam kembali ke `claude-sonnet-4-5`."
+			"highlight1": "✨ Model SOTA baru ditambahkan: Gunakan GPT-6 Sol, GPT-6 Luna, dan Claude Opus 5.5 melalui provider yang didukung.",
+			"highlight2": "🧭 Task dan subtask yang lebih andal: Jaga mode yang didelegasikan tetap terisolasi, pertahankan tautan subtask setelah Stop berulang, dan lindungi pengaturan orchestrator saat slash command mengganti mode.",
+			"highlight3": "🛠️ Perilaku terminal, provider, dan pencarian kode yang lebih andal: Tingkatkan terminal di Windows dan lingkungan non-Inggris, perkuat respons serta pembatalan provider, dan pastikan pencarian kode lebih konsisten menggunakan workspace yang tepat."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

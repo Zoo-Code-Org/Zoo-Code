@@ -13,6 +13,8 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
 
 import { MiniMaxHandler } from "../minimax"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("@anthropic-ai/sdk", () => {
 	const mockCreate = vitest.fn()
@@ -32,7 +34,7 @@ describe("MiniMaxHandler", () => {
 	let mockCreate: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		const anthropicInstance = (Anthropic as unknown as any)()
 		mockCreate = anthropicInstance.messages.create
 	})
@@ -87,6 +89,23 @@ describe("MiniMaxHandler", () => {
 			const model = handlerWithModel.getModel()
 			expect(model.id).toBe(testModelId)
 			expect(model.info).toEqual(minimaxModels[testModelId])
+		})
+
+		it("should return MiniMax-M3 model with correct configuration", () => {
+			const testModelId: MinimaxModelId = "MiniMax-M3"
+			const handlerWithModel = new MiniMaxHandler({
+				apiModelId: testModelId,
+				minimaxApiKey: "test-minimax-api-key",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(minimaxModels[testModelId])
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.maxTokens).toBe(16_384)
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.cacheWritesPrice).toBe(0.375)
+			expect(model.info.cacheReadsPrice).toBe(0.06)
 		})
 
 		it("should return MiniMax-M2.5 model with correct configuration", () => {
@@ -193,10 +212,10 @@ describe("MiniMaxHandler", () => {
 			expect(model.info).toEqual(minimaxModels[minimaxDefaultModelId])
 		})
 
-		it("should default to MiniMax-M2.7 model", () => {
+		it("should default to MiniMax-M3 model", () => {
 			const handlerDefault = new MiniMaxHandler({ minimaxApiKey: "test-minimax-api-key" })
 			const model = handlerDefault.getModel()
-			expect(model.id).toBe("MiniMax-M2.7")
+			expect(model.id).toBe("MiniMax-M3")
 		})
 	})
 
@@ -223,21 +242,15 @@ describe("MiniMaxHandler", () => {
 		it("createMessage should yield text content from stream", async () => {
 			const testContent = "This is test content from MiniMax stream"
 
-			mockCreate.mockResolvedValueOnce({
-				[Symbol.asyncIterator]: () => ({
-					next: vitest
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: {
-								type: "content_block_start",
-								index: 0,
-								content_block: { type: "text", text: testContent },
-							},
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			})
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "text", text: testContent },
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -247,25 +260,19 @@ describe("MiniMaxHandler", () => {
 		})
 
 		it("createMessage should yield usage data from stream", async () => {
-			mockCreate.mockResolvedValueOnce({
-				[Symbol.asyncIterator]: () => ({
-					next: vitest
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: {
-								type: "message_start",
-								message: {
-									usage: {
-										input_tokens: 10,
-										output_tokens: 20,
-									},
-								},
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 20,
 							},
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			})
+						},
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -282,13 +289,7 @@ describe("MiniMaxHandler", () => {
 				minimaxApiKey: "test-minimax-api-key",
 			})
 
-			mockCreate.mockResolvedValueOnce({
-				[Symbol.asyncIterator]: () => ({
-					async next() {
-						return { done: true }
-					},
-				}),
-			})
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 			const systemPrompt = "Test system prompt for MiniMax"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for MiniMax" }]
@@ -309,13 +310,7 @@ describe("MiniMaxHandler", () => {
 		})
 
 		it("should use temperature 1 by default", async () => {
-			mockCreate.mockResolvedValueOnce({
-				[Symbol.asyncIterator]: () => ({
-					async next() {
-						return { done: true }
-					},
-				}),
-			})
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 			const messageGenerator = handler.createMessage("test", [])
 			await messageGenerator.next()
@@ -330,21 +325,15 @@ describe("MiniMaxHandler", () => {
 		it("should handle thinking blocks in stream", async () => {
 			const thinkingContent = "Let me think about this..."
 
-			mockCreate.mockResolvedValueOnce({
-				[Symbol.asyncIterator]: () => ({
-					next: vitest
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: {
-								type: "content_block_start",
-								index: 0,
-								content_block: { type: "thinking", thinking: thinkingContent },
-							},
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			})
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: thinkingContent },
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -354,33 +343,24 @@ describe("MiniMaxHandler", () => {
 		})
 
 		it("should handle tool calls in stream", async () => {
-			mockCreate.mockResolvedValueOnce({
-				[Symbol.asyncIterator]: () => ({
-					next: vitest
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: {
-								type: "content_block_start",
-								index: 0,
-								content_block: {
-									type: "tool_use",
-									id: "tool-123",
-									name: "get_weather",
-									input: { city: "London" },
-								},
-							},
-						})
-						.mockResolvedValueOnce({
-							done: false,
-							value: {
-								type: "content_block_stop",
-								index: 0,
-							},
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			})
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "tool_use",
+							id: "tool-123",
+							name: "get_weather",
+							input: { city: "London" },
+						},
+					},
+					{
+						type: "content_block_stop",
+						index: 0,
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -398,6 +378,18 @@ describe("MiniMaxHandler", () => {
 	})
 
 	describe("Model Configuration", () => {
+		it("should correctly configure MiniMax-M3 model properties", () => {
+			const model = minimaxModels["MiniMax-M3"]
+			expect(model.maxTokens).toBe(16_384)
+			expect(model.contextWindow).toBe(1_000_000)
+			expect(model.supportsImages).toBe(true)
+			expect(model.supportsPromptCache).toBe(true)
+			expect(model.inputPrice).toBe(0.3)
+			expect(model.outputPrice).toBe(1.2)
+			expect(model.cacheWritesPrice).toBe(0.375)
+			expect(model.cacheReadsPrice).toBe(0.06)
+		})
+
 		it("should correctly configure MiniMax-M2 model properties", () => {
 			const model = minimaxModels["MiniMax-M2"]
 			expect(model.maxTokens).toBe(16_384)

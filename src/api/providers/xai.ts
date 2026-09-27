@@ -11,9 +11,9 @@ import { convertToResponsesApiInput } from "../transform/responses-api-input"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { getModelParams } from "../transform/model-params"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { isMcpTool } from "../../utils/mcp-name"
 
@@ -28,7 +28,7 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		super()
 		this.options = options
 
-		const apiKey = this.options.xaiApiKey ?? "not-provided"
+		const apiKey = this.options.xaiApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({
 			baseURL: "https://api.x.ai/v1",
@@ -144,7 +144,7 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		yield* processResponsesApiStream(stream, normalizeUsage)
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const model = this.getModel()
 
 		try {

@@ -47,5 +47,7 @@
 	"subtaskTag": "Sottoattività",
 	"deleteWithSubtasks": "Questo eliminerà anche {{count}} sottoattività. Sei sicuro?",
 	"expandSubtasks": "Espandi sottoattività",
-	"collapseSubtasks": "Comprimi sottoattività"
+	"collapseSubtasks": "Comprimi sottoattività",
+	"delegatedTag": "In attesa di sottoattività",
+	"interruptedTag": "Interrotta"
 }

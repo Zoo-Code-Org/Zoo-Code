@@ -36,7 +36,7 @@
 	"settings.vsCodeLmModelSelector.family.description": "Keluarga dari model bahasa (misalnya gpt-4)",
 	"settings.customStoragePath.description": "Path penyimpanan kustom. Biarkan kosong untuk menggunakan lokasi default. Mendukung path absolut (misalnya 'D:\\ZooCodeStorage')",
 	"settings.enableCodeActions.description": "Aktifkan perbaikan cepat Zoo Code.",
-	"settings.autoImportSettingsPath.description": "Path ke file konfigurasi ZooCode untuk diimpor secara otomatis saat ekstensi dimulai. Mendukung path absolut dan path relatif terhadap direktori home (misalnya '~/Documents/roo-code-settings.json'). Biarkan kosong untuk menonaktifkan impor otomatis.",
+	"settings.autoImportSettingsPath.description": "Path ke file konfigurasi ZooCode untuk diimpor secara otomatis saat ekstensi dimulai. Mendukung path absolut dan path relatif terhadap direktori home (misalnya '~/Documents/zoo-code-settings.json'). Biarkan kosong untuk menonaktifkan impor otomatis.",
 	"settings.maximumIndexedFilesForFileSearch.description": "Jumlah maksimum file yang akan diindeks untuk fitur pencarian file @. Nilai yang lebih besar memberikan hasil pencarian yang lebih baik di proyek besar tetapi mungkin menggunakan lebih banyak memori. Default: 10.000.",
 	"settings.useAgentRules.description": "Aktifkan pemuatan file AGENTS.md untuk aturan khusus agen (lihat https://agent-rules.org/)",
 	"settings.apiRequestTimeout.description": "Batas waktu respons API (detik, default: 600, rentang: 1–3600). Nilai lebih tinggi direkomendasikan untuk penyedia lokal. Penyedia tidak didukung: Amazon Bedrock, Google Gemini(directly or through the Vertex AI platform), Mistral, Moonshot, Ollama, Poe, VS Code LM API.",

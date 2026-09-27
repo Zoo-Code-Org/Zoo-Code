@@ -6,6 +6,7 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	kenariDefaultModelId,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -69,7 +70,7 @@ export const Kenari = ({
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
 				defaultModelId={kenariDefaultModelId}
-				models={routerModels?.["kenari"] ?? {}}
+				models={routerModels?.[providerIdentifiers.kenari] ?? {}}
 				modelIdKey="kenariModelId"
 				serviceName="Kenari"
 				serviceUrl="https://kenari.id/docs"

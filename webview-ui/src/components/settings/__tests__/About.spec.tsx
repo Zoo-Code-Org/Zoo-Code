@@ -151,6 +151,36 @@ describe("About", () => {
 		)
 	})
 
+	it("shows the telemetry checkbox as checked when the setting is explicitly enabled", () => {
+		render(
+			<TranslationProvider>
+				<About {...defaultProps} telemetrySetting="enabled" />
+			</TranslationProvider>,
+		)
+
+		expect(screen.getByRole("checkbox", { name: /telemetry/i })).toBeChecked()
+	})
+
+	it("shows the telemetry checkbox as checked when the setting is unset (disclosed opt-out default)", () => {
+		render(
+			<TranslationProvider>
+				<About {...defaultProps} telemetrySetting="unset" />
+			</TranslationProvider>,
+		)
+
+		expect(screen.getByRole("checkbox", { name: /telemetry/i })).toBeChecked()
+	})
+
+	it("does not show the telemetry checkbox as checked when the setting is disabled", () => {
+		render(
+			<TranslationProvider>
+				<About {...defaultProps} telemetrySetting="disabled" />
+			</TranslationProvider>,
+		)
+
+		expect(screen.getByRole("checkbox", { name: /telemetry/i })).not.toBeChecked()
+	})
+
 	it("renders export, import, and reset buttons", () => {
 		render(
 			<TranslationProvider>

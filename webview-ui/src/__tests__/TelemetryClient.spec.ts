@@ -77,12 +77,71 @@ describe("TelemetryClient", () => {
 			expect(posthog.init).not.toHaveBeenCalled()
 		})
 
-		it("doesn't initialize PostHog when telemetry is unset", () => {
+		it("initializes PostHog when telemetry is unset and credentials are present (disclosed opt-out default)", () => {
+			// Arrange
+			const API_KEY = "test-api-key"
+			const DISTINCT_ID = "test-user-id"
+
+			// Act
+			telemetryClient.updateTelemetryState("unset", API_KEY, DISTINCT_ID)
+
+			// Assert
+			expect(posthog.init).toHaveBeenCalledWith(
+				API_KEY,
+				expect.objectContaining({
+					api_host: "https://us.i.posthog.com",
+					persistence: "localStorage",
+					loaded: expect.any(Function),
+				}),
+			)
+		})
+
+		it("doesn't initialize PostHog when telemetry is unset but credentials are missing", () => {
 			// Act
 			telemetryClient.updateTelemetryState("unset")
 
 			// Assert
 			expect(posthog.init).not.toHaveBeenCalled()
+		})
+
+		it("doesn't initialize PostHog when vscode.env.isTelemetryEnabled is false, even with an explicit Accept", () => {
+			// Regression test: the webview's own PostHog client must respect the live VS
+			// Code global telemetry toggle the same way the extension-side gate does --
+			// otherwise a user's explicit Accept can still send events while VS Code's
+			// global telemetry is disabled.
+			const API_KEY = "test-api-key"
+			const DISTINCT_ID = "test-user-id"
+
+			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, false)
+
+			expect(posthog.init).not.toHaveBeenCalled()
+		})
+
+		it("initializes PostHog when vscode.env.isTelemetryEnabled is true and the user opted in", () => {
+			const API_KEY = "test-api-key"
+			const DISTINCT_ID = "test-user-id"
+
+			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, true)
+
+			expect(posthog.init).toHaveBeenCalledWith(
+				API_KEY,
+				expect.objectContaining({
+					api_host: "https://us.i.posthog.com",
+					persistence: "localStorage",
+					loaded: expect.any(Function),
+				}),
+			)
+		})
+
+		it("defaults vscodeTelemetryEnabled to true when the argument is omitted", () => {
+			// Callers on an old build (or during a state-hydration race) that don't yet
+			// pass this argument must not have telemetry silently disabled as a side effect.
+			const API_KEY = "test-api-key"
+			const DISTINCT_ID = "test-user-id"
+
+			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
+
+			expect(posthog.init).toHaveBeenCalled()
 		})
 	})
 

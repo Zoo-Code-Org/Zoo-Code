@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -16,29 +15,43 @@
 
         ## Biz Zoo Code'uz
 
-> Roo ekibinin 🦘🦘🦘 [son duyurusunu](https://x.com/mattrubens/status/2046636598859559114) görmüş olabilirsin. Kısacası ekip, [Roomote](https://roomote.dev/) üzerine odaklanırken Roo Code'un aktif gelişimini kademeli olarak azaltıyor. Bu haber birçok Roo kullanıcısı için zordu; bu eklenti bu topluluk için çok şey ifade ediyor.
+> Roo ekibi, [Roomote](https://roomote.dev/) üzerine odaklanmak için Roo
+> Code'un aktif geliştirmesini durdurduktan sonra Zoo Code bu projenin
+> geliştirilmesini sürdürüyor. İnşa ettikleri her şey için Roo ekibine
+> teşekkürler.
 >
-> Bu eklentiye verdikleri emek için tüm Roo ekibine teşekkür etmek istiyoruz. Burada herkesin adını tek tek anmayacağız, ama hepimiz onların olağanüstü geliştiriciler ve aynı derecede inanılmaz insanlar olduğu konusunda hemfikiriz. Roo ekibine teşekkürler.
->
-> Roo kullanıcıları her türden geliyor. Bazıları bunu günlük işlerinde profesyonel olarak kullanıyor, bazılarıysa akıl almaz derecede karmaşık iş akışları tasarlamak için kullanıyor. Bazıları Roo'nun kendisini geliştirirken, bazıları da Roo'nun kullandığı modelleri geliştiriyor (tam anlamıyla meta). Demek istediğimiz şu: topluluk çok çeşitli ve bir kanguru 🦘🦘🦘 seçkin ve asil bir hayvan olsa da farklı türlerden oluşan bir "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 bu eklentinin kullanıcı çeşitliliğini daha iyi yansıtıyor.
->
-> Bu yüzden **Zoo Code**'un bu önemli projenin geliştirilmesini sürdüreceğini duyurmak istiyoruz. Çekirdek ekip, daha önce Roo'ya katkıda bulunmuş ve bu eklentiye gerçekten önem veren geliştiricilerden oluşuyor. Model güncellemeleri yapmaya, hataları düzeltmeye ve özellikler yayınlamaya devam edeceğiz. Ama her şeyden önce, bu eklentiyi özel kılan topluluğun sesi olan seni dinlemek istiyoruz. Bu yüzden [Discord](https://discord.gg/VxfP4Vx3gX) sunucumuza, [Reddit](https://www.reddit.com/r/ZooCode) topluluğumuza katılabilir ya da [PR veya issue açabilirsin](https://github.com/Zoo-Code-Org/Zoo-Code); ama en önemlisi, topluluk olarak ilgili, bağlantıda ve aktif kalmanı istiyoruz.
+> Çekirdek ekip, daha önce Roo'ya katkıda bulunmuş ve bu eklentiye gerçekten
+> önem veren geliştiricilerden oluşuyor. Model güncellemeleri yapmaya,
+> hataları düzeltmeye ve özellikler yayınlamaya devam edeceğiz ve bu
+> eklentiyi bu kadar özel kılan topluluğu yakından dinlemeyi planlıyoruz.
+> Bize katıl:
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), ya da
+> [PR veya issue aç](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
 ## Roo Code'dan Zoo Code'a geçiş
 
-Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
+Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da soruların olursa gel ve sor.
 
-## v3.68.0'daki Yenilikler
+## Zoo Code'un Roo Code'dan Sonra Ekledikleri
 
-- **GLM-5.2 destekli Friendli sağlayıcısı** — en yeni GLM modelini Friendli üzerinden kullan.
-- **Ollama için yerel thinking/reasoning desteği** — Ollama modellerini kullanırken reasoning çıktısını uçtan uca koru.
-- **Anthropic özel `apiModelId` düzeltmesi** — özel Anthropic model kimlikleri artık sessizce `claude-sonnet-4-5` modeline geri dönmek yerine seçili kalıyor.
-- Düzeltme: Ollama sağlayıcısında araç sonucu işleme ve erken bağlam yoğunlaştırma.
-- Düzeltme: yetkilendirilen bir alt görev kesintiye uğradığında görev üst-alt bağlantısını koru.
-- Daha güvenilir yanıtlar için Anthropic Vertex Claude içerik bloğu işleme iyileştirildi.
-- CI, nightly yayınlama ve bağımlılık/araç güncellemeleri.
+Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli şunlarla genişletmeye devam ediyor:
+
+- **Semble kod tabanı zekâsı** — otomatik kurulumla çalışan, ayrı bir indeksleme iş akışı gerektirmeyen hızlı ve isteğe bağlı semantik kod araması.
+- **Daha güçlü Orchestrator iş akışları** — daha güvenli görev devri, paralel görev koordinasyonu, güvenilir üst/alt görev kurtarma ve alt görevlerle sağlayıcı profilleri arasında daha iyi yalıtım.
+- **Destructive Command Guard (DCG) ile daha uzun otonom çalıştırmalar** — güvenilir işler tekrarlanan onay istekleri olmadan sürerken tehlikeli komutları otomatik olarak engeller.
+- **En yeni modeller** — yeni Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax ve diğer model aileleri için sürekli destek.
+- **Daha fazla bağlantı seçeneği** — Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go ve çok daha fazlası dahil yeni ve genişletilmiş sağlayıcılar.
+- **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
+- **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
+
+## v3.84.0'daki Yenilikler
+
+- ✨ **Yeni SOTA modelleri eklendi:** Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.
+- 🧭 **Daha güvenilir görevler ve alt görevler:** Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.
+- 🛠️ **Daha güvenilir terminal, sağlayıcı ve kod arama davranışı:** Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 
@@ -62,24 +75,9 @@ Zoo Code, sizin çalışma şeklinize uyum sağlar, tam tersi değil:
 
 Daha fazla: [Modları kullanma](https://docs.zoocode.dev/basic-usage/using-modes) • [Özel modlar](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Eğitim ve Özellik Videoları
-
-<div align="center">
-
-|                                                                                                                                                                         |                                                                                                                                                                               |                                                                                                                                                                             |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Zoo Code Kurulumu</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Profilleri Yapılandırma</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Kod Tabanı İndeksleme</b> |
-|    <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Özel Modlar</b>    |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Kontrol Noktaları</b>    |    <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Bağlam Yönetimi</b>    |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Daha fazla hızlı eğitim ve özellik videosu...</a>
-</p>
-
 ## Kaynaklar
 
 - **[Dokümantasyon](https://docs.zoocode.dev):** Zoo Code'u yükleme, yapılandırma ve ustalaşma konusundaki resmi kılavuz.
-- **[YouTube Kanalı](https://youtube.com/@roocodeyt?feature=shared):** Eğitimleri izleyin ve özellikleri çalışırken görün.
 - **[Discord Sunucusu](https://discord.gg/VxfP4Vx3gX):** Gerçek zamanlı yardım ve tartışma için topluluğa katılın.
 - **[Reddit Topluluğu](https://www.reddit.com/r/ZooCode):** Deneyimlerinizi paylaşın ve başkalarının ne inşa ettiğini görün.
 - **[GitHub Sorunları](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Hataları bildirin ve gelişimi takip edin.

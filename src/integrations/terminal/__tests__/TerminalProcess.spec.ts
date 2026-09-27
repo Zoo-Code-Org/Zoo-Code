@@ -59,6 +59,25 @@ describe("TerminalProcess", () => {
 	})
 
 	describe("run", () => {
+		it("rejects the command promise when terminal process startup rejects", async () => {
+			const startupError = new Error("terminal startup failed")
+			const runSpy = vi.spyOn(TerminalProcess.prototype, "run").mockRejectedValueOnce(startupError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+			const commandPromise = mockTerminalInfo.runCommand("test command", {
+				onLine: vi.fn(),
+				onCompleted: vi.fn(),
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			})
+
+			await expect(commandPromise).rejects.toThrow("terminal startup failed")
+			expect(runSpy).toHaveBeenCalledWith("test command")
+
+			runSpy.mockRestore()
+			consoleErrorSpy.mockRestore()
+		})
+
 		it("emits no_shell_integration with commandSubmitted=false when shell integration startup times out", async () => {
 			vi.useFakeTimers()
 			const previousTimeout = Terminal.getShellIntegrationTimeout()

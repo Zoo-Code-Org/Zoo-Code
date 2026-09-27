@@ -55,6 +55,7 @@
 		"failed_remove_directory": "Gagal menghapus direktori tugas: {{error}}",
 		"custom_storage_path_unusable": "Path penyimpanan kustom \"{{path}}\" tidak dapat digunakan, akan menggunakan path default",
 		"cannot_access_path": "Tidak dapat mengakses path {{path}}: {{error}}",
+		"path_outside_workspace": "Path berada di luar workspace",
 		"settings_import_failed": "Impor pengaturan gagal: {{error}}.",
 		"mistake_limit_guidance": "Ini mungkin menunjukkan kegagalan dalam proses pemikiran model atau ketidakmampuan untuk menggunakan tool dengan benar, yang dapat diatasi dengan beberapa panduan pengguna (misalnya \"Coba bagi tugas menjadi langkah-langkah yang lebih kecil\").",
 		"violated_organization_allowlist": "Gagal menjalankan tugas: profil saat ini tidak kompatibel dengan pengaturan organisasi kamu",
@@ -72,6 +73,10 @@
 		"url_fetch_failed": "Gagal mengambil konten URL: {{error}}",
 		"url_fetch_error_with_url": "Error mengambil konten untuk {{url}}: {{error}}",
 		"command_timeout": "Eksekusi perintah waktu habis setelah {{seconds}} detik",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard diaktifkan, tetapi tidak tersedia untuk platform ini",
+			"enableFailed": "Tidak dapat mengaktifkan Destructive Command Guard: {{error}}"
+		},
 		"share_task_failed": "Gagal membagikan tugas. Silakan coba lagi.",
 		"share_no_active_task": "Tidak ada tugas aktif untuk dibagikan",
 		"share_auth_required": "Autentikasi diperlukan. Silakan masuk untuk berbagi tugas.",
