@@ -17,7 +17,9 @@
 		"condenseContext": "Bağlamı akıllıca yoğunlaştır",
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
-		"backToParentTask": "Üst görev"
+		"backToParentTask": "Üst görev",
+		"waitingOnSubtask": "Alt görev bekleniyor",
+		"goToSubtask": "Alt göreve git"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
@@ -185,7 +187,7 @@
 		"current": "Mevcut"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
+		"wantsToFetch": "Zoo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo bu dosyayı okumak istiyor",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
 		"wantsToEditProtected": "Zoo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
 		"wantsToCreate": "Zoo yeni bir dosya oluşturmak istiyor",
-		"wantsToSearchReplace": "Roo bu dosyada arama ve değiştirme yapmak istiyor",
-		"didSearchReplace": "Roo bu dosyada arama ve değiştirme yaptı",
+		"wantsToSearchReplace": "Zoo bu dosyada arama ve değiştirme yapmak istiyor",
+		"didSearchReplace": "Zoo bu dosyada arama ve değiştirme yaptı",
 		"wantsToInsert": "Zoo bu dosyaya içerik eklemek istiyor",
 		"wantsToInsertWithLineNumber": "Zoo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
 		"wantsToInsertAtEnd": "Zoo bu dosyanın sonuna içerik eklemek istiyor",
@@ -231,6 +233,7 @@
 		"exitStatus": "{{exitCode}} durumuyla çıkıldı",
 		"malformedCommand": "Hatalı komut: shell sozdizimi hatasi",
 		"manageCommands": "Komut İzinlerini Yönet",
+		"denied": "Komut reddedildi",
 		"commandManagementDescription": "Komut izinlerini yönetin: Otomatik yürütmeye izin vermek için ✓'e, yürütmeyi reddetmek için ✗'e tıklayın. Desenler açılıp kapatılabilir veya listelerden kaldırılabilir. <settingsLink>Tüm ayarları görüntüle</settingsLink>",
 		"addToAllowed": "İzin verilenler listesine ekle",
 		"removeFromAllowed": "İzin verilenler listesinden kaldır",
@@ -342,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Claude Sonnet 5 desteği — en yeni Claude modeli artık Anthropic, Bedrock ve Vertex sağlayıcılarında kullanılabilir.",
-			"highlight2": "Semble v0.4.1 yükseltmesi — düzleştirilmiş sonuç ayrıştırma ve yerelleştirilmiş durum mesajları.",
-			"highlight3": "Görev yaşam döngüsü durum geçiş koruması — yeni bir durum geçiş koruması ve başlangıç yetkilendirme uzlaştırması geçersiz görev durum geçişlerini önler."
+			"highlight1": "✨ Yeni SOTA modelleri eklendi: Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.",
+			"highlight2": "🧭 Daha güvenilir görevler ve alt görevler: Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.",
+			"highlight3": "🛠️ Daha güvenilir terminal, sağlayıcı ve kod arama davranışı: Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

@@ -17,7 +17,9 @@
 		"condenseContext": "Inteligentnie skondensuj kontekst",
 		"openApiHistory": "Otwórz historię API",
 		"openUiHistory": "Otwórz historię UI",
-		"backToParentTask": "Zadanie nadrzędne"
+		"backToParentTask": "Zadanie nadrzędne",
+		"waitingOnSubtask": "Oczekuje na podzadanie",
+		"goToSubtask": "Przejdź do podzadania"
 	},
 	"unpin": "Odepnij",
 	"pin": "Przypnij",
@@ -185,7 +187,7 @@
 		"current": "Bieżący"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
+		"wantsToFetch": "Zoo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo chce przeczytać ten plik",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo chce edytować ten plik poza obszarem roboczym",
 		"wantsToEditProtected": "Zoo chce edytować chroniony plik konfiguracyjny",
 		"wantsToCreate": "Zoo chce utworzyć nowy plik",
-		"wantsToSearchReplace": "Roo chce wykonać wyszukiwanie i zamianę w tym pliku",
-		"didSearchReplace": "Roo wykonał wyszukiwanie i zamianę w tym pliku",
+		"wantsToSearchReplace": "Zoo chce wykonać wyszukiwanie i zamianę w tym pliku",
+		"didSearchReplace": "Zoo wykonał wyszukiwanie i zamianę w tym pliku",
 		"wantsToInsert": "Zoo chce wstawić zawartość do tego pliku",
 		"wantsToInsertWithLineNumber": "Zoo chce wstawić zawartość do tego pliku w linii {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo chce dodać zawartość na końcu tego pliku",
@@ -231,6 +233,7 @@
 		"exitStatus": "Zakończono ze statusem {{exitCode}}",
 		"malformedCommand": "Nieprawidlowe polecenie: blad skladni shell",
 		"manageCommands": "Polecenia zatwierdzone automatycznie",
+		"denied": "Polecenie odrzucone",
 		"addToAllowed": "Dodaj do listy dozwolonych",
 		"removeFromAllowed": "Usuń z listy dozwolonych",
 		"addToDenied": "Dodaj do listy odrzuconych",
@@ -341,9 +344,9 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "Obsługa Claude Sonnet 5 — najnowszy model Claude jest teraz dostępny u dostawców Anthropic, Bedrock i Vertex.",
-			"highlight2": "Aktualizacja do Semble v0.4.1 — spłaszczony parsing wyników i zlokalizowane komunikaty stanu.",
-			"highlight3": "Strażnik przejścia stanu cyklu życia zadań — nowy strażnik przejścia stanu i uzgadnianie delegacji przy uruchomieniu zapobiegają nieprawidłowym przejściom stanu zadań."
+			"highlight1": "✨ Dodano nowe modele SOTA: Korzystaj z GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 u obsługiwanych providerów.",
+			"highlight2": "🧭 Bardziej niezawodne zadania i podzadania: Zachowaj izolację delegowanych trybów, utrzymuj linki do podzadań po wielokrotnym zatrzymaniu i chroń ustawienia orchestratora, gdy polecenia slash zmieniają tryb.",
+			"highlight3": "🛠️ Bardziej niezawodne działanie terminala, providerów i wyszukiwania kodu: Usprawnij terminal w Windows i środowiskach innych niż angielskie, popraw odpowiedzi oraz anulowanie u providerów i spraw, aby wyszukiwanie kodu bardziej konsekwentnie korzystało z właściwego workspace."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

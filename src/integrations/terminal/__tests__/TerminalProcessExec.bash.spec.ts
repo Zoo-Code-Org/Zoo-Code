@@ -3,6 +3,7 @@
 import * as vscode from "vscode"
 import { execSync } from "child_process"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -176,11 +177,17 @@ async function testTerminalCommand(
 		// Set up the mock stream with real command output and exit code
 		const { stream, exitCode } = createRealCommandStream(command)
 
-		// Configure the mock terminal to return our stream
+		// Configure the mock terminal to return our stream. Reused as the SAME object
+		// for the start/end event triggers below -- TerminalRegistry's end handler
+		// correlates events to TerminalProcess.ownExecution by identity (see #800 fix),
+		// so a real VSCode-like flow must reference this same execution throughout,
+		// exactly as the real API's TerminalShellExecution object would be.
+		const mockExecution = {
+			commandLine: { value: command },
+			read: vi.fn().mockReturnValue(stream),
+		}
 		mockTerminal.shellIntegration.executeCommand.mockImplementation(function () {
-			return {
-				read: vi.fn().mockReturnValue(stream),
-			}
+			return mockExecution
 		})
 
 		// Set up event listeners to capture output
@@ -212,30 +219,31 @@ async function testTerminalCommand(
 		const eventHandlers = (vscode as any).__eventHandlers
 
 		// Execute the command first to set up the process
-		terminalProcess.run(command)
+		const runPromise = terminalProcess.run(command)
 
 		// Trigger the start terminal shell execution event through VSCode mock
 		if (eventHandlers.startTerminalShellExecution) {
 			eventHandlers.startTerminalShellExecution({
 				terminal: mockTerminal,
-				execution: {
-					commandLine: { value: command },
-					read: () => stream,
-				},
+				execution: mockExecution,
 			})
 		}
 
-		// Wait for some output to be processed
-		await new Promise<void>((resolve) => {
-			terminalProcess.once("line", () => resolve())
-		})
-
-		// Then trigger the end event
+		// Trigger the end event after microtask-based stream consumption completes.
+		// The stream yields chunks as microtasks (async generator); setTimeout(0)
+		// fires after all pending microtasks, so the D marker will be consumed and
+		// the loop will have broken on sawEndMarker before this fires. Firing before
+		// that (e.g. after the first 'line' event) would cause DONE_SENTINEL to win
+		// the Promise.race and skip unconsumed chunks.
 		if (eventHandlers.endTerminalShellExecution) {
-			eventHandlers.endTerminalShellExecution({
-				terminal: mockTerminal,
-				exitCode: exitCode,
-			})
+			const _exitCode = exitCode
+			setTimeout(() => {
+				eventHandlers.endTerminalShellExecution({
+					terminal: mockTerminal,
+					execution: mockExecution,
+					exitCode: _exitCode,
+				})
+			}, 0)
 		}
 
 		// Store exit details for return
@@ -250,6 +258,7 @@ async function testTerminalCommand(
 
 		// Wait for the command to complete or timeout
 		await Promise.race([completedPromise, timeoutPromise])
+		await runPromise
 		// Calculate execution time in microseconds
 		// If endTime wasn't set (unlikely but possible), set it now
 		if (!timeRecorded) {
@@ -291,7 +300,7 @@ describe("TerminalProcess with Bash Command Output", () => {
 	beforeEach(() => {
 		// Reset the terminals array before each test
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses Bash-specific commands to test the same functionality

@@ -4,6 +4,7 @@ import path from "path"
 import { resolveVerbosity } from "../src/utils/vitest-verbosity"
 
 const { silent, reporters, onConsoleLog } = resolveVerbosity()
+const isCI = process.env.CI === "true"
 
 export default defineConfig({
 	plugins: [react()],
@@ -14,8 +15,10 @@ export default defineConfig({
 		reporters,
 		silent,
 		environment: "jsdom",
-		include: ["src/**/*.spec.ts", "src/**/*.spec.tsx"],
+		include: ["src/**/*.spec.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
 		onConsoleLog,
+		maxWorkers: isCI ? 1 : undefined,
+		testTimeout: isCI ? 15000 : 5000,
 		server: {
 			deps: {
 				inline: ["@radix-ui/react-slot"],
@@ -30,6 +33,10 @@ export default defineConfig({
 				"**/*.test.tsx",
 				"**/*.spec.ts",
 				"**/*.spec.tsx",
+				"**/*.visual.ts",
+				"**/*.visual.tsx",
+				"**/*.visual.fixture.ts",
+				"**/*.visual.fixture.tsx",
 				"**/vitest.setup.ts",
 				"**/vitest.config.ts",
 				"**/vite.config.ts",

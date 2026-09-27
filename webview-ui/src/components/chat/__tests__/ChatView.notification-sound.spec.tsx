@@ -1,10 +1,7 @@
 // npx vitest run src/components/chat/__tests__/ChatView.notification-sound.spec.tsx
 
 import React from "react"
-import { render, waitFor } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
+import { renderWithExtensionState, waitFor } from "@/utils/test-utils"
 
 import ChatView, { ChatViewProps } from "../ChatView"
 
@@ -257,16 +254,8 @@ const defaultProps: ChatViewProps = {
 	hideAnnouncement: () => {},
 }
 
-const queryClient = new QueryClient()
-
 const renderChatView = (props: Partial<ChatViewProps> = {}) => {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatView {...defaultProps} {...props} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+	return renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 }
 
 describe("ChatView - Notification Sound with Queued Messages", () => {

@@ -11,6 +11,14 @@
 				"types": "./dist/index.d.cts",
 				"default": "./dist/index.cjs"
 			}
+		},
+		"./model": {
+			"types": "./src/model.ts",
+			"import": "./src/model.ts"
+		},
+		"./provider-identifiers": {
+			"types": "./src/provider-identifiers.ts",
+			"import": "./src/provider-identifiers.ts"
 		}
 	},
 	"scripts": {
@@ -30,11 +38,11 @@
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "20.19.43",
-		"globals": "16.3.0",
-		"tsup": "8.5.0",
+		"@types/node": "22.20.1",
+		"globals": "16.5.0",
+		"tsup": "8.5.1",
 		"ajv": "8.20.0",
-		"vitest": "4.1.9",
-		"zod-to-json-schema": "3.25.1"
+		"vitest": "4.1.11",
+		"zod-to-json-schema": "3.25.2"
 	}
 }

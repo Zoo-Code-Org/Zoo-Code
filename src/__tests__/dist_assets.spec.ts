@@ -21,6 +21,7 @@ describe("dist assets", () => {
 			"tree-sitter-c_sharp.wasm",
 			"tree-sitter-css.wasm",
 			"tree-sitter-c.wasm",
+			"tree-sitter-dart.wasm",
 			"tree-sitter-elisp.wasm",
 			"tree-sitter-elixir.wasm",
 			"tree-sitter-elm.wasm",

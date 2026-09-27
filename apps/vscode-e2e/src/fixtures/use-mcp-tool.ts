@@ -1,5 +1,7 @@
 import { LLMock } from "@copilotkit/aimock"
 
+import { toolResultContains } from "./tool-result"
+
 const TEST_DIR_NAME = "use-mcp-tool-fixture"
 const FILESYSTEM_SERVER_NAME = "filesystem"
 const READ_FILE_RELATIVE_PATH = `${TEST_DIR_NAME}/mcp-read-target.txt`
@@ -99,7 +101,7 @@ export function addUseMcpToolResultFixtures(mock: InstanceType<typeof LLMock>) {
 
 		mock.addFixture({
 			match: {
-				toolCallId: fixture.toolCallId,
+				predicate: (req) => toolResultContains(req, fixture.toolCallId, []),
 			},
 			response: {
 				toolCalls: [

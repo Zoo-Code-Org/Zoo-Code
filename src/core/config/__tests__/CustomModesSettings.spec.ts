@@ -51,7 +51,7 @@ describe("CustomModesSettings", () => {
 		})
 
 		it("rejects missing customModes field", () => {
-			const invalidSettings = {} as any
+			const invalidSettings = {}
 
 			expect(() => {
 				customModesSettingsSchema.parse(invalidSettings)
@@ -115,7 +115,7 @@ describe("CustomModesSettings", () => {
 				customModes: [
 					{
 						...validMode,
-						groups: ["invalid_group"] as any,
+						groups: ["invalid_group"],
 					},
 				],
 			}

@@ -159,6 +159,28 @@ describe("Zoo Gateway Fetchers", () => {
 	})
 
 	describe("parseZooGatewayModel", () => {
+		it("enables image attachment from Zoo Gateway vision tags", () => {
+			const result = parseZooGatewayModel({
+				id: "anthropic/claude-sonnet-4.5",
+				model: {
+					id: "anthropic/claude-sonnet-4.5",
+					object: "model",
+					owned_by: "anthropic",
+					name: "Claude Sonnet 4.5",
+					context_window: 200000,
+					max_tokens: 64000,
+					type: "language",
+					tags: ["tool-use", "vision"],
+					pricing: {
+						input: "3.00",
+						output: "15.00",
+					},
+				},
+			})
+
+			expect(result.supportsImages).toBe(true)
+		})
+
 		it("delegates to the vercel-ai-gateway parser", () => {
 			const result = parseZooGatewayModel({
 				id: "anthropic/claude-sonnet-4",

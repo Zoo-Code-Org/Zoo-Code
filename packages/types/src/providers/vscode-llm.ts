@@ -1,4 +1,14 @@
+import { z } from "zod"
+
 import type { ModelInfo } from "../model.js"
+
+export const vsCodeLmModelsMessageTypes = ["requestVsCodeLmModels", "vsCodeLmModels"] as const
+
+export const vsCodeLmModelsMessageTypeSchema = z.enum(vsCodeLmModelsMessageTypes)
+
+export const VsCodeLmModelsMessageType = vsCodeLmModelsMessageTypeSchema.enum
+
+export type VsCodeLmModelsMessageType = z.infer<typeof vsCodeLmModelsMessageTypeSchema>
 
 export type VscodeLlmModelId = keyof typeof vscodeLlmModels
 

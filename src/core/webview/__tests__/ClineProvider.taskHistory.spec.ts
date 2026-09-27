@@ -2,9 +2,12 @@
 
 import * as vscode from "vscode"
 import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
+import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
+import { Task } from "../../task/Task"
+import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
 
 // Mock setup
@@ -240,6 +243,7 @@ vi.mock("@roo-code/cloud", () => ({
 				getOrganizationMemberships: vi.fn().mockResolvedValue([]),
 				getUserSettings: vi.fn().mockReturnValue(null),
 				isTaskSyncEnabled: vi.fn().mockReturnValue(false),
+				off: vi.fn(),
 			}
 		},
 	},
@@ -382,6 +386,32 @@ describe("ClineProvider Task History Synchronization", () => {
 	const findCallsByType = (calls: any[][], type: string) => {
 		return calls.filter((call) => call[0]?.type === type)
 	}
+
+	it("uses per-task files without registering a globalState write-through callback", () => {
+		expect(provider.taskHistoryStore["onWrite"]).toBeUndefined()
+	})
+
+	it("does not write task history to globalState after a history mutation", async () => {
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.updateTaskHistory(createHistoryItem({ id: "file-backed-task", task: "File-backed task" }), {
+			broadcast: false,
+		})
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
+
+	it("does not write task history to globalState during disposal", async () => {
+		await provider.updateTaskHistory(
+			createHistoryItem({ id: "disposed-file-backed-task", task: "Disposed file-backed task" }),
+			{ broadcast: false },
+		)
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.dispose()
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
 
 	describe("updateTaskHistory", () => {
 		it("broadcasts task history update by default", async () => {
@@ -639,6 +669,91 @@ describe("ClineProvider Task History Synchronization", () => {
 	})
 
 	describe("task history includes all workspaces", () => {
+		it("uses the default profile name when no task is active and no profile is saved", async () => {
+			await provider["updateGlobalState"]("currentApiConfigName", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.currentTaskId).toBeUndefined()
+			expect(state.currentApiConfigName).toBe("default")
+		})
+
+		it("projects the active task's local mode and provider profile", async () => {
+			const activeTask = {
+				taskId: "task-local-context",
+				taskMode: "ask",
+				taskApiConfigName: undefined,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "task-local-model",
+				},
+				clineMessages: [],
+				todoList: [],
+				messageQueueService: { messages: [] },
+			}
+			// The module-level Task mock intentionally implements only the fields this provider-state test reads.
+			provider["taskRegistry"].push(activeTask as unknown as Task)
+			await provider.updateTaskHistory(
+				createHistoryItem({
+					id: activeTask.taskId,
+					task: "Task-local context",
+					mode: "ask",
+					apiConfigName: undefined,
+				}),
+				{ broadcast: false },
+			)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.mode).toBe("ask")
+			expect(state.currentApiConfigName).toBeUndefined()
+			expect(state.apiConfiguration).toEqual(activeTask.apiConfiguration)
+			expect(state.currentTaskId).toBe(activeTask.taskId)
+		})
+
+		it("validates and applies the delegated child's effective profile", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "allowed-child-model",
+				consecutiveMistakeLimit: 7,
+			}
+			const isProfileAllowed = vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(true)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await provider.createTask("child", undefined, parentTask, {
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "allowed-child",
+					apiConfiguration: effectiveConfiguration,
+				},
+			})
+
+			expect(isProfileAllowed).toHaveBeenCalledWith(effectiveConfiguration, expect.anything())
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(expect.objectContaining({ consecutiveMistakeLimit: 7 }))
+		})
+
+		it("rejects a delegated child when its effective profile is not allowed", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "blocked-child-model",
+			}
+			vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(false)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await expect(
+				provider.createTask("child", undefined, parentTask, {
+					startTask: false,
+					handoffExecutionContext: {
+						mode: "ask",
+						apiConfigName: "blocked-child",
+						apiConfiguration: effectiveConfiguration,
+					},
+				}),
+			).rejects.toThrow("errors.violated_organization_allowlist")
+			expect(vi.mocked(Task)).not.toHaveBeenCalled()
+		})
+
 		it("getStateToPostToWebview returns tasks from all workspaces", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
@@ -778,6 +893,82 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(item).toBeDefined()
 			// The second write (tokensIn: 222) should be the last one since writes are serialized
 			expect(item!.tokensIn).toBe(222)
+		})
+	})
+
+	describe("taskCreationCallback — onTaskCompleted listener", () => {
+		function makeFakeTask(taskId: string) {
+			const listeners: Record<string, ((...args: unknown[]) => unknown)[]> = {}
+			return {
+				taskId,
+				on: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners[event] = listeners[event] ?? []
+					listeners[event].push(fn)
+				},
+				// Returns a promise that resolves when all async listeners have settled.
+				emit: async (event: string, ...args: unknown[]) => {
+					await Promise.all((listeners[event] ?? []).map((fn) => Promise.resolve(fn(...args))))
+				},
+			}
+		}
+
+		it("writes completed status when task is not already completed", async () => {
+			const existing = createHistoryItem({ id: "task-cb-1", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const fakeTask = makeFakeTask("task-cb-1")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-1", {}, {})
+
+			const stored = provider.taskHistoryStore.get("task-cb-1")
+			expect(stored?.status).toBe("completed")
+		})
+
+		it("skips the write when task is already completed", async () => {
+			const existing = createHistoryItem({ id: "task-cb-2", task: "T", status: "completed" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const updateSpy = vi.spyOn(provider, "updateTaskHistory")
+
+			const fakeTask = makeFakeTask("task-cb-2")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-2", {}, {})
+
+			// updateTaskHistory is called initially to store the item, but should NOT be
+			// called again by onTaskCompleted since it's already completed.
+			const onTaskCompletedCalls = updateSpy.mock.calls.filter((c) => {
+				const item = c[0] as HistoryItem
+				return item?.id === "task-cb-2" && item?.status === "completed"
+			})
+			// It was written with completed status already; the callback must not re-write.
+			expect(onTaskCompletedCalls.length).toBe(0)
+		})
+
+		it("logs and does not throw when updateTaskHistory rejects", async () => {
+			const existing = createHistoryItem({ id: "task-cb-3", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			vi.spyOn(provider, "updateTaskHistory").mockRejectedValueOnce(new Error("disk full"))
+			const logSpy = vi.spyOn(provider as any, "log")
+
+			const fakeTask = makeFakeTask("task-cb-3")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
+
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
+		})
+
+		it("emits delegated completion through the provider after the child is disposed", () => {
+			const listener = vi.fn()
+			provider.on(RooCodeEventName.TaskCompleted, listener)
+
+			provider.emitDelegatedTaskCompleted("child-task", {} as never, {})
+
+			expect(listener).toHaveBeenCalledTimes(1)
+			expect(listener).toHaveBeenCalledWith("child-task", {}, {})
 		})
 	})
 })

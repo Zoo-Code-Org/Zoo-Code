@@ -254,6 +254,22 @@ describe("WorkspaceTracker", () => {
 		vitest.runAllTimers()
 	})
 
+	it("should catch workspace reinitialization failures after a path change", async () => {
+		const initializationError = new Error("workspace scan failed")
+		const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => undefined)
+		;(listFiles as Mock).mockRejectedValue(initializationError)
+		;(getWorkspacePath as Mock).mockReturnValue("/test/new-workspace")
+
+		await registeredTabChangeCallback!()
+		await vitest.advanceTimersByTimeAsync(300)
+
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"[WorkspaceTracker] Failed to reset workspace:",
+			initializationError,
+		)
+		consoleErrorSpy.mockRestore()
+	})
+
 	it("should not update file paths if workspace changes during initialization", async () => {
 		// Setup initial workspace path
 		;(getWorkspacePath as Mock).mockReturnValue("/test/workspace")

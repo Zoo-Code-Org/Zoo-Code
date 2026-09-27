@@ -9,6 +9,9 @@ vi.mock("node:fs", () => ({
 }))
 
 const mockCreate = vi.fn()
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -53,7 +56,7 @@ describe("QwenCodeHandler Native Tools", () => {
 	]
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		// Mock credentials file
 		const mockCredentials = {
@@ -70,20 +73,13 @@ describe("QwenCodeHandler Native Tools", () => {
 			apiModelId: "qwen3-coder-plus",
 		}
 		handler = new QwenCodeHandler(mockOptions)
-
-		// Clear NativeToolCallParser state before each test
-		NativeToolCallParser.clearRawChunkState()
 	})
 
 	describe("Native Tool Calling Support", () => {
 		it("should include tools in request when model supports native tools and tools are provided", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -107,13 +103,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should include tool_choice when provided", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -130,13 +122,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should always include tools and tool_choice (tools are guaranteed to be present after ALWAYS_AVAILABLE_TOOLS)", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -151,9 +139,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should yield tool_call_partial chunks during streaming", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -170,8 +158,8 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -186,19 +174,16 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
 				tools: testTools,
 			})
 
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({
 				type: "tool_call_partial",
@@ -218,13 +203,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should set parallel_tool_calls based on metadata", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -241,9 +222,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should yield tool_call_end events when finish_reason is tool_calls", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -260,8 +241,8 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {},
@@ -269,26 +250,30 @@ describe("QwenCodeHandler Native Tools", () => {
 							},
 						],
 						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
 				tools: testTools,
 			})
 
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 			for await (const chunk of stream) {
 				// Simulate what Task.ts does: when we receive tool_call_partial,
 				// process it through NativeToolCallParser to populate rawChunkTracker
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}
@@ -302,51 +287,159 @@ describe("QwenCodeHandler Native Tools", () => {
 			expect(endChunks[0].id).toBe("call_qwen_test")
 		})
 
+		it("emits completion only for identified calls and clears completed IDs", async () => {
+			const toolCall = (id?: string) => ({
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, id, function: { name: "test_tool", arguments: '{"arg1":"value"}' } },
+							],
+						},
+					},
+				],
+			})
+			mockCreate
+				.mockImplementationOnce(() =>
+					asyncStreamFrom([toolCall(), { choices: [{ delta: {}, finish_reason: "tool_calls" }] }]),
+				)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom([toolCall("call_qwen_stop"), { choices: [{ delta: {}, finish_reason: "stop" }] }]),
+				)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						toolCall("call_qwen_once"),
+						{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+						{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+					]),
+				)
+
+			const createMessage = () => handler.createMessage("test prompt", [], { taskId: "task", tools: testTools })
+			const idlessChunks = await collectStream(createMessage())
+			const stoppedChunks = await collectStream(createMessage())
+			const completedChunks = await collectStream(createMessage())
+
+			expect(idlessChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(stoppedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(completedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_qwen_once" },
+			])
+		})
+
+		it("isolates overlapping tool-call finalization between provider streams", async () => {
+			let releaseFirstStream: (() => void) | undefined
+			let markFirstStreamPaused: (() => void) | undefined
+			const firstStreamRelease = new Promise<void>((resolve) => {
+				releaseFirstStream = resolve
+			})
+			const firstStreamPaused = new Promise<void>((resolve) => {
+				markFirstStreamPaused = resolve
+			})
+			const firstStream = async function* () {
+				yield {
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_qwen_a",
+										function: { name: "test_tool", arguments: '{"arg1":"a' },
+									},
+								],
+							},
+						},
+					],
+				}
+				markFirstStreamPaused?.()
+				await firstStreamRelease
+				yield { choices: [{ delta: {}, finish_reason: "tool_calls" }] }
+			}
+			const secondStream = asyncStreamFrom([
+				{
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_qwen_b",
+										function: { name: "test_tool", arguments: '{"arg1":"b' },
+									},
+								],
+							},
+						},
+					],
+				},
+				{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+			])
+			mockCreate.mockImplementationOnce(() => firstStream()).mockImplementationOnce(() => secondStream)
+
+			const firstChunksPromise = collectStreamAndParseToolCalls(
+				handler.createMessage("first", [], { taskId: "task-a", tools: testTools }),
+			)
+			await firstStreamPaused
+			const secondChunks = await collectStreamAndParseToolCalls(
+				handler.createMessage("second", [], { taskId: "task-b", tools: testTools }),
+			)
+			releaseFirstStream?.()
+			const firstChunks = await firstChunksPromise
+
+			expect(secondChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_qwen_b" },
+			])
+			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_qwen_a" },
+			])
+			expect(firstChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_qwen_a", name: "test_tool" },
+				{ type: "tool_call_delta", id: "call_qwen_a", delta: '{"arg1":"a' },
+			])
+			expect(secondChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_qwen_b", name: "test_tool" },
+				{ type: "tool_call_delta", id: "call_qwen_b", delta: '{"arg1":"b' },
+			])
+		})
+
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
-					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -356,28 +449,25 @@ describe("QwenCodeHandler Native Tools", () => {
 								index: 0,
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
 
 		it("should preserve thinking block handling alongside tool calls", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -385,8 +475,8 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -403,32 +493,36 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {},
 								finish_reason: "tool_calls",
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
 				tools: testTools,
 			})
 
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 			for await (const chunk of stream) {
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}

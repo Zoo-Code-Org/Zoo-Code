@@ -1,19 +1,19 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { providerIdentifiers, openAiModelInfoSaneDefaults, type ProviderSettings } from "@roo-code/types"
+import { screen, fireEvent, waitFor } from "@testing-library/react"
+
+import { renderWithExtensionState } from "@/utils/test-utils"
 import { vi, describe, it, expect, beforeEach } from "vitest"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
 import React from "react"
 
 import SettingsView from "../SettingsView"
+import { vscode } from "@src/utils/vscode"
 
-// Mock vscode API
-const mockPostMessage = vi.fn()
-const mockVscode = {
-	postMessage: mockPostMessage,
-}
-;(global as any).acquireVsCodeApi = () => mockVscode
+const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: vi.fn(),
 }))
 
@@ -170,7 +170,14 @@ vi.mock("@src/components/modes/ModesView", () => ({
 }))
 
 vi.mock("@src/components/mcp/McpView", () => ({
-	default: () => null,
+	default: ({ mcpEnabled, setMcpEnabled }: any) => (
+		<button
+			data-testid="mcp-enabled-toggle"
+			data-mcp-enabled={String(mcpEnabled)}
+			onClick={() => setMcpEnabled(!mcpEnabled)}>
+			Toggle MCP
+		</button>
+	),
 }))
 
 // Mock Tab components
@@ -252,7 +259,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		uriScheme: "vscode",
 		settingsImportedAt: undefined,
 		apiConfiguration: {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 			apiModelId: "", // Empty string initially
 		},
 		alwaysAllowReadOnly: false,
@@ -261,7 +268,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		deniedCommands: [],
 		allowedMaxRequests: undefined,
 		allowedMaxCost: undefined,
-		language: "en",
+		language: "en" as const,
 		alwaysAllowExecute: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
@@ -280,7 +287,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		ttsEnabled: false,
 		ttsSpeed: 1.0,
 		soundVolume: 0.5,
-		telemetrySetting: "unset",
+		telemetrySetting: "unset" as const,
 		terminalOutputLineLimit: 500,
 		terminalOutputCharacterLimit: 50000,
 		terminalShellIntegrationTimeout: 3000,
@@ -328,11 +335,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	it("should not show unsaved changes when settings are automatically initialized", async () => {
 		const onDone = vi.fn()
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render
 		await waitFor(() => {
@@ -377,11 +380,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			return <div data-testid="api-options">ApiOptions with Init</div>
 		})
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render and effects to run
 		await waitFor(() => {
@@ -428,11 +427,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		// Override the mock for this specific test
 		vi.mocked(ApiOptions).mockImplementation(ApiOptionsWithButton)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render
 		await waitFor(() => {
@@ -463,17 +458,13 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const stateWithUndefined = {
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: undefined,
 			},
 		}
 		;(useExtensionState as any).mockReturnValue(stateWithUndefined)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for initialization
 		await waitFor(() => {
@@ -506,17 +497,13 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const stateWithNull = {
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: null,
 			},
 		}
 		;(useExtensionState as any).mockReturnValue(stateWithNull)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for initialization
 		await waitFor(() => {
@@ -566,11 +553,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			return <div data-testid="api-options">ApiOptions</div>
 		})
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for component to fully mount and ApiOptions effect to run
 		await waitFor(() => {
@@ -595,5 +578,187 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		// No dialog should appear
 		expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument()
+	})
+
+	it("buffers MCP enablement until Save", async () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="mcp" />, { queryClient })
+
+		const toggle = await screen.findByTestId("mcp-enabled-toggle")
+		fireEvent.click(toggle)
+
+		await waitFor(() => expect(toggle).toHaveAttribute("data-mcp-enabled", "true"))
+		expect(postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ mcpEnabled: true }),
+			}),
+		)
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ mcpEnabled: true }),
+			}),
+		)
+	})
+
+	it("buffers and saves the complete NanoGPT provider configuration from cached state", async () => {
+		const liveApiConfiguration = {
+			apiProvider: providerIdentifiers.nanogpt,
+			nanoGptApiKey: "original-key",
+			nanoGptModelId: "openai/original",
+			nanoGptRoutingPreference: "auto" as const,
+		}
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: liveApiConfiguration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<div>
+				<input
+					data-testid="cached-nanogpt-key"
+					value={apiConfiguration.nanoGptApiKey ?? ""}
+					onChange={(event) => setApiConfigurationField("nanoGptApiKey", event.target.value)}
+				/>
+				<input
+					data-testid="cached-nanogpt-model"
+					value={apiConfiguration.nanoGptModelId ?? ""}
+					onChange={(event) => setApiConfigurationField("nanoGptModelId", event.target.value)}
+				/>
+				<select
+					data-testid="cached-nanogpt-routing"
+					value={apiConfiguration.nanoGptRoutingPreference ?? "auto"}
+					onChange={(event) =>
+						setApiConfigurationField(
+							"nanoGptRoutingPreference",
+							event.target.value as
+								| "auto"
+								| "fast"
+								| "cheap"
+								| "latency"
+								| "throughput"
+								| "tools"
+								| "caching",
+						)
+					}>
+					<option value="auto">Automatic</option>
+					<option value="tools">Tool-capable</option>
+				</select>
+			</div>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+
+		expect(await screen.findByTestId("cached-nanogpt-key")).toHaveValue("original-key")
+		expect(screen.getByTestId("cached-nanogpt-model")).toHaveValue("openai/original")
+		expect(screen.getByTestId("cached-nanogpt-routing")).toHaveValue("auto")
+
+		fireEvent.change(screen.getByTestId("cached-nanogpt-key"), { target: { value: "unsaved-key" } })
+		fireEvent.change(screen.getByTestId("cached-nanogpt-model"), { target: { value: "openai/next" } })
+		fireEvent.change(screen.getByTestId("cached-nanogpt-routing"), { target: { value: "tools" } })
+
+		expect(liveApiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.nanogpt,
+			nanoGptApiKey: "original-key",
+			nanoGptModelId: "openai/original",
+			nanoGptRoutingPreference: "auto",
+		})
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "unsaved-key",
+				nanoGptModelId: "openai/next",
+				nanoGptRoutingPreference: "tools",
+			},
+		})
+	})
+
+	it("keeps OpenAI-compatible reasoning edits cached until Save despite a live state refresh", async () => {
+		const configuration: ProviderSettings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "custom-model",
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "low" },
+		}
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: configuration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<button
+				data-testid="select-compatible-max"
+				onClick={() => {
+					setApiConfigurationField("enableReasoningEffort", true)
+					setApiConfigurationField("openAiCustomModelInfo", {
+						...(apiConfiguration.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults),
+						reasoningEffort: "max",
+					})
+				}}>
+				{apiConfiguration.openAiCustomModelInfo?.reasoningEffort}
+			</button>
+		))
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+		fireEvent.click(await screen.findByTestId("select-compatible-max"))
+
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: { ...configuration },
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} />)
+
+		expect(screen.getByTestId("select-compatible-max")).toHaveTextContent("max")
+		expect(configuration.enableReasoningEffort).toBe(false)
+		expect(configuration.openAiCustomModelInfo?.reasoningEffort).toBe("low")
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				...configuration,
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
+			},
+		})
+	})
+
+	it("discards NanoGPT cached edits and restores the extension values", async () => {
+		const onDone = vi.fn()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "saved-key",
+				nanoGptModelId: "openai/saved",
+				nanoGptRoutingPreference: "cheap",
+			},
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<input
+				data-testid="cached-nanogpt-key"
+				value={apiConfiguration.nanoGptApiKey ?? ""}
+				onChange={(event) => setApiConfigurationField("nanoGptApiKey", event.target.value)}
+			/>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
+		fireEvent.change(await screen.findByTestId("cached-nanogpt-key"), { target: { value: "discard-me" } })
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+
+		await waitFor(() => expect(screen.getByTestId("cached-nanogpt-key")).toHaveValue("saved-key"))
+		expect(onDone).toHaveBeenCalledOnce()
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})
 })

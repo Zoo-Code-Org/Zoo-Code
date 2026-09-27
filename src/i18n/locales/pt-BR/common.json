@@ -59,6 +59,7 @@
 		"failed_remove_directory": "Falha ao remover o diretório de tarefas: {{error}}",
 		"custom_storage_path_unusable": "O caminho de armazenamento personalizado \"{{path}}\" não pode ser usado, será usado o caminho padrão",
 		"cannot_access_path": "Não é possível acessar o caminho {{path}}: {{error}}",
+		"path_outside_workspace": "O caminho está fora do espaço de trabalho",
 		"settings_import_failed": "Falha ao importar configurações: {{error}}",
 		"mistake_limit_guidance": "Isso pode indicar uma falha no processo de pensamento do modelo ou incapacidade de usar uma ferramenta adequadamente, o que pode ser mitigado com orientação do usuário (ex. \"Tente dividir a tarefa em etapas menores\").",
 		"violated_organization_allowlist": "Falha ao executar a tarefa: o perfil atual não é compatível com as configurações da sua organização",
@@ -76,6 +77,10 @@
 		"url_fetch_failed": "Falha ao buscar conteúdo da URL: {{error}}",
 		"url_fetch_error_with_url": "Erro ao buscar conteúdo para {{url}}: {{error}}",
 		"command_timeout": "A execução do comando excedeu o tempo limite após {{seconds}} segundos",
+		"destructiveCommandGuard": {
+			"unavailable": "O Destructive Command Guard está ativado, mas não está disponível para esta plataforma",
+			"enableFailed": "Não foi possível ativar o Destructive Command Guard: {{error}}"
+		},
 		"share_task_failed": "Falha ao compartilhar tarefa",
 		"share_no_active_task": "Nenhuma tarefa ativa para compartilhar",
 		"share_auth_required": "Autenticação necessária. Faça login para compartilhar tarefas.",

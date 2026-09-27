@@ -2,6 +2,7 @@
 
 import {
 	clineAsks,
+	clineMessageSchema,
 	getCompletionCheckpoint,
 	isIdleAsk,
 	isInteractiveAsk,
@@ -18,6 +19,20 @@ describe("ask messages", () => {
 				`${ask} is not classified`,
 			).toBe(true)
 		}
+	})
+})
+
+describe("clineMessageSchema autoApprovalDecision", () => {
+	it.each(["approve", "deny"] as const)("accepts %s", (autoApprovalDecision) => {
+		expect(clineMessageSchema.safeParse({ ts: 1, type: "ask", ask: "command", autoApprovalDecision }).success).toBe(
+			true,
+		)
+	})
+
+	it("rejects invalid decisions", () => {
+		expect(
+			clineMessageSchema.safeParse({ ts: 1, type: "ask", ask: "command", autoApprovalDecision: "ask" }).success,
+		).toBe(false)
 	})
 })
 

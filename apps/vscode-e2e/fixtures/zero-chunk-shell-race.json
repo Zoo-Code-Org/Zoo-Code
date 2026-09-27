@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "ZERO_CHUNK_SHELL_RACE_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"python3 -c \\\"\\nimport sys\\nprint('boom', file=sys.stderr)\\nsys.exit(1)\\n\\\"\"}",
+						"id": "call_zero_chunk_shell_race_001"
+					}
+				]
+			}
+		}
+	]
+}

@@ -11,17 +11,6 @@ vi.mock("../../prompts/responses", () => ({
 	},
 }))
 
-const { mockCaptureTaskCompleted } = vi.hoisted(() => ({
-	mockCaptureTaskCompleted: vi.fn(),
-}))
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			captureTaskCompleted: mockCaptureTaskCompleted,
-		},
-	},
-}))
-
 // Mock vscode module
 vi.mock("vscode", () => ({
 	workspace: {
@@ -53,7 +42,6 @@ describe("attemptCompletionTool", () => {
 	let mockGetConfiguration: ReturnType<typeof vi.fn<() => any>>
 
 	beforeEach(() => {
-		mockCaptureTaskCompleted.mockReset()
 		mockPushToolResult = vi.fn<PushToolResult>()
 		mockAskApproval = vi.fn<AskApproval>()
 		mockHandleError = vi.fn<HandleError>()
@@ -81,9 +69,14 @@ describe("attemptCompletionTool", () => {
 			emit: vi.fn(),
 			getTokenUsage: vi.fn().mockReturnValue({}),
 			toolUsage: {},
+			messageCounts: { user: 0, assistant: 0 },
 			taskId: "task_1",
 			apiConfiguration: { apiProvider: "test" } as any,
 			api: { getModel: vi.fn().mockReturnValue({ id: "test-model", info: {} }) } as any,
+			flushTelemetryInstallment: vi.fn(),
+			setPendingTaskAction: vi.fn(),
+			persistQueuedFeedbackAndAcknowledge: vi.fn().mockResolvedValue(true),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(true),
 		}
 	})
 
@@ -486,6 +479,10 @@ describe("attemptCompletionTool", () => {
 
 		describe("completion lifecycle", () => {
 			it("delegates an active subtask completion when the active parent awaits that child", async () => {
+				let markPersistenceReady!: () => void
+				const persistenceReady = new Promise<boolean>((resolve) => {
+					markPersistenceReady = () => resolve(true)
+				})
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
 					name: "attempt_completion",
@@ -506,13 +503,17 @@ describe("attemptCompletionTool", () => {
 						}
 						throw new Error(`unexpected task id ${id}`)
 					}),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					clearPendingTaskAction: vi.fn().mockResolvedValue(true),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+					emitDelegatedTaskCompleted: vi.fn(),
 				}
 
 				Object.assign(mockTask, {
 					taskId: "child-1",
 					parentTaskId: "parent-1",
 					providerRef: { deref: () => mockProvider },
+					waitForCurrentAssistantMessagePersistence: vi.fn(() => persistenceReady),
 				})
 				mockAskFinishSubTaskApproval.mockResolvedValue(true)
 
@@ -522,18 +523,191 @@ describe("attemptCompletionTool", () => {
 					pushToolResult: mockPushToolResult,
 					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
 					toolDescription: mockToolDescription,
+					toolCallId: "call-attempt-completion",
 				}
 
-				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+				const handlingCompletion = attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+				await vi.waitFor(() => expect(mockTask.waitForCurrentAssistantMessagePersistence).toHaveBeenCalled())
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+
+				markPersistenceReady()
+				await handlingCompletion
 
 				expect(mockAskFinishSubTaskApproval).toHaveBeenCalled()
+				expect(mockProvider.setPendingTaskAction).toHaveBeenCalledWith("child-1", {
+					kind: "finish_subtask",
+					actionId: "call-attempt-completion",
+					approvalText: JSON.stringify({ tool: "finishTask" }),
+					parentTaskId: "parent-1",
+					result: "9",
+				})
 				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
 					parentTaskId: "parent-1",
 					childTaskId: "child-1",
 					completionResultSummary: "9",
+					pendingActionId: "call-attempt-completion",
 				})
 				expect(mockTask.ask).not.toHaveBeenCalled()
 				expect(mockPushToolResult).toHaveBeenCalledWith("")
+				expect(mockTask.emitFinalTokenUsageUpdate).toHaveBeenCalledTimes(1)
+				expect(mockProvider.emitDelegatedTaskCompleted).toHaveBeenCalledTimes(1)
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
+			it("does not delegate or emit completion when child history persistence fails", async () => {
+				const persistenceError = new Error("history unavailable")
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "active", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+					waitForCurrentAssistantMessagePersistence: vi.fn().mockRejectedValue(persistenceError),
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+					toolCallId: "call-attempt-completion",
+				})
+
+				expect(mockHandleError).toHaveBeenCalledWith("persisting task completion", persistenceError)
+				expect(mockAskFinishSubTaskApproval).not.toHaveBeenCalled()
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
+			it("does not delegate or report an error when child history persistence is cancelled", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "active", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+					waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(false),
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+					toolCallId: "call-attempt-completion",
+				})
+
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(mockAskFinishSubTaskApproval).not.toHaveBeenCalled()
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
+			it("does not reopen the parent when persistence is cancelled during approval", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "active", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+					waitForCurrentAssistantMessagePersistence: vi
+						.fn()
+						.mockResolvedValueOnce(true)
+						.mockResolvedValueOnce(false),
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+					toolCallId: "call-attempt-completion",
+				})
+
+				expect(mockTask.waitForCurrentAssistantMessagePersistence).toHaveBeenCalledTimes(2)
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
 			})
 
 			it("falls through to standalone completion when parent delegation becomes stale after approval", async () => {
@@ -557,6 +731,8 @@ describe("attemptCompletionTool", () => {
 						}
 						throw new Error(`unexpected task id ${id}`)
 					}),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					clearPendingTaskAction: vi.fn().mockResolvedValue(true),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(false),
 				}
 
@@ -574,6 +750,7 @@ describe("attemptCompletionTool", () => {
 					pushToolResult: mockPushToolResult,
 					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
 					toolDescription: mockToolDescription,
+					toolCallId: "call-stale-completion",
 				}
 
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
@@ -582,10 +759,15 @@ describe("attemptCompletionTool", () => {
 					parentTaskId: "parent-1",
 					childTaskId: "child-1",
 					completionResultSummary: "9",
+					pendingActionId: "call-stale-completion",
 				})
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "call-stale-completion")
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 				expect(mockPushToolResult).not.toHaveBeenCalledWith("")
-				expect(mockCaptureTaskCompleted).not.toHaveBeenCalled()
+				// Flush once per validated attempt_completion call, before delegation is
+				// attempted, independent of whether delegation succeeds.
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 			})
 
 			it("does not resume the parent when the parent is no longer awaiting this child", async () => {
@@ -633,7 +815,61 @@ describe("attemptCompletionTool", () => {
 				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
 				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("child-1")
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
+			})
+
+			it("delegates an interrupted subtask completion when the parent is still delegated and awaiting that child", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) => {
+						if (id === "child-1") {
+							return Promise.resolve({ historyItem: { id, status: "interrupted" } })
+						}
+						if (id === "parent-1") {
+							return Promise.resolve({
+								historyItem: { id, status: "delegated", awaitingChildId: "child-1" },
+							})
+						}
+						throw new Error(`unexpected task id ${id}`)
+					}),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+					emitDelegatedTaskCompleted: vi.fn(),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				const callbacks: AttemptCompletionCallbacks = {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				}
+
+				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+
+				expect(mockAskFinishSubTaskApproval).toHaveBeenCalled()
+				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
+					parentTaskId: "parent-1",
+					childTaskId: "child-1",
+					completionResultSummary: "9",
+				})
+				expect(mockTask.ask).not.toHaveBeenCalled()
+				expect(mockPushToolResult).toHaveBeenCalledWith("")
+				expect(mockProvider.emitDelegatedTaskCompleted).toHaveBeenCalledTimes(1)
 			})
 
 			it("does not resume the parent when the parent is active but awaiting a different child", async () => {
@@ -681,7 +917,8 @@ describe("attemptCompletionTool", () => {
 				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
 				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("child-1")
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 			})
 
 			it("emits TaskCompleted only when completion is accepted", async () => {
@@ -706,7 +943,12 @@ describe("attemptCompletionTool", () => {
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
 
 				expect(mockHandleError).not.toHaveBeenCalled()
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("task_1")
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
+				expect(mockTask.waitForCurrentAssistantMessagePersistence).toHaveBeenCalledTimes(1)
+				expect(
+					vi.mocked(mockTask.waitForCurrentAssistantMessagePersistence!).mock.invocationCallOrder[0],
+				).toBeLessThan(vi.mocked(mockTask.emit!).mock.invocationCallOrder[0])
 				expect(mockTask.emit).toHaveBeenCalledWith(
 					RooCodeEventName.TaskCompleted,
 					"task_1",
@@ -715,7 +957,64 @@ describe("attemptCompletionTool", () => {
 				)
 			})
 
-			it("does not emit TaskCompleted when user provides follow-up feedback", async () => {
+			it("does not emit TaskCompleted when persistence is cancelled", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "2" },
+					nativeArgs: { result: "2" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+				mockTask.waitForCurrentAssistantMessagePersistence = vi.fn().mockResolvedValue(false)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
+			it("reports accepted-completion persistence failures with persistence context", async () => {
+				const persistenceError = new Error("history write failed")
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "2" },
+					nativeArgs: { result: "2" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+				mockTask.waitForCurrentAssistantMessagePersistence = vi.fn().mockRejectedValue(persistenceError)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).toHaveBeenCalledWith("persisting task completion", persistenceError)
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
+			it("reports telemetry but does not emit the public TaskCompleted event when user provides follow-up feedback", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
 					name: "attempt_completion",
@@ -741,7 +1040,12 @@ describe("attemptCompletionTool", () => {
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
 
 				expect(mockHandleError).not.toHaveBeenCalled()
-				expect(mockCaptureTaskCompleted).not.toHaveBeenCalled()
+				// Telemetry is reported on every model-initiated attempt_completion call,
+				// regardless of whether the user accepts, declines, or gives feedback.
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
+				// The public RooCodeEventName.TaskCompleted API event still only fires once
+				// the user actually accepts the result.
 				expect(mockTask.emit).not.toHaveBeenCalledWith(
 					RooCodeEventName.TaskCompleted,
 					expect.anything(),
@@ -750,6 +1054,296 @@ describe("attemptCompletionTool", () => {
 				)
 				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("<user_message>"))
 			})
+
+			it("durably persists queued completion feedback before continuing", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "One more change",
+					queuedMessageId: "queued-1",
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+					"queued-1",
+					"One more change",
+					undefined,
+				)
+				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("One more change"))
+			})
+
+			it("does not continue when queued completion feedback persistence fails", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "One more change",
+					queuedMessageId: "queued-1",
+				})
+				mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(false)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"inspecting site",
+					expect.objectContaining({ message: expect.stringContaining("queued-1") }),
+				)
+				expect(mockPushToolResult).not.toHaveBeenCalled()
+			})
+
+			it("records image-only completion feedback before continuing", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					images: ["data:image/png;base64,feedback"],
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "", ["data:image/png;base64,feedback"])
+				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			})
+
+			it("does not clear pending metadata when stale delegation continues without an action id", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "delegated", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn(),
+					clearPendingTaskAction: vi.fn(),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(false),
+				}
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
+					parentTaskId: "parent-1",
+					childTaskId: "child-1",
+					completionResultSummary: "Done",
+				})
+				expect(mockProvider.clearPendingTaskAction).not.toHaveBeenCalled()
+				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
+			})
 		})
+	})
+})
+
+describe("attemptCompletionTool telemetry invariants", () => {
+	function makeTask(overrides: Partial<Task> = {}): Partial<Task> {
+		return {
+			consecutiveMistakeCount: 0,
+			recordToolError: vi.fn(),
+			todoList: undefined,
+			say: vi.fn().mockResolvedValue(undefined),
+			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] }),
+			emitFinalTokenUsageUpdate: vi.fn(),
+			emit: vi.fn(),
+			getTokenUsage: vi.fn().mockReturnValue({}),
+			toolUsage: {},
+			messageCounts: { user: 0, assistant: 0 },
+			taskId: "task_1",
+			flushTelemetryInstallment: vi.fn(),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(true),
+			...overrides,
+		}
+	}
+
+	it("does not emit a duplicate telemetry installment when replaying an already-completed subtask from history", async () => {
+		const block: AttemptCompletionToolUse = {
+			type: "tool_use",
+			name: "attempt_completion",
+			params: { result: "done" },
+			nativeArgs: { result: "done" },
+			partial: false,
+		}
+		const mockProvider = {
+			log: vi.fn(),
+			getTaskWithId: vi.fn().mockImplementation((id: string) => {
+				if (id === "child-1") return Promise.resolve({ historyItem: { id, status: "completed" } })
+				throw new Error(`unexpected task id ${id}`)
+			}),
+			reopenParentFromDelegation: vi.fn(),
+		}
+
+		const task = makeTask({
+			taskId: "child-1",
+			parentTaskId: "parent-1",
+			toolUsage: { read_file: { attempts: 5, failures: 0 } },
+			messageCounts: { user: 3, assistant: 4 },
+		})
+		Object.assign(task, { providerRef: { deref: () => mockProvider } })
+
+		await attemptCompletionTool.handle(task as Task, block, {
+			askApproval: vi.fn(),
+			handleError: vi.fn(),
+			pushToolResult: vi.fn(),
+			askFinishSubTaskApproval: vi.fn(),
+			toolDescription: vi.fn(),
+		} as AttemptCompletionCallbacks)
+
+		expect(task.flushTelemetryInstallment).not.toHaveBeenCalled()
+	})
+
+	it("does not emit the public TaskCompleted event when replaying an already-completed subtask from history", async () => {
+		const block: AttemptCompletionToolUse = {
+			type: "tool_use",
+			name: "attempt_completion",
+			params: { result: "done" },
+			nativeArgs: { result: "done" },
+			partial: false,
+		}
+		const mockProvider = {
+			log: vi.fn(),
+			getTaskWithId: vi.fn().mockImplementation((id: string) => {
+				if (id === "child-1") return Promise.resolve({ historyItem: { id, status: "completed" } })
+				throw new Error(`unexpected task id ${id}`)
+			}),
+			reopenParentFromDelegation: vi.fn(),
+		}
+
+		const task = makeTask({
+			taskId: "child-1",
+			parentTaskId: "parent-1",
+			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] }),
+		})
+		Object.assign(task, { providerRef: { deref: () => mockProvider } })
+
+		await attemptCompletionTool.handle(task as Task, block, {
+			askApproval: vi.fn(),
+			handleError: vi.fn(),
+			pushToolResult: vi.fn(),
+			askFinishSubTaskApproval: vi.fn(),
+			toolDescription: vi.fn(),
+		} as AttemptCompletionCallbacks)
+
+		expect(task.emit).not.toHaveBeenCalledWith(
+			RooCodeEventName.TaskCompleted,
+			expect.anything(),
+			expect.anything(),
+			expect.anything(),
+		)
+	})
+
+	it("emits the public TaskCompleted API event only when completion is accepted, but reports telemetry either way", async () => {
+		const block: AttemptCompletionToolUse = {
+			type: "tool_use",
+			name: "attempt_completion",
+			params: { result: "done" },
+			nativeArgs: { result: "done" },
+			partial: false,
+		}
+
+		const task = makeTask({
+			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] }),
+		})
+
+		await attemptCompletionTool.handle(task as Task, block, {
+			askApproval: vi.fn(),
+			handleError: vi.fn(),
+			pushToolResult: vi.fn(),
+			askFinishSubTaskApproval: vi.fn(),
+			toolDescription: vi.fn(),
+		} as AttemptCompletionCallbacks)
+
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
+		expect(task.emit).toHaveBeenCalledWith(
+			RooCodeEventName.TaskCompleted,
+			"task_1",
+			expect.anything(),
+			expect.anything(),
+		)
+	})
+
+	it("still reports telemetry for a model-initiated completion even when the user provides follow-up feedback instead of accepting", async () => {
+		const block: AttemptCompletionToolUse = {
+			type: "tool_use",
+			name: "attempt_completion",
+			params: { result: "done" },
+			nativeArgs: { result: "done" },
+			partial: false,
+		}
+
+		const task = makeTask({
+			ask: vi.fn().mockResolvedValue({ response: "messageResponse", text: "one more thing", images: [] }),
+		})
+
+		await attemptCompletionTool.handle(task as Task, block, {
+			askApproval: vi.fn(),
+			handleError: vi.fn(),
+			pushToolResult: vi.fn(),
+			askFinishSubTaskApproval: vi.fn(),
+			toolDescription: vi.fn(),
+		} as AttemptCompletionCallbacks)
+
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
+		expect(task.emit).not.toHaveBeenCalledWith(
+			RooCodeEventName.TaskCompleted,
+			expect.anything(),
+			expect.anything(),
+			expect.anything(),
+		)
 	})
 })

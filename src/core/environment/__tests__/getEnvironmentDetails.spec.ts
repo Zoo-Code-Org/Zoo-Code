@@ -75,7 +75,7 @@ describe("getEnvironmentDetails", () => {
 			terminalOutputLineLimit: 100,
 			maxWorkspaceFiles: 50,
 			maxOpenTabsContext: 10,
-			mode: "code",
+			mode: "orchestrator",
 			customModes: [],
 			experiments: {},
 			customInstructions: "test instructions",
@@ -91,6 +91,7 @@ describe("getEnvironmentDetails", () => {
 			cwd: mockCwd,
 			taskId: mockTaskId,
 			didEditFile: false,
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			fileContextTracker: {
 				getAndClearRecentlyModifiedFiles: vi.fn().mockReturnValue([]),
 			} as unknown as FileContextTracker,
@@ -156,6 +157,8 @@ describe("getEnvironmentDetails", () => {
 
 		expect(mockProvider.getState).toHaveBeenCalled()
 
+		expect(mockCline.getTaskMode).toHaveBeenCalled()
+		expect(result).toContain("<slug>code</slug>")
 		expect(getFullModeDetails).toHaveBeenCalledWith("code", [], undefined, {
 			cwd: mockCwd,
 			globalCustomInstructions: "test instructions",
@@ -445,5 +448,48 @@ describe("getEnvironmentDetails", () => {
 		await getEnvironmentDetails(mockCline as Task)
 
 		expect(getGitStatus).toHaveBeenCalledWith(mockCwd, 5)
+	})
+
+	// Regression test for https://github.com/Zoo-Code-Org/Zoo-Code/issues/1024
+	// When ripgrep cannot be found (e.g. @vscode/ripgrep >=1.18 platform layout on
+	// Windows), listFiles throws "Could not find ripgrep binary". getEnvironmentDetails
+	// must not propagate this — the task should proceed to the API call, not hang at 0%.
+	it("should degrade gracefully when listFiles rejects with an Error", async () => {
+		;(listFiles as Mock).mockRejectedValue(new Error("Could not find ripgrep binary"))
+
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+		expect(result).toContain("File listing unavailable: Could not find ripgrep binary")
+	})
+
+	it("should degrade gracefully when listFiles rejects with a non-Error value", async () => {
+		;(listFiles as Mock).mockRejectedValue("unexpected string rejection")
+
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+		expect(result).toContain("File listing unavailable: unexpected string rejection")
+	})
+
+	// Regression for issue #1623.
+	// Before the fix, the Current Mode block read the shared provider mode.
+	// A child delegated to "architect" mode would report "orchestrator" instead.
+	it("uses the task-local mode in the Current Mode block, not the provider mode", async () => {
+		// Provider mode stays "code"; task was delegated to "architect".
+		mockState.mode = "code"
+		;(mockCline.getTaskMode as Mock).mockResolvedValue("architect")
+		;(getFullModeDetails as Mock).mockResolvedValue({
+			name: "🏗️ Architect",
+			roleDefinition: "You design software.",
+			customInstructions: "",
+		})
+
+		const result = await getEnvironmentDetails(mockCline as Task)
+
+		expect(result).toContain("<slug>architect</slug>")
+		expect(result).not.toContain("<slug>code</slug>")
+		expect(getFullModeDetails).toHaveBeenCalledWith(
+			"architect",
+			[],
+			undefined,
+			expect.objectContaining({ cwd: mockCwd }),
+		)
 	})
 })

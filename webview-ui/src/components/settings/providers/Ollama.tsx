@@ -1,26 +1,45 @@
-import { useState, useCallback, useMemo, useEffect } from "react"
-import { useEvent } from "react-use"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { Checkbox } from "vscrui"
 
-import type { ProviderSettings, ExtensionMessage, ModelRecord } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	type ExtensionMessage,
+	type ModelRecord,
+	ollamaDefaultModelInfo,
+	OllamaModelsMessageType,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+import { Button } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
 
 import { inputEventTransform } from "../transforms"
 import { ModelPicker } from "../ModelPicker"
+import { ThinkingBudget } from "../ThinkingBudget"
 
 type OllamaProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 }
 
+enum RefreshStatus {
+	Idle = "idle",
+	Loading = "loading",
+	Success = "success",
+	Error = "error",
+}
+
 export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaProps) => {
 	const { t } = useAppTranslation()
 
 	const [ollamaModels, setOllamaModels] = useState<ModelRecord>({})
-	const routerModels = useRouterModels()
+	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
+	const [refreshError, setRefreshError] = useState<string | undefined>()
+	const refreshStatusRef = useRef(refreshStatus)
+	const routerModels = useRouterModels({ provider: providerIdentifiers.ollama })
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -33,25 +52,47 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 		[setApiConfigurationField],
 	)
 
-	const onMessage = useCallback((event: MessageEvent) => {
-		const message: ExtensionMessage = event.data
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
 
-		switch (message.type) {
-			case "ollamaModels":
-				{
-					const newModels = message.ollamaModels ?? {}
-					setOllamaModels(newModels)
+			if (message.type === OllamaModelsMessageType.ollamaModels) {
+				if (!message.error) {
+					setOllamaModels(message.ollamaModels ?? {})
 				}
-				break
+
+				if (refreshStatusRef.current === RefreshStatus.Loading) {
+					const nextStatus = message.error ? RefreshStatus.Error : RefreshStatus.Success
+					refreshStatusRef.current = nextStatus
+					setRefreshStatus(nextStatus)
+					setRefreshError(message.error)
+				}
+			}
+		}
+
+		window.addEventListener("message", handleMessage)
+		return () => {
+			window.removeEventListener("message", handleMessage)
 		}
 	}, [])
 
-	useEvent("message", onMessage)
+	const handleRefreshModels = useCallback(() => {
+		refreshStatusRef.current = RefreshStatus.Loading
+		setRefreshStatus(RefreshStatus.Loading)
+		setRefreshError(undefined)
+		vscode.postMessage({
+			type: OllamaModelsMessageType.requestOllamaModels,
+			values: {
+				baseUrl: apiConfiguration?.ollamaBaseUrl,
+				apiKey: apiConfiguration?.ollamaApiKey,
+			},
+		})
+	}, [apiConfiguration?.ollamaBaseUrl, apiConfiguration?.ollamaApiKey])
 
 	// Refresh models on mount
 	useEffect(() => {
 		// Request fresh models - the handler now flushes cache automatically
-		vscode.postMessage({ type: "requestOllamaModels" })
+		vscode.postMessage({ type: OllamaModelsMessageType.requestOllamaModels })
 	}, [])
 
 	// Check if the selected model exists in the fetched models
@@ -100,6 +141,33 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 					</div>
 				</VSCodeTextField>
 			)}
+			<Button
+				variant="outline"
+				onClick={handleRefreshModels}
+				disabled={refreshStatus === RefreshStatus.Loading}
+				className="w-full">
+				<div className="flex items-center gap-2">
+					{refreshStatus === RefreshStatus.Loading ? (
+						<span className="codicon codicon-loading codicon-modifier-spin" />
+					) : (
+						<span className="codicon codicon-refresh" />
+					)}
+					{t("settings:providers.refreshModels.label")}
+				</div>
+			</Button>
+			{refreshStatus === RefreshStatus.Loading && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.refreshModels.loading")}
+				</div>
+			)}
+			{refreshStatus === RefreshStatus.Success && (
+				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
+			)}
+			{refreshStatus === RefreshStatus.Error && (
+				<div className="text-sm text-vscode-errorForeground">
+					{refreshError || t("settings:providers.refreshModels.error")}
+				</div>
+			)}
 			<ModelPicker
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
@@ -131,6 +199,49 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 					{t("settings:providers.ollama.numCtxHelp")}
 				</div>
 			</VSCodeTextField>
+			<div className="flex flex-col gap-1">
+				<Checkbox
+					checked={apiConfiguration.enableReasoningEffort ?? false}
+					onChange={(checked: boolean) => {
+						setApiConfigurationField("enableReasoningEffort", checked)
+
+						if (checked) {
+							// Restore the last selected effort level if one was
+							// previously chosen; otherwise default to "medium" so
+							// the request actually enables Ollama's native think
+							// parameter. Without a value, the ThinkingBudget Select
+							// would show "None" (disable) and getOllamaThinkParam()
+							// would return undefined, sending no think parameter
+							// despite the checkbox being on. Preserving the prior
+							// value avoids wiping the user's effort choice when
+							// toggling the checkbox off and back on.
+							setApiConfigurationField("reasoningEffort", apiConfiguration.reasoningEffort ?? "medium")
+						}
+						// When unchecked, leave reasoningEffort untouched so the
+						// user's prior selection is preserved across toggles. The
+						// handler gates on enableReasoningEffort === true, so a
+						// stale reasoningEffort value will not emit a think param
+						// while the checkbox is off.
+					}}>
+					{t("settings:providers.ollama.thinking")}
+				</Checkbox>
+				<div className="text-xs text-vscode-descriptionForeground mt-1">
+					{t("settings:providers.ollama.thinkingHelp")}
+				</div>
+				{!!apiConfiguration.enableReasoningEffort && (
+					<ThinkingBudget
+						apiConfiguration={apiConfiguration}
+						setApiConfigurationField={setApiConfigurationField}
+						// Ollama models don't advertise reasoning capabilities, so
+						// synthesize a model info that exposes the effort levels
+						// Ollama's native `think` parameter supports (low/medium/high).
+						modelInfo={{
+							...ollamaDefaultModelInfo,
+							supportsReasoningEffort: true,
+						}}
+					/>
+				)}
+			</div>
 			<div className="text-sm text-vscode-descriptionForeground">
 				{t("settings:providers.ollama.description")}
 				<span className="text-vscode-errorForeground ml-1">{t("settings:providers.ollama.warning")}</span>

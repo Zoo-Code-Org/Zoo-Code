@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -16,13 +15,17 @@
 
         ## Jesteśmy Zoo Code
 
-> Być może widziałeś [niedawne ogłoszenie](https://x.com/mattrubens/status/2046636598859559114) zespołu Roo 🦘🦘🦘. W skrócie: zespół stopniowo wygasza aktywny rozwój Roo Code, skupiając się na [Roomote](https://roomote.dev/). Ta wiadomość była trudna dla wielu użytkowników Roo; ta wtyczka naprawdę wiele znaczy dla tej społeczności.
+> Zoo Code kontynuuje rozwój tego projektu po tym, jak zespół Roo zakończył
+> aktywny rozwój Roo Code, aby skupić się na [Roomote](https://roomote.dev/).
+> Dziękujemy zespołowi Roo za wszystko, co stworzyli.
 >
-> Chcemy podziękować całemu zespołowi Roo za pracę włożoną w tę wtyczkę. Nie będziemy tutaj wymieniać każdej osoby z osobna, ale wszyscy możemy się zgodzić, że to wyjątkowi deweloperzy i, co równie ważne, niesamowici ludzie. Dziękujemy zespołowi Roo.
->
-> Użytkownicy Roo są bardzo różni. Jedni używają go zawodowo na co dzień, inni wykorzystują go do tworzenia niewiarygodnie złożonych workflow. Niektórzy używają go do ulepszania samego Roo, a inni do ulepszania modeli, z których Roo korzysta (super meta). Chodzi o to, że społeczność jest różnorodna, i choć kangur 🦘🦘🦘 jest dostojnym i szlachetnym zwierzęciem, uznaliśmy, że „Zoo” 🐘🦡🦒🦓🦛🦧🦭🦦 lepiej oddaje tę różnorodność użytkowników wtyczki.
->
-> Dlatego chcemy ogłosić, że **Zoo Code** będzie kontynuować rozwój tego ważnego projektu. Główny zespół tworzą deweloperzy, którzy wcześniej współtworzyli Roo i naprawdę zależy im na tej wtyczce. Będziemy dalej aktualizować modele, naprawiać błędy i wydawać nowe funkcje. Ale przede wszystkim chcemy słuchać was, społeczności, która uczyniła tę wtyczkę tak wyjątkową. Dołącz więc do naszego [Discorda](https://discord.gg/VxfP4Vx3gX), naszego [Reddita](https://www.reddit.com/r/ZooCode) albo [otwórz PR lub issue](https://github.com/Zoo-Code-Org/Zoo-Code); a przede wszystkim prosimy cię, żebyś pozostał zaangażowany, w kontakcie i aktywny jako część społeczności.
+> Główny zespół to grupa deweloperów, którzy wcześniej współtworzyli Roo i
+> naprawdę zależy im na tej wtyczce. Będziemy dalej aktualizować modele,
+> naprawiać błędy i wydawać nowe funkcje, i zamierzamy uważnie słuchać
+> społeczności, która uczyniła tę wtyczkę tak wyjątkową. Dołącz do nas na
+> [Discordzie](https://discord.gg/VxfP4Vx3gX),
+> [Reddicie](https://www.reddit.com/r/ZooCode), albo
+> [otwórz PR lub issue](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
@@ -30,11 +33,23 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.66.0
+## Co Zoo Code dodał od czasu Roo Code
 
-- **Obsługa Claude Sonnet 5** — najnowszy model Claude jest teraz dostępny u dostawców Anthropic, Bedrock i Vertex
-- **Aktualizacja do Semble v0.4.1** — spłaszczony parsing wyników i zlokalizowane komunikaty stanu
-- **Strażnik przejścia stanu cyklu życia zadań** — nowy strażnik przejścia stanu i uzgadnianie delegacji przy uruchomieniu zapobiegają nieprawidłowym przejściom stanu zadań
+Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
+
+- **Analizę bazy kodu Semble** — szybkie, semantyczne wyszukiwanie kodu na żądanie, z automatyczną konfiguracją i bez osobnego procesu indeksowania.
+- **Silniejsze workflow Orchestratora** — bezpieczniejsze delegowanie, równoległą koordynację zadań, niezawodne odzyskiwanie zadań nadrzędnych i podrzędnych oraz lepszą izolację między podzadaniami a profilami providerów.
+- **Dłuższe autonomiczne działanie z Destructive Command Guard (DCG)** — automatyczne blokowanie niebezpiecznych poleceń przy jednoczesnym kontynuowaniu zaufanej pracy bez wielokrotnych próśb o zatwierdzenie.
+- **Najnowsze modele** — stałe wsparcie dla nowych rodzin modeli Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax i innych.
+- **Więcej sposobów łączenia** — nowych i rozszerzonych providerów, w tym Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go i wielu innych.
+- **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
+- **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
+
+## Nowości w v3.84.0
+
+- ✨ **Dodano nowe modele SOTA:** Korzystaj z GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 u obsługiwanych providerów.
+- 🧭 **Bardziej niezawodne zadania i podzadania:** Zachowaj izolację delegowanych trybów, utrzymuj linki do podzadań po wielokrotnym zatrzymaniu i chroń ustawienia orchestratora, gdy polecenia slash zmieniają tryb.
+- 🛠️ **Bardziej niezawodne działanie terminala, providerów i wyszukiwania kodu:** Usprawnij terminal w Windows i środowiskach innych niż angielskie, popraw odpowiedzi oraz anulowanie u providerów i spraw, aby wyszukiwanie kodu bardziej konsekwentnie korzystało z właściwego workspace.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 
@@ -58,24 +73,9 @@ Zoo Code dostosowuje się do Twojego sposobu pracy, a nie odwrotnie:
 
 Więcej: [Korzystanie z trybów](https://docs.zoocode.dev/basic-usage/using-modes) • [Tryby niestandardowe](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Filmy instruktażowe i prezentujące funkcje
-
-<div align="center">
-
-|                                                                                                                                                                            |                                                                                                                                                                            |                                                                                                                                                                              |
-| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Instalacja Zoo Code</b>  | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Konfiguracja profili</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Indeksowanie bazy kodu</b> |
-| <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Tryby niestandardowe</b> |   <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Punkty kontrolne</b>   | <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Zarządzanie Kontekstem</b> |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Więcej szybkich filmów instruktażowych i prezentujących funkcje...</a>
-</p>
-
 ## Zasoby
 
 - **[Dokumentacja](https://docs.zoocode.dev):** Oficjalny przewodnik po instalacji, konfiguracji i opanowaniu Zoo Code.
-- **[Kanał YouTube](https://youtube.com/@roocodeyt?feature=shared):** Oglądaj samouczki i zobacz funkcje w akcji.
 - **[Serwer Discord](https://discord.gg/VxfP4Vx3gX):** Dołącz do społeczności, aby uzyskać pomoc i dyskutować w czasie rzeczywistym.
 - **[Społeczność Reddit](https://www.reddit.com/r/ZooCode):** Dziel się swoimi doświadczeniami i zobacz, co budują inni.
 - **[Problemy na GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Zgłaszaj błędy i śledź rozwój.

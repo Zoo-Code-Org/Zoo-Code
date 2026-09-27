@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { OpenAI } from "openai"
 import { OpenRouterEmbedder, OPENROUTER_DEFAULT_PROVIDER_NAME } from "../openrouter"
 import { getModelDimension, getDefaultModelId } from "../../../../shared/embeddingModels"
+import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock the OpenAI SDK
 vi.mock("openai")
@@ -42,7 +44,7 @@ describe("OpenRouterEmbedder", () => {
 	let mockOpenAIInstance: any
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.spyOn(console, "warn").mockImplementation(function () {})
 		vi.spyOn(console, "error").mockImplementation(function () {})
 
@@ -60,7 +62,7 @@ describe("OpenRouterEmbedder", () => {
 	})
 
 	afterEach(() => {
-		vi.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	describe("constructor", () => {
@@ -339,7 +341,7 @@ describe("OpenRouterEmbedder", () => {
 		})
 
 		it("should validate configuration with specificProvider", async () => {
-			const specificProvider = "openai"
+			const specificProvider = providerIdentifiers.openai
 			const embedderWithProvider = new OpenRouterEmbedder(mockApiKey, undefined, undefined, specificProvider)
 
 			const testEmbedding = new Float32Array([0.25, 0.5])

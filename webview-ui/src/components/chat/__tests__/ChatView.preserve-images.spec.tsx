@@ -1,10 +1,7 @@
 // npx vitest run src/components/chat/__tests__/ChatView.preserve-images.spec.tsx
 
 import React from "react"
-import { render, waitFor, act } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
+import { renderWithExtensionState, waitFor, act } from "@/utils/test-utils"
 
 import ChatView, { ChatViewProps } from "../ChatView"
 
@@ -244,16 +241,8 @@ const defaultProps: ChatViewProps = {
 	hideAnnouncement: () => {},
 }
 
-const queryClient = new QueryClient()
-
 const renderChatView = (props: Partial<ChatViewProps> = {}) => {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatView {...defaultProps} {...props} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+	return renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 }
 
 describe("ChatView - Preserve Images During Chat Activity", () => {

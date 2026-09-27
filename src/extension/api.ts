@@ -14,6 +14,8 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type CreateTaskOptions,
+	type TaskApiConversationHistorySequence,
+	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
@@ -23,6 +25,7 @@ import {
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
+import type { Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -192,7 +195,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = this.sidebarProvider
 		}
 
-		await provider.removeClineFromStack()
+		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
@@ -240,18 +243,81 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return item ? structuredClone(item) : undefined
 	}
 
+	public async getTaskApiConversationHistoryLength(taskId: string): Promise<number> {
+		try {
+			const { apiConversationHistory } = await this.sidebarProvider.getTaskWithId(taskId)
+			return apiConversationHistory.length
+		} catch {
+			return 0
+		}
+	}
+
+	/** Checks persisted turn ordering without exposing conversation contents to tests. */
+	public async hasTaskApiConversationHistorySequence(
+		taskId: string,
+		sequence: TaskApiConversationHistorySequence,
+	): Promise<boolean> {
+		let apiConversationHistory: Awaited<ReturnType<ClineProvider["getTaskWithId"]>>["apiConversationHistory"]
+		try {
+			const task = await this.sidebarProvider.getTaskWithId(taskId)
+			apiConversationHistory = task.apiConversationHistory
+		} catch {
+			return false
+		}
+
+		const userTurnIndex = apiConversationHistory.findIndex(
+			(message) =>
+				message.role === "user" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "text" && block.text.includes(sequence.userText)),
+		)
+		if (userTurnIndex < 0) return false
+
+		// Search all assistant turns that belong to the same generation: between
+		// this user turn and the next genuine user text turn (or end of history).
+		// tool_result messages also use role:"user", so we must skip them —
+		// stopping at a tool_result would cut the search short before a later
+		// attempt_completion in the same generation.
+		const nextUserIndex = apiConversationHistory.findIndex(
+			(m, i) =>
+				i > userTurnIndex &&
+				m.role === "user" &&
+				Array.isArray(m.content) &&
+				m.content.some((block) => block.type === "text"),
+		)
+		const generationSlice = apiConversationHistory.slice(
+			userTurnIndex + 1,
+			nextUserIndex < 0 ? undefined : nextUserIndex,
+		)
+		return generationSlice.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some(
+					(block) =>
+						block.type === "tool_use" &&
+						block.name === sequence.assistantToolName &&
+						JSON.stringify(block.input).includes(sequence.assistantToolInputText),
+				),
+		)
+	}
+
 	public getCurrentTaskStack() {
 		return this.sidebarProvider.getCurrentTaskStack()
 	}
 
 	public async clearCurrentTask(_lastMessage?: string) {
 		// Legacy finishSubTask removed; clear current by closing active task instance.
-		await this.sidebarProvider.removeClineFromStack()
+		await this.sidebarProvider.evictCurrentTask()
 		await this.sidebarProvider.postStateToWebview()
 	}
 
 	public async cancelCurrentTask() {
 		await this.sidebarProvider.cancelTask()
+	}
+
+	public async abandonSubtask(childTaskId: string): Promise<boolean> {
+		return this.sidebarProvider.abandonSubtask(childTaskId)
 	}
 
 	public async sendMessage(text?: string, images?: string[]) {
@@ -300,6 +366,14 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return this.sidebarProvider.viewLaunched
 	}
 
+	public captureWebviewThemeFixture(): Promise<WebviewThemeFixture> {
+		return this.sidebarProvider.requestWebviewThemeFixture()
+	}
+
+	public getLatestAnnouncementId(): string {
+		return this.sidebarProvider.latestAnnouncementId
+	}
+
 	private async waitForWebviewLaunch(timeoutMs: number): Promise<boolean> {
 		try {
 			await pWaitFor(() => this.sidebarProvider.viewLaunched, {
@@ -315,22 +389,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	private registerListeners(provider: ClineProvider) {
+		provider.on(RooCodeEventName.TaskCompleted, async (taskId, tokenUsage, toolUsage) => {
+			const historyItem = provider.taskHistoryStore.get(taskId)
+			this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage, {
+				isSubtask: !!historyItem?.parentTaskId,
+			})
+
+			await this.fileLog(
+				`[${new Date().toISOString()}] taskCompleted -> ${taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
+			)
+		})
+
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
 				this.emit(RooCodeEventName.TaskStarted, task.taskId)
 				await this.fileLog(`[${new Date().toISOString()}] taskStarted -> ${task.taskId}\n`)
-			})
-
-			task.on(RooCodeEventName.TaskCompleted, async (_, tokenUsage, toolUsage) => {
-				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
-					isSubtask: !!task.parentTaskId,
-				})
-
-				await this.fileLog(
-					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
-				)
 			})
 
 			task.on(RooCodeEventName.TaskAborted, () => {
@@ -492,6 +567,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	public async setConfiguration(values: RooCodeSettings) {
 		await this.sidebarProvider.contextProxy.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		if (values.modeApiConfigs) {
+			await Promise.all(
+				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+				),
+			)
+		}
 		await this.sidebarProvider.postStateToWebview()
 	}
 

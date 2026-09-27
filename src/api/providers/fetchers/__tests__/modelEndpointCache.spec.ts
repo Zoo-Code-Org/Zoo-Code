@@ -1,6 +1,9 @@
 // npx vitest run api/providers/fetchers/__tests__/modelEndpointCache.spec.ts
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
+
+import { providerIdentifiers } from "@roo-code/types"
+
 import { getModelEndpoints } from "../modelEndpointCache"
 import * as modelCache from "../modelCache"
 import * as openrouter from "../openrouter"
@@ -54,7 +57,7 @@ describe("modelEndpointCache", () => {
 			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue(mockEndpoints as any)
 
 			const result = await getModelEndpoints({
-				router: "openrouter",
+				router: providerIdentifiers.openrouter,
 				modelId: "anthropic/claude-sonnet-4",
 				endpoint: "anthropic",
 			})
@@ -94,7 +97,7 @@ describe("modelEndpointCache", () => {
 			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue(mockEndpoints as any)
 
 			const result = await getModelEndpoints({
-				router: "openrouter",
+				router: providerIdentifiers.openrouter,
 				modelId: "test/model",
 				endpoint: "endpoint-1",
 			})
@@ -122,7 +125,7 @@ describe("modelEndpointCache", () => {
 			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue(mockEndpoints as any)
 
 			const result = await getModelEndpoints({
-				router: "openrouter",
+				router: providerIdentifiers.openrouter,
 				modelId: "missing/model",
 				endpoint: "anthropic",
 			})
@@ -134,7 +137,7 @@ describe("modelEndpointCache", () => {
 
 		it("should return empty object for non-openrouter providers", async () => {
 			const result = await getModelEndpoints({
-				router: "vercel-ai-gateway",
+				router: providerIdentifiers.vercelAiGateway,
 				modelId: "claude-sonnet-4",
 				endpoint: "default",
 			})
@@ -144,13 +147,13 @@ describe("modelEndpointCache", () => {
 
 		it("should return empty object when modelId or endpoint is missing", async () => {
 			const result1 = await getModelEndpoints({
-				router: "openrouter",
+				router: providerIdentifiers.openrouter,
 				modelId: undefined,
 				endpoint: "anthropic",
 			})
 
 			const result2 = await getModelEndpoints({
-				router: "openrouter",
+				router: providerIdentifiers.openrouter,
 				modelId: "anthropic/claude-sonnet-4",
 				endpoint: undefined,
 			})

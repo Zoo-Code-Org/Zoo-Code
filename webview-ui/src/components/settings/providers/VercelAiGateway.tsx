@@ -6,6 +6,7 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	vercelAiGatewayDefaultModelId,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -69,7 +70,7 @@ export const VercelAiGateway = ({
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
 				defaultModelId={vercelAiGatewayDefaultModelId}
-				models={routerModels?.["vercel-ai-gateway"] ?? {}}
+				models={routerModels?.[providerIdentifiers.vercelAiGateway] ?? {}}
 				modelIdKey="vercelAiGatewayModelId"
 				serviceName="Vercel AI Gateway"
 				serviceUrl="https://vercel.com/ai-gateway/models"

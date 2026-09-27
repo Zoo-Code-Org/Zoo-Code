@@ -90,7 +90,7 @@ export interface CreateTaskOptions {
 	experiments?: Record<string, boolean>
 	initialTodos?: TodoItem[]
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
-	initialStatus?: "active" | "delegated" | "completed"
+	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 	/** Whether to start the task loop immediately (default: true).
 	 *  When false, the caller must invoke `task.start()` manually. */
 	startTask?: boolean
@@ -128,7 +128,7 @@ export interface TaskLike {
 	approveAsk(options?: { text?: string; images?: string[] }): void
 	denyAsk(options?: { text?: string; images?: string[] }): void
 	submitUserMessage(text: string, images?: string[], mode?: string, providerProfile?: string): Promise<void>
-	abortTask(): void
+	abortTask(): Promise<void>
 }
 
 export type TaskEvents = {

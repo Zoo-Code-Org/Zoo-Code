@@ -229,8 +229,6 @@ export class EditTool extends BaseTool<"edit"> {
 			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 			pushToolResult(message)
 
-			// Record successful tool usage and cleanup
-			task.recordToolUsage("edit")
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 

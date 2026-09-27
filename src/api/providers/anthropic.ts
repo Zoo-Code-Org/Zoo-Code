@@ -22,12 +22,22 @@ import { getAnthropicProviderReasoning } from "../transform/reasoning"
 import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
+
+// Pre-sorted list of known Anthropic model IDs (lowercased) by length (descending) for case-insensitive substring matching.
+const ANTHROPIC_MODEL_IDS_SORTED_LOWER = (Object.keys(anthropicModels) as AnthropicModelId[])
+	.map((id) => id.toLowerCase())
+	.sort((a, b) => b.length - a.length) as string[]
+
+// Original-case mapping: lowercase key → original AnthropicModelId for lookup.
+const ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL = Object.fromEntries(
+	(Object.keys(anthropicModels) as AnthropicModelId[]).map((id) => [id.toLowerCase(), id]),
+)
 
 export class AnthropicHandler extends BaseProvider implements SingleCompletionHandler {
 	private options: ApiHandlerOptions
@@ -83,9 +93,24 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			betas.push("context-1m-2025-08-07")
 		}
 
+		const convertedToolChoice = convertOpenAIToolChoiceToAnthropic(
+			metadata?.tool_choice,
+			metadata?.parallelToolCalls,
+		)
+		let toolChoice = convertedToolChoice
+		if (modelId === "claude-fable-5-1") {
+			if (metadata?.tool_choice === undefined && metadata?.parallelToolCalls !== false) {
+				toolChoice = undefined
+			} else if (metadata.tool_choice === "required" || typeof metadata.tool_choice === "object") {
+				toolChoice = {
+					type: "auto" as const,
+					disable_parallel_tool_use: metadata.parallelToolCalls === false,
+				}
+			}
+		}
 		const nativeToolParams = {
 			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
-			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
+			tool_choice: toolChoice,
 		}
 
 		switch (modelId) {
@@ -96,6 +121,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			case "claude-opus-4-6":
 			case "claude-opus-4-7":
 			case "claude-opus-4-8":
+			case "claude-opus-5":
+			case "claude-opus-5-5":
+			case "claude-fable-5-1":
 			case "claude-fable-5":
 			case "claude-opus-4-5-20251101":
 			case "claude-opus-4-1-20250805":
@@ -167,6 +195,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 								case "claude-opus-4-6":
 								case "claude-opus-4-7":
 								case "claude-opus-4-8":
+								case "claude-opus-5":
+								case "claude-opus-5-5":
+								case "claude-fable-5-1":
 								case "claude-fable-5":
 								case "claude-opus-4-5-20251101":
 								case "claude-opus-4-1-20250805":
@@ -353,10 +384,29 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		}
 	}
 
+	// Guesses capabilities for an unrecognized model ID via known-family substring match.
+	private guessModelInfoFromId(modelId: string): ModelInfo {
+		const lowerModelId = modelId.toLowerCase()
+		const matchedLower = ANTHROPIC_MODEL_IDS_SORTED_LOWER.find((knownId) => lowerModelId.includes(knownId))
+
+		if (!matchedLower) {
+			return anthropicModels[anthropicDefaultModelId]
+		}
+
+		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower] as AnthropicModelId
+		return anthropicModels[originalId]
+	}
+
 	getModel() {
 		const modelId = this.options.apiModelId
-		const id = modelId && modelId in anthropicModels ? (modelId as AnthropicModelId) : anthropicDefaultModelId
-		let info: ModelInfo = anthropicModels[id]
+		const isKnownModel = modelId !== undefined && modelId in anthropicModels
+
+		// Always honor a user-configured apiModelId, even if it's not a known model.
+		const id = isKnownModel ? (modelId as AnthropicModelId) : (modelId ?? anthropicDefaultModelId)
+
+		let info: ModelInfo = isKnownModel
+			? anthropicModels[modelId as AnthropicModelId]
+			: this.guessModelInfoFromId(id)
 
 		// If 1M context beta is enabled for supported models, update the model info
 		if (
@@ -400,7 +450,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		}
 	}
 
-	async completePrompt(prompt: string) {
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
 		let message

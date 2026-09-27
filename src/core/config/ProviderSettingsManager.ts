@@ -618,7 +618,7 @@ export class ProviderSettingsManager {
 			const content = await this.context.secrets.get(this.secretsKey)
 
 			if (!content) {
-				return this.defaultProviderProfiles
+				return structuredClone(this.defaultProviderProfiles)
 			}
 
 			const providerProfiles = providerProfilesSchema

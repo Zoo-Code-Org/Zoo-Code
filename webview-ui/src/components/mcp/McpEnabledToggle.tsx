@@ -5,9 +5,21 @@ import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { vscode } from "@src/utils/vscode"
 
-const McpEnabledToggle = () => {
-	const { mcpEnabled, setMcpEnabled } = useExtensionState()
+interface McpEnabledToggleProps {
+	mcpEnabled?: boolean
+	setMcpEnabled?: (value: boolean) => void
+}
+
+const McpEnabledToggle = ({
+	mcpEnabled: propsMcpEnabled,
+	setMcpEnabled: propsSetMcpEnabled,
+}: McpEnabledToggleProps = {}) => {
+	const { mcpEnabled: contextMcpEnabled, setMcpEnabled: contextSetMcpEnabled } = useExtensionState()
 	const { t } = useAppTranslation()
+
+	// When rendered inside SettingsView the value is buffered in `cachedState` and
+	// only persisted on Save. Fall back to live extension state when used uncontrolled.
+	const mcpEnabled = propsMcpEnabled ?? contextMcpEnabled
 
 	const handleChange = (e: Event | FormEvent<HTMLElement>) => {
 		const target = ("target" in e ? e.target : null) as HTMLInputElement | null
@@ -16,8 +28,12 @@ const McpEnabledToggle = () => {
 			return
 		}
 
-		setMcpEnabled(target.checked)
-		vscode.postMessage({ type: "updateSettings", updatedSettings: { mcpEnabled: target.checked } })
+		if (propsSetMcpEnabled) {
+			propsSetMcpEnabled(target.checked)
+		} else {
+			contextSetMcpEnabled(target.checked)
+			vscode.postMessage({ type: "updateSettings", updatedSettings: { mcpEnabled: target.checked } })
+		}
 	}
 
 	return (

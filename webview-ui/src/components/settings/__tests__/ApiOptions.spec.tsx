@@ -1,13 +1,10 @@
+import { retiredProviderIdentifiers, providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ApiOptions.spec.tsx
 
-import { render, screen, fireEvent, within } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
 import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
-
-import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
-const { ExtensionStateContextProvider } = ExtensionStateContext
 
 import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
@@ -18,6 +15,9 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			{children}
 			<input type="text" value={value} onChange={onBlur} />
 		</div>
+	),
+	VSCodeTextArea: ({ value, onInput, ...props }: any) => (
+		<textarea value={value} onChange={(event) => onInput?.(event)} {...props} />
 	),
 	VSCodeLink: ({ children, href }: any) => <a href={href}>{children}</a>,
 	VSCodeRadio: ({ value, checked }: any) => <input type="radio" value={value} checked={checked} />,
@@ -194,9 +194,14 @@ vi.mock("../ThinkingBudget", () => ({
 						value={apiConfiguration?.reasoningEffort || ""}
 						onChange={(e) => setApiConfigurationField("reasoningEffort", e.target.value)}>
 						<option value="">Select...</option>
-						<option value="low">Low</option>
-						<option value="medium">Medium</option>
-						<option value="high">High</option>
+						{(Array.isArray(modelInfo.supportsReasoningEffort)
+							? modelInfo.supportsReasoningEffort
+							: ["low", "medium", "high"]
+						).map((effort: string) => (
+							<option key={effort} value={effort}>
+								{effort}
+							</option>
+						))}
 					</select>
 				</div>
 			)
@@ -229,6 +234,28 @@ vi.mock("../providers/LiteLLM", () => ({
 	),
 }))
 
+// Mock Kenari provider for tests
+vi.mock("../providers/Kenari", () => ({
+	Kenari: ({ apiConfiguration, setApiConfigurationField }: any) => (
+		<div data-testid="kenari-provider">
+			<input
+				data-testid="kenari-api-key"
+				type="password"
+				value={apiConfiguration.kenariApiKey || ""}
+				onChange={(e) => setApiConfigurationField("kenariApiKey", e.target.value)}
+				placeholder="API Key"
+			/>
+		</div>
+	),
+}))
+
+// Mock Friendli provider for tests
+vi.mock("../providers/Friendli", () => ({
+	Friendli: ({ apiConfiguration }: any) => (
+		<div data-testid="friendli-provider" data-key={apiConfiguration?.friendliApiKey || ""} />
+	),
+}))
+
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: vi.fn((apiConfiguration: ProviderSettings) => {
 		if (apiConfiguration.apiModelId?.includes("thinking")) {
@@ -256,21 +283,15 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 }))
 
 const renderApiOptions = (props: Partial<ApiOptionsProps> = {}) => {
-	const queryClient = new QueryClient()
-
-	render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ApiOptions
-					errorMessage={undefined}
-					setErrorMessage={() => {}}
-					uriScheme={undefined}
-					apiConfiguration={{}}
-					setApiConfigurationField={() => {}}
-					{...props}
-				/>
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
+	renderWithExtensionState(
+		<ApiOptions
+			errorMessage={undefined}
+			setErrorMessage={() => {}}
+			uriScheme={undefined}
+			apiConfiguration={{}}
+			setApiConfigurationField={() => {}}
+			{...props}
+		/>,
 	)
 }
 
@@ -280,7 +301,7 @@ describe("ApiOptions", () => {
 
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				// Simulate a previously-selected model ID from another provider.
 				// When switching to OpenAI - ChatGPT Plus/Pro, this is invalid and should be reset.
 				apiModelId: "claude-3-5-sonnet-20241022",
@@ -308,7 +329,7 @@ describe("ApiOptions", () => {
 
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				// No prior zooGatewayModelId.
 			},
 			setApiConfigurationField: mockSetApiConfigurationField,
@@ -320,6 +341,18 @@ describe("ApiOptions", () => {
 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "zoo-gateway")
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("zooGatewayModelId", zooGatewayDefaultModelId, false)
+	})
+
+	it("renders the Friendli provider form when friendli is selected", () => {
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.friendli,
+				friendliApiKey: "k",
+			},
+		})
+
+		expect(screen.getByTestId("friendli-provider")).toBeInTheDocument()
+		expect(screen.getByTestId("friendli-provider")).toHaveAttribute("data-key", "k")
 	})
 
 	it("shows temperature and rate limit controls by default", () => {
@@ -340,7 +373,7 @@ describe("ApiOptions", () => {
 		it("should show ThinkingBudget for Anthropic models that support thinking", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-7-sonnet-20250219:thinking",
 				},
 			})
@@ -351,7 +384,7 @@ describe("ApiOptions", () => {
 		it("should show ThinkingBudget for Vertex models that support thinking", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "vertex",
+					apiProvider: providerIdentifiers.vertex,
 					apiModelId: "claude-3-7-sonnet@20250219:thinking",
 				},
 			})
@@ -362,7 +395,7 @@ describe("ApiOptions", () => {
 		it("should not show ThinkingBudget for models that don't support thinking", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-opus-20240229",
 				},
 			})
@@ -396,6 +429,7 @@ describe("ApiOptions", () => {
 		const optionTexts = Array.from(options).map((opt) => opt.textContent)
 		expect(optionTexts).toContain("OpenAI")
 		expect(optionTexts).toContain("Anthropic")
+		expect(optionTexts).toContain("NanoGPT")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options
@@ -405,7 +439,7 @@ describe("ApiOptions", () => {
 		it("removes reasoningEffort from openAiCustomModelInfo when unchecked", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: true,
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults, // Start with defaults
@@ -448,7 +482,7 @@ describe("ApiOptions", () => {
 		it("does not render ReasoningEffort component when initially disabled", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: false, // Initially disabled
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
@@ -467,7 +501,7 @@ describe("ApiOptions", () => {
 		it("renders ReasoningEffort component and sets flag when checkbox is checked", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: false, // Initially disabled
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
@@ -492,11 +526,12 @@ describe("ApiOptions", () => {
 			// However, we've tested the state update call.
 		})
 
-		it("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
+		it("selects max in custom model info even when a top-level low effort remains", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: true, // Initially enabled
+				reasoningEffort: "low" as const,
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
 					reasoningEffort: "low" as const,
@@ -508,25 +543,18 @@ describe("ApiOptions", () => {
 				setApiConfigurationField: mockSetApiConfigurationField,
 			})
 
-			// Find the reasoning effort select among all comboboxes by its current value
-			// const allSelects = screen.getAllByRole("combobox") as HTMLSelectElement[]
-			// const reasoningSelect = allSelects.find(
-			// 	(el) => el.value === initialConfig.openAiCustomModelInfo.reasoningEffort,
-			// )
-			// expect(reasoningSelect).toBeDefined()
 			const selectContainer = screen.getByTestId("reasoning-effort")
 			expect(selectContainer).toBeInTheDocument()
 
 			const reasoningSelect = within(selectContainer).getByRole("combobox")
 			expect(reasoningSelect).toHaveValue("low")
 
-			// Simulate changing the reasoning effort to 'high'
-			fireEvent.change(reasoningSelect, { target: { value: "high" } })
+			fireEvent.change(reasoningSelect, { target: { value: "max" } })
 
 			// Check if setApiConfigurationField was called correctly for openAiCustomModelInfo
 			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
 				"openAiCustomModelInfo",
-				expect.objectContaining({ reasoningEffort: "high" }),
+				expect.objectContaining({ reasoningEffort: "max" }),
 			)
 
 			// Check that other properties were preserved
@@ -543,7 +571,7 @@ describe("ApiOptions", () => {
 		it("renders LiteLLM component when provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "litellm",
+					apiProvider: providerIdentifiers.litellm,
 					litellmBaseUrl: "http://localhost:4000",
 					litellmApiKey: "test-key",
 				},
@@ -558,7 +586,7 @@ describe("ApiOptions", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "litellm",
+					apiProvider: providerIdentifiers.litellm,
 				},
 				setApiConfigurationField: mockSetApiConfigurationField,
 			})
@@ -576,7 +604,7 @@ describe("ApiOptions", () => {
 		it("shows refresh models button for LiteLLM", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "litellm",
+					apiProvider: providerIdentifiers.litellm,
 					litellmBaseUrl: "http://localhost:4000",
 					litellmApiKey: "test-key",
 				},
@@ -588,7 +616,7 @@ describe("ApiOptions", () => {
 		it("does not render LiteLLM component when other provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 				},
 			})
 
@@ -596,10 +624,34 @@ describe("ApiOptions", () => {
 		})
 	})
 
+	describe("Kenari provider tests", () => {
+		it("renders Kenari component when provider is selected", () => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.kenari,
+					kenariApiKey: "kn-test-key",
+				},
+			})
+
+			expect(screen.getByTestId("kenari-provider")).toBeInTheDocument()
+			expect(screen.getByTestId("kenari-api-key")).toHaveValue("kn-test-key")
+		})
+
+		it("does not render Kenari component when other provider is selected", () => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+				},
+			})
+
+			expect(screen.queryByTestId("kenari-provider")).not.toBeInTheDocument()
+		})
+	})
+
 	it("renders retired provider message and hides provider-specific forms", () => {
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 			},
 		})
 
@@ -612,7 +664,7 @@ describe("ApiOptions", () => {
 	it("does not reintroduce retired providers into active provider options", () => {
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 			},
 		})
 

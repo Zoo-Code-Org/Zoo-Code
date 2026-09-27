@@ -5,7 +5,38 @@ import {
 	type TelemetryPropertiesProvider,
 	TelemetryEventName,
 	type TelemetrySetting,
+	type ToolUsage,
 } from "@roo-code/types"
+
+/**
+ * Events prone to retry-storm-style repetition (e.g. a broken embedder config
+ * re-triggering on every file-system event). Guarded by a circuit breaker in
+ * `captureEvent` so a single broken install can't flood the Product Analytics
+ * quota. Tracked per-event via a sliding time window, independent of any
+ * other telemetry the same install may also be sending.
+ */
+const CIRCUIT_BREAKER_GUARDED_EVENTS = new Set<TelemetryEventName>([TelemetryEventName.CODE_INDEX_ERROR])
+
+/** Captures of a guarded event within the counting window allowed before the breaker trips. */
+const CIRCUIT_BREAKER_MAX_IN_WINDOW = 50
+
+/** Rolling window over which guarded-event occurrences are counted. */
+const CIRCUIT_BREAKER_WINDOW_MS = 10 * 60 * 1000
+
+/** How long a tripped breaker stays tripped before allowing captures again. */
+const CIRCUIT_BREAKER_COOLDOWN_MS = 10 * 60 * 1000
+
+/**
+ * Upper bound applied separately to each phase of shutdown(): draining in-flight capture
+ * calls, then awaiting client.shutdown(). deactivate() awaits shutdown() before terminal
+ * cleanup, so an unbounded wait in either phase (e.g. a capture stuck on network I/O, or
+ * a client's own shutdown() -- posthog-node defaults to a 30s internal timeout -- never
+ * settling) would block the extension host from ever finishing deactivation. Losing an
+ * in-flight capture, or a client's graceful flush, on timeout is an acceptable tradeoff
+ * against blocking shutdown indefinitely. Worst case, shutdown() takes up to roughly
+ * 2 * SHUTDOWN_PHASE_TIMEOUT_MS.
+ */
+const SHUTDOWN_PHASE_TIMEOUT_MS = 3000
 
 /**
  * TelemetryService wrapper class that defers initialization.
@@ -13,7 +44,29 @@ import {
  * variables are loaded.
  */
 export class TelemetryService {
+	// Timestamps of recent guarded-event occurrences, per event name, oldest first.
+	private guardedEventOccurrences = new Map<TelemetryEventName, number[]>()
+	private trippedUntil = new Map<TelemetryEventName, number>()
+
+	// In-flight client.capture()/captureException() promises. captureEvent/captureException are
+	// synchronous (void-returning) for callers, but the underlying client calls are async (e.g.
+	// PostHogTelemetryClient awaits property enrichment before enqueueing). Tracked here so
+	// shutdown() can drain them before flushing/closing the clients -- otherwise a capture that's
+	// still mid-flight when shutdown() runs could be lost entirely.
+	private pendingClientCalls = new Set<Promise<unknown>>()
+
+	// Set at the start of shutdown() so new captureEvent/captureException calls stop being
+	// tracked (and, once clients are closing, stop being sent) instead of racing the drain.
+	private isShuttingDown = false
+
 	constructor(private clients: TelemetryClient[]) {}
+
+	private trackPendingClientCall(promise: Promise<unknown>): void {
+		// Never let a rejected client call surface as an unhandled rejection or block shutdown.
+		const tracked = promise.catch(() => undefined)
+		this.pendingClientCalls.add(tracked)
+		void tracked.finally(() => this.pendingClientCalls.delete(tracked))
+	}
 
 	public register(client: TelemetryClient): void {
 		this.clients.push(client)
@@ -52,17 +105,59 @@ export class TelemetryService {
 	}
 
 	/**
+	 * Checks whether a guarded event should be dropped by the circuit breaker,
+	 * updating the breaker's internal state as a side effect. Tracked entirely
+	 * independently of other event names -- unrelated telemetry from the same
+	 * install must never mask (or count towards) a guarded-event burst.
+	 */
+	private shouldDropForCircuitBreaker(eventName: TelemetryEventName): boolean {
+		if (!CIRCUIT_BREAKER_GUARDED_EVENTS.has(eventName)) {
+			return false
+		}
+
+		const now = Date.now()
+
+		const trippedUntil = this.trippedUntil.get(eventName)
+		if (trippedUntil !== undefined) {
+			if (now < trippedUntil) {
+				return true
+			}
+
+			// Cooldown elapsed - reset and allow this capture through.
+			this.trippedUntil.delete(eventName)
+			this.guardedEventOccurrences.delete(eventName)
+		}
+
+		const windowStart = now - CIRCUIT_BREAKER_WINDOW_MS
+		const occurrences = (this.guardedEventOccurrences.get(eventName) ?? []).filter((ts) => ts > windowStart)
+		occurrences.push(now)
+		this.guardedEventOccurrences.set(eventName, occurrences)
+
+		if (occurrences.length >= CIRCUIT_BREAKER_MAX_IN_WINDOW) {
+			this.trippedUntil.set(eventName, now + CIRCUIT_BREAKER_COOLDOWN_MS)
+			this.guardedEventOccurrences.delete(eventName)
+			return true
+		}
+
+		return false
+	}
+
+	/**
 	 * Generic method to capture any type of event with specified properties
 	 * @param eventName The event name to capture
 	 * @param properties The event properties
 	 */
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	public captureEvent(eventName: TelemetryEventName, properties?: Record<string, any>): void {
-		if (!this.isReady) {
+		if (!this.isReady || this.isShuttingDown) {
 			return
 		}
 
-		this.clients.forEach((client) => client.capture({ event: eventName, properties }))
+		if (this.shouldDropForCircuitBreaker(eventName)) {
+			return
+		}
+
+		this.clients.forEach((client) => this.trackPendingClientCall(client.capture({ event: eventName, properties })))
 	}
 
 	/**
@@ -71,11 +166,13 @@ export class TelemetryService {
 	 * @param additionalProperties Additional properties to include with the exception
 	 */
 	public captureException(error: Error, additionalProperties?: Record<string, unknown>): void {
-		if (!this.isReady) {
+		if (!this.isReady || this.isShuttingDown) {
 			return
 		}
 
-		this.clients.forEach((client) => client.captureException(error, additionalProperties))
+		this.clients.forEach((client) =>
+			this.trackPendingClientCall(client.captureException(error, additionalProperties)),
+		)
 	}
 
 	public captureTaskCreated(taskId: string): void {
@@ -86,8 +183,31 @@ export class TelemetryService {
 		this.captureEvent(TelemetryEventName.TASK_RESTARTED, { taskId })
 	}
 
-	public captureTaskCompleted(taskId: string): void {
-		this.captureEvent(TelemetryEventName.TASK_COMPLETED, { taskId })
+	/**
+	 * Captures task completion, summarizing per-task tool and message counts that
+	 * were previously reported as separate per-turn events to reduce event volume.
+	 *
+	 * A single task may emit this more than once (e.g. an "idle" or "shutdown"
+	 * installment followed by a final "attempt_completion" one). toolsUsed and
+	 * messageCount are always deltas since the previous emission for that task,
+	 * not running totals -- summing installments for a taskId reconstructs the
+	 * full-task counts without double-counting.
+	 *
+	 * Note: "attempt_completion" means the model called that tool, not that the
+	 * user accepted the result.
+	 */
+	public captureTaskCompleted(
+		taskId: string,
+		toolsUsed?: ToolUsage,
+		messageCount?: { user: number; assistant: number },
+		completionReason: "attempt_completion" | "idle" | "shutdown" = "attempt_completion",
+	): void {
+		this.captureEvent(TelemetryEventName.TASK_COMPLETED, {
+			taskId,
+			completionReason,
+			...(toolsUsed !== undefined && { toolsUsed }),
+			...(messageCount !== undefined && { messageCount }),
+		})
 	}
 
 	public captureConversationMessage(taskId: string, source: "user" | "assistant"): void {
@@ -263,7 +383,35 @@ export class TelemetryService {
 			return
 		}
 
-		this.clients.forEach((client) => client.shutdown())
+		// Stop accepting new captures immediately, before draining -- otherwise a steady trickle
+		// of new calls (e.g. from a teardown-time error handler) could keep pendingClientCalls
+		// non-empty indefinitely and the drain loop below would never terminate on its own.
+		this.isShuttingDown = true
+
+		// Drain any in-flight capture/captureException calls first, so a client's shutdown()
+		// (which flushes its queue) can't run ahead of a capture that hasn't been enqueued yet.
+		// Loop rather than a single snapshot: a call already in flight when draining started may
+		// itself still be tracked by the time we check again. Bounded by a timeout so a capture
+		// stuck on network I/O that never resolves/rejects can't block deactivate() forever --
+		// losing that one capture is an acceptable tradeoff against hanging terminal cleanup.
+		const drainStart = Date.now()
+		while (this.pendingClientCalls.size > 0 && Date.now() - drainStart < SHUTDOWN_PHASE_TIMEOUT_MS) {
+			await Promise.race([
+				Promise.all(this.pendingClientCalls),
+				new Promise((resolve) => setTimeout(resolve, SHUTDOWN_PHASE_TIMEOUT_MS - (Date.now() - drainStart))),
+			])
+		}
+
+		// Bound client shutdown the same way as the drain above: posthog-node's own shutdown()
+		// defaults to a 30s internal timeout when called with no argument (as PostHogTelemetryClient
+		// does), and TelemetryClient#shutdown() takes no timeout parameter to pass one through. Racing
+		// against our own timer here, instead of just awaiting client.shutdown() directly, keeps
+		// deactivate() from blocking for up to 30s on a client that never settles.
+		// allSettled, not all: one client rejecting must not stop us from awaiting the others.
+		await Promise.race([
+			Promise.allSettled(this.clients.map((client) => client.shutdown())),
+			new Promise((resolve) => setTimeout(resolve, SHUTDOWN_PHASE_TIMEOUT_MS)),
+		])
 	}
 
 	private static _instance: TelemetryService | null = null

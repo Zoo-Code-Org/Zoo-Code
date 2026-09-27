@@ -347,6 +347,79 @@ export function isDebugMode(): boolean {
 }
 
 /**
+ * Determine whether a target URL should bypass the proxy based on NO_PROXY / no_proxy.
+ *
+ * Follows the widely-used convention (curl, proxy-from-env):
+ * - `NO_PROXY=*` bypasses the proxy for every host.
+ * - Entries are comma-separated host suffixes; an optional leading `.` or `*.` and a
+ *   trailing `:port` are ignored. A target matches when its hostname equals an entry
+ *   or ends with `.<entry>` (so `amazonaws.com` covers `bedrock-runtime.us-east-1.amazonaws.com`).
+ * - Matching is case-insensitive.
+ */
+function isNoProxyHost(targetUrl: string): boolean {
+	const noProxy = (process.env.NO_PROXY || process.env.no_proxy || "").trim()
+	if (!noProxy) return false
+	if (noProxy === "*") return true
+
+	let hostname: string
+	try {
+		hostname = new URL(targetUrl).hostname.toLowerCase()
+	} catch {
+		return false
+	}
+	if (!hostname) return false
+
+	return noProxy
+		.split(",")
+		.map((entry) => entry.trim().toLowerCase())
+		.filter(Boolean)
+		.some((entry) => {
+			// Normalize a leading wildcard/dot and a trailing port: "*.example.com:443" -> "example.com"
+			const suffix = entry.replace(/^\*?\./, "").replace(/:\d+$/, "")
+			if (!suffix) return false
+			return hostname === suffix || hostname.endsWith(`.${suffix}`)
+		})
+}
+
+/**
+ * Get the proxy URL from environment variables or VS Code settings.
+ * Works in all extension modes (production and debug).
+ *
+ * When `targetUrl` is provided and its host is covered by NO_PROXY / no_proxy, this
+ * returns undefined so the caller connects directly — honoring the user's intent to
+ * bypass the proxy for e.g. a directly-reachable VPC or AWS endpoint.
+ *
+ * @param targetUrl Optional URL of the request destination, used for NO_PROXY matching.
+ * @returns The proxy URL, or undefined if no proxy applies or only whitespace is set.
+ */
+export function getSystemProxyUrl(targetUrl?: string): string | undefined {
+	// If the destination is covered by NO_PROXY, connect directly regardless of proxy source.
+	if (targetUrl && isNoProxyHost(targetUrl)) {
+		return undefined
+	}
+
+	// Standard proxy environment variables (HTTPS takes precedence over HTTP).
+	// Trim to reject whitespace-only values which would be invalid for HttpsProxyAgent.
+	const fromEnv =
+		process.env.HTTPS_PROXY?.trim() ||
+		process.env.https_proxy?.trim() ||
+		process.env.HTTP_PROXY?.trim() ||
+		process.env.http_proxy?.trim()
+
+	if (fromEnv) return fromEnv
+
+	// Fall back to VS Code's http.proxy setting
+	try {
+		const vsCodeProxy = vscode.workspace.getConfiguration("http").get<string>("proxy")
+		if (vsCodeProxy?.trim()) return vsCodeProxy.trim()
+	} catch {
+		// VS Code API may be unavailable in test environments
+	}
+
+	return undefined
+}
+
+/**
  * Log a message to the output channel if available.
  */
 function log(message: string): void {

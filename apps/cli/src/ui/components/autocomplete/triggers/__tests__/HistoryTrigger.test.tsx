@@ -188,6 +188,24 @@ describe("HistoryTrigger", () => {
 			expect(output).toContain("○")
 		})
 
+		it("should render interrupted status with correct indicator", () => {
+			const trigger = createHistoryTrigger({ getHistory: () => mockHistoryItems })
+
+			const interruptedItem: HistoryResult = {
+				key: "task-interrupted",
+				id: "task-interrupted",
+				task: "Interrupted subtask waiting to resume",
+				ts: Date.now() - 1000 * 60 * 5,
+				mode: "ask",
+				status: "interrupted",
+			}
+			const { lastFrame } = render(trigger.renderItem(interruptedItem, false) as React.ReactElement)
+
+			const output = lastFrame()
+			// Should contain the interrupted status indicator (⏸)
+			expect(output).toContain("⏸")
+		})
+
 		it("should render selected items with different styling", () => {
 			const trigger = createHistoryTrigger({ getHistory: () => mockHistoryItems })
 

@@ -95,7 +95,7 @@ describe("CustomModeSchema", () => {
 				slug: "123e4567-e89b-12d3-a456-426614174000",
 				name: "Test Mode",
 				roleDefinition: "Test role definition",
-				groups: ["not-a-valid-group"] as any,
+				groups: ["not-a-valid-group"],
 			}
 
 			expect(() => validateCustomMode(invalidGroupMode)).toThrow(ZodError)
@@ -209,7 +209,7 @@ describe("CustomModeSchema", () => {
 		test("rejects non-array group format", () => {
 			const mode = {
 				...validBaseMode,
-				groups: "not-an-array" as any,
+				groups: "not-an-array",
 			}
 
 			expect(() => modeConfigSchema.parse(mode)).toThrow()
@@ -218,7 +218,7 @@ describe("CustomModeSchema", () => {
 		test("rejects invalid group names", () => {
 			const mode = {
 				...validBaseMode,
-				groups: ["invalid_group"] as any,
+				groups: ["invalid_group"],
 			}
 
 			expect(() => modeConfigSchema.parse(mode)).toThrow()
@@ -227,7 +227,7 @@ describe("CustomModeSchema", () => {
 		test("rejects duplicate groups", () => {
 			const mode = {
 				...validBaseMode,
-				groups: ["read", "read"] as any,
+				groups: ["read", "read"],
 			}
 
 			expect(() => modeConfigSchema.parse(mode)).toThrow("Duplicate groups are not allowed")
@@ -236,12 +236,12 @@ describe("CustomModeSchema", () => {
 		test("rejects null or undefined groups", () => {
 			const modeWithNull = {
 				...validBaseMode,
-				groups: null as any,
+				groups: null,
 			}
 
 			const modeWithUndefined = {
 				...validBaseMode,
-				groups: undefined as any,
+				groups: undefined,
 			}
 
 			expect(() => modeConfigSchema.parse(modeWithNull)).toThrow()

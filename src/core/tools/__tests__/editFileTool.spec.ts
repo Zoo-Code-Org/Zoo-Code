@@ -560,7 +560,9 @@ describe("editFileTool", () => {
 
 			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
 			expect(mockTask.didEditFile).toBe(true)
-			expect(mockTask.recordToolUsage).toHaveBeenCalledWith("edit_file")
+			// Usage is recorded once at the central presentAssistantMessage
+			// attribution point, not locally by the handler.
+			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 		})
 
 		it("reverts changes when user rejects", async () => {

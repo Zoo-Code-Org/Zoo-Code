@@ -1,16 +1,39 @@
 // npx vitest src/components/settings/__tests__/ModelPicker.spec.tsx
 
-import { screen, fireEvent, render } from "@/utils/test-utils"
-import { act } from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { screen, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
+import { act, type ReactNode } from "react"
+import { QueryClient } from "@tanstack/react-query"
+import { type Mock } from "vitest"
 
-import { ModelInfo } from "@roo-code/types"
+import {
+	litellmDefaultModelId,
+	type ModelInfo,
+	type ProviderSettings,
+	type RouterModels,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { ModelPicker } from "../ModelPicker"
+import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+
+type SetApiConfigurationField = <K extends keyof ProviderSettings>(
+	field: K,
+	value: ProviderSettings[K],
+	isUserAction?: boolean,
+) => void
+
+// useRouterModels returns a react-query observable result; these tests only need the stable state fields.
+const createRouterModelsResult = (data: Partial<RouterModels>): ReturnType<typeof useRouterModels> =>
+	({ data, isLoading: false, isError: false }) as ReturnType<typeof useRouterModels>
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: { children: ReactNode }) => children,
 	useExtensionState: vi.fn(),
 }))
+
+vi.mock("@src/components/ui/hooks/useRouterModels")
+
+const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -33,8 +56,9 @@ describe("ModelPicker", () => {
 		model2: { name: "Model 2", description: "Test model 2", ...modelInfo },
 	}
 
+	const apiConfiguration: ProviderSettings = {}
 	const defaultProps = {
-		apiConfiguration: {},
+		apiConfiguration,
 		defaultModelId: "model1",
 		modelIdKey: "openRouterModelId" as const,
 		serviceName: "Test Service",
@@ -48,16 +72,14 @@ describe("ModelPicker", () => {
 	const queryClient = new QueryClient()
 
 	const renderModelPicker = () => {
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<ModelPicker {...defaultProps} />
-			</QueryClientProvider>,
-		)
+		return renderWithExtensionState(<ModelPicker {...defaultProps} />, { queryClient })
 	}
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.useFakeTimers()
+		// Default: no router models available. Provider-specific tests override per test.
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
 	})
 
 	afterEach(() => {
@@ -154,11 +176,7 @@ describe("ModelPicker", () => {
 			}
 
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...propsWithError} />
-					</QueryClientProvider>,
-				)
+				renderWithExtensionState(<ModelPicker {...propsWithError} />, { queryClient })
 			})
 
 			// Check that the error message is displayed
@@ -181,11 +199,7 @@ describe("ModelPicker", () => {
 			}
 
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...propsWithError} />
-					</QueryClientProvider>,
-				)
+				renderWithExtensionState(<ModelPicker {...propsWithError} />, { queryClient })
 			})
 
 			// Check that both the model selector and error message are present
@@ -203,10 +217,9 @@ describe("ModelPicker", () => {
 			const initialError = "Initial error"
 			const updatedError = "Updated error"
 
-			const { rerender } = render(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={initialError} />
-				</QueryClientProvider>,
+			const { rerender } = renderWithExtensionState(
+				<ModelPicker {...defaultProps} errorMessage={initialError} />,
+				{ queryClient },
 			)
 
 			// Check initial error is displayed
@@ -214,11 +227,7 @@ describe("ModelPicker", () => {
 			expect(screen.getByText(initialError)).toBeInTheDocument()
 
 			// Update the error message
-			rerender(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={updatedError} />
-				</QueryClientProvider>,
-			)
+			rerender(<ModelPicker {...defaultProps} errorMessage={updatedError} />)
 
 			// Check that the error message has been updated
 			expect(screen.getByTestId("api-error-message")).toBeInTheDocument()
@@ -229,10 +238,9 @@ describe("ModelPicker", () => {
 		it("removes error message when errorMessage prop becomes undefined", async () => {
 			const errorMessage = "Temporary error"
 
-			const { rerender } = render(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={errorMessage} />
-				</QueryClientProvider>,
+			const { rerender } = renderWithExtensionState(
+				<ModelPicker {...defaultProps} errorMessage={errorMessage} />,
+				{ queryClient },
 			)
 
 			// Check error is initially displayed
@@ -240,11 +248,7 @@ describe("ModelPicker", () => {
 			expect(screen.getByText(errorMessage)).toBeInTheDocument()
 
 			// Remove the error message
-			rerender(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={undefined} />
-				</QueryClientProvider>,
-			)
+			rerender(<ModelPicker {...defaultProps} errorMessage={undefined} />)
 
 			// Check that the error message has been removed
 			expect(screen.queryByTestId("api-error-message")).not.toBeInTheDocument()
@@ -255,10 +259,9 @@ describe("ModelPicker", () => {
 	describe("automaticFetch hint", () => {
 		it("hides the automatic fetch hint for MiMo provider", async () => {
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "mimo" }} />
-					</QueryClientProvider>,
+				renderWithExtensionState(
+					<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: providerIdentifiers.mimo }} />,
+					{ queryClient },
 				)
 			})
 
@@ -267,14 +270,98 @@ describe("ModelPicker", () => {
 
 		it("shows the automatic fetch hint for non-MiMo providers", async () => {
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "openai" }} />
-					</QueryClientProvider>,
+				renderWithExtensionState(
+					<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: providerIdentifiers.openai }} />,
+					{ queryClient },
 				)
 			})
 
 			expect(screen.getByTestId("automatic-fetch-hint")).toBeInTheDocument()
+		})
+	})
+
+	describe("LiteLLM custom model selection", () => {
+		const litellmModels: Record<string, ModelInfo> = {
+			"gpt-4o-mini": { description: "LiteLLM proxy model", ...modelInfo },
+		}
+
+		const renderLiteLLMPicker = (apiConfiguration: ProviderSettings, setField: SetApiConfigurationField) =>
+			renderWithExtensionState(
+				<ModelPicker
+					apiConfiguration={apiConfiguration}
+					defaultModelId={litellmDefaultModelId}
+					models={litellmModels}
+					modelIdKey="litellmModelId"
+					serviceName="LiteLLM"
+					serviceUrl="https://docs.litellm.ai/"
+					setApiConfigurationField={setField}
+					organizationAllowList={{ allowAll: true, providers: {} }}
+				/>,
+				{ queryClient },
+			)
+
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ litellm: litellmModels }))
+		})
+
+		it("keeps a custom model ID in the picker instead of reverting to the default", async () => {
+			// Regression: on the LiteLLM settings screen the user could not change the
+			// model ID to a value absent from the fetched /models list -- the picker
+			// silently reverted to the hardcoded default model after the selection.
+			const customModelId = "my-litellm-alias"
+			let apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.litellm }
+			const setField = vi.fn(function <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) {
+				apiConfiguration = { ...apiConfiguration, [field]: value }
+			})
+
+			const { rerender } = await act(async () => {
+				return renderLiteLLMPicker(apiConfiguration, setField)
+			})
+
+			// Before any selection the picker shows the provider default.
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(litellmDefaultModelId)
+
+			// Open the popover and type a model ID that is not in the fetched list.
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("model-picker-button"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.input(screen.getByTestId("model-input"), { target: { value: customModelId } })
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("use-custom-model"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+
+			expect(setField).toHaveBeenCalledWith("litellmModelId", customModelId)
+
+			// Re-render with the updated configuration (as SettingsView does after the
+			// setter runs) and assert the selection is kept, not reset to the default.
+			await act(async () => {
+				rerender(
+					<ModelPicker
+						apiConfiguration={apiConfiguration}
+						defaultModelId={litellmDefaultModelId}
+						models={litellmModels}
+						modelIdKey="litellmModelId"
+						serviceName="LiteLLM"
+						serviceUrl="https://docs.litellm.ai/"
+						setApiConfigurationField={setField}
+						organizationAllowList={{ allowAll: true, providers: {} }}
+					/>,
+				)
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(customModelId)
+			expect(screen.getByTestId("model-picker-button")).not.toHaveTextContent(litellmDefaultModelId)
 		})
 	})
 })

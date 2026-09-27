@@ -47,5 +47,7 @@
 	"subtaskTag": "Subtask",
 	"deleteWithSubtasks": "This will also delete {{count}} subtask(s). Are you sure?",
 	"expandSubtasks": "Expand subtasks",
-	"collapseSubtasks": "Collapse subtasks"
+	"collapseSubtasks": "Collapse subtasks",
+	"delegatedTag": "Waiting on subtask",
+	"interruptedTag": "Interrupted"
 }

@@ -81,6 +81,7 @@ export const window = {
 		sendText: () => {},
 	}),
 	onDidCloseTerminal: () => mockDisposable,
+	onDidChangeTerminalShellIntegration: () => mockDisposable,
 	createTextEditorDecorationType: () => ({ dispose: () => {} }),
 }
 

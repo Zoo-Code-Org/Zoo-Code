@@ -11,6 +11,8 @@ vitest.mock("../utils/timeout-config", () => ({
 
 import { getApiRequestTimeout } from "../utils/timeout-config"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock OpenAI and capture constructor calls
 const mockOpenAIConstructor = vitest.fn()
 
@@ -56,7 +58,7 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 
 describe("BaseOpenAiCompatibleProvider Timeout Configuration", () => {
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("should call getApiRequestTimeout when creating the provider", () => {

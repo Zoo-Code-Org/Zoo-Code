@@ -7,6 +7,8 @@ import { VERCEL_AI_GATEWAY_VISION_ONLY_MODELS, VERCEL_AI_GATEWAY_VISION_AND_TOOL
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { parseApiPrice } from "../../../shared/cost"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 /**
  * VercelAiGatewayPricing
  */
@@ -34,6 +36,7 @@ const vercelAiGatewayModelSchema = z.object({
 	context_window: z.number(),
 	max_tokens: z.number(),
 	type: z.string(),
+	tags: z.array(z.string()).optional(),
 	pricing: vercelAiGatewayPricingSchema,
 })
 
@@ -54,12 +57,15 @@ type VercelAiGatewayModelsResponse = z.infer<typeof vercelAiGatewayModelsRespons
  * getVercelAiGatewayModels
  */
 
-export async function getVercelAiGatewayModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export async function getVercelAiGatewayModels(
+	options?: ApiHandlerOptions,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = "https://ai-gateway.vercel.sh/v1"
 
 	try {
-		const response = await axios.get<VercelAiGatewayModelsResponse>(`${baseURL}/models`)
+		const response = await axios.get<VercelAiGatewayModelsResponse>(`${baseURL}/models`, { signal: opts?.signal })
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 
@@ -79,6 +85,10 @@ export async function getVercelAiGatewayModels(options?: ApiHandlerOptions): Pro
 			models[id] = parseVercelAiGatewayModel({ id, model })
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(
 			`Error fetching Vercel AI Gateway models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 		)
@@ -99,8 +109,9 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 	const cacheReadsPrice = model.pricing?.input_cache_read ? parseApiPrice(model.pricing?.input_cache_read) : undefined
 
 	const supportsPromptCache = typeof cacheWritesPrice !== "undefined" && typeof cacheReadsPrice !== "undefined"
-	const supportsImages =
-		VERCEL_AI_GATEWAY_VISION_ONLY_MODELS.has(id) || VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS.has(id)
+	const supportsImages = Array.isArray(model.tags)
+		? model.tags.includes("vision")
+		: VERCEL_AI_GATEWAY_VISION_ONLY_MODELS.has(id) || VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS.has(id)
 
 	const modelInfo: ModelInfo = {
 		maxTokens: model.max_tokens,
@@ -114,11 +125,26 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		description: model.description ?? model.name,
 	}
 
-	if (id === "anthropic/claude-fable-5") {
+	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-fast") {
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
+		modelInfo.requiredReasoningEffort = true
+		modelInfo.reasoningEffort = "medium"
+		modelInfo.supportsTemperature = false
+	}
+
+	if (id === "anthropic/claude-fable-5.1" || id === "anthropic/claude-fable-5") {
 		modelInfo.supportsTemperature = false
 	}
 
 	if (id === "anthropic/claude-sonnet-5") {
+		modelInfo.supportsTemperature = false
+	}
+
+	if (id === "anthropic/claude-opus-5") {
+		modelInfo.supportsTemperature = false
+	}
+
+	if (id === "anthropic/claude-opus-5-5") {
 		modelInfo.supportsTemperature = false
 	}
 

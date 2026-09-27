@@ -2,6 +2,8 @@ import axios from "axios"
 import { ModelInfo, ollamaDefaultModelInfo } from "@roo-code/types"
 import { z } from "zod"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 const OllamaModelDetailsSchema = z.object({
 	family: z.string(),
 	families: z.array(z.string()).nullable().optional(),
@@ -53,7 +55,10 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 		contextWindow: contextWindow || ollamaDefaultModelInfo.contextWindow,
 		supportsPromptCache: true,
 		supportsImages: rawModel.capabilities?.includes("vision"),
-		maxTokens: contextWindow || ollamaDefaultModelInfo.contextWindow,
+		// maxTokens represents max OUTPUT tokens, not the context window.
+		// Setting it to the full contextWindow causes getModelMaxOutputTokens to
+		// reserve 20% of the window for output, triggering premature condensing.
+		// Inherit the sane default (4096) from ollamaDefaultModelInfo instead.
 	})
 
 	return modelInfo
@@ -62,6 +67,7 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 export async function getOllamaModels(
 	baseUrl = "http://localhost:11434",
 	apiKey?: string,
+	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
@@ -79,7 +85,7 @@ export async function getOllamaModels(
 			headers["Authorization"] = `Bearer ${apiKey}`
 		}
 
-		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers })
+		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers, signal: opts?.signal })
 		const parsedResponse = OllamaModelsResponseSchema.safeParse(response.data)
 		const modelInfoPromises = []
 
@@ -92,7 +98,7 @@ export async function getOllamaModels(
 							{
 								model: ollamaModel.model,
 							},
-							{ headers },
+							{ headers, signal: opts?.signal },
 						)
 						.then((ollamaModelInfo) => {
 							const modelInfo = parseOllamaModel(ollamaModelInfo.data)
@@ -100,6 +106,13 @@ export async function getOllamaModels(
 							if (modelInfo) {
 								models[ollamaModel.name] = modelInfo
 							}
+						})
+						// A single failing /api/show request (corrupt model, timeout,
+						// server overload, etc.) must not reject the whole Promise.all
+						// and wipe out all otherwise healthy models. Log and swallow
+						// the individual failure so the remaining models still load.
+						.catch((error) => {
+							console.error(`Error fetching details for model ${ollamaModel.model}:`, error)
 						}),
 				)
 			}
@@ -117,6 +130,11 @@ export async function getOllamaModels(
 			)
 		}
 	}
+
+	// The per-model fan-out tolerates individual request failures, so an abort that
+	// fires mid-fan-out surfaces through those swallowed rejections; without this
+	// guard the caller would receive a partial catalog as a successful result.
+	throwIfAborted(opts?.signal)
 
 	return models
 }

@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 /**
  * Linux-only e2e smoke test for the VS Code terminal profile override.
  *
@@ -41,7 +42,7 @@ suite("Terminal Profile", function () {
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "anthropic/claude-sonnet-4.5",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -97,7 +98,7 @@ suite("Terminal Profile", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),

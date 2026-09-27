@@ -248,6 +248,7 @@ export type ContextTruncation = z.infer<typeof contextTruncationSchema>
  * Note: These fields are mutually exclusive - a message will have at most one of them.
  */
 export const clineMessageSchema = z.object({
+	messageId: z.string().optional(),
 	ts: z.number(),
 	type: z.union([z.literal("ask"), z.literal("say")]),
 	ask: clineAskSchema.optional(),
@@ -272,6 +273,7 @@ export const clineMessageSchema = z.object({
 	isProtected: z.boolean().optional(),
 	apiProtocol: z.union([z.literal("openai"), z.literal("anthropic")]).optional(),
 	isAnswered: z.boolean().optional(),
+	autoApprovalDecision: z.union([z.literal("approve"), z.literal("deny")]).optional(),
 })
 
 export type ClineMessage = z.infer<typeof clineMessageSchema>

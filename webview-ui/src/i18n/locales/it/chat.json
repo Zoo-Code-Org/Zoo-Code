@@ -17,7 +17,9 @@
 		"condenseContext": "Condensa contesto in modo intelligente",
 		"openApiHistory": "Apri cronologia API",
 		"openUiHistory": "Apri cronologia UI",
-		"backToParentTask": "Attività principale"
+		"backToParentTask": "Attività principale",
+		"waitingOnSubtask": "In attesa di sottoattività",
+		"goToSubtask": "Vai alla sottoattività"
 	},
 	"unpin": "Rilascia",
 	"pin": "Fissa",
@@ -139,7 +141,7 @@
 	"forNextMode": "per la prossima modalità",
 	"forPreviousMode": "per la modalità precedente",
 	"instructions": {
-		"wantsToFetch": "Roo vuole recuperare istruzioni dettagliate per aiutare con l'attività corrente"
+		"wantsToFetch": "Zoo vuole recuperare istruzioni dettagliate per aiutare con l'attività corrente"
 	},
 	"error": "Errore",
 	"diffError": {
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo vuole modificare questo file al di fuori dell'area di lavoro",
 		"wantsToEditProtected": "Zoo vuole modificare un file di configurazione protetto",
 		"wantsToCreate": "Zoo vuole creare un nuovo file",
-		"wantsToSearchReplace": "Roo vuole eseguire ricerca e sostituzione in questo file",
-		"didSearchReplace": "Roo ha eseguito ricerca e sostituzione in questo file",
+		"wantsToSearchReplace": "Zoo vuole eseguire ricerca e sostituzione in questo file",
+		"didSearchReplace": "Zoo ha eseguito ricerca e sostituzione in questo file",
 		"wantsToInsert": "Zoo vuole inserire contenuto in questo file",
 		"wantsToInsertWithLineNumber": "Zoo vuole inserire contenuto in questo file alla riga {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo vuole aggiungere contenuto alla fine di questo file",
@@ -231,6 +233,7 @@
 		"exitStatus": "Uscito con stato {{exitCode}}",
 		"malformedCommand": "Comando non valido: errore di sintassi della shell",
 		"manageCommands": "Comandi approvati automaticamente",
+		"denied": "Comando negato",
 		"addToAllowed": "Aggiungi alla lista dei permessi",
 		"removeFromAllowed": "Rimuovi dalla lista dei permessi",
 		"addToDenied": "Aggiungi alla lista dei negati",
@@ -341,9 +344,9 @@
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novità:",
-			"highlight1": "Supporto per Claude Sonnet 5 — l'ultimo modello di Claude è ora disponibile sui provider Anthropic, Bedrock e Vertex.",
-			"highlight2": "Aggiornamento a Semble v0.4.1 — analisi dei risultati appiattita e messaggi di stato localizzati.",
-			"highlight3": "Guardia di transizione di stato del ciclo di vita delle attività — una nuova guardia di transizione di stato e la riconciliazione della delega all'avvio prevengono transizioni di stato delle attività non valide."
+			"highlight1": "✨ Aggiunti nuovi modelli SOTA: Usa GPT-6 Sol, GPT-6 Luna e Claude Opus 5.5 con i provider supportati.",
+			"highlight2": "🧭 Attività e sottoattività più affidabili: Mantieni isolati i mode delegati, conserva i collegamenti alle sottoattività dopo Stop ripetuti e proteggi le impostazioni dell'orchestrator quando i comandi slash cambiano mode.",
+			"highlight3": "🛠️ Comportamento più affidabile di terminale, provider e ricerca del codice: Migliora il terminale su Windows e negli ambienti non in inglese, rafforza le risposte e l'annullamento dei provider e fai in modo che la ricerca del codice utilizzi più coerentemente il workspace corretto."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

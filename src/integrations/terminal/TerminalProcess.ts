@@ -1,3 +1,7 @@
+import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
+
 import * as vscode from "vscode"
 
 import type { ExitCodeDetails } from "./types"
@@ -19,6 +23,13 @@ export class TerminalProcess extends BaseTerminalProcess {
 	// Guards against overlapping abort retry loops if abort() is called again
 	// while a previous loop is still re-sending Ctrl+C.
 	private aborting = false
+	// The specific VSCode shell execution this process was started with. Kept on the
+	// process (not just terminal.activeShellExecution, which gets reused/reassigned as
+	// soon as the next command starts) so TerminalRegistry can tell a late
+	// onDidEndTerminalShellExecution event for THIS execution apart from one belonging to
+	// whatever command is currently running on the same reused terminal -- see the
+	// self-finalize grace period in run()'s finalize().
+	public ownExecution?: vscode.TerminalShellExecution
 
 	constructor(terminal: Terminal) {
 		super()
@@ -75,7 +86,10 @@ export class TerminalProcess extends BaseTerminalProcess {
 			return
 		}
 
-		// Create a promise that resolves when the stream becomes available
+		// Create a promise that resolves when the stream becomes available.
+		// cancelStreamWait() lets the early-completion race path abort the pending
+		// timeout so it doesn't fire (and reject) after we've already returned.
+		let cancelStreamWait: () => void = () => {}
 		const streamAvailable = new Promise<AsyncIterable<string>>((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
 				// Remove event listener to prevent memory leaks
@@ -95,6 +109,11 @@ export class TerminalProcess extends BaseTerminalProcess {
 				)
 			}, Terminal.getShellIntegrationTimeout())
 
+			cancelStreamWait = () => {
+				clearTimeout(timeoutId)
+				this.removeAllListeners("stream_available")
+			}
+
 			// Clean up timeout if stream becomes available
 			this.once("stream_available", (stream: AsyncIterable<string>) => {
 				clearTimeout(timeoutId)
@@ -102,9 +121,28 @@ export class TerminalProcess extends BaseTerminalProcess {
 			})
 		})
 
-		// Create promise that resolves when shell execution completes for this terminal
+		// Create promise that resolves when shell execution completes for this terminal.
+		// We also expose a "done" sentinel so the stream-reading loop can be interrupted
+		// when this event fires while we are blocked awaiting the next chunk — VSCode's
+		// AsyncIterable has no built-in cancellation mechanism.
+		const doneSignal = { done: false }
+		// Resolves to a sentinel object (not ExitCodeDetails) so we can distinguish it
+		// from a real chunk in the interruptible loop below.
 		const shellExecutionComplete = new Promise<ExitCodeDetails>((resolve) => {
-			this.once("shell_execution_complete", (details: ExitCodeDetails) => resolve(details))
+			this.once("shell_execution_complete", (details: ExitCodeDetails) => {
+				doneSignal.done = true
+				resolve(details)
+			})
+		})
+
+		// Register shell_execution_started listener BEFORE awaiting streamAvailable.
+		// BaseTerminal.setActiveStream emits shell_execution_started and stream_available
+		// on the same synchronous tick (in that order). If we register after the await,
+		// we miss the event and shellExecutionStarted stays false, causing the idle-timeout
+		// guard to incorrectly treat a running-but-silent command as stalled.
+		let shellExecutionStarted = false
+		this.once("shell_execution_started", () => {
+			shellExecutionStarted = true
 		})
 
 		// Execute command.
@@ -136,24 +174,50 @@ export class TerminalProcess extends BaseTerminalProcess {
 				this.prepareCommandForShellIntegration(commandToExecute, shellKind),
 			)
 
+			this.ownExecution = execution
 			this.terminal.activeShellExecution = execution
-
-			// VS Code only captures data written after read() is first called, so read
-			// the execution stream immediately instead of waiting for the global start
-			// event to deliver the same execution later.
-			this.terminal.setActiveStream(execution.read())
+			// Do NOT call execution.read() here. Reading must happen inside
+			// onDidStartTerminalShellExecution (TerminalRegistry), which fires when
+			// VSCode's shell integration confirms the command has actually started
+			// executing. Calling read() before that event — particularly on a cold
+			// terminal where the shell is still initializing — creates a stream window
+			// that misses output: the execution begins after the stream was opened,
+			// VSCode doesn't buffer retroactively, and zero chunks arrive.
 		} catch (error) {
 			this.terminal.activeShellExecution = undefined
+			this.cleanupScriptFile()
 			throw error
 		}
 
 		this.isHot = true
 
-		// Wait for stream to be available
+		// Wait for stream to be available, but also race against shellExecutionComplete.
+		// If the end event fires before the stream arrives (e.g. a zero-output command
+		// where onDidEndTerminalShellExecution beats onDidStartTerminalShellExecution),
+		// we would otherwise block until the stream timeout fires. Resolving early on
+		// completion produces a clean empty-output result instead.
 		let stream: AsyncIterable<string>
 
 		try {
-			stream = await streamAvailable
+			const COMPLETED_BEFORE_STREAM = Symbol("completed_before_stream")
+			const result = await Promise.race([
+				streamAvailable,
+				shellExecutionComplete.then(() => COMPLETED_BEFORE_STREAM as typeof COMPLETED_BEFORE_STREAM),
+			])
+
+			if (result === COMPLETED_BEFORE_STREAM) {
+				console.info("[Terminal Process] shell execution completed before stream arrived — finishing cleanly")
+				cancelStreamWait()
+				this.terminal.activeShellExecution = undefined
+				this.terminal.busy = false
+				this.isHot = false
+				this.cleanupScriptFile()
+				this.emit("completed", "")
+				this.emit("continue")
+				return
+			}
+
+			stream = result as AsyncIterable<string>
 		} catch (error) {
 			// Stream timeout or other error occurred
 			console.error("[Terminal Process] Stream error:", error.message)
@@ -165,6 +229,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			)
 
 			this.terminal.busy = false
+			this.cleanupScriptFile()
 
 			// Emit continue event to allow execution to proceed
 			this.emit("continue")
@@ -181,68 +246,298 @@ export class TerminalProcess extends BaseTerminalProcess {
 		 * - OSC 633 ; E ; <commandline> [; <nonce>] ST - Explicitly set command line with optional nonce
 		 */
 
-		// Process stream data
-		for await (let data of stream) {
-			const match = this.fullOutput === "" ? this.matchAfterVsceStartMarkers(data) : undefined
+		// Process stream data.
+		//
+		// VSCode bug: on some platforms/shells (observed with multi-line commands and
+		// certain compound single-line commands), the stream can fail to close on its own
+		// and onDidEndTerminalShellExecution can fail to fire, even though the ]633;D end
+		// marker IS written into the stream -- the command visibly finished, but the event
+		// that would normally tell us so is silently dropped. See:
+		// https://github.com/microsoft/vscode/issues/316556,
+		// https://github.com/microsoft/vscode/issues/250764,
+		// https://github.com/microsoft/vscode/issues/254724.
+		//
+		// We can safely self-finalize on the D marker text alone: it is real, positive
+		// proof the shell finished, independent of whether the stream/event machinery
+		// ever confirms it. What we deliberately do NOT do is guess a "gone quiet, must be
+		// done" timeout: legitimate long-running-but-silent commands (a cold `tsc --noEmit`
+		// on a large project easily runs 20-60s with zero interim output) are
+		// indistinguishable from the broken-signal case by elapsed time alone, so any fixed
+		// threshold either fires falsely on real work or is too long to help. If neither the
+		// marker nor the event ever arrives, this still hangs (the pre-existing behavior) --
+		// bounded only by the user's own commandExecutionTimeout / the model's agentTimeout
+		// at the tool layer, both already user-understood, opt-in settings.
+		let sawEndMarker = false
+		let chunkCount = 0
+		let streamEndedByEvent = false
+		let idleTimedOut = false
+		const streamStartedAt = Date.now()
+
+		// VSCode's execution.read() AsyncIterable can stay open indefinitely even after
+		// the command finishes — it has no built-in cancellation. We need to be able to
+		// break out of the loop when onDidEndTerminalShellExecution fires. We do this by
+		// manually driving the iterator and racing each .next() call against shellExecutionComplete.
+		const iterator = stream[Symbol.asyncIterator]()
+		let streamProcessingError: unknown = undefined
+
+		try {
+			// A unique sentinel to distinguish "shellExecutionComplete won the race" from a real chunk.
+			const DONE_SENTINEL = Symbol("done")
+			// A sentinel for the no-data idle timeout (see below).
+			const IDLE_SENTINEL = Symbol("idle")
+
+			// How long to wait for the first chunk before assuming the command finished with
+			// no output (VSCode bug: { ... }-wrapped multiline commands often produce zero
+			// stream data AND delay onDidEndTerminalShellExecution by 60+ seconds).
+			// Only applies before any data arrives (chunkCount === 0).
+			const IDLE_TIMEOUT_MS = 3_000
+
+			// Hoist nextChunk outside the loop so that re-arming after an idle timeout
+			// reuses the same pending .next() promise instead of issuing a second call
+			// while the first is still unresolved (violates the async-iterator protocol
+			// and silently drops the first output chunk).
+			let nextChunk = iterator.next()
+			while (true) {
+				const racers: Promise<typeof DONE_SENTINEL | typeof IDLE_SENTINEL | IteratorResult<string>>[] = [
+					nextChunk,
+					shellExecutionComplete.then(() => DONE_SENTINEL as typeof DONE_SENTINEL),
+				]
+
+				// Before any data arrives, add a short idle timeout. Once data starts
+				// flowing we trust the stream to close normally (or the D-marker path).
+				if (chunkCount === 0) {
+					racers.push(
+						new Promise<typeof IDLE_SENTINEL>((resolve) =>
+							setTimeout(() => resolve(IDLE_SENTINEL as typeof IDLE_SENTINEL), IDLE_TIMEOUT_MS),
+						),
+					)
+				}
+
+				const raceResult = await Promise.race(racers)
+
+				if (raceResult === DONE_SENTINEL) {
+					// onDidEndTerminalShellExecution fired — the shell says we're done.
+					// Do NOT also check doneSignal.done here: if a real chunk won the race
+					// but completion fired concurrently, doneSignal.done is true and the
+					// chunk would be dropped before being appended. Break only on the
+					// sentinel so data chunks always flow through even when completion races.
+					streamEndedByEvent = true
+					console.info(
+						`[Terminal Process] shell execution complete event broke stream loop after ${chunkCount} chunk(s), +${Date.now() - streamStartedAt}ms`,
+					)
+					break
+				}
+
+				if (raceResult === IDLE_SENTINEL) {
+					if (shellExecutionStarted) {
+						// The command is confirmed running (shell_execution_started fired). A
+						// silent command like `sleep 5` can legitimately produce zero output —
+						// elapsed time alone is not proof of completion. Re-arm the idle timer
+						// and keep waiting for a real chunk, the D marker, or the end event.
+						// Reuse the existing nextChunk promise — do NOT call iterator.next() again.
+						console.info(
+							`[Terminal Process] idle timeout fired but shell execution is running — re-arming (${chunkCount} chunks so far)`,
+						)
+						continue
+					}
+
+					const elapsedMs = Date.now() - streamStartedAt
+					const shellInitTimeout = Terminal.getShellIntegrationTimeout()
+
+					if (elapsedMs < shellInitTimeout) {
+						// onDidStartTerminalShellExecution hasn't fired yet — the shell is
+						// still initializing. Don't self-finalize; re-arm the idle timer
+						// and keep waiting.
+						console.info(
+							`[Terminal Process] idle timeout fired but shell execution not started yet — waiting for shell init (${elapsedMs}ms elapsed)`,
+						)
+						continue
+					}
+
+					// Shell integration timeout exceeded and onDidStartTerminalShellExecution
+					// never fired — something went wrong during shell init. Self-finalize.
+					console.info(
+						`[Terminal Process] shell execution never started after ${elapsedMs}ms — self-finalizing`,
+					)
+					idleTimedOut = true
+					console.info(
+						`[Terminal Process] idle timeout (${IDLE_TIMEOUT_MS}ms) after ${chunkCount} chunk(s) — self-finalizing`,
+					)
+					break
+				}
+
+				const { value: data, done } = raceResult as IteratorResult<string>
+
+				if (done) {
+					break
+				}
+
+				chunkCount++
+				console.info(
+					`[Terminal Process] stream chunk #${chunkCount} (+${Date.now() - streamStartedAt}ms, ${data.length} chars)`,
+				)
+
+				const match = this.fullOutput === "" ? this.matchAfterVsceStartMarkers(data) : undefined
+
+				if (match !== undefined) {
+					this.emit("line", "") // Trigger UI to proceed
+				}
+
+				// Accumulate data without filtering.
+				// notice to future programmers: do not add escape sequence
+				// filtering here: fullOutput cannot change in length (see getUnretrievedOutput),
+				// and chunks may not be complete so you cannot rely on detecting or removing escape sequences mid-stream.
+				this.fullOutput += match !== undefined ? match : data
+
+				// For non-immediately returning commands we want to show loading spinner
+				// right away but this wouldn't happen until it emits a line break, so
+				// as soon as we get any output we emit to let webview know to show spinner
+				const now = Date.now()
+
+				if (this.isListening && (now - this.lastEmitTime_ms > 100 || this.lastEmitTime_ms === 0)) {
+					this.emitRemainingBufferIfListening()
+					this.lastEmitTime_ms = now
+				}
+
+				this.startHotTimer(data)
+
+				if (this.matchBeforeVsceEndMarkers(this.fullOutput) !== undefined) {
+					sawEndMarker = true
+					console.info(
+						`[Terminal Process] D marker observed in stream after ${chunkCount} chunk(s), +${Date.now() - streamStartedAt}ms`,
+					)
+					break
+				}
+
+				// Advance to the next chunk only after the current one has been fully
+				// consumed. Calling iterator.next() here (not at the top of the loop)
+				// ensures there is never more than one pending .next() call at a time.
+				nextChunk = iterator.next()
+			}
+
+			if (!sawEndMarker && !streamEndedByEvent) {
+				console.info(
+					`[Terminal Process] stream ended without a D marker after ${chunkCount} chunk(s), +${Date.now() - streamStartedAt}ms`,
+				)
+			}
+
+			// Set streamClosed immediately after stream ends.
+			this.terminal.setActiveStream(undefined)
+
+			// Wait for shell execution to complete.
+			//
+			// Exit paths from the loop above:
+			//  1. streamEndedByEvent=true  — onDidEndTerminalShellExecution already fired;
+			//                                shellExecutionComplete is resolved, nothing to await.
+			//  2. idleTimedOut=true        — No data and no event within idle window; the command
+			//                                finished but VSCode won't tell us in time. Skip wait.
+			//  3. sawEndMarker=true        — D marker seen in stream; event may or may not have
+			//                                fired yet. Give it a 1s grace period to arrive with
+			//                                the real exit code before proceeding without one.
+			//  4. Neither                  — stream closed naturally (no marker, no event yet);
+			//                                wait for shellExecutionComplete directly.
+			if (streamEndedByEvent || idleTimedOut) {
+				// Already resolved or deliberately skipping — nothing to wait for.
+				console.info(
+					`[Terminal Process] skipping shellExecutionComplete wait (streamEndedByEvent=${streamEndedByEvent}, idleTimedOut=${idleTimedOut})`,
+				)
+			} else if (sawEndMarker) {
+				let graceTimer: NodeJS.Timeout | undefined
+				let graceWon = false
+				const grace = new Promise<void>((resolve) => {
+					graceTimer = setTimeout(() => {
+						graceWon = true
+						resolve()
+					}, 1_000)
+				})
+
+				const waitStartedAt = Date.now()
+				await Promise.race([shellExecutionComplete, grace])
+				clearTimeout(graceTimer)
+				console.info(
+					`[Terminal Process] post-marker wait resolved after ${Date.now() - waitStartedAt}ms via ${
+						graceWon ? "grace timer (no onDidEndTerminalShellExecution)" : "shellExecutionComplete"
+					}`,
+				)
+			} else {
+				const waitStartedAt = Date.now()
+				await shellExecutionComplete
+				console.info(
+					`[Terminal Process] shellExecutionComplete resolved after ${Date.now() - waitStartedAt}ms (stream closed, no D marker)`,
+				)
+			}
+
+			this.terminal.activeShellExecution = undefined
+
+			this.cleanupScriptFile()
+
+			this.isHot = false
+
+			// Emit any remaining output before completing.
+			this.emitRemainingBufferIfListening()
+
+			// fullOutput begins after C marker so we only need to trim off D marker
+			// (if D exists, see VSCode bug# 237208):
+			const match = this.matchBeforeVsceEndMarkers(this.fullOutput)
 
 			if (match !== undefined) {
-				data = match
-				this.emit("line", "") // Trigger UI to proceed
+				this.fullOutput = match
 			}
 
-			// Accumulate data without filtering.
-			// notice to future programmers: do not add escape sequence
-			// filtering here: fullOutput cannot change in length (see getUnretrievedOutput),
-			// and chunks may not be complete so you cannot rely on detecting or removing escape sequences mid-stream.
-			this.fullOutput += data
-
-			// For non-immediately returning commands we want to show loading spinner
-			// right away but this wouldn't happen until it emits a line break, so
-			// as soon as we get any output we emit to let webview know to show spinner
-			const now = Date.now()
-
-			if (this.isListening && (now - this.lastEmitTime_ms > 100 || this.lastEmitTime_ms === 0)) {
-				this.emitRemainingBufferIfListening()
-				this.lastEmitTime_ms = now
+			// For now we don't want this delaying requests since we don't send
+			// diagnostics automatically anymore (previous: "even though the
+			// command is finished, we still want to consider it 'hot' in case
+			// so that api request stalls to let diagnostics catch up").
+			this.stopHotTimer()
+			this.emit("completed", this.stripCursorSequences(this.removeVSCodeShellIntegration(this.fullOutput)))
+			this.emit("continue")
+		} catch (error) {
+			streamProcessingError = error
+			console.error("[Terminal Process] Error during stream processing:", error)
+		} finally {
+			// Always release the iterator so the underlying VSCode stream can free its
+			// resources. (for-await-of does this automatically; our manual .next() loop
+			// does not, so we must call .return() explicitly on exit.)
+			try {
+				await iterator.return?.()
+			} catch {
+				/* ignore */
 			}
 
-			this.startHotTimer(data)
+			if (streamProcessingError !== undefined) {
+				// Ensure cleanup and caller unblocking happen even when the loop throws.
+				this.terminal.activeShellExecution = undefined
+				this.terminal.busy = false
+				this.isHot = false
+				this.cleanupScriptFile()
+				this.emit(
+					"completed",
+					`<terminal process error: ${streamProcessingError instanceof Error ? streamProcessingError.message : String(streamProcessingError)}>`,
+				)
+				this.emit("continue")
+			}
 		}
-
-		// Set streamClosed immediately after stream ends.
-		this.terminal.setActiveStream(undefined)
-
-		// Wait for shell execution to complete.
-		await shellExecutionComplete
-		this.terminal.activeShellExecution = undefined
-
-		this.isHot = false
-
-		// Emit any remaining output before completing.
-		this.emitRemainingBufferIfListening()
-
-		// fullOutput begins after C marker so we only need to trim off D marker
-		// (if D exists, see VSCode bug# 237208):
-		const match = this.matchBeforeVsceEndMarkers(this.fullOutput)
-
-		if (match !== undefined) {
-			this.fullOutput = match
-		}
-
-		// For now we don't want this delaying requests since we don't send
-		// diagnostics automatically anymore (previous: "even though the
-		// command is finished, we still want to consider it 'hot' in case
-		// so that api request stalls to let diagnostics catch up").
-		this.stopHotTimer()
-		this.emit("completed", this.stripCursorSequences(this.removeVSCodeShellIntegration(this.fullOutput)))
-		this.emit("continue")
 	}
 
 	/**
-	 * VS Code reports each complete top-level statement in multiline input as a
-	 * separate shell execution. Keep the submitted script in one execution so a
-	 * leading assignment cannot complete and detach the tracked process before
-	 * the remaining statements run.
+	 * Prepares a multiline command for VSCode shell integration execution.
+	 *
+	 * For POSIX shells (bash/zsh/sh), wrapping in `{ ... }` triggers a VSCode bug
+	 * where the shell integration stream is marked ended before read() is called,
+	 * delivering zero chunks even though output is visible in the terminal. The
+	 * root cause is that VSCode's multiline compound-command tracking calls
+	 * endExecution() on the outer block before our read() arrives, so the async
+	 * iterable returns yl.EMPTY immediately.
+	 *
+	 * Workaround: write the script to a temp file and run it via the shell
+	 * executable. This produces a single-line executeCommand() call with no
+	 * newlines, so VSCode never enters the multiline code path.
+	 *
+	 * PowerShell uses `. { ... }` and Fish uses `begin...end` — both have their
+	 * own VSCode shell integration handling and are not affected by this bug.
+	 *
+	 * Returns the command to pass to executeCommand(), and sets this.scriptPath
+	 * if a temp file was created (so run() can clean it up after the stream ends).
 	 */
 	private prepareCommandForShellIntegration(
 		command: string,
@@ -260,7 +555,71 @@ export class TerminalProcess extends BaseTerminalProcess {
 			return `begin\n${command}\nend`
 		}
 
-		return `{\n${command}\n}`
+		// POSIX shell: write to a temp script file to avoid the VSCode multiline bug.
+		// We need a known shell executable to run it — if we can't determine one,
+		// fall back to { ... } wrapping (accepts the VSCode zero-chunk bug as a
+		// lesser evil than invoking a non-existent "sh" on Windows).
+		//
+		// Try the Zoo Code profile first; if unset, fall back to the VS Code default
+		// profile so users who haven't configured a Zoo Code profile override still
+		// get the temp-file path instead of { ... } wrapping.
+		let shellExe = Terminal.getProfileShell()?.shellPath
+		if (!shellExe) {
+			const defaultProfileName = Terminal.getConfiguredDefaultProfileName()
+			if (defaultProfileName) {
+				const profiles = Terminal.getConfiguredProfiles()
+				const profile = profiles?.[defaultProfileName] as { path?: string | string[] } | null | undefined
+				if (profile) {
+					shellExe = Terminal.resolveProfilePath(profile.path)
+				}
+			}
+		}
+		if (!shellExe) {
+			return `{\n${command}\n}`
+		}
+
+		// If the resolved shell is PowerShell or fish, the branches above should have
+		// caught it — but if shell-kind detection missed it (e.g. no explicit default
+		// profile configured), fall back to the appropriate wrapper rather than passing
+		// a .sh script to a shell that cannot execute it.
+		if (Terminal.isPowerShell(shellExe)) {
+			return `. {\n${command}\n}`
+		}
+		if (Terminal.isFish(shellExe)) {
+			return `begin\n${command}\nend`
+		}
+
+		const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "roo-cmd-"))
+		this.scriptDir = scriptDir
+		const scriptPath = path.join(scriptDir, "cmd.sh")
+		fs.writeFileSync(scriptPath, command, { mode: 0o700 })
+		this.scriptPath = scriptPath
+
+		// Quote both paths with double-quotes to handle spaces (e.g. Git Bash on
+		// Windows: "C:\Program Files\Git\bin\bash.exe" "C:\Users\...\roo-cmd-*.sh").
+		return `"${shellExe}" "${scriptPath}"`
+	}
+
+	private scriptPath: string | undefined
+	private scriptDir: string | undefined
+
+	private cleanupScriptFile() {
+		if (this.scriptPath) {
+			try {
+				fs.unlinkSync(this.scriptPath)
+			} catch {
+				// Best-effort: if it's already gone, that's fine.
+			}
+			this.scriptPath = undefined
+		}
+		if (this.scriptDir) {
+			try {
+				fs.rmdirSync(this.scriptDir)
+			} catch {
+				// Best-effort: ignore if already removed or non-empty.
+			}
+			this.scriptDir = undefined
+		}
 	}
 
 	public override continue() {

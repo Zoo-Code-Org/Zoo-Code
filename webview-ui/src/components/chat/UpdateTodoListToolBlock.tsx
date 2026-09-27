@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef } from "react"
 import { ToolUseBlock, ToolUseBlockHeader } from "../common/ToolUseBlock"
 import MarkdownBlock from "../common/MarkdownBlock"
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogTitle,
+} from "@/components/ui"
 
 interface TodoItem {
 	id?: string
@@ -27,21 +36,9 @@ interface UpdateTodoListToolBlockProps {
 }
 
 const STATUS_OPTIONS = [
-	{ value: "", label: "Not Started", color: "var(--vscode-foreground)", border: "#bbb", bg: "transparent" },
-	{
-		value: "in_progress",
-		label: "In Progress",
-		color: "var(--vscode-charts-yellow)",
-		border: "var(--vscode-charts-yellow)",
-		bg: "rgba(255, 221, 51, 0.15)",
-	},
-	{
-		value: "completed",
-		label: "Completed",
-		color: "var(--vscode-charts-green)",
-		border: "var(--vscode-charts-green)",
-		bg: "var(--vscode-charts-green)",
-	},
+	{ value: "", label: "Not Started" },
+	{ value: "in_progress", label: "In Progress" },
+	{ value: "completed", label: "Completed" },
 ]
 
 const genId = () => Math.random().toString(36).slice(2, 10)
@@ -336,7 +333,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 												style={{
 													border: "none",
 													background: "transparent",
-													color: "#f14c4c",
+													color: "var(--vscode-errorForeground)",
 													cursor: "pointer",
 													fontSize: 14,
 													marginLeft: 2,
@@ -371,7 +368,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 											fontSize: 13,
 											marginRight: 6,
 											padding: "1px 3px",
-											borderBottom: "1px solid #eee",
+											borderBottom: "1px solid var(--vscode-input-border)",
 										}}
 									/>
 									<button
@@ -430,67 +427,25 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 						<MarkdownBlock markdown={content} />
 					)}
 				</div>
-				{/* Delete confirmation dialog */}
-				{deleteId && (
-					<div
-						style={{
-							position: "fixed",
-							left: 0,
-							top: 0,
-							right: 0,
-							bottom: 0,
-							background: "rgba(0,0,0,0.15)",
-							zIndex: 9999,
-							display: "flex",
-							alignItems: "center",
-							justifyContent: "center",
-						}}
-						onClick={cancelDelete}>
-						<div
-							style={{
-								background: "#fff",
-								borderRadius: 8,
-								boxShadow: "0 2px 16px rgba(0,0,0,0.15)",
-								padding: "16px 20px",
-								minWidth: 200,
-								zIndex: 10000,
-							}}
-							onClick={(e) => e.stopPropagation()}>
-							<div style={{ marginBottom: 12, fontSize: 14, color: "#333" }}>
-								Are you sure you want to delete this todo item?
-							</div>
-							<div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-								<button
-									onClick={cancelDelete}
-									style={{
-										border: "1px solid #bbb",
-										background: "transparent",
-										color: "#888",
-										borderRadius: 4,
-										padding: "2px 10px",
-										cursor: "pointer",
-										fontSize: 12,
-									}}>
-									Cancel
-								</button>
-								<button
-									onClick={confirmDelete}
-									style={{
-										border: "1px solid #f14c4c",
-										background: "#f14c4c",
-										color: "#fff",
-										borderRadius: 4,
-										padding: "2px 10px",
-										cursor: "pointer",
-										fontSize: 12,
-									}}>
-									Delete
-								</button>
-							</div>
-						</div>
-					</div>
-				)}
 			</ToolUseBlock>
+			<AlertDialog open={deleteId !== null} onOpenChange={cancelDelete}>
+				<AlertDialogContent className="max-w-xs">
+					<AlertDialogTitle className="sr-only">Delete todo item</AlertDialogTitle>
+					<AlertDialogDescription>Are you sure you want to delete this todo item?</AlertDialogDescription>
+					<AlertDialogFooter>
+						<AlertDialogCancel
+							onClick={cancelDelete}
+							className="bg-transparent text-vscode-foreground border-vscode-dropdown-border hover:bg-vscode-toolbar-hoverBackground">
+							Cancel
+						</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={confirmDelete}
+							className="bg-transparent text-vscode-errorForeground border-vscode-errorForeground hover:bg-vscode-toolbar-hoverBackground">
+							Delete
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	)
 }

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EventEmitter } from "events"
 import { SembleCLI } from "../semble-cli"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock spawn
 const mockSpawn = vi.fn()
 
@@ -46,7 +48,7 @@ describe("SembleCLI", () => {
 	let cli: SembleCLI
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		cli = new SembleCLI("semble")
 	})
 

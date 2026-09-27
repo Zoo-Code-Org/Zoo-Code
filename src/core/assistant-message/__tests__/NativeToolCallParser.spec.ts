@@ -1,11 +1,6 @@
 import { NativeToolCallParser } from "../NativeToolCallParser"
 
 describe("NativeToolCallParser", () => {
-	beforeEach(() => {
-		NativeToolCallParser.clearAllStreamingToolCalls()
-		NativeToolCallParser.clearRawChunkState()
-	})
-
 	describe("parseToolCall", () => {
 		describe("read_file tool", () => {
 			it("should parse minimal single-file read_file args", () => {
@@ -294,17 +289,131 @@ describe("NativeToolCallParser", () => {
 	})
 
 	describe("processStreamingChunk", () => {
+		it("retains peer calls until each call in a scope is finalized", () => {
+			const scope = NativeToolCallParser.createScope()
+			const firstKey = NativeToolCallParser.makeStreamingKey("call_first", "read_file")
+			const secondKey = NativeToolCallParser.makeStreamingKey("call_second", "read_file")
+			NativeToolCallParser.startStreamingToolCall("call_first", "read_file", scope)
+			NativeToolCallParser.startStreamingToolCall("call_second", "read_file", scope)
+			NativeToolCallParser.processStreamingChunk(firstKey, '{"path":"first.ts"}', scope)
+			NativeToolCallParser.processStreamingChunk(secondKey, '{"path":"second.ts"}', scope)
+
+			const firstResult = NativeToolCallParser.finalizeStreamingToolCall(firstKey, scope)
+			expect(firstResult?.type).toBe("tool_use")
+			if (firstResult?.type === "tool_use") expect(firstResult.nativeArgs).toMatchObject({ path: "first.ts" })
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(true)
+			const secondResult = NativeToolCallParser.finalizeStreamingToolCall(secondKey, scope)
+			expect(secondResult?.type).toBe("tool_use")
+			if (secondResult?.type === "tool_use") expect(secondResult.nativeArgs).toMatchObject({ path: "second.ts" })
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(false)
+		})
+
+		it("clears active raw and streaming state without affecting unused scopes", () => {
+			const activeScope = NativeToolCallParser.createScope()
+			const unusedScope = NativeToolCallParser.createScope()
+			NativeToolCallParser.processRawChunk({ index: 0, id: "call_active", name: "read_file" }, activeScope)
+			NativeToolCallParser.startStreamingToolCall("call_active", "read_file", activeScope)
+
+			NativeToolCallParser.clearRawChunkState(activeScope)
+			NativeToolCallParser.clearAllStreamingToolCalls(activeScope)
+
+			expect(NativeToolCallParser.finalizeRawChunks(activeScope)).toEqual([])
+			expect(NativeToolCallParser.processStreamingChunk("call_active", "{}", activeScope)).toBeNull()
+			expect(NativeToolCallParser.processStreamingChunk("missing", "{}", unusedScope)).toBeNull()
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(activeScope)).toBe(false)
+		})
+
+		it("keeps interleaved task streams isolated", () => {
+			const firstScope = NativeToolCallParser.createScope()
+			const secondScope = NativeToolCallParser.createScope()
+
+			const firstStart = NativeToolCallParser.processRawChunk(
+				{ index: 0, id: "call_first", name: "read_file" },
+				firstScope,
+			)
+			NativeToolCallParser.startStreamingToolCall("call_first", "read_file", firstScope)
+
+			NativeToolCallParser.clearRawChunkState(secondScope)
+			NativeToolCallParser.clearAllStreamingToolCalls(secondScope)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(firstScope)).toBe(true)
+
+			const secondStart = NativeToolCallParser.processRawChunk(
+				{ index: 0, id: "call_second", name: "read_file" },
+				secondScope,
+			)
+
+			expect(firstStart).toEqual([{ type: "tool_call_start", id: "call_first", name: "read_file" }])
+			expect(secondStart).toEqual([{ type: "tool_call_start", id: "call_second", name: "read_file" }])
+
+			NativeToolCallParser.startStreamingToolCall("call_second", "read_file", secondScope)
+
+			const firstDelta = NativeToolCallParser.processRawChunk(
+				{ index: 0, arguments: JSON.stringify({ path: "first.ts" }) },
+				firstScope,
+			)
+			const secondDelta = NativeToolCallParser.processRawChunk(
+				{ index: 0, arguments: JSON.stringify({ path: "second.ts" }) },
+				secondScope,
+			)
+
+			expect(firstDelta).toEqual([
+				{ type: "tool_call_delta", id: "call_first", delta: JSON.stringify({ path: "first.ts" }) },
+			])
+			expect(secondDelta).toEqual([
+				{ type: "tool_call_delta", id: "call_second", delta: JSON.stringify({ path: "second.ts" }) },
+			])
+			if (firstDelta[0]?.type !== "tool_call_delta" || secondDelta[0]?.type !== "tool_call_delta") {
+				throw new Error("Expected argument delta events")
+			}
+
+			const firstKey = NativeToolCallParser.makeStreamingKey("call_first", "read_file")
+			const secondKey = NativeToolCallParser.makeStreamingKey("call_second", "read_file")
+			NativeToolCallParser.processStreamingChunk(firstKey, firstDelta[0].delta, firstScope)
+			NativeToolCallParser.processStreamingChunk(secondKey, secondDelta[0].delta, secondScope)
+
+			const firstFinalizeEvents = NativeToolCallParser.finalizeRawChunks(firstScope)
+			expect(firstFinalizeEvents).toEqual([{ type: "tool_call_end", id: "call_first", name: "read_file" }])
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(firstScope)).toBe(true)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(secondScope)).toBe(true)
+
+			const firstResult = NativeToolCallParser.finalizeStreamingToolCall(firstKey, firstScope)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(firstScope)).toBe(false)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(secondScope)).toBe(true)
+
+			const secondFinalizeEvents = NativeToolCallParser.finalizeRawChunks(secondScope)
+			expect(secondFinalizeEvents).toEqual([{ type: "tool_call_end", id: "call_second", name: "read_file" }])
+			const secondResult = NativeToolCallParser.finalizeStreamingToolCall(secondKey, secondScope)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(secondScope)).toBe(false)
+			expect(firstResult?.type).toBe("tool_use")
+			expect(secondResult?.type).toBe("tool_use")
+			if (firstResult?.type !== "tool_use" || secondResult?.type !== "tool_use") {
+				throw new Error("Expected native tool uses")
+			}
+			expect(firstResult.nativeArgs).toEqual({ path: "first.ts" })
+			expect(secondResult.nativeArgs).toEqual({ path: "second.ts" })
+
+			expect(NativeToolCallParser.finalizeRawChunks(firstScope)).toEqual([])
+			expect(NativeToolCallParser.finalizeStreamingToolCall(firstKey, firstScope)).toBeNull()
+			expect(
+				NativeToolCallParser.processRawChunk({ index: 0, arguments: "ignored-after-cleanup" }, firstScope),
+			).toEqual([])
+			expect(
+				NativeToolCallParser.processRawChunk({ index: 0, id: "call_reprobe", name: "read_file" }, firstScope),
+			).toEqual([{ type: "tool_call_start", id: "call_reprobe", name: "read_file" }])
+		})
+
 		describe("read_file tool", () => {
 			it("should emit a partial ToolUse with nativeArgs.path during streaming", () => {
 				const id = "toolu_streaming_123"
-				NativeToolCallParser.startStreamingToolCall(id, "read_file")
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "read_file", scope)
 
 				// Simulate streaming chunks
 				const fullArgs = JSON.stringify({ path: "src/test.ts" })
 
 				// Process the complete args as a single chunk for simplicity using compound key
 				const key = NativeToolCallParser.makeStreamingKey(id, "read_file")
-				const result = NativeToolCallParser.processStreamingChunk(key, fullArgs)
+				const result = NativeToolCallParser.processStreamingChunk(key, fullArgs, scope)
 
 				expect(result).not.toBeNull()
 				expect(result?.nativeArgs).toBeDefined()
@@ -318,7 +427,8 @@ describe("NativeToolCallParser", () => {
 		describe("read_file tool", () => {
 			it("should parse read_file args on finalize", () => {
 				const id = "toolu_finalize_123"
-				NativeToolCallParser.startStreamingToolCall(id, "read_file")
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "read_file", scope)
 
 				// Add the complete arguments using compound key
 				const key = NativeToolCallParser.makeStreamingKey(id, "read_file")
@@ -330,9 +440,10 @@ describe("NativeToolCallParser", () => {
 						offset: 1,
 						limit: 10,
 					}),
+					scope,
 				)
 
-				const result = NativeToolCallParser.finalizeStreamingToolCall(key)
+				const result = NativeToolCallParser.finalizeStreamingToolCall(key, scope)
 
 				expect(result).not.toBeNull()
 				expect(result?.type).toBe("tool_use")
@@ -348,25 +459,27 @@ describe("NativeToolCallParser", () => {
 
 	describe("streamingToolCalls collision", () => {
 		it("should keep separate accumulated arguments for tools with same id but different names", () => {
-			NativeToolCallParser.clearAllStreamingToolCalls()
-			NativeToolCallParser.clearRawChunkState()
-
+			const scope = NativeToolCallParser.createScope()
 			const id = "toolu_collision_123"
 
 			// Start two tool calls with the same id but different names
-			NativeToolCallParser.startStreamingToolCall(id, "read_file")
-			NativeToolCallParser.startStreamingToolCall(id, "write_to_file")
+			NativeToolCallParser.startStreamingToolCall(id, "read_file", scope)
+			NativeToolCallParser.startStreamingToolCall(id, "write_to_file", scope)
 
 			// Accumulate arguments for each using compound keys
 			const key1 = NativeToolCallParser.makeStreamingKey(id, "read_file")
 			const key2 = NativeToolCallParser.makeStreamingKey(id, "write_to_file")
 
-			NativeToolCallParser.processStreamingChunk(key1, JSON.stringify({ path: "file_a.ts" }))
-			NativeToolCallParser.processStreamingChunk(key2, JSON.stringify({ path: "file_b.ts", content: "hello" }))
+			NativeToolCallParser.processStreamingChunk(key1, JSON.stringify({ path: "file_a.ts" }), scope)
+			NativeToolCallParser.processStreamingChunk(
+				key2,
+				JSON.stringify({ path: "file_b.ts", content: "hello" }),
+				scope,
+			)
 
 			// Finalize both and verify they have distinct arguments
-			const result1 = NativeToolCallParser.finalizeStreamingToolCall(key1)
-			const result2 = NativeToolCallParser.finalizeStreamingToolCall(key2)
+			const result1 = NativeToolCallParser.finalizeStreamingToolCall(key1, scope)
+			const result2 = NativeToolCallParser.finalizeStreamingToolCall(key2, scope)
 
 			expect(result1).not.toBeNull()
 			expect(result2).not.toBeNull()
@@ -382,72 +495,82 @@ describe("NativeToolCallParser", () => {
 			}
 
 			// Verify streaming state is cleaned up for both
-			expect(NativeToolCallParser.hasActiveStreamingToolCalls()).toBe(false)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(false)
 		})
 	})
 
 	describe("finalizeRawChunks", () => {
 		it("should include name field in events for compound-key deduplication", () => {
-			NativeToolCallParser.clearAllStreamingToolCalls()
-			NativeToolCallParser.clearRawChunkState()
+			const scope = NativeToolCallParser.createScope()
 
 			// Simulate two different tools with the same toolCallId via raw chunk tracking.
 			// processRawChunk returns [start, delta] when arguments are provided alongside name.
-			const result1 = NativeToolCallParser.processRawChunk({
-				index: 1,
-				id: "toolu_sameid",
-				name: "read_file",
-				arguments: '{"path":"a.ts"}',
-			})
+			const result1 = NativeToolCallParser.processRawChunk(
+				{
+					index: 1,
+					id: "toolu_sameid",
+					name: "read_file",
+					arguments: '{"path":"a.ts"}',
+				},
+				scope,
+			)
 			// First call for index 1 returns start + delta events
 			expect(result1.some((e) => e.type === "tool_call_start")).toBe(true)
 
-			const result2 = NativeToolCallParser.processRawChunk({
-				index: 2,
-				id: "toolu_sameid",
-				name: "write_to_file",
-				arguments: '{"path":"b.ts","content":"hello"}',
-			})
+			const result2 = NativeToolCallParser.processRawChunk(
+				{
+					index: 2,
+					id: "toolu_sameid",
+					name: "write_to_file",
+					arguments: '{"path":"b.ts","content":"hello"}',
+				},
+				scope,
+			)
 			// Second call for index 2 also returns start + delta events
 			expect(result2.some((e) => e.type === "tool_call_start")).toBe(true)
 
 			// Finalize raw chunks — both should be included with their names
-			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks(scope)
 
 			expect(finalizeEvents).toHaveLength(2)
 			expect(finalizeEvents.every((e) => e.type === "tool_call_end")).toBe(true)
 
 			// Each event must carry its name for compound-key deduplication
-			const names = finalizeEvents.map((e) => (e as any).name)
+			const names = finalizeEvents.map((e) => (e.type === "tool_call_end" ? e.name : undefined))
 			expect(names).toContain("read_file")
 			expect(names).toContain("write_to_file")
 		})
 
 		it("should emit separate end events when two tools share the same toolCallId", () => {
-			NativeToolCallParser.clearAllStreamingToolCalls()
-			NativeToolCallParser.clearRawChunkState()
+			const scope = NativeToolCallParser.createScope()
 
 			// Both tools use the exact same call ID but different names
-			NativeToolCallParser.processRawChunk({
-				index: 10,
-				id: "toolu_dup",
-				name: "codebase_search",
-				arguments: '{"query":"foo"}',
-			})
-			NativeToolCallParser.processRawChunk({
-				index: 11,
-				id: "toolu_dup",
-				name: "search_files",
-				arguments: '{"path":".","regex":"bar"}',
-			})
+			NativeToolCallParser.processRawChunk(
+				{
+					index: 10,
+					id: "toolu_dup",
+					name: "codebase_search",
+					arguments: '{"query":"foo"}',
+				},
+				scope,
+			)
+			NativeToolCallParser.processRawChunk(
+				{
+					index: 11,
+					id: "toolu_dup",
+					name: "search_files",
+					arguments: '{"path":".","regex":"bar"}',
+				},
+				scope,
+			)
 
-			const events = NativeToolCallParser.finalizeRawChunks()
+			const events = NativeToolCallParser.finalizeRawChunks(scope)
 
 			// Should produce two distinct end events
 			expect(events).toHaveLength(2)
 
 			// Verify compound keys would be unique
-			const dedupKeys = new Set(events.map((e) => `${e.id}::${(e as any).name}`))
+			const dedupKeys = new Set(events.map((e) => (e.type === "tool_call_end" ? `${e.id}::${e.name}` : e.id)))
 			expect(dedupKeys.size).toBe(2)
 		})
 	})

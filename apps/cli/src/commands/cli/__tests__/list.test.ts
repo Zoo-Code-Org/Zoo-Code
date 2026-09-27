@@ -1,7 +1,45 @@
-import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
-import { isRecord } from "@/lib/utils/guards.js"
+import fs from "fs"
+import os from "os"
+import path from "path"
+import { EventEmitter } from "events"
 
-import { listSessions, parseFormat } from "../list.js"
+import { openRouterDefaultModelId, providerIdentifiers } from "@roo-code/types"
+
+import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
+
+import { listModels, listSessions, parseFormat } from "../list.js"
+
+const extensionHostMock = vi.hoisted(() => ({
+	activate: vi.fn(async () => undefined),
+	dispose: vi.fn(async () => undefined),
+	options: [] as unknown[],
+	responses: [] as unknown[],
+	sendToExtension: vi.fn(),
+}))
+
+vi.mock("@/agent/index.js", () => ({
+	ExtensionHost: class extends EventEmitter {
+		client = {
+			isInitialized: () => true,
+			on: vi.fn(() => () => undefined),
+		}
+
+		constructor(options: unknown) {
+			super()
+			extensionHostMock.options.push(options)
+		}
+
+		activate = extensionHostMock.activate
+		dispose = extensionHostMock.dispose
+
+		sendToExtension(message: unknown): void {
+			extensionHostMock.sendToExtension(message)
+			for (const response of extensionHostMock.responses) {
+				this.emit("extensionWebviewMessage", response)
+			}
+		}
+	},
+}))
 
 vi.mock("@/lib/task-history/index.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/task-history/index.js")>()
@@ -39,30 +77,88 @@ describe("parseFormat", () => {
 	})
 })
 
-describe("router model extraction", () => {
-	// This mirrors the extraction logic in requestOpenRouterModels (list.ts:226-228)
-	const extractOpenRouterModels = (routerModelsRaw: unknown) => {
-		const routerModels = isRecord(routerModelsRaw) ? routerModelsRaw : {}
-		const openRouterModels = routerModels.openrouter
-		return isRecord(openRouterModels) ? openRouterModels : {}
+describe("listModels", () => {
+	let tempDir: string
+	let workspacePath: string
+	let extensionPath: string
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		extensionHostMock.options.length = 0
+		extensionHostMock.responses.length = 0
+
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roo-list-test-"))
+		workspacePath = path.join(tempDir, "workspace")
+		extensionPath = path.join(tempDir, "extension")
+		fs.mkdirSync(workspacePath)
+		fs.mkdirSync(extensionPath)
+		fs.writeFileSync(path.join(extensionPath, "extension.js"), "")
+	})
+
+	afterEach(() => {
+		fs.rmSync(tempDir, { recursive: true, force: true })
+		vi.restoreAllMocks()
+	})
+
+	const captureStdout = async (fn: () => Promise<void>): Promise<string> => {
+		const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+		await fn()
+		return stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join("")
 	}
 
-	it("extracts openrouter models from valid routerModels", () => {
+	it("creates a host with resolved paths and returns OpenRouter models", async () => {
 		const models = { "openai/gpt-4.1": { contextWindow: 128000, supportsPromptCache: false } }
-		const result = extractOpenRouterModels({ openrouter: models })
-		expect(result).toEqual(models)
+		extensionHostMock.responses.push(
+			{ type: "unrelatedMessage" },
+			{ type: "routerModels", routerModels: { [providerIdentifiers.openrouter]: models } },
+		)
+
+		const output = await captureStdout(() =>
+			listModels({
+				format: "json",
+				workspace: path.relative(process.cwd(), workspacePath),
+				extension: path.relative(process.cwd(), extensionPath),
+				apiKey: "test-api-key",
+				debug: true,
+			}),
+		)
+
+		expect(extensionHostMock.options).toEqual([
+			expect.objectContaining({
+				mode: "code",
+				provider: providerIdentifiers.openrouter,
+				model: openRouterDefaultModelId,
+				apiKey: "test-api-key",
+				workspacePath,
+				extensionPath,
+				nonInteractive: true,
+				ephemeral: true,
+				debug: true,
+				exitOnComplete: true,
+				exitOnError: false,
+				disableOutput: true,
+			}),
+		])
+		expect(extensionHostMock.activate).toHaveBeenCalledOnce()
+		expect(extensionHostMock.sendToExtension).toHaveBeenCalledWith({
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.openrouter },
+		})
+		expect(extensionHostMock.dispose).toHaveBeenCalledOnce()
+		expect(JSON.parse(output)).toEqual({ models })
 	})
 
-	it("returns empty object when routerModels is null", () => {
-		expect(extractOpenRouterModels(null)).toEqual({})
-	})
+	it.each([
+		["a malformed routerModels value", null],
+		["a malformed OpenRouter value", { [providerIdentifiers.openrouter]: "invalid" }],
+	])("returns an empty model record for %s", async (_description, routerModels) => {
+		extensionHostMock.responses.push({ type: "routerModels", routerModels })
 
-	it("returns empty object when openrouter key is missing", () => {
-		expect(extractOpenRouterModels({ requesty: {} })).toEqual({})
-	})
+		const output = await captureStdout(() =>
+			listModels({ format: "json", workspace: workspacePath, extension: extensionPath }),
+		)
 
-	it("returns empty object when openrouter value is not a record", () => {
-		expect(extractOpenRouterModels({ openrouter: "invalid" })).toEqual({})
+		expect(JSON.parse(output)).toEqual({ models: {} })
 	})
 })
 

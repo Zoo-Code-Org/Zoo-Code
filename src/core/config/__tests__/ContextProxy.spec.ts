@@ -4,7 +4,11 @@ import * as vscode from "vscode"
 
 import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-code/types"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+
 import { ContextProxy } from "../ContextProxy"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
 	Uri: {
@@ -25,7 +29,7 @@ describe("ContextProxy", () => {
 
 	beforeEach(async () => {
 		// Reset mocks
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		// Mock globalState
 		mockGlobalState = {
@@ -42,14 +46,16 @@ describe("ContextProxy", () => {
 
 		// Mock the extension context
 		mockContext = {
-			globalState: mockGlobalState,
-			secrets: mockSecrets,
-			extensionUri: { path: "/test/extension" },
-			extensionPath: "/test/extension",
-			globalStorageUri: { path: "/test/storage" },
-			logUri: { path: "/test/logs" },
+			...makeExtensionContext({
+				globalState: mockGlobalState,
+				secrets: mockSecrets,
+				extensionUri: makeUri("/test/extension"),
+				extensionPath: "/test/extension",
+				extensionMode: vscode.ExtensionMode.Development,
+			}),
+			globalStorageUri: makeUri("/test/storage"),
+			logUri: makeUri("/test/logs"),
 			extension: { packageJSON: { version: "1.0.0" } },
-			extensionMode: vscode.ExtensionMode.Development,
 		}
 
 		// Create proxy instance
@@ -265,7 +271,7 @@ describe("ContextProxy", () => {
 			// Test with multiple values
 			await proxy.setValues({
 				apiModelId: "gpt-4",
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				mode: "test-mode",
 			})
 
@@ -303,6 +309,25 @@ describe("ContextProxy", () => {
 	})
 
 	describe("setProviderSettings", () => {
+		it("stores and returns the complete NanoGPT configuration across secret and global state", async () => {
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "nanogpt-secret",
+				nanoGptModelId: "openai/model",
+				nanoGptRoutingPreference: "throughput",
+			})
+
+			expect(mockSecrets.store).toHaveBeenCalledWith("nanoGptApiKey", "nanogpt-secret")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("nanoGptModelId", "openai/model")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("nanoGptRoutingPreference", "throughput")
+			expect(proxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "nanogpt-secret",
+				nanoGptModelId: "openai/model",
+				nanoGptRoutingPreference: "throughput",
+			})
+		})
+
 		it("should clear old API configuration values and set new ones", async () => {
 			// Set up initial API configuration values
 			await proxy.updateGlobalState("apiModelId", "old-model")
@@ -315,7 +340,7 @@ describe("ContextProxy", () => {
 			// Call setProviderSettings with new configuration
 			await proxy.setProviderSettings({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				// Note: openAiBaseUrl is not included in the new config
 			})
 
@@ -325,7 +350,7 @@ describe("ContextProxy", () => {
 			expect(setValuesSpy).toHaveBeenCalledWith(
 				expect.objectContaining({
 					apiModelId: "new-model",
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					openAiBaseUrl: undefined,
 					modelTemperature: undefined,
 				}),
@@ -436,7 +461,7 @@ describe("ContextProxy", () => {
 
 	describe("invalid apiProvider migration", () => {
 		it("should clear Roo provider state during initialization", async () => {
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "apiProvider") {
 					return "roo"
@@ -460,7 +485,7 @@ describe("ContextProxy", () => {
 
 		it("should clear invalid apiProvider from storage during initialization", async () => {
 			// Reset and create a new proxy with invalid provider in state
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "apiProvider") {
 					return "invalid-removed-provider" // Invalid/removed provider
@@ -477,7 +502,7 @@ describe("ContextProxy", () => {
 
 		it("should not clear retired apiProvider from storage during initialization", async () => {
 			// Reset and create a new proxy with retired provider in state
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "apiProvider") {
 					return "groq" // Retired provider
@@ -496,7 +521,7 @@ describe("ContextProxy", () => {
 
 		it("should not modify valid apiProvider during initialization", async () => {
 			// Reset and create a new proxy with valid provider in state
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "apiProvider") {
 					return "anthropic" // Valid provider
@@ -517,7 +542,7 @@ describe("ContextProxy", () => {
 	describe("getProviderSettings", () => {
 		it("should sanitize invalid apiProvider before parsing", async () => {
 			// Reset and create a new proxy with an unknown provider in state
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "apiProvider") {
 					return "invalid-removed-provider"
@@ -541,7 +566,7 @@ describe("ContextProxy", () => {
 
 		it("should preserve retired apiProvider and provider fields", async () => {
 			await proxy.setValues({
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 				apiModelId: "llama3-70b",
 				openAiBaseUrl: "https://api.retired-provider.example/v1",
 				apiKey: "retired-provider-key",
@@ -620,7 +645,7 @@ Output only the summary of the conversation so far, without any additional comme
 
 		it("should clear old v1 default condensing prompt from customSupportPrompts during initialization", async () => {
 			// Reset and create a new proxy with old v1 default prompt in customSupportPrompts
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "customSupportPrompts") {
 					return { CONDENSE: OLD_V1_DEFAULT_CONDENSE_PROMPT }
@@ -638,7 +663,7 @@ Output only the summary of the conversation so far, without any additional comme
 
 		it("should preserve other custom prompts when clearing old v1 default", async () => {
 			// Reset and create a new proxy with old v1 default plus other custom prompts
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "customSupportPrompts") {
 					return {
@@ -660,7 +685,7 @@ Output only the summary of the conversation so far, without any additional comme
 
 		it("should not clear truly customized condensing prompts", async () => {
 			// Reset and create a new proxy with a truly customized condensing prompt
-			vi.clearAllMocks()
+			clearAllMocks()
 			const customPrompt = "My custom condensing instructions"
 			mockGlobalState.get.mockImplementation((key: string) => {
 				if (key === "customSupportPrompts") {
@@ -682,7 +707,7 @@ Output only the summary of the conversation so far, without any additional comme
 
 		it("should not fail when customSupportPrompts is undefined", async () => {
 			// Reset and create a new proxy with no customSupportPrompts
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockGlobalState.get.mockReturnValue(undefined)
 
 			const proxyWithNoPrompts = new ContextProxy(mockContext)

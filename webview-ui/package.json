@@ -8,12 +8,14 @@
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
+		"test:visual": "playwright test -c playwright-ct.config.ts",
+		"test:visual:docker": "node playwright/run-docker.mjs",
+		"test:visual:docker:update": "node playwright/run-docker.mjs --update",
 		"format": "prettier --write src",
 		"dev": "vite",
 		"build": "tsc -b && vite build",
-		"build:nightly": "tsc -b && vite build --mode nightly",
 		"preview": "vite preview",
-		"clean": "rimraf ../src/webview-ui ../apps/vscode-nightly/build/webview-ui tsconfig.tsbuildinfo .turbo"
+		"clean": "rimraf ../src/webview-ui tsconfig.tsbuildinfo .turbo"
 	},
 	"dependencies": {
 		"@radix-ui/react-alert-dialog": "^1.1.6",
@@ -34,10 +36,10 @@
 		"@roo-code/types": "workspace:^",
 		"@tailwindcss/vite": "^4.0.0",
 		"@tanstack/react-query": "^5.68.0",
-		"@vscode/codicons": "^0.0.36",
+		"@vscode/codicons": "^0.0.45",
 		"@vscode/webview-ui-toolkit": "^1.4.0",
 		"ansi-to-html": "^0.7.2",
-		"axios": "^1.12.0",
+		"axios": "^1.18.1",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"cmdk": "^1.0.0",
@@ -50,7 +52,7 @@
 		"i18next": "^25.0.0",
 		"katex": "^0.16.11",
 		"lru-cache": "^11.1.0",
-		"lucide-react": "^0.518.0",
+		"lucide-react": "^1.18.0",
 		"mermaid": "^11.4.1",
 		"posthog-js": "^1.227.2",
 		"pretty-bytes": "^7.0.0",
@@ -67,7 +69,7 @@
 		"rehype-katex": "^7.0.1",
 		"remark-gfm": "^4.0.1",
 		"remark-math": "^6.0.0",
-		"remove-markdown": "^0.6.0",
+		"remove-markdown": "^0.6.4",
 		"shell-quote": "^1.8.2",
 		"shiki": "^3.2.1",
 		"source-map": "^0.7.4",
@@ -83,6 +85,7 @@
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.62.1",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",
@@ -91,10 +94,9 @@
 		"@types/diff": "5.2.3",
 		"@types/jest": "29.5.14",
 		"@types/katex": "0.16.7",
-		"@types/node": "20.19.43",
-		"@types/react": "18.3.23",
+		"@types/node": "22.20.1",
+		"@types/react": "18.3.31",
 		"@types/react-dom": "18.3.7",
-		"@types/shell-quote": "1.7.5",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
 		"@vitejs/plugin-react": "5.2.0",
@@ -102,7 +104,8 @@
 		"@vitest/ui": "4.1.9",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
+		"monocart-reporter": "^2.9.20",
 		"vite": "8.1.0",
-		"vitest": "4.1.9"
+		"vitest": "4.1.11"
 	}
 }

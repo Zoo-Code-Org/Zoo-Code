@@ -2,7 +2,7 @@ import { HTMLAttributes } from "react"
 import React from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox, VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
-import { FoldVertical } from "lucide-react"
+import { ListChevronsDownUp } from "lucide-react"
 import { DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
 
 import { supportPrompt } from "@roo/support-prompt"
@@ -24,7 +24,6 @@ import { SetCachedStateField } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
-import { vscode } from "@/utils/vscode"
 
 type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	autoCondenseContext: boolean
@@ -139,7 +138,6 @@ export const ContextManagementSettings = ({
 			}
 
 			setCachedStateField("profileThresholds", newThresholds)
-			vscode.postMessage({ type: "updateSettings", updatedSettings: { profileThresholds: newThresholds } })
 		}
 	}
 	return (
@@ -516,7 +514,7 @@ export const ContextManagementSettings = ({
 				{autoCondenseContext && (
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
 						<div className="flex items-center gap-4 font-bold">
-							<FoldVertical size={16} />
+							<ListChevronsDownUp size={16} />
 							<div>{t("settings:contextManagement.condensingThreshold.label")}</div>
 						</div>
 						<div>

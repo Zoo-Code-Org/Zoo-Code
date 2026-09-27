@@ -11,28 +11,26 @@ vi.mock("@roo-code/telemetry", () => ({
 // Mock Mistral client - must come before other imports
 const mockCreate = vi.fn()
 const mockComplete = vi.fn()
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 vi.mock("@mistralai/mistralai", () => {
 	return {
 		Mistral: vi.fn().mockImplementation(function () {
 			return {
 				chat: {
-					stream: mockCreate.mockImplementation(async (_options) => {
-						const stream = {
-							[Symbol.asyncIterator]: async function* () {
-								yield {
-									data: {
-										choices: [
-											{
-												delta: { content: "Test response" },
-												index: 0,
-											},
-										],
-									},
-								}
+					stream: mockCreate.mockImplementation(async (_options) =>
+						asyncStreamFrom([
+							{
+								data: {
+									choices: [
+										{
+											delta: { content: "Test response" },
+											index: 0,
+										},
+									],
+								},
 							},
-						}
-						return stream
-					}),
+						]),
+					),
 					complete: mockComplete.mockImplementation(async (_options) => {
 						return {
 							choices: [
@@ -158,31 +156,28 @@ describe("MistralHandler", () => {
 
 		it("should handle thinking content as reasoning chunks", async () => {
 			// Mock stream with thinking content matching new SDK structure
-			mockCreate.mockImplementationOnce(async (_options) => {
-				const stream = {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							data: {
-								choices: [
-									{
-										delta: {
-											content: [
-												{
-													type: "thinking",
-													thinking: [{ type: "text", text: "Let me think about this..." }],
-												},
-												{ type: "text", text: "Here's the answer" },
-											],
-										},
-										index: 0,
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										content: [
+											{
+												type: "thinking",
+												thinking: [{ type: "text", text: "Let me think about this..." }],
+											},
+											{ type: "text", text: "Here's the answer" },
+										],
 									},
-								],
-							},
-						}
+									index: 0,
+								},
+							],
+						},
 					},
-				}
-				return stream
-			})
+				]),
+			)
 
 			const iterator = handler.createMessage(systemPrompt, messages)
 			const results: (ApiStreamTextChunk | ApiStreamReasoningChunk)[] = []
@@ -200,32 +195,29 @@ describe("MistralHandler", () => {
 
 		it("should handle mixed content arrays correctly", async () => {
 			// Mock stream with mixed content matching new SDK structure
-			mockCreate.mockImplementationOnce(async (_options) => {
-				const stream = {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							data: {
-								choices: [
-									{
-										delta: {
-											content: [
-												{ type: "text", text: "First text" },
-												{
-													type: "thinking",
-													thinking: [{ type: "text", text: "Some reasoning" }],
-												},
-												{ type: "text", text: "Second text" },
-											],
-										},
-										index: 0,
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										content: [
+											{ type: "text", text: "First text" },
+											{
+												type: "thinking",
+												thinking: [{ type: "text", text: "Some reasoning" }],
+											},
+											{ type: "text", text: "Second text" },
+										],
 									},
-								],
-							},
-						}
+									index: 0,
+								},
+							],
+						},
 					},
-				}
-				return stream
-			})
+				]),
+			)
 
 			const iterator = handler.createMessage(systemPrompt, messages)
 			const results: (ApiStreamTextChunk | ApiStreamReasoningChunk)[] = []
@@ -314,34 +306,31 @@ describe("MistralHandler", () => {
 
 		it("should handle tool calls in streaming response", async () => {
 			// Mock stream with tool calls
-			mockCreate.mockImplementationOnce(async (_options) => {
-				const stream = {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							data: {
-								choices: [
-									{
-										delta: {
-											toolCalls: [
-												{
-													id: "call_123",
-													type: "function",
-													function: {
-														name: "get_weather",
-														arguments: '{"location":"New York"}',
-													},
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										toolCalls: [
+											{
+												id: "call_123",
+												type: "function",
+												function: {
+													name: "get_weather",
+													arguments: '{"location":"New York"}',
 												},
-											],
-										},
-										index: 0,
+											},
+										],
 									},
-								],
-							},
-						}
+									index: 0,
+								},
+							],
+						},
 					},
-				}
-				return stream
-			})
+				]),
+			)
 
 			const metadata: ApiHandlerCreateMessageMetadata = {
 				taskId: "test-task",
@@ -369,42 +358,39 @@ describe("MistralHandler", () => {
 
 		it("should handle multiple tool calls in a single response", async () => {
 			// Mock stream with multiple tool calls
-			mockCreate.mockImplementationOnce(async (_options) => {
-				const stream = {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							data: {
-								choices: [
-									{
-										delta: {
-											toolCalls: [
-												{
-													id: "call_1",
-													type: "function",
-													function: {
-														name: "get_weather",
-														arguments: '{"location":"NYC"}',
-													},
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: {
+										toolCalls: [
+											{
+												id: "call_1",
+												type: "function",
+												function: {
+													name: "get_weather",
+													arguments: '{"location":"NYC"}',
 												},
-												{
-													id: "call_2",
-													type: "function",
-													function: {
-														name: "get_weather",
-														arguments: '{"location":"LA"}',
-													},
+											},
+											{
+												id: "call_2",
+												type: "function",
+												function: {
+													name: "get_weather",
+													arguments: '{"location":"LA"}',
 												},
-											],
-										},
-										index: 0,
+											},
+										],
 									},
-								],
-							},
-						}
+									index: 0,
+								},
+							],
+						},
 					},
-				}
-				return stream
-			})
+				]),
+			)
 
 			const metadata: ApiHandlerCreateMessageMetadata = {
 				taskId: "test-task",

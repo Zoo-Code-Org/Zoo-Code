@@ -52,7 +52,7 @@ import CodebaseSearchResultsDisplay from "./CodebaseSearchResultsDisplay"
 import { appendImages } from "@src/utils/imageUtils"
 import { McpExecution } from "./McpExecution"
 import { ChatTextArea } from "./ChatTextArea"
-import { MAX_IMAGES_PER_MESSAGE } from "./ChatView"
+import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import { useSelectedModel } from "../ui/hooks/useSelectedModel"
 import {
 	Eye,
@@ -66,12 +66,13 @@ import {
 	FileCode2,
 	PocketKnife,
 	FolderTree,
-	TerminalSquare,
+	SquareTerminal,
 	MessageCircle,
 	Repeat2,
 	Split,
 	ArrowRight,
 	Check,
+	OctagonX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PathTooltip } from "../ui/PathTooltip"
@@ -290,11 +291,23 @@ export const ChatRowContent = ({
 			case "mistake_limit_reached":
 				return [null, null] // These will be handled by ErrorRow component
 			case "command":
+				if (message.autoApprovalDecision === "deny") {
+					return [
+						<OctagonX
+							key="denied-icon"
+							className="size-4 text-vscode-errorForeground"
+							aria-label="Denied command icon"
+						/>,
+						<span key="denied-title" className="font-bold text-vscode-errorForeground">
+							{t("chat:commandExecution.denied")}
+						</span>,
+					]
+				}
 				return [
 					isCommandExecuting ? (
 						<ProgressIndicator />
 					) : (
-						<TerminalSquare className="size-4" aria-label="Terminal icon" />
+						<SquareTerminal className="size-4" aria-label="Terminal icon" />
 					),
 					<span style={{ color: normalColor, fontWeight: "bold" }}>
 						{t("chat:commandExecution.running")}
@@ -1603,6 +1616,7 @@ export const ChatRowContent = ({
 							text={message.text}
 							icon={icon}
 							title={title}
+							isDenied={message.autoApprovalDecision === "deny"}
 						/>
 					)
 				case "use_mcp_server":

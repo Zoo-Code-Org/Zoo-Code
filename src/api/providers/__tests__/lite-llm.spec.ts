@@ -4,6 +4,8 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { LiteLLMHandler } from "../lite-llm"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock vscode first to avoid import errors
 vi.mock("vscode", () => ({
@@ -44,6 +46,16 @@ vi.mock("../fetchers/modelCache", () => ({
 			"gpt-5o": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"gpt-5.1": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"gpt-5-mini": { ...litellmDefaultModelInfo, maxTokens: 8192 },
+			"gpt-6-astra": {
+				...litellmDefaultModelInfo,
+				maxTokens: 128_000,
+				contextWindow: 1_050_000,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+				requiresResponsesApi: true,
+			},
 			"gpt-4": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"claude-3-opus": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 			"llama-3": { ...litellmDefaultModelInfo, maxTokens: 8192 },
@@ -56,6 +68,10 @@ vi.mock("../fetchers/modelCache", () => ({
 			"vertex_ai/gemini-3-pro": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 		})
 	}),
+	refreshModels: vi.fn(async (options) => {
+		const { getModels } = await import("../fetchers/modelCache")
+		return getModels(options)
+	}),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
 }))
 
@@ -64,7 +80,7 @@ describe("LiteLLMHandler", () => {
 	let mockOptions: ApiHandlerOptions
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockOptions = {
 			litellmApiKey: "test-key",
 			litellmBaseUrl: "http://localhost:4000",
@@ -89,29 +105,24 @@ describe("LiteLLMHandler", () => {
 			]
 
 			// Mock the stream response
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { content: "I'm doing well!" } }],
-						usage: {
-							prompt_tokens: 100,
-							completion_tokens: 50,
-							cache_creation_input_tokens: 20,
-							cache_read_input_tokens: 30,
-						},
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "I'm doing well!" } }],
+					usage: {
+						prompt_tokens: 100,
+						completion_tokens: 50,
+						cache_creation_input_tokens: 20,
+						cache_read_input_tokens: 30,
+					},
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			// Verify that create was called with cache control headers
 			const createCall = mockCreate.mock.calls[0][0]
@@ -186,27 +197,22 @@ describe("LiteLLMHandler", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
 
 			// Mock the stream response
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { content: "Hello!" } }],
-						usage: {
-							prompt_tokens: 10,
-							completion_tokens: 5,
-						},
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Hello!" } }],
+					usage: {
+						prompt_tokens: 10,
+						completion_tokens: 5,
+					},
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			// Verify that create was called with max_completion_tokens instead of max_tokens
 			const createCall = mockCreate.mock.calls[0][0]
@@ -229,7 +235,7 @@ describe("LiteLLMHandler", () => {
 			]
 
 			for (const modelId of gpt5Variations) {
-				vi.clearAllMocks()
+				clearAllMocks()
 
 				const optionsWithGPT5: ApiHandlerOptions = {
 					...mockOptions,
@@ -241,26 +247,22 @@ describe("LiteLLMHandler", () => {
 				const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test" }]
 
 				// Mock the stream response
-				const mockStream = {
-					async *[Symbol.asyncIterator]() {
-						yield {
-							choices: [{ delta: { content: "Response" } }],
-							usage: {
-								prompt_tokens: 10,
-								completion_tokens: 5,
-							},
-						}
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "Response" } }],
+						usage: {
+							prompt_tokens: 10,
+							completion_tokens: 5,
+						},
 					},
-				}
+				])
 
 				mockCreate.mockReturnValue({
 					withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 				})
 
 				const generator = handler.createMessage(systemPrompt, messages)
-				for await (const chunk of generator) {
-					// Consume the generator
-				}
+				await collectStream(generator)
 
 				// Verify that create was called with max_completion_tokens for this model variation
 				const createCall = mockCreate.mock.calls[0][0]
@@ -274,7 +276,7 @@ describe("LiteLLMHandler", () => {
 			const nonGPT5Models = ["gpt-4", "claude-3-opus", "llama-3", "gpt-4-turbo"]
 
 			for (const modelId of nonGPT5Models) {
-				vi.clearAllMocks()
+				clearAllMocks()
 
 				const options: ApiHandlerOptions = {
 					...mockOptions,
@@ -286,26 +288,22 @@ describe("LiteLLMHandler", () => {
 				const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test" }]
 
 				// Mock the stream response
-				const mockStream = {
-					async *[Symbol.asyncIterator]() {
-						yield {
-							choices: [{ delta: { content: "Response" } }],
-							usage: {
-								prompt_tokens: 10,
-								completion_tokens: 5,
-							},
-						}
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "Response" } }],
+						usage: {
+							prompt_tokens: 10,
+							completion_tokens: 5,
+						},
 					},
-				}
+				])
 
 				mockCreate.mockReturnValue({
 					withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 				})
 
 				const generator = handler.createMessage(systemPrompt, messages)
-				for await (const chunk of generator) {
-					// Consume the generator
-				}
+				await collectStream(generator)
 
 				// Verify that create was called with max_tokens for non-GPT-5 models
 				const createCall = mockCreate.mock.calls[0][0]
@@ -349,17 +347,15 @@ describe("LiteLLMHandler", () => {
 			})
 
 			// Mock the stream response
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { content: "Hello!" } }],
-						usage: {
-							prompt_tokens: 10,
-							completion_tokens: 5,
-						},
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Hello!" } }],
+					usage: {
+						prompt_tokens: 10,
+						completion_tokens: 5,
+					},
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
@@ -368,9 +364,7 @@ describe("LiteLLMHandler", () => {
 			const generator = handler.createMessage("You are a helpful assistant", [
 				{ role: "user", content: "Hello" } as unknown as Anthropic.Messages.MessageParam,
 			])
-			for await (const _chunk of generator) {
-				// consume
-			}
+			await collectStream(generator)
 
 			// Should not include either token field
 			const createCall = mockCreate.mock.calls[0][0]
@@ -400,6 +394,112 @@ describe("LiteLLMHandler", () => {
 			const createCall = mockCreate.mock.calls[0][0]
 			expect(createCall.max_tokens).toBeUndefined()
 			expect(createCall.max_completion_tokens).toBeUndefined()
+		})
+	})
+
+	describe("GPT-6 Astra handling", () => {
+		it("triggers LiteLLM's Responses bridge with safe request parameters", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "none",
+				modelTemperature: 0.7,
+			})
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({
+					data: asyncStreamFrom([
+						{
+							choices: [{ delta: { content: "Astra response" } }],
+							usage: { prompt_tokens: 10, completion_tokens: 5 },
+						},
+					]),
+				}),
+			})
+
+			await collectStream(
+				handler.createMessage("You are helpful", [{ role: "user", content: "Hello" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "read_file",
+								description: "Read a file",
+								parameters: { type: "object", properties: { path: { type: "string" } } },
+							},
+						},
+					],
+				}),
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request).toMatchObject({
+				model: "gpt-6-astra",
+				max_completion_tokens: 128_000,
+				reasoning_effort: "medium",
+				tools: [{ type: "function", function: { name: "read_file" } }],
+			})
+			expect(request.max_tokens).toBeUndefined()
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("uses safe Astra parameters for completePrompt", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "max",
+				modelTemperature: 0.7,
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "Astra response" } }] })
+
+			await handler.completePrompt("Hello")
+
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({
+				model: "gpt-6-astra",
+				max_completion_tokens: 128_000,
+				reasoning_effort: "max",
+			})
+			expect(mockCreate.mock.calls[0][0].max_tokens).toBeUndefined()
+			expect(mockCreate.mock.calls[0][0].temperature).toBeUndefined()
+		})
+
+		it("uses Astra's required default when reasoning is disabled", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "disable",
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "Astra response" } }] })
+
+			await handler.completePrompt("Hello")
+
+			expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("medium")
+		})
+
+		it("reports nested LiteLLM cache-write tokens", async () => {
+			handler = new LiteLLMHandler({ ...mockOptions, litellmModelId: "gpt-6-astra" })
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({
+					data: asyncStreamFrom([
+						{
+							choices: [{ delta: { content: "Astra response" } }],
+							usage: {
+								prompt_tokens: 100,
+								completion_tokens: 5,
+								prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+							},
+						},
+					]),
+				}),
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("You are helpful", [{ role: "user", content: "Hello" }]),
+			)
+
+			expect(chunks).toContainEqual(
+				expect.objectContaining({ type: "usage", cacheReadTokens: 20, cacheWriteTokens: 30 }),
+			)
 		})
 	})
 
@@ -616,17 +716,15 @@ describe("LiteLLMHandler", () => {
 				]
 
 				// Mock the stream response
-				const mockStream = {
-					async *[Symbol.asyncIterator]() {
-						yield {
-							choices: [{ delta: { content: "You're welcome!" } }],
-							usage: {
-								prompt_tokens: 100,
-								completion_tokens: 20,
-							},
-						}
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "You're welcome!" } }],
+						usage: {
+							prompt_tokens: 100,
+							completion_tokens: 20,
+						},
 					},
-				}
+				])
 
 				mockCreate.mockReturnValue({
 					withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
@@ -643,9 +741,7 @@ describe("LiteLLMHandler", () => {
 				}
 
 				const generator = handler.createMessage(systemPrompt, messages, metadata as any)
-				for await (const _chunk of generator) {
-					// Consume the generator
-				}
+				await collectStream(generator)
 
 				// Verify that the assistant message with tool_calls has thought_signature injected
 				const createCall = mockCreate.mock.calls[0][0]
@@ -687,14 +783,12 @@ describe("LiteLLMHandler", () => {
 					},
 				]
 
-				const mockStream = {
-					async *[Symbol.asyncIterator]() {
-						yield {
-							choices: [{ delta: { content: "Response" } }],
-							usage: { prompt_tokens: 100, completion_tokens: 20 },
-						}
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "Response" } }],
+						usage: { prompt_tokens: 100, completion_tokens: 20 },
 					},
-				}
+				])
 
 				mockCreate.mockReturnValue({
 					withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
@@ -710,9 +804,7 @@ describe("LiteLLMHandler", () => {
 				}
 
 				const generator = handler.createMessage(systemPrompt, messages, metadata as any)
-				for await (const _chunk of generator) {
-					// Consume
-				}
+				await collectStream(generator)
 
 				// Verify that thought_signature was NOT injected for non-Gemini model
 				const createCall = mockCreate.mock.calls[0][0]
@@ -729,28 +821,23 @@ describe("LiteLLMHandler", () => {
 
 	describe("reasoning field handling", () => {
 		it("should yield reasoning chunks from reasoning_content delta", async () => {
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { reasoning_content: "Let me think..." } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { content: "The answer is 42." } }],
-						usage: { prompt_tokens: 20, completion_tokens: 10 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: "Let me think..." } }],
+					usage: null,
 				},
-			}
+				{
+					choices: [{ delta: { content: "The answer is 42." } }],
+					usage: { prompt_tokens: 20, completion_tokens: 10 },
+				},
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "What is the answer?" }])
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			const reasoningChunk = results.find((c) => c.type === "reasoning")
 			expect(reasoningChunk).toBeDefined()
@@ -760,29 +847,49 @@ describe("LiteLLMHandler", () => {
 			expect(textChunk).toMatchObject({ type: "text", text: "The answer is 42." })
 		})
 
-		it("should yield reasoning chunks from reasoning delta field", async () => {
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { reasoning: "Analyzing the problem..." } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { content: "Done." } }],
-						usage: { prompt_tokens: 10, completion_tokens: 5 },
-					}
+		it("should yield reasoning chunks BEFORE text chunks when both are present in the exact same delta", async () => {
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: "thinking...", content: "answer" } }],
+					usage: { prompt_tokens: 10, completion_tokens: 10 },
 				},
-			}
+			])
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Test simultaneous." }])
+			const results = await collectStream(generator)
+
+			// Filter out usage chunks to focus on ordering of content
+			const contentResults = results.filter((r) => r.type === "reasoning" || r.type === "text")
+
+			// The order is strictly enforced here
+			expect(contentResults).toEqual([
+				{ type: "reasoning", text: "thinking..." },
+				{ type: "text", text: "answer" },
+			])
+		})
+
+		it("should yield reasoning chunks from reasoning delta field", async () => {
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning: "Analyzing the problem..." } }],
+					usage: null,
+				},
+				{
+					choices: [{ delta: { content: "Done." } }],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+				},
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "Solve this." }])
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			const reasoningChunk = results.find((c) => c.type === "reasoning")
 			expect(reasoningChunk).toBeDefined()
@@ -790,26 +897,19 @@ describe("LiteLLMHandler", () => {
 		})
 
 		it("should prefer reasoning_content over reasoning when both are present", async () => {
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [
-							{ delta: { reasoning_content: "from_reasoning_content", reasoning: "from_reasoning" } },
-						],
-						usage: { prompt_tokens: 5, completion_tokens: 5 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: "from_reasoning_content", reasoning: "from_reasoning" } }],
+					usage: { prompt_tokens: 5, completion_tokens: 5 },
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "Test." }])
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			const reasoningChunks = results.filter((c) => c.type === "reasoning")
 			expect(reasoningChunks).toHaveLength(1)
@@ -817,104 +917,89 @@ describe("LiteLLMHandler", () => {
 		})
 
 		it("should not yield reasoning chunk when reasoning field is present but falsy", async () => {
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { reasoning_content: undefined } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { reasoning: "" } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { content: "Hello" } }],
-						usage: { prompt_tokens: 5, completion_tokens: 5 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: undefined } }],
+					usage: null,
 				},
-			}
+				{
+					choices: [{ delta: { reasoning: "" } }],
+					usage: null,
+				},
+				{
+					choices: [{ delta: { content: "Hello" } }],
+					usage: { prompt_tokens: 5, completion_tokens: 5 },
+				},
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "Hi" }])
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			const reasoningChunks = results.filter((c) => c.type === "reasoning")
 			expect(reasoningChunks).toHaveLength(0)
 		})
 
 		it("should preserve whitespace-only reasoning chunks so streamed boundaries survive concatenation", async () => {
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { reasoning_content: "Let's" } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { reasoning_content: " " } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { reasoning_content: "think" } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { reasoning_content: "\n\n" } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { reasoning_content: "next" } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { content: "Hello" } }],
-						usage: { prompt_tokens: 5, completion_tokens: 5 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: "Let's" } }],
+					usage: null,
 				},
-			}
+				{
+					choices: [{ delta: { reasoning_content: " " } }],
+					usage: null,
+				},
+				{
+					choices: [{ delta: { reasoning_content: "think" } }],
+					usage: null,
+				},
+				{
+					choices: [{ delta: { reasoning_content: "\n\n" } }],
+					usage: null,
+				},
+				{
+					choices: [{ delta: { reasoning_content: "next" } }],
+					usage: null,
+				},
+				{
+					choices: [{ delta: { content: "Hello" } }],
+					usage: { prompt_tokens: 5, completion_tokens: 5 },
+				},
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "Hi" }])
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			const reasoningChunks = results.filter((c) => c.type === "reasoning")
 			expect(reasoningChunks.map((c) => (c as { text: string }).text).join("")).toBe("Let's think\n\nnext")
 		})
 
 		it("should fall back to reasoning when reasoning_content is null on the same delta", async () => {
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { reasoning_content: null, reasoning: "fallback thinking" } }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { content: "Answer." } }],
-						usage: { prompt_tokens: 5, completion_tokens: 5 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: null, reasoning: "fallback thinking" } }],
+					usage: null,
 				},
-			}
+				{
+					choices: [{ delta: { content: "Answer." } }],
+					usage: { prompt_tokens: 5, completion_tokens: 5 },
+				},
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "Test." }])
-			const results = []
-			for await (const chunk of generator) {
-				results.push(chunk)
-			}
+			const results = await collectStream(generator)
 
 			const reasoningChunks = results.filter((c) => c.type === "reasoning")
 			expect(reasoningChunks).toHaveLength(1)
@@ -954,23 +1039,19 @@ describe("LiteLLMHandler", () => {
 				},
 			]
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { content: "Response" } }],
-						usage: { prompt_tokens: 100, completion_tokens: 20 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Response" } }],
+					usage: { prompt_tokens: 100, completion_tokens: 20 },
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of generator) {
-				// Consume
-			}
+			await collectStream(generator)
 
 			// Verify that tool IDs are truncated to 64 characters or less
 			const createCall = mockCreate.mock.calls[0][0]
@@ -1017,23 +1098,19 @@ describe("LiteLLMHandler", () => {
 				},
 			]
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { content: "Response" } }],
-						usage: { prompt_tokens: 100, completion_tokens: 20 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Response" } }],
+					usage: { prompt_tokens: 100, completion_tokens: 20 },
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of generator) {
-				// Consume
-			}
+			await collectStream(generator)
 
 			// Verify that tool IDs are unchanged
 			const createCall = mockCreate.mock.calls[0][0]
@@ -1085,23 +1162,19 @@ describe("LiteLLMHandler", () => {
 				},
 			]
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						choices: [{ delta: { content: "Response" } }],
-						usage: { prompt_tokens: 100, completion_tokens: 20 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Response" } }],
+					usage: { prompt_tokens: 100, completion_tokens: 20 },
 				},
-			}
+			])
 
 			mockCreate.mockReturnValue({
 				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of generator) {
-				// Consume
-			}
+			await collectStream(generator)
 
 			// Verify that truncated tool IDs are unique (hash suffix ensures this)
 			const createCall = mockCreate.mock.calls[0][0]
@@ -1124,27 +1197,158 @@ describe("LiteLLMHandler", () => {
 		})
 	})
 
-	describe("session ID header", () => {
-		const mockStream = {
-			async *[Symbol.asyncIterator]() {
-				yield {
+	describe("preserveReasoning message conversion", () => {
+		const makeMockStream = () =>
+			asyncStreamFrom([
+				{
 					choices: [{ delta: { content: "ok" } }],
 					usage: { prompt_tokens: 1, completion_tokens: 1 },
-				}
-			},
-		}
+				},
+			])
+
+		it("uses convertToR1Format (merging tool-result text) when the model info sets preserveReasoning", async () => {
+			const optionsWithReasoning: ApiHandlerOptions = {
+				...mockOptions,
+				litellmModelId: "deepseek-reasoner-alias",
+			}
+			handler = new LiteLLMHandler(optionsWithReasoning)
+
+			vi.spyOn(handler as any, "fetchModel").mockResolvedValue({
+				id: "deepseek-reasoner-alias",
+				info: { ...litellmDefaultModelInfo, preserveReasoning: true },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I'll help." },
+						{ type: "tool_use", id: "toolu_123", name: "read_file", input: { path: "test.txt" } },
+					],
+					// DeepSeek-style interleaved thinking: must be echoed back in the next request.
+					reasoning_content: "Let me check the file first.",
+				} as Anthropic.Messages.MessageParam & { reasoning_content: string },
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_123", content: "file contents" },
+						{ type: "text", text: "Thanks, continue." },
+					],
+				},
+			]
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
+			})
+
+			const generator = handler.createMessage(systemPrompt, messages)
+			await collectStream(generator)
+
+			const createCall = mockCreate.mock.calls[0][0]
+
+			// convertToR1Format with mergeToolResultText folds the trailing text into the
+			// tool message instead of appending a separate user message.
+			const toolMessage = createCall.messages.find((msg: any) => msg.role === "tool")
+			expect(toolMessage).toBeDefined()
+			expect(toolMessage.content).toBe("file contents\n\nThanks, continue.")
+
+			const trailingUserMessage = createCall.messages.find(
+				(msg: any) => msg.role === "user" && msg.content === "Thanks, continue.",
+			)
+			expect(trailingUserMessage).toBeUndefined()
+
+			// The whole point of routing through convertToR1Format: reasoning_content
+			// must survive on the assistant message so the model doesn't reject the
+			// follow-up request for missing prior reasoning.
+			const assistantMessage = createCall.messages.find(
+				(msg: any) => msg.role === "assistant" && msg.tool_calls?.length > 0,
+			)
+			expect(assistantMessage).toBeDefined()
+			expect(assistantMessage.reasoning_content).toBe("Let me check the file first.")
+		})
+
+		it("uses convertToOpenAiMessages (no merging) when the model info does not set preserveReasoning", async () => {
+			vi.spyOn(handler as any, "fetchModel").mockResolvedValue({
+				id: litellmDefaultModelId,
+				info: { ...litellmDefaultModelInfo, preserveReasoning: undefined },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			// Task.buildCleanConversationHistory() (src/core/task/Task.ts) already strips the
+			// reasoning content block before messages reach this handler when the model's
+			// preserveReasoning is not true, so no reasoning_content/reasoning block is present
+			// on the assistant message here — this input reflects what the handler actually
+			// receives in that case.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I'll help." },
+						{ type: "tool_use", id: "toolu_123", name: "read_file", input: { path: "test.txt" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_123", content: "file contents" },
+						{ type: "text", text: "Thanks, continue." },
+					],
+				},
+			]
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
+			})
+
+			const generator = handler.createMessage(systemPrompt, messages)
+			await collectStream(generator)
+
+			const createCall = mockCreate.mock.calls[0][0]
+
+			const toolMessage = createCall.messages.find((msg: any) => msg.role === "tool")
+			expect(toolMessage).toBeDefined()
+			expect(toolMessage.content).toBe("file contents")
+
+			const trailingUserMessage = createCall.messages.find(
+				(msg: any) =>
+					msg.role === "user" &&
+					(msg.content === "Thanks, continue." ||
+						(Array.isArray(msg.content) &&
+							msg.content.some((part: any) => part.text === "Thanks, continue."))),
+			)
+			expect(trailingUserMessage).toBeDefined()
+
+			// No reasoning_content is sent to the API in this branch, matching what
+			// buildCleanConversationHistory already stripped upstream.
+			const assistantMessage = createCall.messages.find(
+				(msg: any) => msg.role === "assistant" && msg.tool_calls?.length > 0,
+			)
+			expect(assistantMessage).toBeDefined()
+			expect(assistantMessage.reasoning_content).toBeUndefined()
+		})
+	})
+
+	describe("session ID header", () => {
+		const makeMockStream = () =>
+			asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "ok" } }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				},
+			])
 
 		it("should send the X-Zoo-Session-ID header when a taskId is provided", async () => {
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
 				taskId: "task-123",
 			})
-			for await (const _chunk of generator) {
-				// drain the stream
-			}
+			await collectStream(generator)
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).toMatchObject({ "X-Zoo-Session-ID": "task-123" })
@@ -1152,13 +1356,11 @@ describe("LiteLLMHandler", () => {
 
 		it("should not send the X-Zoo-Session-ID header when no taskId is provided", async () => {
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }])
-			for await (const _chunk of generator) {
-				// drain the stream
-			}
+			await collectStream(generator)
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
@@ -1166,15 +1368,13 @@ describe("LiteLLMHandler", () => {
 
 		it("should not send the X-Zoo-Session-ID header when taskId is an empty string", async () => {
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
 				taskId: "",
 			})
-			for await (const _chunk of generator) {
-				// drain the stream
-			}
+			await collectStream(generator)
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")

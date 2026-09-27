@@ -1,7 +1,7 @@
 // npm run test ContextWindowProgress.spec.tsx
 
 import { render, screen, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { providerIdentifiers } from "@roo-code/types"
 
 import TaskHeader from "@src/components/chat/TaskHeader"
 
@@ -18,7 +18,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 // Mock ExtensionStateContext since we use useExtensionState
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	useExtensionState: vi.fn(() => ({
-		apiConfiguration: { apiProvider: "openai" },
+		apiConfiguration: { apiProvider: providerIdentifiers.openai },
 		currentTaskItem: { id: "test-id", number: 1, size: 1024 },
 	})),
 }))
@@ -42,8 +42,6 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 }))
 
 describe("ContextWindowProgress", () => {
-	const queryClient = new QueryClient()
-
 	// Helper function to render just the ContextWindowProgress part through TaskHeader
 	const renderComponent = (props: Record<string, any>) => {
 		// Create a simple mock of the task that avoids importing the actual types
@@ -58,11 +56,7 @@ describe("ContextWindowProgress", () => {
 			handleCondenseContext: vi.fn((_taskId: string) => {}),
 		}
 
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<TaskHeader {...defaultProps} {...props} />
-			</QueryClientProvider>,
-		)
+		return render(<TaskHeader {...defaultProps} {...props} />)
 	}
 
 	beforeEach(() => vi.clearAllMocks())

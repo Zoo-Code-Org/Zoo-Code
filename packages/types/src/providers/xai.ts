@@ -3,9 +3,25 @@ import type { ModelInfo } from "../model.js"
 // https://docs.x.ai/docs/api-reference
 export type XAIModelId = keyof typeof xaiModels
 
-export const xaiDefaultModelId: XAIModelId = "grok-4.20"
+export const xaiDefaultModelId: XAIModelId = "grok-4.5"
 
 export const xaiModels = {
+	"grok-4.5": {
+		maxTokens: 65_536,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheWritesPrice: 0.5,
+		cacheReadsPrice: 0.5,
+		description:
+			"xAI's flagship Grok 4.5 model with 500K context, configurable reasoning (low/medium/high), and agentic tool calling via Responses API.",
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "high",
+		includedTools: ["search_replace"],
+		excludedTools: ["apply_diff"],
+	},
 	"grok-4.20": {
 		maxTokens: 65_536,
 		contextWindow: 2_000_000,

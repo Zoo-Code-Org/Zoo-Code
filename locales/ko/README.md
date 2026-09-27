@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -16,13 +15,17 @@
 
         ## 우리는 Zoo Code입니다
 
-> Roo 팀 🦘🦘🦘의 [최근 발표](https://x.com/mattrubens/status/2046636598859559114)를 봤을지도 몰라. 한줄 요약하면, 팀은 [Roomote](https://roomote.dev/)에 집중하면서 Roo Code의 적극적인 개발을 점차 줄여 나가고 있어. 이 소식은 많은 Roo 사용자들에게 힘들었고, 이 플러그인은 이 커뮤니티에 큰 의미가 있어.
+> Roo 팀이 [Roomote](https://roomote.dev/)에 집중하기 위해 Roo Code의 적극적인
+> 개발을 중단한 뒤, Zoo Code가 이 프로젝트의 개발을 이어가고 있어. 그동안
+> 쌓아 온 모든 것에 대해 Roo 팀에게 고마워.
 >
-> 이 플러그인에 쏟아 준 Roo 팀 전체의 노력에 감사하고 싶어. 여기서 한 사람씩 이름을 부르지는 않겠지만, 모두가 그들이 뛰어난 개발자일 뿐 아니라 정말 멋진 사람들이라는 데 동의할 거야. Roo 팀에게 고마워.
->
-> Roo 사용자들은 정말 다양합니다. 어떤 사람은 일상적인 업무에서 전문적으로 사용하고, 어떤 사람은 상상하기 어려울 정도로 복잡한 워크플로를 구상하는 데 사용합니다. 어떤 사람은 Roo 자체를 개선하는 데 쓰고, 또 어떤 사람은 Roo가 사용하는 모델 자체를 개선하는 데 씁니다 (정말 메타하죠). 우리가 말하고 싶은 핵심은 커뮤니티가 다양하다는 것입니다. 캥거루 🦘🦘🦘도 충분히 멋지고 고귀한 동물이지만, 여러 종이 함께 있는 "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦가 이 플러그인 사용자의 다양성을 더 잘 보여준다고 느꼈습니다.
->
-> 그래서 **Zoo Code**가 이 중요한 프로젝트의 개발을 이어가겠다고 발표하고자 합니다. 핵심 팀은 이전에 Roo에 기여했고 이 플러그인을 깊이 아끼는 개발자들로 구성되어 있습니다. 우리는 계속해서 모델을 업데이트하고, 버그를 수정하고, 기능을 출시할 것입니다. 하지만 무엇보다도 이 플러그인을 특별하게 만들어 준 커뮤니티 여러분의 목소리에 귀 기울이려 합니다. 그러니 우리의 [Discord](https://discord.gg/VxfP4Vx3gX), [Reddit](https://www.reddit.com/r/ZooCode)에 참여하거나 [PR 또는 issue 를 만들어](https://github.com/Zoo-Code-Org/Zoo-Code) 주세요. 무엇보다도 커뮤니티로서 계속 연결되고, 참여하고, 활발하게 함께해 주시길 부탁드립니다.
+> 핵심 팀은 이전에 Roo에 기여했고 이 플러그인을 깊이 아끼는 개발자들로
+> 구성되어 있어. 우리는 계속해서 모델을 업데이트하고, 버그를 수정하고,
+> 기능을 출시할 거고, 이 플러그인을 특별하게 만들어 준 커뮤니티의 목소리에
+> 귀 기울일 계획이야. 우리와 함께해
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), 또는
+> [PR이나 issue 열기](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
@@ -30,11 +33,23 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.66.0의 새로운 기능
+## Roo Code 이후 Zoo Code가 추가한 기능
 
-- **Claude Sonnet 5 지원** — 최신 Claude 모델이 이제 Anthropic, Bedrock, Vertex 프로바이더에서 사용 가능합니다
-- **Semble v0.4.1 업그레이드** — 평면화된 결과 파싱과 현지화된 상태 메시지
-- **태스크 수명주기 상태 전환 가드** — 새로운 상태 전환 가드와 시작 시 위임 조정으로 잘못된 태스크 상태 전환을 방지합니다
+Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계속 확장하고 있어:
+
+- **Semble 코드베이스 인텔리전스** — 자동 설정을 지원하고 별도 인덱싱 워크플로우 없이 사용할 수 있는 빠른 온디맨드 시맨틱 코드 검색.
+- **더 강력한 Orchestrator 워크플로우** — 더 안전한 위임, 병렬 작업 조정, 안정적인 상위/하위 작업 복구, 하위 작업과 프로바이더 프로필 간 격리 강화.
+- **Destructive Command Guard(DCG)를 통한 더 긴 자율 실행** — 신뢰할 수 있는 작업을 승인 요청 반복 없이 계속하면서 위험한 명령은 자동으로 차단.
+- **최신 모델** — 새로운 Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax 등 다양한 모델 제품군을 지속적으로 지원.
+- **더 다양한 연결 방식** — Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go 등 새롭게 추가되거나 확장된 프로바이더 지원.
+- **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
+- **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
+
+## v3.84.0의 새로운 기능
+
+- ✨ **새로운 SOTA 모델 추가:** 지원되는 프로바이더에서 GPT-6 Sol, GPT-6 Luna, Claude Opus 5.5를 사용하세요.
+- 🧭 **더 안정적인 작업 및 하위 작업:** 위임된 모드를 분리하고, Stop을 반복한 뒤에도 하위 작업 링크를 유지하며, 슬래시 명령이 모드를 전환할 때 오케스트레이터 설정을 보호합니다.
+- 🛠️ **더 안정적인 터미널, 프로바이더 및 코드 검색 동작:** Windows와 비영어권 환경의 터미널 동작을 개선하고, 프로바이더 응답과 취소 처리를 강화하며, 코드 검색이 올바른 워크스페이스를 더 일관되게 사용하도록 했습니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 
@@ -58,24 +73,9 @@ Zoo Code는 당신의 작업 방식에 맞춰 적응합니다.
 
 자세히: [모드 사용](https://docs.zoocode.dev/basic-usage/using-modes) • [사용자 지정 모드](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## 튜토리얼 및 기능 비디오
-
-<div align="center">
-
-|                                                                                                                                                                         |                                                                                                                                                                       |                                                                                                                                                                         |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Zoo Code 설치하기</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>프로필 구성하기</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>코드베이스 인덱싱</b> |
-| <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>사용자 지정 모드</b>  |   <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>체크포인트</b>    |   <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>컨텍스트 관리</b>   |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">더 많은 빠른 튜토리얼 및 기능 비디오...</a>
-</p>
-
 ## 리소스
 
 - **[문서](https://docs.zoocode.dev):** Zoo Code 설치, 구성 및 마스터하기 위한 공식 가이드.
-- **[YouTube 채널](https://youtube.com/@roocodeyt?feature=shared):** 튜토리얼을 시청하고 실제 기능을 확인하세요.
 - **[Discord 서버](https://discord.gg/VxfP4Vx3gX):** 커뮤니티에 가입하여 실시간 도움과 토론에 참여하세요.
 - **[Reddit 커뮤니티](https://www.reddit.com/r/ZooCode):** 경험을 공유하고 다른 사람들이 무엇을 만들고 있는지 확인하세요.
 - **[GitHub 문제](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** 버그를 보고하고 개발을 추적하세요.

@@ -203,22 +203,64 @@ describe("convertAnthropicMessageToGemini", () => {
 		])
 	})
 
-	it("should handle empty tool result content", () => {
+	it("should preserve an empty tool result as a user function response", () => {
+		const toolIdToName = new Map([["calculator-123", "calculator"]])
 		const anthropicMessage: Anthropic.Messages.MessageParam = {
 			role: "user",
 			content: [
 				{
 					type: "tool_result",
 					tool_use_id: "calculator-123",
-					content: null as any, // Empty content
+					content: "",
 				},
 			],
 		}
 
-		const result = convertAnthropicMessageToGemini(anthropicMessage)
+		const result = convertAnthropicMessageToGemini(anthropicMessage, { toolIdToName })
 
-		// Should skip the empty tool result
-		expect(result).toEqual([])
+		expect(result).toEqual([
+			{
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "calculator",
+							response: { name: "calculator", content: "(empty)" },
+						},
+					},
+				],
+			},
+		])
+	})
+
+	it("should preserve an empty tool result array as a user function response", () => {
+		const toolIdToName = new Map([["calculator-123", "calculator"]])
+		const anthropicMessage: Anthropic.Messages.MessageParam = {
+			role: "user",
+			content: [
+				{
+					type: "tool_result",
+					tool_use_id: "calculator-123",
+					content: [],
+				},
+			],
+		}
+
+		const result = convertAnthropicMessageToGemini(anthropicMessage, { toolIdToName })
+
+		expect(result).toEqual([
+			{
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "calculator",
+							response: { name: "calculator", content: "(empty)" },
+						},
+					},
+				],
+			},
+		])
 	})
 
 	it("should convert a message with tool result as array with text only", () => {

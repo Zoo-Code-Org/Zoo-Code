@@ -7,6 +7,7 @@ import { DeleteButton } from "./DeleteButton"
 import { StandardTooltip } from "../ui/standard-tooltip"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { Split } from "lucide-react"
+import { TaskStatusBadge } from "./TaskStatusBadge"
 
 export interface TaskItemFooterProps {
 	item: HistoryItem
@@ -33,6 +34,13 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 					<>
 						<Split className="size-3" />
 						<span>{t("history:subtaskTag")}</span>
+						<span>·</span>
+					</>
+				)}
+				{/* Delegation status (delegated parent waiting on a child, or interrupted child) */}
+				{(item.status === "delegated" || item.status === "interrupted") && (
+					<>
+						<TaskStatusBadge status={item.status} />
 						<span>·</span>
 					</>
 				)}

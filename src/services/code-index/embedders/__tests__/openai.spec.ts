@@ -3,6 +3,7 @@ import { OpenAI } from "openai"
 
 import { OpenAiEmbedder } from "../openai"
 import { MAX_ITEM_TOKENS, INITIAL_RETRY_DELAY_MS } from "../../constants"
+import { clearAllMocks } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK
 vitest.mock("openai")
@@ -44,7 +45,7 @@ describe("OpenAiEmbedder", () => {
 	let MockedOpenAI: MockedClass<typeof OpenAI>
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		consoleMocks.error.mockClear()
 		consoleMocks.warn.mockClear()
 
@@ -62,7 +63,7 @@ describe("OpenAiEmbedder", () => {
 	})
 
 	afterEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

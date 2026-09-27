@@ -95,4 +95,50 @@ describe("getBinPath", () => {
 
 		expect(await getBinPath(appRoot)).toBeUndefined()
 	})
+
+	// Regression test for https://github.com/Zoo-Code-Org/Zoo-Code/issues/1024
+	// VS Code 1.130+ ships @vscode/ripgrep >=1.18, where the binary lives in a
+	// platform-specific optional package (e.g. @vscode/ripgrep-win32-x64).
+	// None of the previous candidate paths matched this layout.
+	it("resolves ripgrep from the @vscode/ripgrep >=1.18 platform-package layout", async () => {
+		const arch = process.env.npm_config_arch || process.arch
+		const rg = path.join(appRoot, `node_modules/@vscode/ripgrep-${process.platform}-${arch}/bin`, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("resolves ripgrep from the unpacked @vscode/ripgrep >=1.18 platform-package layout", async () => {
+		const arch = process.env.npm_config_arch || process.arch
+		const rg = path.join(
+			appRoot,
+			`node_modules.asar.unpacked/@vscode/ripgrep-${process.platform}-${arch}/bin`,
+			binName,
+		)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("respects npm_config_arch when selecting the platform package", async () => {
+		const overrideArch = "x64"
+		const original = process.env.npm_config_arch
+		process.env.npm_config_arch = overrideArch
+		try {
+			const rg = path.join(
+				appRoot,
+				`node_modules/@vscode/ripgrep-${process.platform}-${overrideArch}/bin`,
+				binName,
+			)
+			mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+			expect(await getBinPath(appRoot)).toBe(rg)
+		} finally {
+			if (original === undefined) {
+				delete process.env.npm_config_arch
+			} else {
+				process.env.npm_config_arch = original
+			}
+		}
+	})
 })

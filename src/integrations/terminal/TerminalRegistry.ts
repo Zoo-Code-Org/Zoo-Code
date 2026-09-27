@@ -56,14 +56,41 @@ export class TerminalRegistry {
 					})
 
 					if (terminal instanceof Terminal) {
-						if (terminal.activeShellExecution === e.execution) {
+						// Always call read() from this event — it fires when VSCode's shell
+						// integration confirms the command has actually started, which is the
+						// earliest point at which read() will reliably capture output. Calling
+						// read() earlier (e.g. immediately after executeCommand()) creates a
+						// stream window that misses data on cold terminals where the shell
+						// hasn't started yet: VSCode doesn't buffer retroactively.
+						//
+						// Guard: only set the stream for the execution we own. Stale start
+						// events for a previous execution on the same reused terminal must
+						// not overwrite the current command's stream.
+						const process = terminal.process
+						const isOwnExecution =
+							!(process instanceof TerminalProcess) ||
+							// Allow undefined only when the process hasn't started yet (cold
+							// terminal: process is assigned but run() hasn't called executeCommand).
+							// Once isHot is true, ownExecution is always set — a stale start
+							// event on a reused terminal must match exactly.
+							(!process.isHot && process.ownExecution === undefined) ||
+							process.ownExecution === e.execution
+						if (!isOwnExecution) {
+							console.info(
+								"[TerminalRegistry] Ignoring onDidStartTerminalShellExecution for a different execution",
+								{ terminalId: terminal.id },
+							)
 							return
 						}
-
-						// Get a handle to the stream as early as possible.
 						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
-						terminal.busy = true // Mark terminal as busy when shell execution starts
+						// Only mark busy when there is a live process to clear it later.
+						// If the end event already fired (early-completion race), process is
+						// undefined and setActiveStream returned early — setting busy here would
+						// leave the terminal stuck busy with nothing to clear it.
+						if (terminal.process) {
+							terminal.busy = true
+						}
 					} else {
 						console.error(
 							"[onDidStartTerminalShellExecution] Shell execution started, but not from a Roo-registered terminal:",
@@ -100,6 +127,29 @@ export class TerminalRegistry {
 
 					if (terminal instanceof Terminal && terminal.activeShellExecution === e.execution) {
 						terminal.activeShellExecution = undefined
+					}
+
+					// Guard against a late end event for an execution that has already been
+					// superseded on this terminal. This can happen when a process self-finalizes
+					// after TerminalProcess's own D-marker grace period elapses without ever
+					// seeing this event (see TerminalProcess.ts's finalize()): the terminal gets
+					// reused for a new command before VSCode's stale event for the OLD command
+					// finally arrives. Without this check, that stale event would call
+					// shellExecutionComplete() on whatever process/exit-code tracking is
+					// currently attached -- the NEW command's -- corrupting its state instead of
+					// being a harmless no-op for the command it actually belongs to.
+					const isStaleExecution =
+						process instanceof TerminalProcess &&
+						process.ownExecution !== undefined &&
+						process.ownExecution !== e.execution
+
+					if (isStaleExecution) {
+						console.info(
+							"[TerminalRegistry] Ignoring stale onDidEndTerminalShellExecution for a superseded execution",
+							{ terminalId: terminal.id, exitCode: e.exitCode },
+						)
+
+						return
 					}
 
 					if (!terminal.running) {

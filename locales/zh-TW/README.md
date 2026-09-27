@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -16,13 +15,15 @@
 
         ## 我們是 Zoo Code
 
-> 你可能已經看到 Roo 團隊 🦘🦘🦘 的[最近公告](https://x.com/mattrubens/status/2046636598859559114)。簡單來說，團隊在把重心放到 [Roomote](https://roomote.dev/) 的同時，正在逐步減少 Roo Code 的活躍開發。這個消息讓很多 Roo 使用者都很難受；這個外掛對這個社群意義重大。
+> 在 Roo 團隊停止 Roo Code 的積極開發、轉而專注於 [Roomote](https://roomote.dev/)
+> 之後，Zoo Code 將繼續開發這個專案。感謝 Roo 團隊所建立的一切。
 >
-> 我們想感謝整個 Roo 團隊為這個外掛投入的努力。這裡不會逐一點名，但大家都能認同，他們既是卓越的開發者，也是同樣令人敬佩的優秀的人。感謝 Roo 團隊。
->
-> Roo 使用者來自各種不同背景。有人在日常工作中專業使用它，也有人用它來構思難以想像的複雜 workflow。有人用它來改進 Roo 本身，也有人用它來改進 Roo 所使用的模型（超級 meta）。我們想表達的是，這個社群非常多元。雖然袋鼠 🦘🦘🦘 是高貴又有代表性的動物，但我們覺得由不同物種組成的「Zoo」🐘🦡🦒🦓🦛🦧🦭🦦 更能反映這個外掛使用者的多樣性。
->
-> 因此我們想宣布，**Zoo Code** 將繼續開發這個重要專案。核心團隊由先前曾為 Roo 做出貢獻、並且非常在乎這個外掛的開發者所組成。我們會持續更新模型、修正 bug，並推出新功能。但最重要的是，我們想傾聽你們——讓這個外掛如此特別的社群。歡迎加入我們的 [Discord](https://discord.gg/VxfP4Vx3gX)、[Reddit](https://www.reddit.com/r/ZooCode)，或是[建立 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)；但更重要的是，我們希望你能繼續作為社群的一分子，保持參與、保持連結、保持活躍。
+> 核心團隊由先前曾為 Roo 做出貢獻、並且非常在乎這個外掛的開發者所組成。
+> 我們會持續更新模型、修正 bug，並推出新功能，也計劃仔細傾聽讓這個外掛
+> 如此特別的社群。歡迎加入我們，一起在
+> [Discord](https://discord.gg/VxfP4Vx3gX)、
+> [Reddit](https://www.reddit.com/r/ZooCode)，或是
+> [建立 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)。
 >
 > _-Zoo Code Team_
 
@@ -30,11 +31,23 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.66.0 新功能
+## Zoo Code 在 Roo Code 之後新增的功能
 
-- **Claude Sonnet 5 支援** — 最新 Claude 模型現已於 Anthropic、Bedrock 和 Vertex 供應商可用
-- **Semble v0.4.1 升級** — 扁平化的結果解析和本地化的狀態訊息
-- **任務生命週期狀態轉換守衛** — 新的狀態轉換守衛和啟動時的委派對帳可防止無效的任務狀態轉換
+Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
+
+- **Semble 程式碼庫智慧** — 快速、隨選的語意程式碼搜尋，可自動設定，無需另外執行索引工作流程。
+- **更強大的 Orchestrator 工作流程** — 更安全的工作委派、平行工作協調、可靠的父子工作復原，以及更完善的子工作與供應商設定檔隔離。
+- **透過 Destructive Command Guard (DCG) 延長自主執行時間** — 自動封鎖危險命令，同時讓可信任的工作繼續執行，不必反覆核准。
+- **最新模型** — 持續支援新的 Claude、GPT、Gemini、Kimi、GLM、Grok、MiniMax 及其他模型系列。
+- **更多連線方式** — 新增並擴充 Zoo Gateway、Moonshot、Kimi Code、Kenari、Friendli、OpenCode Go 等眾多供應商。
+- **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
+- **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
+
+## v3.84.0 新功能
+
+- ✨ **新增 SOTA 模型：** 在支援的供應商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。
+- 🧭 **更可靠的工作與子工作：** 隔離委派模式，在重複停止後保留子工作連結，並在斜線命令切換模式時保護協調器設定。
+- 🛠️ **更可靠的終端機、供應商和程式碼搜尋行為：** 改善 Windows 和非英語環境中的終端機行為，強化供應商回應與取消處理，並讓程式碼搜尋更穩定地使用正確的工作區。
 
 ## Zoo Code 能為您做什麼？
 
@@ -58,24 +71,9 @@ Zoo Code 會配合您的工作方式，而非要您配合它：
 
 更多資訊：[使用模式](https://docs.zoocode.dev/basic-usage/using-modes) • [自訂模式](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## 教學和功能影片
-
-<div align="center">
-
-|                                                                                                                                                                     |                                                                                                                                                                  |                                                                                                                                                                    |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>安裝 Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>設定設定檔</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>程式碼庫索引</b> |
-|   <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>自訂模式</b>    |   <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>檢查點</b>   |  <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>上下文管理</b>  |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">更多快速教學和功能影片...</a>
-</p>
-
 ## 資源
 
 - **[文件](https://docs.zoocode.dev):** 安裝、設定和掌握 Zoo Code 的官方指南。
-- **[YouTube 頻道](https://youtube.com/@roocodeyt?feature=shared):** 觀看教學和功能實際操作。
 - **[Discord 伺服器](https://discord.gg/VxfP4Vx3gX):** 加入社群以獲得即時協助和討論。
 - **[Reddit 社群](https://www.reddit.com/r/ZooCode):** 分享您的經驗，看看其他人正在建立什麼。
 - **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** 回報問題並追蹤開發進度。

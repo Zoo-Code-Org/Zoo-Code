@@ -2,6 +2,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
+import { clearAllMocks, restoreGlobals } from "../../../test-utils/reset"
 import { OutputInterceptor } from "../OutputInterceptor"
 import { TerminalOutputPreviewSize } from "@roo-code/types"
 
@@ -30,7 +31,7 @@ describe("OutputInterceptor", () => {
 	let storageDir: string
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		storageDir = path.normalize("/tmp/test-storage")
 
@@ -49,7 +50,7 @@ describe("OutputInterceptor", () => {
 	})
 
 	afterEach(() => {
-		vi.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	describe("Buffering behavior", () => {

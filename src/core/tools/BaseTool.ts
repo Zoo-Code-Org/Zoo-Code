@@ -108,9 +108,16 @@ export abstract class BaseTool<TName extends ToolName> {
 	 *
 	 * @param task - Task instance
 	 * @param block - ToolUse block from assistant message
-	 * @param callbacks - Tool execution callbacks
+	 * @param callbacks - Tool execution callbacks. Accepts any subclass-specific
+	 *   extension of ToolCallbacks (e.g. UseMcpToolCallbacks) so callers can pass
+	 *   extra fields through to a matching execute() override without widening
+	 *   the shared ToolCallbacks interface for every tool.
 	 */
-	async handle(task: Task, block: ToolUse<TName>, callbacks: ToolCallbacks): Promise<void> {
+	async handle<TCallbacks extends ToolCallbacks>(
+		task: Task,
+		block: ToolUse<TName>,
+		callbacks: TCallbacks,
+	): Promise<void> {
 		// Handle partial messages
 		if (block.partial) {
 			try {

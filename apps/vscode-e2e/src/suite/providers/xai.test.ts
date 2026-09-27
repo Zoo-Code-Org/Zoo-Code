@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -12,7 +13,7 @@ const XAI_API_KEY = process.env.XAI_API_KEY
 const XAI_BASE_URL = "https://api.x.ai/v1"
 const XAI_RESPONSES_URL = `${XAI_BASE_URL}/responses`
 // Primary model for the full round-trip test (completion-text assertion included).
-const XAI_MODEL_ID = "grok-4.20"
+const XAI_MODEL_ID = "grok-4.5"
 // Fast variants: tested for API parameter contract only.  They consistently call
 // attempt_completion with an empty result field after a no-tool-error recovery
 // loop, so they cannot satisfy the completion-text assertion at this time.
@@ -336,7 +337,7 @@ async function runXAIToolProbe(
 
 	try {
 		await api.setConfiguration({
-			apiProvider: "xai" as const,
+			apiProvider: providerIdentifiers.xai,
 			xaiApiKey: XAI_API_KEY ?? "mock-key",
 			apiModelId: modelId,
 		})
@@ -492,7 +493,7 @@ suite("xAI provider", function () {
 				const readCallId = modelFixture?.readCallId ?? "call_xai_read_001"
 
 				if (request.functionCallOutputIds.some((id) => id === readCallId)) {
-					// Use recorded turn2 when it contains a function_call (grok-4.20).
+					// Use recorded turn2 when it contains a function_call (grok-4.5).
 					// Fast models return plain text in turn2 — hand-craft attempt_completion
 					// so the task can reach completion.
 					const turn2HasFunctionCall = (modelFixture?.turn2 as ResponsesStreamEvent[] | undefined)?.some(
@@ -549,7 +550,7 @@ suite("xAI provider", function () {
 		)
 
 		await globalThis.api.setConfiguration({
-			apiProvider: "xai" as const,
+			apiProvider: providerIdentifiers.xai,
 			xaiApiKey: XAI_API_KEY ?? "mock-key",
 			apiModelId: XAI_MODEL_ID,
 		})
@@ -569,7 +570,7 @@ suite("xAI provider", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),

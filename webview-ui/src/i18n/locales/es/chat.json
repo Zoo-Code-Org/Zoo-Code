@@ -17,7 +17,9 @@
 		"condenseContext": "Condensar contexto de forma inteligente",
 		"openApiHistory": "Abrir historial de API",
 		"openUiHistory": "Abrir historial de UI",
-		"backToParentTask": "Tarea principal"
+		"backToParentTask": "Tarea principal",
+		"waitingOnSubtask": "Esperando subtarea",
+		"goToSubtask": "Ir a la subtarea"
 	},
 	"unpin": "Desfijar",
 	"pin": "Fijar",
@@ -185,7 +187,7 @@
 		"current": "Actual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo quiere obtener instrucciones detalladas para ayudar con la tarea actual"
+		"wantsToFetch": "Zoo quiere obtener instrucciones detalladas para ayudar con la tarea actual"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo quiere leer este archivo",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo quiere editar este archivo fuera del espacio de trabajo",
 		"wantsToEditProtected": "Zoo quiere editar un archivo de configuración protegido",
 		"wantsToCreate": "Zoo quiere crear un nuevo archivo",
-		"wantsToSearchReplace": "Roo quiere realizar búsqueda y reemplazo en este archivo",
-		"didSearchReplace": "Roo realizó búsqueda y reemplazo en este archivo",
+		"wantsToSearchReplace": "Zoo quiere realizar búsqueda y reemplazo en este archivo",
+		"didSearchReplace": "Zoo realizó búsqueda y reemplazo en este archivo",
 		"wantsToInsert": "Zoo quiere insertar contenido en este archivo",
 		"wantsToInsertWithLineNumber": "Zoo quiere insertar contenido en este archivo en la línea {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo quiere añadir contenido al final de este archivo",
@@ -231,6 +233,7 @@
 		"exitStatus": "Salió con el estado {{exitCode}}",
 		"malformedCommand": "Comando mal formado: error de sintaxis del shell",
 		"manageCommands": "Comandos aprobados automáticamente",
+		"denied": "Comando denegado",
 		"addToAllowed": "Agregar a la lista de permitidos",
 		"removeFromAllowed": "Eliminar de la lista de permitidos",
 		"addToDenied": "Agregar a la lista de denegados",
@@ -341,9 +344,9 @@
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novedades:",
-			"highlight1": "Soporte para Claude Sonnet 5 — el modelo de Claude más reciente ya está disponible en los proveedores Anthropic, Bedrock y Vertex.",
-			"highlight2": "Actualización a Semble v0.4.1 — análisis de resultados aplanado y mensajes de estado localizados.",
-			"highlight3": "Guardia de transición de estado del ciclo de vida de tareas — una nueva guardia de transición de estado y la reconciliación de delegación al inicio evitan transiciones de estado de tareas no válidas."
+			"highlight1": "✨ Nuevos modelos SOTA añadidos: Usa GPT-6 Sol, GPT-6 Luna y Claude Opus 5.5 con los proveedores compatibles.",
+			"highlight2": "🧭 Tareas y subtareas más fiables: Mantén aislados los modos delegados, conserva los enlaces de las subtareas después de detenerlas varias veces y protege la configuración del orquestador cuando los comandos con barra cambien de modo.",
+			"highlight3": "🛠️ Comportamiento más fiable del terminal, los proveedores y la búsqueda de código: Mejora el terminal en Windows y en entornos que no están en inglés, refuerza las respuestas y la cancelación de los proveedores y haz que la búsqueda de código use el espacio de trabajo correcto de forma más consistente."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",

@@ -1,13 +1,13 @@
-import { RooCodeSettings } from "@roo-code/types"
+import { providerIdentifiers, type RooCodeSettings } from "@roo-code/types"
 
 import type { SupportedProvider } from "@/types/index.js"
 
 const envVarMap: Record<SupportedProvider, string> = {
-	anthropic: "ANTHROPIC_API_KEY",
-	"openai-native": "OPENAI_API_KEY",
-	gemini: "GOOGLE_API_KEY",
-	openrouter: "OPENROUTER_API_KEY",
-	"vercel-ai-gateway": "VERCEL_AI_GATEWAY_API_KEY",
+	[providerIdentifiers.anthropic]: "ANTHROPIC_API_KEY",
+	[providerIdentifiers.openaiNative]: "OPENAI_API_KEY",
+	[providerIdentifiers.gemini]: "GOOGLE_API_KEY",
+	[providerIdentifiers.openrouter]: "OPENROUTER_API_KEY",
+	[providerIdentifiers.vercelAiGateway]: "VERCEL_AI_GATEWAY_API_KEY",
 }
 
 export function getEnvVarName(provider: SupportedProvider): string {
@@ -27,23 +27,23 @@ export function getProviderSettings(
 	const config: RooCodeSettings = { apiProvider: provider }
 
 	switch (provider) {
-		case "anthropic":
+		case providerIdentifiers.anthropic:
 			if (apiKey) config.apiKey = apiKey
 			if (model) config.apiModelId = model
 			break
-		case "openai-native":
+		case providerIdentifiers.openaiNative:
 			if (apiKey) config.openAiNativeApiKey = apiKey
 			if (model) config.apiModelId = model
 			break
-		case "gemini":
+		case providerIdentifiers.gemini:
 			if (apiKey) config.geminiApiKey = apiKey
 			if (model) config.apiModelId = model
 			break
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			if (apiKey) config.openRouterApiKey = apiKey
 			if (model) config.openRouterModelId = model
 			break
-		case "vercel-ai-gateway":
+		case providerIdentifiers.vercelAiGateway:
 			if (apiKey) config.vercelAiGatewayApiKey = apiKey
 			if (model) config.vercelAiGatewayModelId = model
 			break

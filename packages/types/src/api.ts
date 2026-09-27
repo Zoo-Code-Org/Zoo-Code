@@ -6,8 +6,15 @@ import type { RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
+import type { WebviewThemeFixture } from "./vscode-extension-host.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
+
+export interface TaskApiConversationHistorySequence {
+	userText: string
+	assistantToolName: string
+	assistantToolInputText: string
+}
 
 export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	/**
@@ -46,6 +53,22 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	getTaskHistoryItem(taskId: string): Promise<HistoryItem | undefined>
 	/**
+	 * Returns the persisted API conversation history length for a task. Intended for use in tests only.
+	 * @param taskId The ID of the task.
+	 * @returns The number of persisted API conversation history entries, or 0 if unavailable.
+	 */
+	getTaskApiConversationHistoryLength(taskId: string): Promise<number>
+	/**
+	 * Checks for an ordered user turn and assistant tool call in persisted API history.
+	 * @param taskId The ID of the task.
+	 * @param sequence The expected user text and assistant tool-call markers.
+	 * @returns True when the expected turns exist in order, or false if unavailable.
+	 */
+	hasTaskApiConversationHistorySequence(
+		taskId: string,
+		sequence: TaskApiConversationHistorySequence,
+	): Promise<boolean>
+	/**
 	 * Returns the current task stack.
 	 * @returns An array of task IDs.
 	 */
@@ -58,6 +81,14 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * Cancels the current task.
 	 */
 	cancelCurrentTask(): Promise<void>
+	/**
+	 * Severs the delegated parent-child link for an interrupted (cancelled, not running)
+	 * subtask, so the parent stops waiting on it and returns to "active". No-op (returns
+	 * false) unless the child is interrupted and its parent is still delegated to it.
+	 * @param childTaskId The ID of the child (subtask) to abandon.
+	 * @returns True if the link was severed, false if there was nothing to abandon.
+	 */
+	abandonSubtask(childTaskId: string): Promise<boolean>
 	/**
 	 * Sends a message to the current task.
 	 * @param message Optional message to send.
@@ -153,6 +184,11 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+}
+
+export interface RooCodeTestAPI extends RooCodeAPI {
+	captureWebviewThemeFixture(): Promise<WebviewThemeFixture>
+	getLatestAnnouncementId(): string
 }
 
 export interface RooCodeIpcServer extends EventEmitter<IpcServerEvents> {

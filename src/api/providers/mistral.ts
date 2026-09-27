@@ -18,7 +18,7 @@ import { ApiStream } from "../transform/stream"
 import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 // Type helper to handle thinking chunks from Mistral API
 // The SDK includes ThinkChunk but TypeScript has trouble with the discriminated union
@@ -192,8 +192,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 
 		return { id, info, maxTokens, temperature }
 	}
-
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id: model, temperature } = this.getModel()
 
 		try {

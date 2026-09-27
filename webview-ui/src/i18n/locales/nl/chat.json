@@ -17,7 +17,9 @@
 		"condenseContext": "Context intelligent samenvatten",
 		"openApiHistory": "API-geschiedenis openen",
 		"openUiHistory": "UI-geschiedenis openen",
-		"backToParentTask": "Bovenliggende taak"
+		"backToParentTask": "Bovenliggende taak",
+		"waitingOnSubtask": "Wacht op subtaak",
+		"goToSubtask": "Ga naar subtaak"
 	},
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",
@@ -180,7 +182,7 @@
 		"current": "Huidig"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
+		"wantsToFetch": "Zoo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo wil dit bestand lezen",
@@ -190,8 +192,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo wil dit bestand buiten de werkruimte bewerken",
 		"wantsToEditProtected": "Zoo wil een beveiligd configuratiebestand bewerken",
 		"wantsToCreate": "Zoo wil een nieuw bestand aanmaken",
-		"wantsToSearchReplace": "Roo wil zoeken en vervangen in dit bestand",
-		"didSearchReplace": "Roo heeft zoeken en vervangen uitgevoerd op dit bestand",
+		"wantsToSearchReplace": "Zoo wil zoeken en vervangen in dit bestand",
+		"didSearchReplace": "Zoo heeft zoeken en vervangen uitgevoerd op dit bestand",
 		"wantsToInsert": "Zoo wil inhoud invoegen in dit bestand",
 		"wantsToInsertWithLineNumber": "Zoo wil inhoud invoegen in dit bestand op regel {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo wil inhoud toevoegen aan het einde van dit bestand",
@@ -226,6 +228,7 @@
 		"exitStatus": "Afgesloten met status {{exitCode}}",
 		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
+		"denied": "Commando geweigerd",
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
 		"addToDenied": "Toevoegen aan geweigerde lijst",
@@ -314,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Claude Sonnet 5 ondersteuning — het nieuwste Claude-model is nu beschikbaar bij de Anthropic, Bedrock en Vertex providers.",
-			"highlight2": "Semble v0.4.1 upgrade — afgevlakte resultaatverwerking en gelokaliseerde statusberichten.",
-			"highlight3": "Taak-levenscyclus statusovergangsbewaking — een nieuwe statusovergangsbewaking en opstart-delegatieverzoening voorkomen ongeldige taakstatusovergangen."
+			"highlight1": "✨ Nieuwe SOTA-modellen toegevoegd: Gebruik GPT-6 Sol, GPT-6 Luna en Claude Opus 5.5 bij ondersteunde providers.",
+			"highlight2": "🧭 Betrouwbaardere taken en subtaken: Houd gedelegeerde modi geïsoleerd, behoud links naar subtaken na herhaald stoppen en bescherm orchestrator-instellingen wanneer slash-opdrachten van modus wisselen.",
+			"highlight3": "🛠️ Betrouwbaarder gedrag van terminal, providers en codezoekfunctie: Verbeter de terminal op Windows en in niet-Engelstalige omgevingen, versterk providerreacties en annulering en laat de codezoekfunctie consistenter de juiste workspace gebruiken."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

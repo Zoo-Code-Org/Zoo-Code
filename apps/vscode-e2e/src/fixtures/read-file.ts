@@ -76,7 +76,6 @@ export function addReadFileResultFixtures(mock: InstanceType<typeof LLMock>) {
 	for (const fixture of fixtures) {
 		mock.addFixture({
 			match: {
-				toolCallId: fixture.toolCallId,
 				predicate: (req) =>
 					isToolResultExpectation(fixture.expected[0])
 						? toolResultsContain(req, fixture.expected as ToolResultExpectation[])

@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "COLD_SHELL_INIT_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"python3 -c \\\"\\nimport sys\\nprint('cold-init-ok', file=sys.stdout)\\nsys.exit(0)\\n\\\"\"}",
+						"id": "call_cold_shell_init_001"
+					}
+				]
+			}
+		}
+	]
+}

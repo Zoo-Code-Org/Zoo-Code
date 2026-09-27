@@ -1,8 +1,9 @@
 // npx vitest run src/components/common/__tests__/CodeBlock.spec.tsx
 
-import { render, screen, fireEvent, act } from "@/utils/test-utils"
+import { render, screen, fireEvent, act, waitFor } from "@/utils/test-utils"
 
-import CodeBlock from "../CodeBlock"
+import CodeBlock, { getCodeBlockTheme } from "../CodeBlock"
+import { getHighlighter } from "../../../utils/highlighter"
 
 // Mock the translation context
 vi.mock("../../../i18n/TranslationContext", () => ({
@@ -32,11 +33,11 @@ vi.mock("shiki", () => ({
 vi.mock("../../../utils/highlighter", () => {
 	const mockHighlighter = {
 		codeToHtml: vi.fn().mockImplementation((code, options) => {
-			const theme = options.theme === "github-light" ? "light" : "dark"
+			const theme = options.theme.includes("light") ? "light" : "dark"
 			return `<pre><code class="hljs language-${options.lang}">${code} [${theme}-theme]</code></pre>`
 		}),
 		codeToHast: vi.fn().mockImplementation((code, options) => {
-			const theme = options.theme === "github-light" ? "light" : "dark"
+			const theme = options.theme.includes("light") ? "light" : "dark"
 			// Return a comprehensive HAST node structure that matches Shiki's output
 			// Apply transformers if provided
 			const preNode = {
@@ -90,6 +91,13 @@ vi.mock("../../../utils/clipboard", () => ({
 }))
 
 describe("CodeBlock", () => {
+	it("selects syntax themes for each VS Code contrast mode", () => {
+		expect(getCodeBlockTheme("vscode-dark")).toBe("github-dark-high-contrast")
+		expect(getCodeBlockTheme("vscode-light")).toBe("github-light-high-contrast")
+		expect(getCodeBlockTheme("vscode-high-contrast")).toBe("github-dark-high-contrast")
+		expect(getCodeBlockTheme("vscode-high-contrast-light")).toBe("github-light-high-contrast")
+	})
+
 	const mockIntersectionObserver = vi.fn()
 	const originalGetComputedStyle = window.getComputedStyle
 
@@ -115,6 +123,7 @@ describe("CodeBlock", () => {
 		if (scrollContainer) {
 			document.body.removeChild(scrollContainer)
 		}
+		document.body.removeAttribute("class")
 		window.getComputedStyle = originalGetComputedStyle
 	})
 
@@ -128,25 +137,45 @@ describe("CodeBlock", () => {
 		expect(screen.getByText(/const x = 1/)).toBeInTheDocument()
 	})
 
-	it("handles theme switching", async () => {
-		const code = "const x = 1;"
+	it("starts at the top and follows later source updates when already at the bottom", async () => {
+		const highlighter = await getHighlighter("typescript")
+		let resolveHighlighter: (value: typeof highlighter) => void = () => undefined
+		vi.mocked(getHighlighter).mockImplementationOnce(() => new Promise((resolve) => (resolveHighlighter = resolve)))
 
-		await act(async () => {
-			const { rerender } = render(<CodeBlock source={code} language="typescript" />)
-
-			// Simulate light theme
-			document.body.className = "light"
-			rerender(<CodeBlock source={code} language="typescript" />)
+		const { container, rerender } = render(<CodeBlock source="const first = 1;" language="typescript" />)
+		const scroller = container.querySelector('[windowshade="true"]') as HTMLDivElement
+		Object.defineProperties(scroller, {
+			scrollHeight: { configurable: true, value: 600 },
+			clientHeight: { configurable: true, value: 100 },
 		})
 
-		expect(screen.getByText(/\[light-theme\]/)).toBeInTheDocument()
+		await act(async () => resolveHighlighter(highlighter))
+		await waitFor(() => expect(screen.getByText(/const first = 1/)).toBeInTheDocument())
+		expect(scroller.scrollTop).toBe(0)
+
+		scroller.scrollTop = 500
+		fireEvent.scroll(scroller)
+		rerender(<CodeBlock source={"const first = 1;\nconst second = 2;"} language="typescript" />)
+
+		await waitFor(() => expect(screen.getByText(/const second = 2/)).toBeInTheDocument())
+		await waitFor(() => expect(scroller.scrollTop).toBe(600))
+	})
+
+	it("handles theme switching", async () => {
+		const code = "const x = 1;"
+		document.body.className = "light"
 
 		await act(async () => {
-			document.body.className = "dark"
 			render(<CodeBlock source={code} language="typescript" />)
 		})
 
-		expect(screen.getByText(/\[dark-theme\]/)).toBeInTheDocument()
+		await waitFor(() => expect(screen.getByText(/\[light-theme\]/)).toBeInTheDocument())
+
+		await act(async () => {
+			document.body.className = "dark"
+		})
+
+		await waitFor(() => expect(screen.getByText(/\[dark-theme\]/)).toBeInTheDocument())
 	})
 
 	it("handles invalid language gracefully", async () => {

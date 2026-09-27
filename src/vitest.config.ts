@@ -15,11 +15,13 @@ export default defineConfig({
 		testTimeout: 20_000,
 		hookTimeout: 20_000,
 		onConsoleLog,
-		maxWorkers: isWindowsCI ? 1 : undefined,
+		// Turbo runs two test lanes concurrently, so two workers per lane
+		// fill the four runner vCPUs on Windows CI.
+		maxWorkers: isWindowsCI ? 2 : undefined,
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "lcov"],
-			include: ["src/**/*.ts", "src/**/*.tsx"],
+			include: ["src/**/*.ts", "src/**/*.tsx", "eslint-rules/**/*.mjs"],
 			exclude: [
 				"**/*.test.ts",
 				"**/*.test.tsx",
