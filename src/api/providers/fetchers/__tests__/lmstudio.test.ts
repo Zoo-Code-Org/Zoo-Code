@@ -148,7 +148,7 @@ describe("LMStudio Fetcher", () => {
 			const result = await getLMStudioModels(baseUrl)
 
 			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`, { signal: undefined })
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledTimes(1)
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledWith({ baseUrl: lmsUrl })
 			expect(mockListDownloadedModels).toHaveBeenCalledTimes(1)
@@ -168,7 +168,7 @@ describe("LMStudio Fetcher", () => {
 			const result = await getLMStudioModels(baseUrl)
 
 			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`, { signal: undefined })
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledTimes(1)
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledWith({ baseUrl: lmsUrl })
 			expect(mockListDownloadedModels).toHaveBeenCalledTimes(1)
@@ -408,7 +408,7 @@ describe("LMStudio Fetcher", () => {
 
 			await getLMStudioModels("")
 
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${defaultBaseUrl}/v1/models`)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${defaultBaseUrl}/v1/models`, { signal: undefined })
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledWith({ baseUrl: defaultLmsUrl })
 		})
 
@@ -420,7 +420,7 @@ describe("LMStudio Fetcher", () => {
 
 			await getLMStudioModels(httpsBaseUrl)
 
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${httpsBaseUrl}/v1/models`)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${httpsBaseUrl}/v1/models`, { signal: undefined })
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledWith({ baseUrl: wssLmsUrl })
 		})
 
@@ -442,7 +442,7 @@ describe("LMStudio Fetcher", () => {
 			const result = await getLMStudioModels(baseUrl)
 
 			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`, { signal: undefined })
 			expect(MockedLMStudioClientConstructor).not.toHaveBeenCalled()
 			expect(mockListLoaded).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -461,7 +461,7 @@ describe("LMStudio Fetcher", () => {
 			const result = await getLMStudioModels(baseUrl)
 
 			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`, { signal: undefined })
 			expect(MockedLMStudioClientConstructor).not.toHaveBeenCalled()
 			expect(mockListLoaded).not.toHaveBeenCalled()
 			expect(consoleInfoSpy).toHaveBeenCalledWith(`Error connecting to LMStudio at ${baseUrl}`)
@@ -487,6 +487,40 @@ describe("LMStudio Fetcher", () => {
 			)
 			expect(result).toEqual({})
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("should pass the caller's abort signal to the connection probe", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockResolvedValueOnce({ data: { status: "ok" } })
+			mockListDownloadedModels.mockResolvedValueOnce([])
+			mockListLoaded.mockResolvedValueOnce([])
+
+			await getLMStudioModels(baseUrl, { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`, { signal: controller.signal })
+		})
+
+		it("should reject with an AbortError when the signal aborts the probe, without calling the SDK", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a request rejects when its signal fires,
+				// including when the signal was already aborted when the request started.
+				return new Promise<never>((_resolve, reject) => {
+					if (config?.signal?.aborted) {
+						reject(new Error("canceled"))
+						return
+					}
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getLMStudioModels(baseUrl, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+			expect(MockedLMStudioClientConstructor).not.toHaveBeenCalled()
+			expect(mockListDownloadedModels).not.toHaveBeenCalled()
+			expect(mockListLoaded).not.toHaveBeenCalled()
 		})
 	})
 })

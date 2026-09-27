@@ -3225,7 +3225,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 	})
 
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
-		const { CodeIndexManager } = await import("../../../services/code-index/manager")
+		const { CodeIndexManagerRegistry } = await import("../../../services/code-index/code-index-manager-registry")
 		let workspaceEnabled = false
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
@@ -3235,8 +3235,8 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
 		const getAllInstances = vi
-			.spyOn(CodeIndexManager, "getAllInstances")
-			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManager.getAllInstances>)
+			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
+			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
 		})
@@ -4962,6 +4962,36 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("does not restore a deleted file-backed task from legacy history", async () => {
+			const historyItem = {
+				id: "deleted-task",
+				task: "legacy task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
+				if (key === "taskHistory") {
+					return [historyItem]
+				}
+				return undefined
+			})
+
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			await provider.taskHistoryStore.delete(historyItem.id)
+			provider["taskHistoryStoreInitialized"] = true
+
+			await expect(provider.getTaskWithId(historyItem.id)).rejects.toThrow("Task not found")
+		})
+
+		it("rejects a missing task before file-backed history initialization", async () => {
+			provider["taskHistoryStoreInitialized"] = false
+			vi.mocked(mockContext.globalState.get).mockReturnValue(undefined)
+			await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
+		})
+
 		it("returns empty apiConversationHistory when file is missing", async () => {
 			const historyItem = { id: "missing-api-file-task", task: "test task", ts: Date.now() }
 			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
