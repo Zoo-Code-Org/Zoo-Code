@@ -25,7 +25,7 @@ vi.mock("../../integrations/terminal/TerminalRegistry", () => ({
 
 describe("API.setConfiguration", () => {
 	it("routes configuration through ClineProvider.setValues so view-local state stays in sync", async () => {
-		const provider = {
+		const provider = Object.assign({} as ClineProvider, {
 			context: {},
 			on: vi.fn(),
 			setValues: vi.fn().mockResolvedValue(undefined),
@@ -36,8 +36,8 @@ describe("API.setConfiguration", () => {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
-		} as unknown as ClineProvider
-		const api = new API({ appendLine: vi.fn() } as unknown as OutputChannel, provider)
+		})
+		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider)
 		const configuration = {
 			apiProvider: providerIdentifiers.bedrock,
 			currentApiConfigName: "default",
@@ -47,9 +47,13 @@ describe("API.setConfiguration", () => {
 
 		await api.setConfiguration(configuration)
 
+		// Exact side-effect counts: a regression that repeats any of these operations
+		// (duplicate settings write, duplicate profile save, duplicate webview post) fails.
+		expect(provider.setValues).toHaveBeenCalledTimes(1)
 		expect(provider.setValues).toHaveBeenCalledWith(configuration)
 		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledTimes(1)
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
-		expect(provider.postStateToWebview).toHaveBeenCalled()
+		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })

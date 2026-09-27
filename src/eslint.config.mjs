@@ -60,4 +60,34 @@ export default [
 	{
 		ignores: [".stryker-tmp", "webview-ui", "out"],
 	},
+	{
+		// Tests inside __tests__/ directories must not traverse 3+ levels above
+		// the test file. That escapes the src/ package root and makes Turbo
+		// invisible to cache changes in those files.
+		// pr-review-state-workflow.test.ts is the intentional exception: it reads
+		// root-level config and runs in a dedicated non-Turbo CI step.
+		files: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.spec.ts"],
+		ignores: ["**/services/__tests__/pr-review-state-workflow.test.ts"],
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				{
+					// Catches path.resolve(..., "../../..") — the three-level literal ends here.
+					selector: "CallExpression > Literal[value=/\\.\\.\\W\\.\\.\\W\\.\\.$/]",
+					message:
+						"Do not read files 3+ levels above the test file. Tests reading root-level config must run in a dedicated non-Turbo-cached CI step.",
+				},
+				{
+					// Catches readFile("../../../.coderabbit.yaml") — three-level traversal
+					// embedded inside a longer path string. Scoped to FS-reading calls so
+					// vi.mock("../../../module") (module paths, not file reads) is not flagged.
+					// Matches both bare readFileSync(...) and fs.readFileSync(...).
+					selector:
+						":matches(CallExpression[callee.name=/^(readFile|readFileSync|open|openSync|stat|statSync|access|accessSync|watch|watchFile|readdir|readdirSync)/], CallExpression[callee.property.name=/^(readFile|readFileSync|open|openSync|stat|statSync|access|accessSync|watch|watchFile|readdir|readdirSync)/]) > Literal[value=/\\.\\.\\W\\.\\.\\W\\.\\./]",
+					message:
+						"Do not read files 3+ levels above the test file. Tests reading root-level config must run in a dedicated non-Turbo-cached CI step.",
+				},
+			],
+		},
+	},
 ]

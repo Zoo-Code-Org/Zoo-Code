@@ -278,9 +278,9 @@ import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistr
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("webviewMessageHandler - webviewDidLaunch", () => {
-	// Structural view of the provider members this suite reassigns at runtime: the
-	// double literal does not declare them and some are readonly on the class, so a
-	// cast of the mock target alone cannot express these reassignments without any.
+	// Single structural view of the provider members this suite reassigns at runtime:
+	// the class type declares several of them as getters / readonly, so the fixture
+	// type is the writable view of the same object (no cast through unknown needed).
 	type LaunchProviderFixture = {
 		setViewStateId: (viewStateId: string) => Promise<void>
 		workspaceTracker: { initializeFilePaths: () => Promise<void> }
@@ -292,7 +292,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		getMcpHub: () => unknown
 		getStateToPostToWebview: () => Promise<{ telemetrySetting: string }>
 	}
-	const double = mockClineProvider as unknown as LaunchProviderFixture
+	const double = mockClineProvider as LaunchProviderFixture
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -300,10 +300,13 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		// does not reset it, so clear a leak from a preceding test to keep the
 		// mark-launched assertion below meaningful.
 		mockClineProvider.isViewLaunched = false
-		vi.mocked(mockClineProvider.getState).mockResolvedValue({
-			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
-			currentApiConfigName: "view-local-profile",
-		} as unknown as Awaited<ReturnType<typeof mockClineProvider.getState>>)
+
+		vi.mocked(mockClineProvider.getState).mockResolvedValue(
+			Object.assign({} as Awaited<ReturnType<typeof mockClineProvider.getState>>, {
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				currentApiConfigName: "view-local-profile",
+			}),
+		)
 		double.setViewStateId = vi.fn().mockResolvedValue(undefined)
 		double.workspaceTracker = { initializeFilePaths: vi.fn().mockResolvedValue(undefined) }
 		double.providerSettingsManager = {
@@ -1447,6 +1450,9 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).toHaveBeenCalledWith("/mock/global/storage")
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
+		// The updateSettings flow must route through the provider-level mutation path so the
+		// durable view pin write stays ordered with the shared write.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
@@ -1500,6 +1506,20 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+	})
+
+	it("routes the write through provider.setValue so view-local state stays in sync", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: false },
+		})
+
+		// The provider-level call is the write path under test. The mock forwards to
+		// contextProxy.setValue, so an assertion on the proxy alone would also pass
+		// if the handler bypassed the provider and skipped the view-local sync.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -2297,6 +2317,25 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(calls.at(-1)).toEqual([true])
 	})
 
+	// The webviewDidLaunch tests below replace these mockClineProvider members with
+	// per-test doubles. Snapshot the module-level originals at collection time and
+	// restore them in the afterEach below so the launch stubs never leak into other
+	// tests of this file.
+	// Single structural cast: the class types these members as a method / a
+	// readonly property, which cannot be re-assigned to swap in a per-test double.
+	const launchSuiteSnapshot = (() => {
+		const view = mockClineProvider as {
+			getMcpHub: unknown
+			providerSettingsManager: unknown
+			getStateToPostToWebview: unknown
+		}
+		return {
+			getMcpHub: view.getMcpHub,
+			providerSettingsManager: view.providerSettingsManager,
+			getStateToPostToWebview: view.getStateToPostToWebview,
+		}
+	})()
+
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
 	// via an async provider.getStateToPostToWebview().then(...) continuation, outside
 	// telemetrySettingQueue -- so it could resolve after a concurrent "telemetrySetting" message
@@ -2464,5 +2503,16 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+
+	afterEach(() => {
+		const view = mockClineProvider as {
+			getMcpHub: unknown
+			providerSettingsManager: unknown
+			getStateToPostToWebview: unknown
+		}
+		view.getMcpHub = launchSuiteSnapshot.getMcpHub
+		view.providerSettingsManager = launchSuiteSnapshot.providerSettingsManager
+		view.getStateToPostToWebview = launchSuiteSnapshot.getStateToPostToWebview
 	})
 })

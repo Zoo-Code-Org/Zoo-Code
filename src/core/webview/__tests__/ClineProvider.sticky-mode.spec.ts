@@ -212,6 +212,12 @@ describe("ClineProvider - Sticky Mode", () => {
 	let mockWebviewView: vscode.WebviewView
 	let mockPostMessage: any
 
+	async function seedTaskHistory(items: HistoryItem[]) {
+		for (const item of items) {
+			await provider.taskHistoryStore.upsert(item)
+		}
+	}
+
 	beforeEach(async () => {
 		vi.clearAllMocks()
 
@@ -337,8 +343,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Get the actual taskId from the mock
 			const taskId = (mockTask as any).taskId || "test-task-id"
 
-			// Mock getGlobalState to return task history
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: taskId,
 					ts: Date.now(),
@@ -398,8 +404,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
-			// Mock getGlobalState to return task history
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: mockTask.taskId,
 					ts: Date.now(),
@@ -438,8 +444,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Get the actual taskId from the mock
 			const taskId = (mockTask as any).taskId || "test-task-id"
 
-			// Mock getGlobalState to return task history
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: taskId,
 					ts: Date.now(),
@@ -471,6 +477,299 @@ describe("ClineProvider - Sticky Mode", () => {
 					mode: "architect",
 				}),
 			)
+		})
+
+		it("should sync the view-local mode buffer when switching modes after a restored view state", async () => {
+			// Simulate the history-restore path: saveViewState is what
+			// createTaskWithHistoryItem uses to pin a saved mode into the
+			// view-local buffer, leaving a stale mode there until the next mutation.
+			await provider.saveViewState("mode", "code")
+
+			// Global-only mode switch with no active task.
+			await provider.handleModeSwitch("architect")
+
+			// The durable global write still happens...
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+
+			// ...and the in-memory buffer must not keep serving the stale restored
+			// mode: getValues() merges viewLocalState on top of the ContextProxy
+			// values, so an unsynced buffer would hide the fresh mode from consumers.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			// The durable per-view write must land too: a regression that left the
+			// persisted entry on the stale restored mode would reload it on restart.
+			// setValue awaits the serialized write queue, so the entry is settled here.
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted.mode).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
+		})
+
+		it("bails out before any task write when the mutation signal is already aborted", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: undefined as string | undefined,
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+
+			const abortedController = new AbortController()
+			abortedController.abort()
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, abortedController.signal)
+
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			expect(mockTask["_taskMode"]).toBeUndefined()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("rolls back the landed history write and leaves no partial mode state when the signal aborts in flight", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The history write settles only after the abort lands: the first call is
+			// controlled, the rollback call resolves immediately.
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockResolvedValueOnce([])
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await switchPromise
+
+			// The persisted new mode is rolled back to the pre-switch item.
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ id: "test-task-id", mode: "architect" }),
+			)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(2, historyItem)
+			// No partial mode state: the task keeps its previous mode, nothing was
+			// emitted, and the durable provider mode write never happened.
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The first write settles after the abort lands; the rollback write rejects:
+			// the failure is logged with its own message and the cancelled switch still
+			// resolves (it must not surface as the switch's persistence error).
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockRejectedValueOnce(new Error("rollback write failed"))
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to roll back mode switch"),
+			)
+		})
+
+		it("preserves fields persisted during the pending window when rolling back the mode", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const preSwitchItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			// While the history write is in flight the running task persists other fields
+			// of the same item; the store now returns that updated item.
+			const updatedItem: HistoryItem = {
+				...preSwitchItem,
+				mode: "architect",
+				tokensIn: 42,
+				totalCost: 0.5,
+			}
+			const storeGet = vi
+				.spyOn(provider.taskHistoryStore, "get")
+				.mockReturnValueOnce(preSwitchItem)
+				.mockReturnValue(updatedItem)
+
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockResolvedValueOnce([])
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			// The rollback restores only the mode: the fields persisted during the
+			// pending window (tokensIn, totalCost) survive the rollback write.
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(storeGet).toHaveBeenCalledTimes(2)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ id: "test-task-id", mode: "code", tokensIn: 42, totalCost: 0.5 }),
+			)
+		})
+
+		it("proceeds normally when no mutation signal is provided", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: undefined as string | undefined,
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, undefined)
+
+			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 		})
 	})
 
@@ -561,8 +860,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Get the actual taskId from the mock
 			const taskId = (mockTask as any).taskId || "test-task-id"
 
-			// Mock getGlobalState to return task history with our task
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: taskId,
 					ts: Date.now(),
@@ -619,25 +918,21 @@ describe("ClineProvider - Sticky Mode", () => {
 				[parentTaskId]: "architect", // Parent starts with architect mode
 			}
 
-			// Mock getGlobalState to return task history
-			const getGlobalStateMock = vi.spyOn(provider as any, "getGlobalState")
-			getGlobalStateMock.mockImplementation((key) => {
-				if (key === "taskHistory") {
-					return Object.entries(taskModes).map(([id, mode]) => ({
-						id,
-						ts: Date.now(),
-						task: `Task ${id}`,
-						number: 1,
-						tokensIn: 0,
-						tokensOut: 0,
-						cacheWrites: 0,
-						cacheReads: 0,
-						totalCost: 0,
-						mode,
-					}))
-				}
-				// Return empty array for other keys
-				return []
+			// Read task metadata from the authoritative store's test double.
+			vi.spyOn(provider.taskHistoryStore, "get").mockImplementation((id) => {
+				const mode = taskModes[id]
+				return mode === undefined
+					? undefined
+					: {
+							id,
+							ts: Date.now(),
+							task: `Task ${id}`,
+							number: 1,
+							tokensIn: 0,
+							tokensOut: 0,
+							totalCost: 0,
+							mode,
+						}
 			})
 
 			// Mock updateTaskHistory to track mode changes
@@ -788,7 +1083,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify that the mode was restored
+			// Verify that history restoration reaches both the view-local pin and public state.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
 			const state = await provider.getState()
 			expect(state.mode).toBe("architect")
 
@@ -856,8 +1153,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
-			// Mock getGlobalState to return task history
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: mockTask.taskId,
 					ts: Date.now(),
@@ -930,8 +1227,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
-			// Mock getGlobalState
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: mockTask.taskId,
 					ts: Date.now(),
@@ -1026,8 +1323,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
-			// Mock getGlobalState to return task history
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: mockTask.taskId,
 					ts: Date.now(),
@@ -1084,8 +1381,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
-			// Mock getGlobalState
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: mockTask.taskId,
 					ts: Date.now(),
@@ -1153,8 +1450,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.addClineToStack(task2 as any)
 			await provider.addClineToStack(task3 as any)
 
-			// Mock getGlobalState to return all tasks
-			vi.spyOn(provider as any, "getGlobalState").mockReturnValue([
+			// Seed the authoritative file-backed task history.
+			await seedTaskHistory([
 				{
 					id: task1.taskId,
 					ts: Date.now(),

@@ -126,6 +126,31 @@ describe("getRequestyModels", () => {
 		expect(opus5.supportsTemperature).toBe(false)
 	})
 
+	it("applies Opus 5.5 overrides when parsing anthropic/claude-opus-5-5", async () => {
+		const rawOpus55 = makeRawModel({
+			id: "anthropic/claude-opus-5-5",
+			max_output_tokens: 128000,
+			context_window: 1000000,
+			supports_caching: true,
+			supports_vision: true,
+			supports_reasoning: true,
+			input_price: "0.000004",
+			output_price: "0.00002",
+			caching_price: "0.000005",
+			cached_price: "0.0000002",
+		})
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [rawOpus55] } })
+
+		const models = await getRequestyModels()
+		const opus55 = models["anthropic/claude-opus-5-5"]
+
+		expect(opus55).toBeDefined()
+		expect(opus55.supportsReasoningBudget).toBe(true)
+		expect(opus55.supportsReasoningBinary).toBe(true)
+		expect(opus55.supportsTemperature).toBe(false)
+	})
+
 	it("does not apply Fable 5 overrides to other models", async () => {
 		const rawSonnet = makeRawModel({
 			id: "anthropic/claude-sonnet-4.6",

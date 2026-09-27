@@ -344,9 +344,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "🔑 Zoo Gateway API 키를 어디서나 사용하세요. OpenAI 호환 클라이언트나 워크플로에 그대로 연결할 수 있습니다: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 한정 기간 동안 Zoo Gateway를 통해 MiniMax-M3를 무료로 이용하세요.",
-			"highlight3": "✨ 새롭게 출시된 GPT-6 Astra와 Claude Fable 5.1 모델을 지금 이용할 수 있습니다."
+			"highlight1": "✨ 새로운 SOTA 모델 추가: 지원되는 프로바이더에서 GPT-6 Sol, GPT-6 Luna, Claude Opus 5.5를 사용하세요.",
+			"highlight2": "🧭 더 안정적인 작업 및 하위 작업: 위임된 모드를 분리하고, Stop을 반복한 뒤에도 하위 작업 링크를 유지하며, 슬래시 명령이 모드를 전환할 때 오케스트레이터 설정을 보호합니다.",
+			"highlight3": "🛠️ 더 안정적인 터미널, 프로바이더 및 코드 검색 동작: Windows와 비영어권 환경의 터미널 동작을 개선하고, 프로바이더 응답과 취소 처리를 강화하며, 코드 검색이 올바른 워크스페이스를 더 일관되게 사용하도록 했습니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

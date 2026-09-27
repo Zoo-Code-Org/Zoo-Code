@@ -234,11 +234,15 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only when the sidebar panel was
-			// focused: the tab takes selection priority in focusPanel, so
-			// the sidebar receives the message only when no tab panel is
-			// tracked.
-			if (sidebarPanel && !tabPanel) {
+			// Post to the surface focusPanel selected: the tab takes
+			// selection priority, so the sidebar is targeted only when no
+			// tab panel is tracked.
+			if (tabPanel) {
+				const tabProvider = getTabProvider()
+				if (tabProvider) {
+					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				}
+			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {
@@ -394,12 +398,12 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 	newPanel.onDidChangeViewState(
 		(e) => {
 			const panel = e.webviewPanel
-			// When this panel becomes the active editor it becomes the tracked tab,
-			// so a title-bar command on an older tab (e.g. plusButtonClickedInTab)
-			// targets that tab's provider instead of the newest-created one.
-			// `active` (not `visible`) is the focus signal for the editor group.
+			// Re-point the tracked tab ref at the panel the user is actually
+			// looking at: several tab panels can stay visible at once, but
+			// only the active one is the current tab, and the title-bar
+			// commands must resolve that instance, not the last created one.
 			if (panel.active) {
-				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+				// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
 				setPanel(panel, "tab")
 			}
 			if (panel.visible) {

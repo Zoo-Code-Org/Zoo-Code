@@ -8,6 +8,7 @@ import pWaitFor from "p-wait-for"
 
 import {
 	type RooCodeAPI,
+	type RooCodeTestOnlyApi,
 	type GlobalState,
 	type RooCodeSettings,
 	type RooCodeEvents,
@@ -47,16 +48,15 @@ type RegisteredTask = {
 	provider: ClineProvider
 }
 
-export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
+export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooCodeTestOnlyApi {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
 	private readonly tasksById = new Map<string, RegisteredTask>()
-	// WeakSet so a disposed tab panel's provider can be garbage-collected: the only
-	// operations here are has/add, so deduplication is preserved without retaining
-	// the provider (and its taskRegistry/view state) through the API after dispose.
-	private readonly listenersRegisteredFor = new WeakSet<ClineProvider>()
+
+	// Providers whose listeners are already wired (startNewTask is idempotent per provider).
+	private readonly registeredProviders = new WeakSet<ClineProvider>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -219,6 +219,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = this.sidebarProvider
 		}
 
+		// A new task must not consume shared default mode/profile state before the view's
+		// stable state id is registered and its persisted view state loaded: webviewDidLaunch
+		// may not have arrived yet. Bound the wait so a view that never launches cannot
+		// hang task creation; if the bound expires, fail task creation rather than start
+		// the task against stale shared defaults.
+		let readinessTimer: ReturnType<typeof setTimeout> | undefined
+		await Promise.race([
+			provider.viewStateReadiness,
+			new Promise<never>((_, reject) => {
+				readinessTimer = setTimeout(
+					() => reject(new Error("Timed out waiting for the view state to become ready")),
+					3000,
+				)
+			}),
+		]).finally(() => {
+			clearTimeout(readinessTimer)
+		})
 		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
@@ -387,11 +404,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	/**
+	 * The test-only surface (task ask control by ID and raw global-state reads) must not
+	 * be reachable from production callers: VS Code only reports ExtensionMode.Production on the extension context for installed extensions, so test hosts and the e2e
+	 * harness keep access.
+	 */
+	private assertTestOnlyApi(method: string): void {
+		if (this.context.extensionMode === vscode.ExtensionMode.Production) {
+			throw new Error(`${method} is a test-only API and is unavailable in production mode`)
+		}
+	}
+
+	/**
 	 * Approves the pending ask for a specific task by its ID.
 	 *
 	 * @returns Whether a registered task with the given ID was found and approved.
 	 */
 	public async approveTaskAsk(taskId: string): Promise<boolean> {
+		this.assertTestOnlyApi("approveTaskAsk")
 		const entry = this.tasksById.get(taskId)
 
 		if (!entry) {
@@ -408,6 +437,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	 * @returns Whether a registered task with the given ID was found and denied.
 	 */
 	public async denyTaskAsk(taskId: string): Promise<boolean> {
+		this.assertTestOnlyApi("denyTaskAsk")
 		const entry = this.tasksById.get(taskId)
 
 		if (!entry) {
@@ -433,6 +463,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		answer: string
 		mode?: string
 	}): Promise<boolean> {
+		this.assertTestOnlyApi("selectTaskFollowupSuggestion")
 		const entry = this.tasksById.get(taskId)
 
 		if (!entry) {
@@ -507,12 +538,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	private registerListeners(provider: ClineProvider) {
-		// A duplicated registration would re-emit every task event once per copy of the
-		// handler, so each provider is wired exactly once.
-		if (this.listenersRegisteredFor.has(provider)) {
+		// Idempotent per provider: repeated or concurrent startNewTask calls against a
+		// reused tab provider must not stack duplicate listeners (duplicate API events,
+		// duplicate file logging, and duplicate per-task listener sets).
+		if (this.registeredProviders.has(provider)) {
 			return
 		}
-		this.listenersRegisteredFor.add(provider)
 
 		provider.on(RooCodeEventName.TaskCompleted, async (taskId, tokenUsage, toolUsage) => {
 			const historyItem = provider.taskHistoryStore.get(taskId)
@@ -645,6 +676,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		provider.on(RooCodeEventName.TaskDelegationResumed, (parentTaskId, childTaskId) => {
 			;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
 		})
+		this.registeredProviders.add(provider)
 	}
 
 	// Logging
@@ -719,6 +751,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
+		this.assertTestOnlyApi("getGlobalState")
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 

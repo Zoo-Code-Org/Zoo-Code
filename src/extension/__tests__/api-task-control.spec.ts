@@ -16,6 +16,12 @@ vi.mock("vscode", () => ({
 	commands: {
 		executeCommand: vi.fn().mockResolvedValue(undefined),
 	},
+	ExtensionMode: {
+		Development: 1,
+		ExtensionDevelopment: 2,
+		Test: 3,
+		Production: 4,
+	},
 }))
 
 vi.mock("@roo-code/ipc", () => ({
@@ -44,8 +50,12 @@ type CreatedTask = {
 }
 
 type ProviderDouble = EventEmitter & {
-	context: vscode.ExtensionContext
-	taskHistoryStore: { get: Mock<(taskId: string) => undefined> }
+	// Minimal context surface exercised by the task-control tests: the mode guard
+	// reads extensionMode and getGlobalState reads globalState.get.
+	context: {
+		extensionMode: vscode.ExtensionMode
+		globalState: { get: (key: string) => unknown }
+	}
 	evictCurrentTask: Mock<() => Promise<void>>
 	postStateToWebview: Mock<() => Promise<void>>
 	postMessageToWebview: Mock<(message: unknown) => Promise<void>>
@@ -55,6 +65,8 @@ type ProviderDouble = EventEmitter & {
 	getState: Mock<() => Promise<{ customModes?: ModeConfig[] }>>
 	handleModeSwitch: Mock<(mode: string, targetTask?: unknown) => Promise<void>>
 	viewLaunched: boolean
+	viewStateReadiness: Promise<void>
+	taskHistoryStore: Map<string, unknown>
 }
 
 type TaskDouble = EventEmitter & {
@@ -75,7 +87,6 @@ function asClineProvider(provider: ProviderDouble): ClineProvider {
 function createProvider(taskId = "task-1"): ProviderDouble {
 	const provider = new EventEmitter() as ProviderDouble
 	provider.context = {} as vscode.ExtensionContext
-	provider.taskHistoryStore = { get: vi.fn().mockReturnValue(undefined) }
 	provider.evictCurrentTask = vi.fn().mockResolvedValue(undefined)
 	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 	provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
@@ -85,6 +96,8 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.getState = vi.fn().mockResolvedValue({ customModes: [] })
 	provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 	provider.viewLaunched = true
+	provider.viewStateReadiness = Promise.resolve()
+	provider.taskHistoryStore = new Map()
 	return provider
 }
 
@@ -157,6 +170,35 @@ describe("API task controls", () => {
 				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER },
 				configuration,
 			)
+		})
+
+		it("fails task creation when the view state is not ready within the readiness bound", async () => {
+			// A readiness promise that never settles: the bound must reject task creation
+			// instead of letting createTask run against stale shared defaults.
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			await expect(api.startNewTask({ configuration, text: "new task" })).rejects.toThrow(
+				"Timed out waiting for the view state to become ready",
+			)
+			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+		})
+
+		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
+			const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+			let resolveReady!: () => void
+			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
+				resolveReady = resolve
+			})
+
+			const started = api.startNewTask({ configuration, text: "ready task" })
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			resolveReady()
+
+			await expect(started).resolves.toBe("sidebar-task")
+			// The bound's timer must be cancelled once readiness wins: a live timer would
+			// later reject an unawaited promise and surface as an unhandled rejection.
+			expect(clearSpy).toHaveBeenCalled()
+			clearSpy.mockRestore()
 		})
 	})
 
@@ -381,5 +423,83 @@ describe("API task controls - per-view review fixes", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0))
 
 		expect(seen).toEqual(["reused-tab-task"])
+	})
+
+	describe("test-only API production guard", () => {
+		function withProductionContext() {
+			return {
+				extensionMode: vscode.ExtensionMode.Production,
+				globalState: { get: vi.fn() },
+			}
+		}
+
+		it("rejects the task ask and global-state surface in production mode", async () => {
+			sidebarProvider.context = withProductionContext()
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
+
+			await expect(api.approveTaskAsk("task-1")).rejects.toThrow("test-only API")
+			await expect(api.denyTaskAsk("task-1")).rejects.toThrow("test-only API")
+			await expect(api.selectTaskFollowupSuggestion({ taskId: "task-1", answer: "yes" })).rejects.toThrow(
+				"test-only API",
+			)
+			expect(() => api.getGlobalState("mode")).toThrow("test-only API")
+		})
+
+		it("keeps the task ask and global-state surface available outside production mode", async () => {
+			const get = vi.fn().mockReturnValue("code")
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get },
+			}
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
+
+			expect(api.getGlobalState("mode")).toBe("code")
+			expect(get).toHaveBeenCalledWith("mode")
+			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)
+		})
+	})
+
+	describe("startNewTask view-state readiness", () => {
+		it("waits for the provider view state to load before creating the task", async () => {
+			let resolveReadiness: () => void = () => {}
+			const readiness = new Promise<void>((resolve) => {
+				resolveReadiness = resolve
+			})
+			const newTabProvider = createProvider("new-tab-task")
+			newTabProvider.viewStateReadiness = readiness
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
+
+			const started = api.startNewTask({ configuration, text: "wait for view state", newTab: true })
+
+			// The task must not start while the view persisted state is still loading.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(newTabProvider.createTask).not.toHaveBeenCalled()
+
+			resolveReadiness()
+
+			await expect(started).resolves.toBe("new-tab-task")
+			expect(newTabProvider.createTask).toHaveBeenCalled()
+		})
+	})
+
+	describe("startNewTask listener idempotency", () => {
+		it("registers provider listeners once when the same provider is reused", async () => {
+			const sharedProvider = createProvider("shared-task")
+			createClineTabPanelMock.mockResolvedValue(sharedProvider)
+
+			await api.startNewTask({ configuration, text: "one", newTab: true })
+			await api.startNewTask({ configuration, text: "two", newTab: true })
+
+			// Re-registering the same provider must not stack duplicate listeners.
+			expect(sharedProvider.listenerCount(RooCodeEventName.TaskCompleted)).toBe(1)
+
+			let completions = 0
+			api.on(RooCodeEventName.TaskCompleted, () => {
+				completions++
+			})
+			sharedProvider.emit(RooCodeEventName.TaskCompleted, "shared-task")
+
+			expect(completions).toBe(1)
+		})
 	})
 })
