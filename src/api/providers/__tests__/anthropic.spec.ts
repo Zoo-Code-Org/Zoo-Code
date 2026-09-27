@@ -705,6 +705,53 @@ describe("AnthropicHandler", () => {
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
 		})
 
+		it("should reject with AbortError when the external signal aborts a non-cached model mid-flight", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation((_params: unknown, options?: { signal?: AbortSignal }) => {
+				return new Promise<void>((_resolve, reject) => {
+					const signal = options?.signal
+					if (!signal) {
+						return
+					}
+					if (signal.aborted) {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						reject(error)
+						return
+					}
+					signal.addEventListener(
+						"abort",
+						() => {
+							const error = new Error("The operation was aborted")
+							error.name = "AbortError"
+							reject(error)
+						},
+						{ once: true },
+					)
+				})
+			})
+
+			const stream = customHandler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const promise = stream.next()
+			controller.abort()
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+
+			// The non-cached path must hand the bridged signal to the SDK.
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.signal).toBeDefined()
+			expect(requestOptions?.signal?.aborted).toBe(true)
+		})
+
 		it("should propagate the creation error for a non-cached model when no external abort signal is provided", async () => {
 			const customHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
