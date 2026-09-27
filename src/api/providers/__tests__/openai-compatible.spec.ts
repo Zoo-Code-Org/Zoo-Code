@@ -310,7 +310,9 @@ describe("OpenAICompatibleHandler", () => {
 				throw new Error("Expected createMessage to throw")
 			}
 			expect(thrownError.status).toBe(429)
-			expect(thrownError.message).toContain("TestProvider")
+			// Single wrap: exactly one provider prefix, so a redundant re-wrap inside the
+			// stream loop would duplicate it and fail this exact-message assertion.
+			expect(thrownError.message).toBe("TestProvider completion error: Rate limited")
 		})
 
 		it("should wrap a synchronous streamText() failure with status and provider name", async () => {
