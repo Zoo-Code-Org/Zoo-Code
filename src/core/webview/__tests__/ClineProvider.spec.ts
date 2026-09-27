@@ -1867,7 +1867,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should refresh the view-local apiConfiguration when activating a profile", async () => {
+		it("should report the activated profile's settings over a stale view-local buffer in getState", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const freshSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 			// @ts-ignore - Replace providerSettingsManager with a test double.
@@ -1877,9 +1877,9 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn(),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			// A stale view-local apiConfiguration (as loaded from a view state) that would
-			// keep shadowing the activated profile's settings in getState() if the mutation
-			// path passed a flat ProviderSettings object (a no-op for the buffer updater).
+			// A stale view-local apiConfiguration (as loaded from a view state) that keeps
+			// shadowing the activated profile's settings in getState() unless the mutation
+			// path clears this view's buffer overlay.
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "stale-key",
@@ -1891,8 +1891,22 @@ describe("ClineProvider", () => {
 
 			await provider.activateProviderProfile({ name: "new-profile" })
 
-			// The activated profile's settings must replace the stale buffer entry.
-			expect(provider.getValues().apiConfiguration).toEqual(freshSettings)
+			// The constructed state must serve the activated profile's fresh shared
+			// settings, not the stale view-local overlay.
+			const state = await provider.getState({ includeTaskHistory: false })
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+			expect(state.apiConfiguration.apiKey).toBe("fresh-key")
+
+			// A later shared settings edit must not be masked by a buffer copy taken at
+			// mutation time: the e2e flow edits settings through the shared path after
+			// configuring the profile, and a wrapped buffer snapshot would keep serving
+			// the pre-edit values in getState().
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "edited-key",
+			})
+			const stateAfterEdit = await provider.getState({ includeTaskHistory: false })
+			expect(stateAfterEdit.apiConfiguration.apiKey).toBe("edited-key")
 			await provider.dispose()
 		})
 
@@ -1918,7 +1932,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should refresh the view-local apiConfiguration when upserting and activating a profile", async () => {
+		it("should report the fresh profile's settings over a stale view-local buffer in getState after upserting and activating a profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const profile: ProviderSettingsEntry = {
 				name: "fresh-profile",
@@ -1932,9 +1946,9 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn(),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			// A stale view-local apiConfiguration (as loaded from a view state) that would
-			// keep shadowing the fresh profile's settings in getState() if the mutation path
-			// passed a flat ProviderSettings object (a no-op for the buffer updater).
+			// A stale view-local apiConfiguration (as loaded from a view state) that keeps
+			// shadowing the fresh profile's settings in getState() unless the mutation
+			// path clears this view's buffer overlay.
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "stale-key",
@@ -1946,8 +1960,18 @@ describe("ClineProvider", () => {
 
 			await provider.upsertProviderProfile("fresh-profile", { apiProvider: providerIdentifiers.openrouter })
 
-			// The fresh profile's settings must replace the stale buffer entry.
-			expect(provider.getValues().apiConfiguration).toEqual({ apiProvider: providerIdentifiers.openrouter })
+			// The constructed state must serve the fresh profile's shared settings, not
+			// the stale view-local overlay.
+			const state = await provider.getState({ includeTaskHistory: false })
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.openrouter)
+
+			// Same masking guard as the activation case: later shared edits stay visible.
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "edited-key",
+			})
+			const stateAfterEdit = await provider.getState({ includeTaskHistory: false })
+			expect(stateAfterEdit.apiConfiguration.apiKey).toBe("edited-key")
 			await provider.dispose()
 		})
 
