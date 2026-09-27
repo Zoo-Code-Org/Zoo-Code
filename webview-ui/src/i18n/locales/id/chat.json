@@ -373,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "🤖 Coba GLM-5.3-Flash dan Gemini 3.7 Flash dengan diskon 50% selama 2 minggu, dan dapatkan MiniMax M3 sepenuhnya GRATIS bagi pengguna dengan saldo di Zoo Gateway baru: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Model baru — GLM-5.3-Flash kini tersedia melalui Z AI.",
-			"highlight3": "Perbaikan keandalan — persetujuan subtask dipulihkan, output tool kosong pada Vertex Gemini 3.7, kegagalan startup terminal, error background service, dan keterbacaan tema turut diperbaiki."
+			"highlight1": "✨ Model SOTA baru ditambahkan: Gunakan GPT-6 Sol, GPT-6 Luna, dan Claude Opus 5.5 melalui provider yang didukung.",
+			"highlight2": "🧭 Task dan subtask yang lebih andal: Jaga mode yang didelegasikan tetap terisolasi, pertahankan tautan subtask setelah Stop berulang, dan lindungi pengaturan orchestrator saat slash command mengganti mode.",
+			"highlight3": "🛠️ Perilaku terminal, provider, dan pencarian kode yang lebih andal: Tingkatkan terminal di Windows dan lingkungan non-Inggris, perkuat respons serta pembatalan provider, dan pastikan pencarian kode lebih konsisten menggunakan workspace yang tepat."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

@@ -7,7 +7,6 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../../shared/modes")>()
 	return {
 		...actual,
-		defaultModeSlug: "code",
 		getModeBySlug: vi.fn(),
 	}
 })
@@ -16,8 +15,14 @@ import { getModeBySlug } from "../../../shared/modes"
 
 const toolError = (error: string) => `ERR:${error}`
 
-function makeTask(state: any): Task {
+type ProviderModeState = {
+	mode?: string
+	customModes?: []
+}
+
+function makeTask(state: ProviderModeState, taskMode = "code"): Task {
 	return {
+		getTaskMode: vi.fn().mockResolvedValue(taskMode),
 		providerRef: {
 			deref: () => ({
 				getState: vi.fn().mockResolvedValue(state),
@@ -60,8 +65,9 @@ describe("getAllowedMcpServersForTask", () => {
 			groups: ["mcp"],
 			allowedMcpServers: ["srv-a"],
 		} as any)
-		const task = makeTask({ mode: "code", customModes: [] })
+		const task = makeTask({ mode: "orchestrator", customModes: [] }, "code")
 		await expect(getAllowedMcpServersForTask(task)).resolves.toEqual(["srv-a"])
+		expect(getModeBySlug).toHaveBeenCalledWith("code", [])
 	})
 
 	it("returns undefined when the mode does not restrict servers", async () => {
@@ -77,7 +83,7 @@ describe("getAllowedMcpServersForTask", () => {
 
 	it("returns undefined when the mode cannot be resolved", async () => {
 		vi.mocked(getModeBySlug).mockReturnValue(undefined as any)
-		const task = makeTask({ mode: "missing", customModes: [] })
+		const task = makeTask({ mode: "code", customModes: [] }, "missing")
 		await expect(getAllowedMcpServersForTask(task)).resolves.toBeUndefined()
 	})
 })

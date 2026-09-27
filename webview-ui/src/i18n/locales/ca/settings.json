@@ -460,6 +460,8 @@
 		"headerName": "Nom de la capçalera",
 		"headerValue": "Valor de la capçalera",
 		"noCustomHeaders": "No hi ha capçaleres personalitzades definides. Feu clic al botó + per afegir-ne una.",
+		"extraBody": "Cos addicional",
+		"extraBodyDescription": "Objecte JSON opcional que es combina amb els cossos de les sol·licituds API. Els camps gestionats per Zoo Code, com ara model, messages, tools i stream, no es poden sobreescriure. No inclogueu secrets.",
 		"unboundApiKey": "Clau API de Unbound",
 		"getUnboundApiKey": "Obtenir clau API de Unbound",
 		"requestyApiKey": "Clau API de Requesty",
@@ -1036,6 +1038,11 @@
 		"modelId": "Heu de proporcionar un ID de model vàlid.",
 		"modelSelector": "Heu de proporcionar un selector de model vàlid.",
 		"openAi": "Heu de proporcionar una URL base, clau API i ID de model vàlids.",
+		"openAiExtraBody": {
+			"invalidJson": "El cos addicional ha de contenir JSON vàlid.",
+			"objectRequired": "El cos addicional ha de ser un objecte JSON.",
+			"reservedKeys": "El cos addicional no pot sobreescriure els camps gestionats per Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Format ARN no vàlid. Si us plau, comproveu els requisits del format.",
 			"regionMismatch": "Avís: La regió del vostre ARN ({{arnRegion}}) no coincideix amb la regió seleccionada ({{region}}). Això pot causar problemes d'accés. El proveïdor utilitzarà la regió de l'ARN."

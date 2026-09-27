@@ -17,6 +17,7 @@ export type FireworksModelId =
 	| "accounts/fireworks/models/deepseek-v3p2"
 	| "accounts/fireworks/models/deepseek-v4-pro"
 	| "accounts/fireworks/models/deepseek-v4-pro-0813"
+	| "accounts/fireworks/models/deepseek-v4-flash-vision-exp"
 	| "accounts/fireworks/models/glm-4p5"
 	| "accounts/fireworks/models/glm-4p5-air"
 	| "accounts/fireworks/models/glm-4p6"
@@ -279,6 +280,19 @@ export const fireworksModels = {
 		cacheReadsPrice: 0.044,
 		description:
 			"DeepSeek V4 Pro 0813 is DeepSeek's production checkpoint for advanced reasoning, coding, and long-context agentic workloads.",
+	},
+	"accounts/fireworks/models/deepseek-v4-flash-vision-exp": {
+		displayName: "DeepSeek V4 Flash Vision Exp",
+		maxTokens: 384_000,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		inputPrice: 0.22,
+		outputPrice: 0.66,
+		cacheReadsPrice: 0.007,
+		description:
+			"DeepSeek V4 Flash Vision Exp is an experimental multimodal model with text and image input, function calling, and long-context support.",
 	},
 	"accounts/fireworks/models/kimi-k2p7-code": {
 		maxTokens: 16384,

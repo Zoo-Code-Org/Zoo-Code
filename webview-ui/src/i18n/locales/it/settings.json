@@ -460,6 +460,8 @@
 		"headerName": "Nome intestazione",
 		"headerValue": "Valore intestazione",
 		"noCustomHeaders": "Nessuna intestazione personalizzata definita. Fai clic sul pulsante + per aggiungerne una.",
+		"extraBody": "Corpo aggiuntivo",
+		"extraBodyDescription": "Oggetto JSON facoltativo unito ai corpi delle richieste API. I campi gestiti da Zoo Code, come model, messages, tools e stream, non possono essere sovrascritti. Non includere segreti.",
 		"unboundApiKey": "Chiave API Unbound",
 		"getUnboundApiKey": "Ottieni chiave API Unbound",
 		"requestyApiKey": "Chiave API Requesty",
@@ -1036,6 +1038,11 @@
 		"modelId": "È necessario fornire un ID modello valido.",
 		"modelSelector": "È necessario fornire un selettore di modello valido.",
 		"openAi": "È necessario fornire un URL base, una chiave API e un ID modello validi.",
+		"openAiExtraBody": {
+			"invalidJson": "Il corpo aggiuntivo deve contenere JSON valido.",
+			"objectRequired": "Il corpo aggiuntivo deve essere un oggetto JSON.",
+			"reservedKeys": "Il corpo aggiuntivo non può sovrascrivere i campi gestiti da Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Formato ARN non valido. Verificare i requisiti del formato.",
 			"regionMismatch": "Attenzione: La regione nel tuo ARN ({{arnRegion}}) non corrisponde alla regione selezionata ({{region}}). Questo potrebbe causare problemi di accesso. Il provider utilizzerà la regione dall'ARN."

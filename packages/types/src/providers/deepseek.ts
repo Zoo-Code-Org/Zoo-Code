@@ -6,23 +6,38 @@ import type { ModelInfo } from "../model.js"
 // continuation within the same turn. See: https://api-docs.deepseek.com/guides/thinking_mode
 export type DeepSeekModelId = keyof typeof deepSeekModels
 
-export const deepSeekDefaultModelId: DeepSeekModelId = "deepseek-v4-flash"
+export const deepSeekDefaultModelId: DeepSeekModelId = "deepseek-flash"
 
 export const deepSeekModels = {
+	"deepseek-flash": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "low", "high", "max"], // Updated 2026-09-10
+		preserveReasoning: true,
+		reasoningEffort: "high",
+		inputPrice: 0, // the inputs are priced as cache read/write, so `inputPrice` should be 0
+		// Static estimates use peak rates; off-peak rates are 50% lower. Effective 2026-09-10.
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.3,
+		cacheReadsPrice: 0.006,
+		description: `DeepSeek-V4.1-Flash is DeepSeek's fast multimodal model with image understanding. It supports thinking and non-thinking modes, JSON output, tool calls, chat prefix completion (beta), and FIM completion (beta) in non-thinking mode.`,
+	},
 	"deepseek-v4-flash": {
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
-		supportsImages: false,
+		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["disable", "low", "high", "max"], // Updated 2026-08-13
 		preserveReasoning: true,
 		reasoningEffort: "high",
 		inputPrice: 0, // the inputs are priced as cache read/write, so `inputPrice` should be 0
-		// Static estimates use peak rates; off-peak rates are 50% lower. Effective 2026-08-16.
-		outputPrice: 1.32,
-		cacheWritesPrice: 0.44,
-		cacheReadsPrice: 0.014,
-		description: `DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model. It supports thinking and non-thinking modes, JSON output, tool calls, chat prefix completion (beta), and FIM completion (beta) in non-thinking mode.`,
+		// This retired ID is billed as the current Flash model.
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.3,
+		cacheReadsPrice: 0.006,
+		description: `Legacy model name routed to the latest DeepSeek Flash model, which supports image input. Use deepseek-flash for new configurations.`,
 	},
 	"deepseek-v4-pro": {
 		displayName: "DeepSeek V4 Pro 0813",
@@ -39,6 +54,22 @@ export const deepSeekModels = {
 		cacheWritesPrice: 1.32,
 		cacheReadsPrice: 0.044,
 		description: `DeepSeek-V4-Pro-0813 is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. It supports thinking and non-thinking modes, JSON output, tool calls, chat prefix completion (beta), and FIM completion (beta) in non-thinking mode.`,
+	},
+	"deepseek-v4-flash-vision-exp": {
+		displayName: "DeepSeek V4 Flash Vision Exp",
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "low", "high", "max"], // Updated 2026-08-13
+		preserveReasoning: true,
+		reasoningEffort: "high",
+		inputPrice: 0, // the inputs are priced as cache read/write, so `inputPrice` should be 0
+		// This retired ID is billed as the current Flash model.
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.3,
+		cacheReadsPrice: 0.006,
+		description: `Legacy model name routed to the latest DeepSeek Flash model, which supports image input. Use deepseek-flash for new configurations.`,
 	},
 } as const satisfies Record<string, ModelInfo>
 

@@ -23,6 +23,7 @@ import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
@@ -477,9 +478,6 @@ describe("OpenRouterHandler", () => {
 			// Import NativeToolCallParser to set up state
 			const { NativeToolCallParser } = await import("../../../core/assistant-message/NativeToolCallParser")
 
-			// Clear any previous state
-			NativeToolCallParser.clearRawChunkState()
-
 			const handler = new OpenRouterHandler(mockOptions)
 
 			const mockStream = asyncStreamFrom([
@@ -519,18 +517,22 @@ describe("OpenRouterHandler", () => {
 			} as any
 
 			const generator = handler.createMessage("test", [])
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 
 			for await (const chunk of generator) {
 				// Simulate what Task.ts does: when we receive tool_call_partial,
 				// process it through NativeToolCallParser to populate rawChunkTracker
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}
@@ -542,6 +544,141 @@ describe("OpenRouterHandler", () => {
 			expect(partialChunks).toHaveLength(1)
 			expect(endChunks).toHaveLength(1)
 			expect(endChunks[0].id).toBe("call_openrouter_test")
+		})
+
+		it("emits completion only for identified calls and clears completed IDs", async () => {
+			const toolCall = (id?: string) => ({
+				id: "stream",
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, id, function: { name: "read_file", arguments: '{"path":"test.ts"}' } },
+							],
+						},
+						index: 0,
+					},
+				],
+			})
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall(),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall("call_openrouter_stop"),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall("call_openrouter_once"),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+					]),
+				)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const idlessChunks = await collectStream(handler.createMessage("idless", []))
+			const stoppedChunks = await collectStream(handler.createMessage("stopped", []))
+			const completedChunks = await collectStream(handler.createMessage("completed", []))
+
+			expect(idlessChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(stoppedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(completedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_once" },
+			])
+		})
+
+		it("isolates overlapping tool-call finalization between provider streams", async () => {
+			let releaseFirstStream: (() => void) | undefined
+			let markFirstStreamPaused: (() => void) | undefined
+			const firstStreamRelease = new Promise<void>((resolve) => {
+				releaseFirstStream = resolve
+			})
+			const firstStreamPaused = new Promise<void>((resolve) => {
+				markFirstStreamPaused = resolve
+			})
+			const firstStream = async function* () {
+				yield {
+					id: "stream-a",
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_openrouter_a",
+										function: { name: "read_file", arguments: '{"path":"a' },
+									},
+								],
+							},
+							index: 0,
+						},
+					],
+				}
+				markFirstStreamPaused?.()
+				await firstStreamRelease
+				yield {
+					id: "stream-a",
+					choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
+				}
+			}
+			const secondStream = asyncStreamFrom([
+				{
+					id: "stream-b",
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_openrouter_b",
+										function: { name: "read_file", arguments: '{"path":"b' },
+									},
+								],
+							},
+							index: 0,
+						},
+					],
+				},
+				{ id: "stream-b", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+			])
+			const mockCreate = vitest.fn().mockResolvedValueOnce(firstStream()).mockResolvedValueOnce(secondStream)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const firstChunksPromise = collectStreamAndParseToolCalls(handler.createMessage("first", []))
+			await firstStreamPaused
+			const secondChunks = await collectStreamAndParseToolCalls(handler.createMessage("second", []))
+			releaseFirstStream?.()
+			const firstChunks = await firstChunksPromise
+
+			expect(secondChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_b" },
+			])
+			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_a" },
+			])
+			expect(firstChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_openrouter_a", name: "read_file" },
+				{ type: "tool_call_delta", id: "call_openrouter_a", delta: '{"path":"a' },
+			])
+			expect(secondChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_openrouter_b", name: "read_file" },
+				{ type: "tool_call_delta", id: "call_openrouter_b", delta: '{"path":"b' },
+			])
 		})
 	})
 

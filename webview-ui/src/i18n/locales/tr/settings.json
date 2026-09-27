@@ -460,6 +460,8 @@
 		"headerName": "Başlık adı",
 		"headerValue": "Başlık değeri",
 		"noCustomHeaders": "Tanımlanmış özel başlık yok. Eklemek için + düğmesine tıklayın.",
+		"extraBody": "Ek Gövde",
+		"extraBodyDescription": "API istek gövdeleriyle birleştirilen isteğe bağlı JSON nesnesi. model, messages, tools ve stream gibi Zoo Code tarafından yönetilen alanlar geçersiz kılınamaz. Gizli bilgiler eklemeyin.",
 		"unboundApiKey": "Unbound API Anahtarı",
 		"getUnboundApiKey": "Unbound API Anahtarı Al",
 		"requestyApiKey": "Requesty API Anahtarı",
@@ -1036,6 +1038,11 @@
 		"modelId": "Geçerli bir model kimliği sağlamalısınız.",
 		"modelSelector": "Geçerli bir model seçici sağlamalısınız.",
 		"openAi": "Geçerli bir temel URL, API anahtarı ve model kimliği sağlamalısınız.",
+		"openAiExtraBody": {
+			"invalidJson": "Ek Gövde geçerli JSON içermelidir.",
+			"objectRequired": "Ek Gövde bir JSON nesnesi olmalıdır.",
+			"reservedKeys": "Ek Gövde, Zoo Code tarafından yönetilen alanları geçersiz kılamaz: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Geçersiz ARN formatı. Lütfen format gereksinimlerini kontrol edin.",
 			"regionMismatch": "Uyarı: ARN'nizdeki bölge ({{arnRegion}}) seçtiğiniz bölge ({{region}}) ile eşleşmiyor. Bu erişim sorunlarına neden olabilir. Sağlayıcı, ARN'deki bölgeyi kullanacak."

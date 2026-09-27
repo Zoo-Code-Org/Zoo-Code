@@ -122,16 +122,16 @@ export class MimoHandler extends OpenAiHandler {
 					}
 				: delta
 
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
 			if (delta.content) {
 				yield {
 					type: "text",
 					text: delta.content,
 				}
-			}
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
 			}
 
 			yield* this.processToolCalls(sanitizedDelta, finishReason, activeToolCallIds)
