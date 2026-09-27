@@ -2094,7 +2094,11 @@ export class ClineProvider
 					// cancelled switch: log it and keep the cancellation result.
 					if (signal?.aborted) {
 						try {
-							await this.updateTaskHistory(taskHistoryItem)
+							// Restore only the field this switch changed: re-read the item so
+							// fields the running task persisted during the pending window
+							// (tokens, cost, status, apiConfigName) survive the rollback.
+							const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
+							await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
 						} catch (rollbackError) {
 							this.log(`Failed to roll back mode switch ${task.taskId}: ${String(rollbackError)}`)
 						}

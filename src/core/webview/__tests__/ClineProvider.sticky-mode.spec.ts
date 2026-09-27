@@ -624,6 +624,78 @@ describe("ClineProvider - Sticky Mode", () => {
 			)
 		})
 
+		it("preserves fields persisted during the pending window when rolling back the mode", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const preSwitchItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			// While the history write is in flight the running task persists other fields
+			// of the same item; the store now returns that updated item.
+			const updatedItem: HistoryItem = {
+				...preSwitchItem,
+				mode: "architect",
+				tokensIn: 42,
+				totalCost: 0.5,
+			}
+			const storeGet = vi
+				.spyOn(provider.taskHistoryStore, "get")
+				.mockReturnValueOnce(preSwitchItem)
+				.mockReturnValue(updatedItem)
+
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockResolvedValueOnce([])
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			// The rollback restores only the mode: the fields persisted during the
+			// pending window (tokensIn, totalCost) survive the rollback write.
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(storeGet).toHaveBeenCalledTimes(2)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ id: "test-task-id", mode: "code", tokensIn: 42, totalCost: 0.5 }),
+			)
+		})
+
 		it("proceeds normally when no mutation signal is provided", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
 			// The literal is asserted as Partial<Task> so its private members (_taskMode,
