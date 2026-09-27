@@ -6526,13 +6526,17 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 	}
 
 	// Task receives a full ClineProvider at runtime; these focused unit tests only
-	// exercise these methods, so the partial double is cast (same pattern as the
-	// "Subtask Rate Limiting" block above). taskHistoryStore must be stubbed:
-	// without it provider?.taskHistoryStore.get() throws before the guard is
-	// evaluated and the catch would mask whether execution reached
+	// exercise these methods, so the partial double is cast. taskHistoryStore must
+	// be stubbed: without it provider?.taskHistoryStore.get() throws before the
+	// guard is evaluated and the catch would mask whether execution reached
 	// updateTaskHistory().
+	//
+	// The double does not structurally overlap MockedClineProvider, so a direct
+	// literal `as` fails (TS2352). Object.assign over an empty-object single cast
+	// keeps one assertion: the target carries the declared type and the source's
+	// property types stay inferred.
 	function makeMockProvider() {
-		const mockProvider = {
+		const mockProvider = Object.assign({} as MockedClineProvider, {
 			context: {
 				globalStorageUri: { fsPath: "/test/storage" },
 				globalState: {
@@ -6549,7 +6553,7 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			updateTaskHistory: vi.fn().mockResolvedValue(undefined),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
-		} as unknown as MockedClineProvider
+		})
 		return mockProvider
 	}
 
