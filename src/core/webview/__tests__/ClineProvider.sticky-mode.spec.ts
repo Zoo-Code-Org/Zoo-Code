@@ -461,16 +461,22 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		it("bails out before any task write when the mutation signal is already aborted", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
-			const mockTask = {
-				taskId: "test-task-id",
-				taskMode: "code",
-				_taskMode: undefined as string | undefined,
-				emit: vi.fn(),
-				saveClineMessages: vi.fn(),
-				clineMessages: [],
-				apiConversationHistory: [],
-				updateApiConfiguration: vi.fn(),
-			} as unknown as Task
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: undefined as string | undefined,
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
 
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])
@@ -489,16 +495,22 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		it("rolls back the landed history write and leaves no partial mode state when the signal aborts in flight", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
-			const mockTask = {
-				taskId: "test-task-id",
-				taskMode: "code",
-				_taskMode: "code",
-				emit: vi.fn(),
-				saveClineMessages: vi.fn(),
-				clineMessages: [],
-				apiConversationHistory: [],
-				updateApiConfiguration: vi.fn(),
-			} as unknown as Task
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
 
 			const historyItem: HistoryItem = {
 				id: "test-task-id",
@@ -554,16 +566,22 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		it("proceeds normally when no mutation signal is provided", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
-			const mockTask = {
-				taskId: "test-task-id",
-				taskMode: "code",
-				_taskMode: undefined as string | undefined,
-				emit: vi.fn(),
-				saveClineMessages: vi.fn(),
-				clineMessages: [],
-				apiConversationHistory: [],
-				updateApiConfiguration: vi.fn(),
-			} as unknown as Task
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: undefined as string | undefined,
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
 
 			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])

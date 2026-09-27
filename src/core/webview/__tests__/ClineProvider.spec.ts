@@ -982,12 +982,12 @@ describe("ClineProvider", () => {
 
 	test("postStateToWebview does not force action navigation for non-compliant MDM state", async () => {
 		// Structural double: the post path only reads these two members, and
-		// MdmService cannot be constructed as a plain object, so a double
-		// assertion is the last-resort cast here.
-		const mdmService = {
+		// MdmService cannot be constructed as a plain object; Object.assign
+		// keeps this a single structural assertion.
+		const mdmService = Object.assign({} as MdmService, {
 			requiresCloudAuth: vi.fn().mockReturnValue(true),
 			isCompliant: vi.fn().mockReturnValue({ compliant: false, reason: "auth required" }),
-		} as unknown as MdmService
+		})
 
 		provider = new ClineProvider(
 			mockContext,
@@ -998,9 +998,11 @@ describe("ClineProvider", () => {
 		)
 
 		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => undefined)
-		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue({
-			version: "1.0.0",
-		} as unknown as ExtensionState)
+		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue(
+			Object.assign({} as ExtensionState, {
+				version: "1.0.0",
+			}),
+		)
 
 		await provider.postStateToWebview()
 
@@ -1015,9 +1017,11 @@ describe("ClineProvider", () => {
 		})
 		let statePostSettled = false
 
-		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue({
-			taskHistory: [],
-		} as unknown as ExtensionState)
+		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue(
+			Object.assign({} as ExtensionState, {
+				taskHistory: [],
+			}),
+		)
 		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockReturnValue(pendingPost)
 
 		const statePost = provider.postStateToWebviewWithoutTaskHistory()
@@ -1254,17 +1258,12 @@ describe("ClineProvider", () => {
 
 		it("should not update viewLocalState when durable view-state persistence fails", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			const providerAccess = provider as unknown as {
-				setViewStateId: (viewStateId: string) => Promise<void>
-				saveViewState: (key: keyof ExtensionState, value: unknown) => Promise<void>
-				viewLocalState: Partial<ExtensionState>
-			}
 			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(new Error("persist failed"))
 
-			await providerAccess.setViewStateId("stable-sidebar-view")
+			await provider["setViewStateId"]("stable-sidebar-view")
 
-			await expect(providerAccess.saveViewState("mode", "architect")).rejects.toThrow("persist failed")
-			expect(providerAccess.viewLocalState).not.toHaveProperty("mode")
+			await expect(provider.saveViewState("mode", "architect")).rejects.toThrow("persist failed")
+			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 			expect(provider.contextProxy.getValue("viewStates")).toBeUndefined()
 
 			await provider.dispose()
@@ -1826,9 +1825,10 @@ describe("ClineProvider", () => {
 				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "bogus-mode"'))
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
 				expect(provider["viewLocalState"].mode).toBe("refactor")
-				// A non-string mode must be rejected before persistence (double assertion: the type
-				// excludes non-strings), so it must not reach global state or the buffer.
-				await provider.setValues({ mode: 42 } as unknown as RooCodeSettings)
+				// A non-string mode must be rejected before persistence; Object.assign
+				// keeps this a single structural assertion, so it must not reach global
+				// state or the buffer.
+				await provider.setValues(Object.assign({} as RooCodeSettings, { mode: 42 }))
 				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "42"'))
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
 				expect(provider["viewLocalState"].mode).toBe("refactor")
@@ -1890,7 +1890,10 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
 			provider.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
-			// The modal answer is a string label; the last-typed vscode overload expects a MessageItem.
+			// The modal answer is a string label; the last-typed vscode overload expects a
+			// MessageItem. A double assertion is the last-resort cast here (AGENTS.md): the
+			// production path compares the answer against the string label directly, so the
+			// runtime value must stay a string and cannot be a structural MessageItem double.
 			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
 				t("common:answers.yes") as unknown as vscode.MessageItem,
 			)

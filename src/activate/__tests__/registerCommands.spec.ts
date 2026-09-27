@@ -643,12 +643,12 @@ describe("openClineInNewTab", () => {
 
 	it("reveals the existing tab instead of creating a second panel", async () => {
 		const mockExistingProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
-		const mockPanel = {
+		const mockPanel = Object.assign({} as vscode.WebviewPanel, {
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
 			reveal: vi.fn().mockResolvedValue(undefined),
-		} as unknown as vscode.WebviewPanel
+		})
 		setPanel(mockPanel, "tab")
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockExistingProvider)
 
@@ -664,12 +664,12 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("creates a new tab panel when the tracked tab's provider has been disposed", async () => {
-		const mockPanel = {
+		const mockPanel = Object.assign({} as vscode.WebviewPanel, {
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
 			reveal: vi.fn().mockResolvedValue(undefined),
-		} as unknown as vscode.WebviewPanel
+		})
 		setPanel(mockPanel, "tab")
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
 
@@ -681,22 +681,22 @@ describe("openClineInNewTab", () => {
 
 	it("re-points the tracked tab ref at the panel that becomes active", async () => {
 		// Panel A is created first and tracked...
-		const panelA = {
+		const panelA = Object.assign({} as vscode.WebviewPanel, {
 			marker: "panel-A",
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
-		} as unknown as vscode.WebviewPanel
+		})
 		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelA)
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
 		// ...then panel B is created, which re-points the tracked tab ref.
-		const panelB = {
+		const panelB = Object.assign({} as vscode.WebviewPanel, {
 			marker: "panel-B",
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
-		} as unknown as vscode.WebviewPanel
+		})
 		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelB)
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
@@ -722,11 +722,13 @@ describe("openClineInNewTab", () => {
 				return { dispose: vi.fn() }
 			},
 		)
-		const mockSidebarProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		const mockSidebarProvider = Object.assign({} as ClineProvider, {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+		})
 		registerCommands({
 			context: mockContext,
 			outputChannel: mockOutputChannel,
-			provider: mockSidebarProvider as unknown as ClineProvider,
+			provider: mockSidebarProvider,
 		})
 
 		await handlers.get("zoo-code.plusButtonClickedInTab")!()
@@ -746,7 +748,7 @@ describe("openClineInNewTab", () => {
 		// The creation must survive the MDM lookup failure: the provider is
 		// constructed with an undefined MDM service and the tab panel is
 		// still created.
-		const ctor = ClineProvider as unknown as Mock
+		const ctor = vi.mocked(ClineProvider)
 		expect(ctor.mock.instances[0]).toBeDefined()
 		expect(ctor).toHaveBeenCalledWith(mockContext, mockOutputChannel, "editor", undefined, undefined)
 		expect(provider).toBe(ctor.mock.instances[0])
@@ -759,7 +761,9 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("opens a new group to the right and targets ViewColumn.Two when no editors are visible", async () => {
-		;(vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = []
+		// The vscode mock factory declares a mutable visibleTextEditors slot that the
+		// readonly public API type hides, so seed it through Object.assign.
+		Object.assign(vscode.window, { visibleTextEditors: [] })
 
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
@@ -789,10 +793,10 @@ describe("openClineInNewTab", () => {
 	it("treats editors without a viewColumn as column 0 when computing the target column", async () => {
 		// openClineInNewTab only reads viewColumn from each editor, so the
 		// fixture keeps that single field.
-		const editorWithoutColumn = { viewColumn: undefined } as unknown as vscode.TextEditor
-		;(vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = [
-			editorWithoutColumn,
-		]
+		const editorWithoutColumn = Object.assign({} as vscode.TextEditor, { viewColumn: undefined })
+		Object.assign(vscode.window, {
+			visibleTextEditors: [editorWithoutColumn],
+		})
 
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
@@ -810,10 +814,12 @@ describe("openClineInNewTab", () => {
 	it("places the tab panel one column right of the rightmost visible editor", async () => {
 		// openClineInNewTab only reads viewColumn from each editor, so the
 		// fixtures keep that single field.
-		;(vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = [
-			{ viewColumn: 1 } as unknown as vscode.TextEditor,
-			{ viewColumn: 3 } as unknown as vscode.TextEditor,
-		]
+		Object.assign(vscode.window, {
+			visibleTextEditors: [
+				Object.assign({} as vscode.TextEditor, { viewColumn: 1 }),
+				Object.assign({} as vscode.TextEditor, { viewColumn: 3 }),
+			],
+		})
 
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
@@ -829,13 +835,13 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("constructs the tab provider with the 'editor' context and the live MdmService instance", async () => {
-		const mockMdm = { name: "mock-mdm" }
 		// MdmService has a private constructor, so pin a sentinel stand-in.
-		;(MdmService.getInstance as Mock).mockReturnValue(mockMdm as unknown as MdmService)
+		const mockMdm = Object.assign({} as MdmService, { name: "mock-mdm" })
+		;(MdmService.getInstance as Mock).mockReturnValue(mockMdm)
 
 		const provider = await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
-		const ctor = ClineProvider as unknown as Mock
+		const ctor = vi.mocked(ClineProvider)
 		expect(ctor).toHaveBeenCalledTimes(1)
 		expect(ctor).toHaveBeenCalledWith(mockContext, mockOutputChannel, "editor", undefined, mockMdm)
 		expect(provider).toBe(ctor.mock.instances[0])
@@ -883,7 +889,7 @@ describe("openClineInNewTab", () => {
 		// the same constructed provider. Pinning both results against the
 		// mocked constructor (not just against each other) keeps the test
 		// failing if the shared result is undefined.
-		const ctor = ClineProvider as unknown as Mock
+		const ctor = vi.mocked(ClineProvider)
 		const constructed = ctor.mock.instances[0]
 		expect(constructed).toBeDefined()
 		expect(first).toBe(constructed)
@@ -908,11 +914,13 @@ describe("openClineInNewTab", () => {
 				return { dispose: vi.fn() }
 			},
 		)
-		const sidebarProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		const sidebarProvider = Object.assign({} as ClineProvider, {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+		})
 		registerCommands({
 			context: mockContext,
 			outputChannel: mockOutputChannel,
-			provider: sidebarProvider as unknown as ClineProvider,
+			provider: sidebarProvider,
 		})
 
 		const started = [commandHandlers["zoo-code.openInNewTab"](), commandHandlers["zoo-code.popoutButtonClicked"]()]
@@ -927,7 +935,7 @@ describe("openClineInNewTab", () => {
 		// Both command entry points await the shared in-flight creation:
 		// exactly one tab panel is created and both results are the same
 		// constructed provider.
-		const ctor = ClineProvider as unknown as Mock
+		const ctor = vi.mocked(ClineProvider)
 		const constructed = ctor.mock.instances[0]
 		expect(constructed).toBeDefined()
 		expect(first).toBe(constructed)
@@ -947,7 +955,7 @@ describe("openClineInNewTab", () => {
 
 		const secondProvider = await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
 
-		const ctor = ClineProvider as unknown as Mock
+		const ctor = vi.mocked(ClineProvider)
 		const second = ctor.mock.instances[1]
 		expect(second).toBeDefined()
 		expect(secondProvider).toBe(second)
