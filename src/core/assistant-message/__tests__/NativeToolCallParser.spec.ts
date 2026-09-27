@@ -3,6 +3,20 @@ import { NativeToolCallParser } from "../NativeToolCallParser"
 describe("NativeToolCallParser", () => {
 	describe("parseToolCall", () => {
 		describe("execute_command optional arguments", () => {
+			it.each([undefined, null, 30])("preserves an explicit cwd with timeout %s", (timeout) => {
+				const args = { command: "printf test", cwd: "/tmp/workspace", timeout }
+				const result = NativeToolCallParser.parseToolCall({
+					id: "call-command-cwd",
+					name: "execute_command",
+					arguments: JSON.stringify(args),
+				})
+				expect(result).toMatchObject({
+					type: "tool_use",
+					name: "execute_command",
+					nativeArgs: args,
+				})
+			})
+
 			it.each([undefined, null, 30])("accepts a finalized command with timeout %s", (timeout) => {
 				const args = { command: "printf test", ...(timeout === undefined ? {} : { cwd: null, timeout }) }
 				const result = NativeToolCallParser.parseToolCall({
