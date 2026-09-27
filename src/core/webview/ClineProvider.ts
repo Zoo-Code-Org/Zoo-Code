@@ -749,18 +749,15 @@ export class ClineProvider
 	 * creation awaits this (bounded by a timeout) so a task cannot consume shared
 	 * default mode/profile state before the view's own persisted selections are loaded.
 	 */
-	private viewStateReadinessResolve?: () => void
+	private viewStateReadinessResolve!: () => void
 
-	private viewStateReadinessPromise?: Promise<void>
-
-	public get viewStateReadiness(): Promise<void> {
-		if (!this.viewStateReadinessPromise) {
-			this.viewStateReadinessPromise = new Promise<void>((resolve) => {
-				this.viewStateReadinessResolve = resolve
-			})
-		}
-		return this.viewStateReadinessPromise
-	}
+	// Created eagerly in the field initializer rather than lazily in a getter: the
+	// resolver is consumed by the first setViewStateId registration or by dispose,
+	// so a promise created after that point would never settle and startNewTask's
+	// readiness race would fall through to its timeout every time.
+	public readonly viewStateReadiness: Promise<void> = new Promise<void>((resolve) => {
+		this.viewStateReadinessResolve = resolve
+	})
 
 	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
@@ -799,7 +796,7 @@ export class ClineProvider
 		} finally {
 			// The stable id is now registered (or restored): API-driven task creation
 			// can proceed against this view's loaded state.
-			this.viewStateReadinessResolve?.()
+			this.viewStateReadinessResolve()
 		}
 	}
 
@@ -1234,7 +1231,7 @@ export class ClineProvider
 
 		// A disposed provider will never register a stable view state id: release
 		// any API-driven task creation that is awaiting viewStateReadiness.
-		this.viewStateReadinessResolve?.()
+		this.viewStateReadinessResolve()
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
@@ -3954,12 +3951,13 @@ export class ClineProvider
 			}
 		}
 
-		// Capture the previous shared values for the keys being written so a failed
-		// durable viewStates write can roll the ContextProxy mutation back.
+		// Capture the previous shared value for every key being written — including keys
+		// being cleared (value undefined) — so a failed durable viewStates write can roll
+		// the ContextProxy mutation back, restoring cleared values as well.
 		const previousValues = Object.fromEntries(
-			(Object.keys(sanitizedValues) as (keyof RooCodeSettings)[])
-				.filter((key) => sanitizedValues[key] !== undefined)
-				.map((key) => [key, this.contextProxy.getValue(key)] as [string, unknown]),
+			(Object.keys(sanitizedValues) as (keyof RooCodeSettings)[]).map(
+				(key) => [key, this.contextProxy.getValue(key)] as [string, unknown],
+			),
 		) as Partial<RooCodeSettings>
 
 		await this.contextProxy.setValues(sanitizedValues)

@@ -171,6 +171,17 @@ describe("API task controls", () => {
 				configuration,
 			)
 		})
+
+		it("fails task creation when the view state is not ready within the readiness bound", async () => {
+			// A readiness promise that never settles: the bound must reject task creation
+			// instead of letting createTask run against stale shared defaults.
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			await expect(api.startNewTask({ configuration, text: "new task" })).rejects.toThrow(
+				"Timed out waiting for the view state to become ready",
+			)
+			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("task ask registry", () => {

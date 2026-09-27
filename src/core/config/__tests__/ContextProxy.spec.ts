@@ -168,6 +168,24 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
 		})
 
+		it("does not roll back over a newer same-value write when the older write fails", async () => {
+			// Seed the cache so two overlapping writes carry the same new value: the
+			// stale-previous restore is only visible when value comparison matches.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			// The older write's durable update fails while a newer same-key write is
+			// in flight: its failure must not restore its previous value over the
+			// newer write's success (its write token was superseded).
+			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+			const older = proxy.updateGlobalState("apiProvider", "anthropic")
+			const newer = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			await expect(older).rejects.toThrow("storage failed")
+			await newer
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 

@@ -46,6 +46,13 @@ export class ContextProxy {
 
 	private stateCache: GlobalState
 	private secretCache: SecretState
+
+	// Per-key write tokens: a failed durable write rolls its cache value back only if it is
+	// still the current write for that key. Value comparison alone would let an older
+	// failed write restore its stale previous value after a newer same-value write
+	// succeeded; refresh/reset replace the caches, so their pending writes are dropped.
+	private stateWriteTokens = new Map<GlobalStateKey, symbol>()
+	private secretWriteTokens = new Map<SecretStateKey, symbol>()
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -372,9 +379,15 @@ export class ContextProxy {
 		// the previous value if the durable write fails so the cache cannot diverge from
 		// storage.
 		const previous = this.stateCache[key]
+		const token = Symbol()
+		this.stateWriteTokens.set(key, token)
 		this.stateCache[key] = value
 		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error) => {
-			this.stateCache[key] = previous
+			// Only the write that is still current for this key may roll back: a newer
+			// write (or a refresh/reset that dropped the token) already superseded it.
+			if (this.stateWriteTokens.get(key) === token) {
+				this.stateCache[key] = previous
+			}
 			throw error
 		})
 	}
@@ -397,6 +410,8 @@ export class ContextProxy {
 		// the previous value if the durable write fails so the cache cannot diverge from
 		// storage.
 		const previous = this.secretCache[key]
+		const token = Symbol()
+		this.secretWriteTokens.set(key, token)
 		this.secretCache[key] = value
 
 		// Write directly to context.
@@ -405,7 +420,11 @@ export class ContextProxy {
 				? this.originalContext.secrets.delete(key)
 				: this.originalContext.secrets.store(key, value),
 		).catch((error) => {
-			this.secretCache[key] = previous
+			// Only the write that is still current for this key may roll back (see
+			// updateGlobalState): a newer write or a secrets refresh superseded it.
+			if (this.secretWriteTokens.get(key) === token) {
+				this.secretCache[key] = previous
+			}
 			throw error
 		})
 	}
@@ -415,6 +434,9 @@ export class ContextProxy {
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
 	async refreshSecrets(): Promise<void> {
+		// The refresh re-syncs the whole secret cache from storage: pending pre-refresh
+		// writes must not roll back over the freshly loaded values.
+		this.secretWriteTokens.clear()
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
@@ -608,6 +630,8 @@ export class ContextProxy {
 		// Clear in-memory caches
 		this.stateCache = {}
 		this.secretCache = {}
+		this.stateWriteTokens.clear()
+		this.secretWriteTokens.clear()
 
 		await Promise.all([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),

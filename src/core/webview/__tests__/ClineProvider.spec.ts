@@ -1212,7 +1212,13 @@ describe("ClineProvider", () => {
 			await provider.setValue("mode", "code")
 			expect(provider.contextProxy.getValue("mode")).toBe("code")
 
-			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(new Error("persist failed"))
+			// Fail only the durable viewStates write: rejecting the first contextProxy.setValue
+			// call would fail the shared write itself, so the rollback branch would never run.
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") throw new Error("persist failed")
+				return originalSetValue(key, value)
+			})
 
 			await expect(provider.setValue("mode", "architect")).rejects.toThrow("persist failed")
 
@@ -1230,7 +1236,13 @@ describe("ClineProvider", () => {
 			await provider.setValues({ mode: "code" })
 			expect(provider.contextProxy.getValue("mode")).toBe("code")
 
-			vi.spyOn(provider.contextProxy, "setValues").mockRejectedValueOnce(new Error("persist failed"))
+			// Fail only the durable viewStates write: rejecting the first contextProxy.setValue
+			// call would fail the shared write itself, so the rollback branch would never run.
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") throw new Error("persist failed")
+				return originalSetValue(key, value)
+			})
 
 			await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("persist failed")
 
@@ -1395,6 +1407,23 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 
 			expect(await settled).toBe(true)
+		})
+
+		it("settles viewStateReadiness even when first read after the id is registered", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider["setViewStateId"]("late-reader-view")
+
+			// First read happens after registration: a lazily created promise would hold a
+			// fresh, never-resolving resolver here (the registration's resolve call was a
+			// no-op), so settling proves the promise was created eagerly in the constructor.
+			const settled = provider.viewStateReadiness.then(
+				() => true,
+				() => false,
+			)
+			expect(await settled).toBe(true)
+
+			await provider.dispose()
 		})
 	})
 

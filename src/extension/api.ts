@@ -221,13 +221,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// A new task must not consume shared default mode/profile state before the view's
 		// stable state id is registered and its persisted view state loaded: webviewDidLaunch
 		// may not have arrived yet. Bound the wait so a view that never launches cannot
-		// hang task creation.
+		// hang task creation; if the bound expires, fail task creation rather than start
+		// the task against stale shared defaults.
+		let readinessTimer: ReturnType<typeof setTimeout> | undefined
 		await Promise.race([
 			provider.viewStateReadiness,
-			new Promise<void>((resolve) => {
-				setTimeout(resolve, 3000)
+			new Promise<never>((_, reject) => {
+				readinessTimer = setTimeout(
+					() => reject(new Error("Timed out waiting for the view state to become ready")),
+					3000,
+				)
 			}),
-		])
+		]).finally(() => {
+			clearTimeout(readinessTimer)
+		})
 		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
