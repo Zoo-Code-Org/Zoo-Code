@@ -171,6 +171,12 @@ jobs:
             - name: Run extension test lanes
               if: ${{ !matrix.collect-coverage }}
               run: pnpm turbo run test:api test:core test:services test:misc test:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only
+            # Runs outside Turbo so changes to .coderabbit.yaml and
+            # .github/workflows/label-pr-review-state.yml always bust the
+            # result — those files are outside the src/ package boundary and
+            # cannot be declared as Turbo inputs.
+            - name: Run workflow config tests
+              run: pnpm --dir src run test:workflow
             - name: Verify extension coverage contract
               if: matrix.collect-coverage
               run: pnpm --dir src run verify:coverage-contract
