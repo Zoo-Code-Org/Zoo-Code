@@ -445,8 +445,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * controller so the stop-button path can observe it. If the SDK path
 	 * fails, the request is retried once through the manual SSE fallback
 	 * (makeResponsesApiRequest) — except when the SDK error is the cancellation
-	 * itself (an AbortError from this request's aborted controller), which is
-	 * rethrown as-is so a cancelled request never triggers a second POST.
+	 * itself (recognized from the error alone via isRequestAborted while this
+	 * request's controller is aborted): native AbortErrors are rethrown as-is
+	 * and other recognized SDK abort errors are normalized to the contract
+	 * AbortError, so a cancelled request never triggers a second POST.
 	 *
 	 * @param requestBody - The serialized Responses API request body
 	 * @param model - The resolved model configuration
@@ -507,13 +509,20 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 		} catch (sdkErr: any) {
 			// If this request's own controller aborted and the SDK error is the
-			// cancellation itself (an AbortError from the aborted request signal),
-			// rethrow it unchanged instead of issuing a second POST through the
-			// fallback path for a request the caller already cancelled. Other SDK
-			// failures (including a pre-aborted signal hitting a broken SDK) still
-			// take the fallback, whose own aborted fetch surfaces the AbortError.
-			if (requestController.signal.aborted && sdkErr instanceof Error && sdkErr.name === "AbortError") {
-				throw sdkErr
+			// cancellation itself — classified from the error alone via
+			// isRequestAborted, never from the signal, so a terminal SDK error
+			// that merely races the abort is not reclassified — surface it as
+			// the contract AbortError instead of entering the fallback path for
+			// a request the caller already cancelled: native AbortErrors are
+			// rethrown as-is, other recognized SDK abort errors are normalized.
+			// Other SDK failures (including a pre-aborted signal hitting a broken
+			// SDK) still take the fallback, whose own aborted fetch surfaces the
+			// AbortError.
+			if (requestController.signal.aborted && isRequestAborted(sdkErr)) {
+				if (sdkErr instanceof Error && sdkErr.name === "AbortError") {
+					throw sdkErr
+				}
+				throw createAbortError(this.providerName)
 			}
 			// For errors, fallback to manual SSE via fetch
 			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages)
@@ -1656,10 +1665,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * The request signal is built request-locally from the caller's abort
 	 * signal and optional timeout (RequestConfigBuilder.mergeAbortSignalAndTimeout),
 	 * so cancellations never touch this.abortController, which streaming
-	 * requests own. Cancellations are normalized to the contract AbortError via
-	 * isRequestAborted/createAbortError (the SDK's own APIUserAbortError does
-	 * not satisfy the contract) so callers can identify them and they are never
-	 * captured as provider errors.
+	 * requests own. Cancellations are classified from the error alone via
+	 * isRequestAborted (the SDK's own APIUserAbortError never satisfies the
+	 * contract) and normalized with createAbortError, so callers can identify
+	 * them and terminal SDK errors are never misreported as cancellations.
 	 *
 	 * @param prompt - The user prompt to complete
 	 * @param options - Optional abortSignal/timeoutMs controlling the request
@@ -1755,12 +1764,15 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			return ""
 		} catch (error) {
 			// Normalize cancellations to the contract AbortError before anything
-			// else: the locked OpenAI SDK raises APIUserAbortError (or its
-			// "Request was aborted." message) instead of a native AbortError when
-			// requestSignal aborts, and the raw SDK error does not satisfy the
-			// Task's abort contract — rethrowing it would surface a cancellation
-			// as a wrapped provider error and capture it as telemetry.
-			if (isRequestAborted(error, requestSignal)) {
+			// Normalize cancellations to the contract AbortError before anything
+			// else. Cancellation is classified from the error alone — never from
+			// requestSignal — because the locked OpenAI SDK raises APIUserAbortError
+			// (or its "Request was aborted." message) when requestSignal aborts,
+			// and a signal that aborts after a terminal SDK error must not turn
+			// that error into a cancellation. The raw SDK abort error does not
+			// satisfy the Task's abort contract, so it is normalized instead of
+			// rethrown; terminal errors keep the telemetry + wrapping below.
+			if (isRequestAborted(error)) {
 				throw createAbortError(this.providerName)
 			}
 

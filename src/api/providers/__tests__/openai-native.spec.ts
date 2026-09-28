@@ -1250,6 +1250,50 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockFetch).not.toHaveBeenCalled()
 			})
 
+			it("should normalize SDK APIUserAbortError without entering the fallback when the request's own signal aborts", async () => {
+				// Regression: the SDK catch path only recognized native AbortErrors, so the
+				// OpenAI SDK's own APIUserAbortError fell through into the manual SSE
+				// fallback — an unnecessary fallback path for a request the caller already
+				// cancelled.
+				const mockFetch = vitest.fn().mockImplementation((_url: unknown, options: { signal?: AbortSignal }) => {
+					if (options?.signal?.aborted) {
+						const error = new Error("This operation was aborted")
+						error.name = "AbortError"
+						return Promise.reject(error)
+					}
+					return new Promise(() => undefined)
+				})
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						const error = new Error("Request was aborted.")
+						error.name = "APIUserAbortError"
+						if (options?.signal?.aborted) {
+							reject(error)
+							return
+						}
+						options?.signal?.addEventListener("abort", () => reject(error), { once: true })
+					})
+				})
+
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				await tick()
+				controller.abort()
+
+				await expect(collected).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
+				expect(mockFetch).not.toHaveBeenCalled()
+			})
+
 			it("should cancel only the aborted fallback body when overlapping requests share a handler", async () => {
 				// Regression: the SSE loop gated on the shared this.abortController
 				// field, so with two overlapping fallback reads an abort of one
@@ -1596,6 +1640,20 @@ describe("OpenAiNativeHandler", () => {
 			})
 			expect(mockCaptureException).not.toHaveBeenCalled()
 		})
+		it("completePrompt should not reclassify a terminal SDK error as a cancellation when the signal aborts", async () => {
+			// Regression: classifying cancellation from requestSignal instead of the
+			// error let a signal that aborts after a terminal SDK error convert that
+			// error into an AbortError and skip telemetry.
+			mockResponsesCreate.mockRejectedValue(new Error("API Error"))
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(handler.completePrompt("Test prompt", { abortSignal: controller.signal })).rejects.toThrow(
+				"OpenAI Native completion error: API Error",
+			)
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+		})
+
 		it("completePrompt should rethrow non-Error failures after telemetry", async () => {
 			mockResponsesCreate.mockRejectedValue("string failure")
 
