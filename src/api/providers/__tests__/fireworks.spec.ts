@@ -3,27 +3,15 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import {
-	type FireworksModelId,
-	fireworksDefaultModelId,
-	fireworksModels,
-	openAiModelInfoSaneDefaults,
-	providerIdentifiers,
-} from "@roo-code/types"
+import { type ModelInfo, fireworksDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { FireworksHandler } from "../fireworks"
-import { getModelsFromCache } from "../fetchers/modelCache"
+import { getModels, getModelsFromCache } from "../fetchers/modelCache"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
-// Create mock functions
 const mockCreate = vi.fn()
 
-vi.mock("../fetchers/modelCache", () => ({
-	getModelsFromCache: vi.fn(() => undefined),
-}))
-
-// Mock OpenAI module
 vi.mock("openai", () => ({
 	default: vi.fn(function () {
 		return {
@@ -36,37 +24,45 @@ vi.mock("openai", () => ({
 	}),
 }))
 
+vi.mock("../fetchers/modelCache", () => ({
+	getModels: vi.fn(async () => ({})),
+	getModelsFromCache: vi.fn(() => undefined),
+}))
+
+const GLM_ID = "accounts/fireworks/models/glm-5p3"
+
+const pricedGlm: ModelInfo = {
+	maxTokens: 16384,
+	contextWindow: 1_048_576,
+	supportsImages: false,
+	supportsPromptCache: true,
+	inputPrice: 1.4,
+	outputPrice: 4.4,
+	cacheReadsPrice: 0.26,
+}
+
+const unpricedModel: ModelInfo = {
+	maxTokens: 8192,
+	contextWindow: 8192,
+	supportsImages: true,
+	supportsPromptCache: false,
+}
+
+const usageStream = (usage: Record<string, unknown>) =>
+	asyncStreamFrom([
+		{ choices: [{ delta: { content: "hi" }, index: 0 }], usage: null },
+		{ choices: [{ delta: {}, index: 0 }], usage },
+	])
+
 describe("FireworksHandler", () => {
 	let handler: FireworksHandler
 
 	beforeEach(() => {
 		clearAllMocks()
-		// Set up default mock implementation
+		vi.mocked(getModelsFromCache).mockReturnValue(undefined)
+		vi.mocked(getModels).mockResolvedValue({})
 		mockCreate.mockImplementation(async () =>
-			asyncStreamFrom([
-				{
-					choices: [
-						{
-							delta: { content: "Test response" },
-							index: 0,
-						},
-					],
-					usage: null,
-				},
-				{
-					choices: [
-						{
-							delta: {},
-							index: 0,
-						},
-					],
-					usage: {
-						prompt_tokens: 10,
-						completion_tokens: 5,
-						total_tokens: 15,
-					},
-				},
-			]),
+			usageStream({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }),
 		)
 		handler = new FireworksHandler({ fireworksApiKey: "test-key" })
 	})
@@ -92,84 +88,83 @@ describe("FireworksHandler", () => {
 		expect(() => new FireworksHandler({})).toThrow("API key is required")
 	})
 
-	it("should return default model when no model is specified", () => {
-		const model = handler.getModel()
-		expect(model.id).toBe(fireworksDefaultModelId)
-		expect(model.info).toEqual(expect.objectContaining(fireworksModels[fireworksDefaultModelId]))
-	})
+	it("should read model info from the key-scoped model cache", () => {
+		vi.mocked(getModelsFromCache).mockReturnValue({ [GLM_ID]: pricedGlm })
 
-	it("should return specified model when valid model is provided", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(expect.objectContaining(fireworksModels[testModelId]))
-	})
-
-	it("should use cached API metadata for a dynamically fetched model", async () => {
-		const dynamicId = "accounts/fireworks/models/glm-5p3"
-		vi.mocked(getModelsFromCache).mockReturnValue({
-			[dynamicId]: {
-				maxTokens: 16384,
-				contextWindow: 1_048_576,
-				supportsImages: true,
-				supportsPromptCache: false,
-			},
-		})
-
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: dynamicId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
+		const handlerWithModel = new FireworksHandler({ apiModelId: GLM_ID, fireworksApiKey: "fw-key" })
 		const model = handlerWithModel.getModel()
 
 		expect(getModelsFromCache).toHaveBeenCalledWith(
-			{
-				provider: providerIdentifiers.fireworks,
-				apiKey: "test-fireworks-api-key",
-			},
+			{ provider: providerIdentifiers.fireworks, apiKey: "fw-key" },
 			handlerWithModel,
 		)
-		expect(model.id).toBe(dynamicId)
-		expect(model.info.contextWindow).toBe(1_048_576)
-		expect(model.info.supportsImages).toBe(true)
-
-		await collectStream(handlerWithModel.createMessage("system prompt", []))
-		expect(mockCreate.mock.calls[0][0].model).toBe(dynamicId)
-		expect(mockCreate.mock.calls[0][0].max_tokens).toBe(16384)
+		expect(model).toEqual({ id: GLM_ID, info: pricedGlm })
 	})
 
-	it("should prefer static metadata over cached metadata for known models", () => {
-		const knownId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
-		vi.mocked(getModelsFromCache).mockReturnValue({
-			[knownId]: { contextWindow: 1, supportsPromptCache: false },
+	it("should use the default model id when none is configured", () => {
+		vi.mocked(getModelsFromCache).mockReturnValue({ [fireworksDefaultModelId]: pricedGlm })
+
+		const model = handler.getModel()
+
+		expect(model.id).toBe(fireworksDefaultModelId)
+		expect(model.info).toEqual(pricedGlm)
+	})
+
+	describe("ensureModelFetched", () => {
+		it("loads the keyed catalog when the cache does not describe the selection", async () => {
+			vi.mocked(getModels).mockResolvedValue({ [GLM_ID]: pricedGlm })
+			const handlerWithModel = new FireworksHandler({ apiModelId: GLM_ID, fireworksApiKey: "fw-key" })
+
+			await handlerWithModel.ensureModelFetched()
+
+			expect(getModels).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.fireworks, apiKey: "fw-key" },
+				handlerWithModel,
+			)
 		})
 
-		const model = new FireworksHandler({ apiModelId: knownId, fireworksApiKey: "k" }).getModel()
+		it("skips the network when the cache already describes the selection", async () => {
+			vi.mocked(getModelsFromCache).mockReturnValue({ [GLM_ID]: pricedGlm })
+			const handlerWithModel = new FireworksHandler({ apiModelId: GLM_ID, fireworksApiKey: "fw-key" })
 
-		expect(model.info).toEqual(fireworksModels[knownId])
+			await handlerWithModel.ensureModelFetched()
+
+			expect(getModels).not.toHaveBeenCalled()
+		})
+
+		it("rejects with the caller's abort reason when already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort(new Error("caller canceled"))
+
+			await expect(handler.ensureModelFetched(controller.signal)).rejects.toThrow("caller canceled")
+			expect(getModels).not.toHaveBeenCalled()
+		})
+
+		it("detaches the waiter when the signal aborts during the fetch", async () => {
+			vi.mocked(getModels).mockReturnValue(new Promise(() => {}))
+			const controller = new AbortController()
+
+			const pending = handler.ensureModelFetched(controller.signal)
+			controller.abort()
+
+			await expect(pending).rejects.toThrow("The Fireworks request was aborted")
+		})
 	})
 
-	it("should fall back to sane defaults when an unknown model is not in the cache", () => {
-		vi.mocked(getModelsFromCache).mockReturnValue({})
-
+	it("should keep the configured id with unpriced defaults when the model is not cached", () => {
 		const model = new FireworksHandler({
 			apiModelId: "accounts/fireworks/models/not-cached",
 			fireworksApiKey: "k",
 		}).getModel()
 
 		expect(model.id).toBe("accounts/fireworks/models/not-cached")
-		// Sane defaults intentionally omit maxTokens so no output limit is sent.
-		expect(model.info).toEqual(openAiModelInfoSaneDefaults)
 		expect(model.info.maxTokens).toBeUndefined()
+		expect(model.info.supportsImages).toBe(false)
+		expect(model.info.inputPrice).toBeUndefined()
+		expect(model.info.outputPrice).toBeUndefined()
 	})
 
-	it("should omit max_tokens for a custom model because Fireworks rejects -1", async () => {
-		// Regression: custom models get sane-default metadata with maxTokens: -1, which
-		// Fireworks rejects with `400 max_tokens must be non-negative`.
+	it("should omit max_tokens for an uncached model because Fireworks rejects -1", async () => {
 		const handlerWithCustomModel = new FireworksHandler({
 			apiModelId: "accounts/fireworks/models/deepseek-v4p1-flash",
 			fireworksApiKey: "test-fireworks-api-key",
@@ -181,361 +176,62 @@ describe("FireworksHandler", () => {
 		expect(mockCreate.mock.calls[0][0].max_tokens).toBeUndefined()
 	})
 
-	it("should still send a positive max_tokens for a known model", async () => {
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: "accounts/fireworks/models/kimi-k2-instruct",
-			fireworksApiKey: "test-fireworks-api-key",
-		})
+	it("should pass the model, capped max_tokens and default temperature for a cached model", async () => {
+		vi.mocked(getModelsFromCache).mockReturnValue({ [GLM_ID]: pricedGlm })
+		const handlerWithModel = new FireworksHandler({ apiModelId: GLM_ID, fireworksApiKey: "k" })
 
-		await collectStream(handlerWithModel.createMessage("system prompt", []))
+		const systemPrompt = "Test system prompt for Fireworks"
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for Fireworks" }]
+		await collectStream(handlerWithModel.createMessage(systemPrompt, messages))
 
-		expect(mockCreate.mock.calls[0][0].max_tokens).toBe(16384)
-	})
-
-	it.each([
-		{
-			modelId: "accounts/fireworks/models/glm-5p1" as const,
-			contextWindow: 202752,
-			inputPrice: 1.4,
-			outputPrice: 4.4,
-			cacheReadsPrice: 0.26,
-		},
-		{
-			modelId: "accounts/fireworks/models/kimi-k2p6" as const,
-			contextWindow: 262144,
-			inputPrice: 0.95,
-			outputPrice: 4.0,
-			cacheReadsPrice: 0.16,
-		},
-		{
-			modelId: "accounts/fireworks/models/deepseek-v4-pro" as const,
-			contextWindow: 1048576,
-			inputPrice: 1.74,
-			outputPrice: 3.48,
-			cacheReadsPrice: 0.145,
-		},
-		{
-			modelId: "accounts/fireworks/models/deepseek-v4-pro-0813" as const,
-			contextWindow: 1_000_000,
-			inputPrice: 1.32,
-			outputPrice: 3.96,
-			cacheReadsPrice: 0.044,
-		},
-		{
-			modelId: "accounts/fireworks/models/deepseek-v4-flash-vision-exp" as const,
-			contextWindow: 1_048_576,
-			inputPrice: 0.22,
-			outputPrice: 0.66,
-			cacheReadsPrice: 0.007,
-		},
-	])(
-		"should expose newly added model $modelId",
-		({ modelId, contextWindow, inputPrice, outputPrice, cacheReadsPrice }) => {
-			expect(fireworksModels[modelId]).toBeDefined()
-			const info = fireworksModels[modelId]
-			expect(info.maxTokens).toBeGreaterThan(0)
-			expect(info.contextWindow).toBe(contextWindow)
-			expect(info.inputPrice).toBe(inputPrice)
-			expect(info.outputPrice).toBe(outputPrice)
-			expect(info.cacheReadsPrice).toBe(cacheReadsPrice)
-			expect(info.description).toBeTruthy()
-
-			const handlerWithModel = new FireworksHandler({
-				apiModelId: modelId,
-				fireworksApiKey: "test-fireworks-api-key",
-			})
-			expect(handlerWithModel.getModel().id).toBe(modelId)
-		},
-	)
-
-	it("should expose vision support for DeepSeek V4 Flash Vision Exp", () => {
-		const model = fireworksModels["accounts/fireworks/models/deepseek-v4-flash-vision-exp"]
-
-		expect(model).toMatchObject({
-			supportsImages: true,
-			supportsPromptCache: true,
-			supportsMaxTokens: true,
-		})
-	})
-
-	it("should return Kimi K2 Instruct model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
+		expect(mockCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.6,
-				outputPrice: 2.5,
-				description: expect.stringContaining("Kimi K2 is a state-of-the-art mixture-of-experts"),
+				model: GLM_ID,
+				max_tokens: 16384,
+				temperature: 0.5,
+				messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
+				stream: true,
+				stream_options: { include_usage: true },
 			}),
+			undefined,
 		)
 	})
 
-	it("should return Kimi K2 Thinking model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-thinking"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16000,
-				contextWindow: 256000,
-				supportsImages: false,
-				supportsPromptCache: true,
-				supportsTemperature: true,
-				preserveReasoning: true,
-				defaultTemperature: 1.0,
-				inputPrice: 0.6,
-				outputPrice: 2.5,
-				cacheReadsPrice: 0.15,
-			}),
-		)
+	it("should use user-specified temperature over the provider default", async () => {
+		const handlerWithTemp = new FireworksHandler({ fireworksApiKey: "k", modelTemperature: 0.7 })
+
+		await collectStream(handlerWithTemp.createMessage("system", []))
+
+		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.7 }), undefined)
 	})
 
-	it("should return Kimi K2.7 code model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2p7-code"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 262144,
-				supportsImages: true,
-				supportsPromptCache: true,
-				supportsTemperature: true,
-				preserveReasoning: true,
-				defaultTemperature: 1.0,
-				inputPrice: 0.95,
-				outputPrice: 4.0,
-				cacheReadsPrice: 0.19,
+	it("should compute cost from API pricing, including cached input", async () => {
+		vi.mocked(getModelsFromCache).mockReturnValue({ [GLM_ID]: pricedGlm })
+		mockCreate.mockImplementationOnce(async () =>
+			usageStream({
+				prompt_tokens: 1_000_000,
+				completion_tokens: 1_000_000,
+				prompt_tokens_details: { cached_tokens: 500_000 },
 			}),
 		)
+		const handlerWithModel = new FireworksHandler({ apiModelId: GLM_ID, fireworksApiKey: "k" })
+
+		const chunks = await collectStream(handlerWithModel.createMessage("system", []))
+		const usage = chunks.find((chunk) => chunk.type === "usage")
+
+		// 500k uncached @ $1.40 + 500k cached @ $0.26 + 1M output @ $4.40
+		expect(usage).toMatchObject({ type: "usage", cacheReadTokens: 500_000 })
+		expect(usage?.type === "usage" && usage.totalCost).toBeCloseTo(0.7 + 0.13 + 4.4, 6)
 	})
 
-	it("should return MiniMax M2 model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/minimax-m2"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 4096,
-				contextWindow: 204800,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.3,
-				outputPrice: 1.2,
-				description: expect.stringContaining("MiniMax M2 is a high-performance language model"),
-			}),
-		)
-	})
+	it("should not attribute a cost to models without API pricing", async () => {
+		vi.mocked(getModelsFromCache).mockReturnValue({ [GLM_ID]: unpricedModel })
+		const handlerWithModel = new FireworksHandler({ apiModelId: GLM_ID, fireworksApiKey: "k" })
 
-	it("should return Qwen3 235B model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 32768,
-				contextWindow: 256000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.22,
-				outputPrice: 0.88,
-				description:
-					"Latest Qwen3 thinking model, competitive against the best closed source models in Jul 2025.",
-			}),
-		)
-	})
+		const chunks = await collectStream(handlerWithModel.createMessage("system", []))
+		const usage = chunks.find((chunk) => chunk.type === "usage")
 
-	it("should return DeepSeek R1 model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/deepseek-r1-0528"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 20480,
-				contextWindow: 160000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 3,
-				outputPrice: 8,
-				description: expect.stringContaining("05/28 updated checkpoint of Deepseek R1"),
-			}),
-		)
-	})
-
-	it("should return DeepSeek V3 model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/deepseek-v3"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.9,
-				outputPrice: 0.9,
-				description: expect.stringContaining("strong Mixture-of-Experts (MoE) language model"),
-			}),
-		)
-	})
-
-	it("should return DeepSeek V3.1 model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/deepseek-v3p1"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 163840,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.56,
-				outputPrice: 1.68,
-				description: expect.stringContaining("DeepSeek v3.1 is an improved version"),
-			}),
-		)
-	})
-
-	it("should return GLM-4.5 model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/glm-4p5"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.55,
-				outputPrice: 2.19,
-				description: expect.stringContaining("Z.ai GLM-4.5 with 355B total parameters"),
-			}),
-		)
-	})
-
-	it("should return GLM-4.5-Air model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/glm-4p5-air"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.55,
-				outputPrice: 2.19,
-				description: expect.stringContaining("Z.ai GLM-4.5-Air with 106B total parameters"),
-			}),
-		)
-	})
-
-	it("should return GLM-4.6 model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/glm-4p6"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 25344,
-				contextWindow: 198000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.55,
-				outputPrice: 2.19,
-				description: expect.stringContaining("Z.ai GLM-4.6 is an advanced coding model"),
-			}),
-		)
-	})
-
-	it("should return gpt-oss-20b model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/gpt-oss-20b"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.07,
-				outputPrice: 0.3,
-				description: expect.stringContaining("OpenAI gpt-oss-20b: Compact model for local/edge deployments"),
-			}),
-		)
-	})
-
-	it("should return gpt-oss-120b model with correct configuration", () => {
-		const testModelId: FireworksModelId = "accounts/fireworks/models/gpt-oss-120b"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: testModelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		const model = handlerWithModel.getModel()
-		expect(model.id).toBe(testModelId)
-		expect(model.info).toEqual(
-			expect.objectContaining({
-				maxTokens: 16384,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.15,
-				outputPrice: 0.6,
-				description: expect.stringContaining("OpenAI gpt-oss-120b: Production-grade, general-purpose model"),
-			}),
-		)
+		expect(usage).toMatchObject({ type: "usage", inputTokens: 10, outputTokens: 5, totalCost: 0 })
 	})
 
 	it("completePrompt method should return text from Fireworks API", async () => {
@@ -550,122 +246,6 @@ describe("FireworksHandler", () => {
 		mockCreate.mockRejectedValueOnce(new Error(errorMessage))
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow(
 			`Fireworks completion error: ${errorMessage}`,
-		)
-	})
-
-	it("createMessage should yield text content from stream", async () => {
-		const testContent = "This is test content from Fireworks stream"
-
-		mockCreate.mockImplementationOnce(() => asyncStreamFrom([{ choices: [{ delta: { content: testContent } }] }]))
-
-		const stream = handler.createMessage("system prompt", [])
-		const firstChunk = await stream.next()
-
-		expect(firstChunk.done).toBe(false)
-		expect(firstChunk.value).toEqual({ type: "text", text: testContent })
-	})
-
-	it("createMessage should yield usage data from stream", async () => {
-		mockCreate.mockImplementationOnce(() =>
-			asyncStreamFrom([{ choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } }]),
-		)
-
-		const stream = handler.createMessage("system prompt", [])
-		const firstChunk = await stream.next()
-
-		expect(firstChunk.done).toBe(false)
-		expect(firstChunk.value).toMatchObject({ type: "usage", inputTokens: 10, outputTokens: 20 })
-	})
-
-	it("createMessage should pass correct parameters to Fireworks client", async () => {
-		const modelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
-		const modelInfo = fireworksModels[modelId]
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: modelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-
-		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
-
-		const systemPrompt = "Test system prompt for Fireworks"
-		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for Fireworks" }]
-
-		const messageGenerator = handlerWithModel.createMessage(systemPrompt, messages)
-		await messageGenerator.next()
-
-		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: modelId,
-				max_tokens: modelInfo.maxTokens,
-				temperature: 0.5,
-				messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
-				stream: true,
-				stream_options: { include_usage: true },
-			}),
-			undefined,
-		)
-	})
-
-	it("should use provider default temperature of 0.5 for models without defaultTemperature", async () => {
-		const modelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: modelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-
-		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
-
-		const messageGenerator = handlerWithModel.createMessage("system", [])
-		await messageGenerator.next()
-
-		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				temperature: 0.5,
-			}),
-			undefined,
-		)
-	})
-
-	it("should use model defaultTemperature (1.0) over provider default (0.5) for kimi-k2-thinking", async () => {
-		const modelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-thinking"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: modelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-
-		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
-
-		const messageGenerator = handlerWithModel.createMessage("system", [])
-		await messageGenerator.next()
-
-		// Model's defaultTemperature (1.0) should take precedence over provider's default (0.5)
-		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				temperature: 1.0,
-			}),
-			undefined,
-		)
-	})
-
-	it("should use user-specified temperature over model and provider defaults", async () => {
-		const modelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-thinking"
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: modelId,
-			fireworksApiKey: "test-fireworks-api-key",
-			modelTemperature: 0.7,
-		})
-
-		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
-
-		const messageGenerator = handlerWithModel.createMessage("system", [])
-		await messageGenerator.next()
-
-		// User-specified temperature should take precedence over everything
-		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				temperature: 0.7,
-			}),
-			undefined,
 		)
 	})
 
@@ -684,45 +264,17 @@ describe("FireworksHandler", () => {
 	it("createMessage should handle stream with multiple chunks", async () => {
 		mockCreate.mockImplementationOnce(async () =>
 			asyncStreamFrom([
+				{ choices: [{ delta: { content: "Hello" }, index: 0 }], usage: null },
+				{ choices: [{ delta: { content: " world" }, index: 0 }], usage: null },
 				{
-					choices: [
-						{
-							delta: { content: "Hello" },
-							index: 0,
-						},
-					],
-					usage: null,
-				},
-				{
-					choices: [
-						{
-							delta: { content: " world" },
-							index: 0,
-						},
-					],
-					usage: null,
-				},
-				{
-					choices: [
-						{
-							delta: {},
-							index: 0,
-						},
-					],
-					usage: {
-						prompt_tokens: 5,
-						completion_tokens: 10,
-						total_tokens: 15,
-					},
+					choices: [{ delta: {}, index: 0 }],
+					usage: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 },
 				},
 			]),
 		)
 
-		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
-
-		const stream = handler.createMessage(systemPrompt, messages)
-		const chunks = await collectStream(stream)
+		const chunks = await collectStream(handler.createMessage("You are a helpful assistant.", messages))
 
 		expect(chunks[0]).toEqual({ type: "text", text: "Hello" })
 		expect(chunks[1]).toEqual({ type: "text", text: " world" })

@@ -29,7 +29,6 @@ import {
 	basetenModels,
 	bedrockModels,
 	deepSeekModels,
-	fireworksModels,
 	friendliModels,
 	geminiModels,
 	mistralModels,
@@ -449,11 +448,8 @@ export const MODELS_BY_PROVIDER: Record<
 		label: "DeepSeek",
 		models: Object.keys(deepSeekModels),
 	},
-	[providerIdentifiers.fireworks]: {
-		id: providerIdentifiers.fireworks,
-		label: "Fireworks",
-		models: Object.keys(fireworksModels),
-	},
+	// Fireworks models are fetched dynamically from the Fireworks API.
+	[providerIdentifiers.fireworks]: { id: providerIdentifiers.fireworks, label: "Fireworks", models: [] },
 	[providerIdentifiers.friendli]: {
 		id: providerIdentifiers.friendli,
 		label: "Friendli",

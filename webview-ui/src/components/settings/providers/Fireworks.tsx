@@ -9,7 +9,6 @@ import {
 	type ExtensionMessage,
 	type RouterModels,
 	fireworksDefaultModelId,
-	fireworksModels,
 	providerIdentifiers,
 	allRouterModelsProvider,
 	RouterModelsMessageType,
@@ -162,11 +161,6 @@ export const Fireworks = ({
 		})
 	}, [apiConfiguration, t])
 
-	// Until the API list has been fetched (e.g. no key yet, or fetch failed), fall
-	// back to the curated static list so the picker is never empty.
-	const fetchedModels = routerModels?.[providerIdentifiers.fireworks]
-	const models = fetchedModels && Object.keys(fetchedModels).length > 0 ? fetchedModels : fireworksModels
-
 	return (
 		<>
 			<VSCodeTextField
@@ -189,7 +183,7 @@ export const Fireworks = ({
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
 				defaultModelId={fireworksDefaultModelId}
-				models={models}
+				models={routerModels?.[providerIdentifiers.fireworks] ?? {}}
 				modelIdKey="apiModelId"
 				serviceName="Fireworks AI"
 				serviceUrl="https://fireworks.ai/models"

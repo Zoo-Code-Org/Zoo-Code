@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
 	allRouterModelsProvider,
 	fireworksDefaultModelId,
-	fireworksModels,
 	providerIdentifiers,
 	type ModelInfo,
 	type ProviderSettings,
@@ -148,7 +147,7 @@ describe("Fireworks Component", () => {
 		expect(screen.getByTestId("model-picker-default")).toHaveTextContent(fireworksDefaultModelId)
 	})
 
-	it("falls back to the static model list when nothing has been fetched", () => {
+	it("shows no models when nothing has been fetched from the API", () => {
 		render(
 			<Fireworks
 				apiConfiguration={createApiConfiguration()}
@@ -156,7 +155,7 @@ describe("Fireworks Component", () => {
 			/>,
 		)
 
-		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent(Object.keys(fireworksModels).join(","))
+		expect(screen.getByTestId("model-picker-ids")).toBeEmptyDOMElement()
 	})
 
 	it("disables refresh without an API key and shows the get-key link", () => {
