@@ -256,6 +256,13 @@ const getCommandsMap = ({
 				const tabProvider = getTabProvider()
 				if (tabProvider) {
 					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				} else {
+					// The tracked tab panel has no live provider (its instance was
+					// disposed while the panel ref survived). focusPanel already
+					// revealed the tab surface, so posting to the sidebar would
+					// focus a surface that is not on screen: log the drop instead
+					// of swallowing it silently.
+					outputChannel.appendLine("focusInput: no live provider for the tracked tab panel; action dropped")
 				}
 			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })

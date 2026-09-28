@@ -154,6 +154,10 @@ describe("registerCommands handlers", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// clearAllMocks() keeps mock implementations: reset the instance-lookup
+		// return value so a preceding test's tab double cannot leak into the
+		// dead-tab drop assertions below.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
 		handlers = {}
 
 		mockOutputChannel = {
@@ -395,15 +399,19 @@ describe("registerCommands handlers", () => {
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it("focusInput does not post when a tab panel is tracked without a live tab instance", async () => {
+	it("focusInput logs the drop when a tab panel is tracked without a live tab instance", async () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
 		setPanel({} as vscode.WebviewPanel, "tab")
 
 		await handlers["zoo-code.focusInput"]()
 
 		// The tab takes selection priority, so the sidebar must not receive
-		// the message; with no live tab instance there is no other target.
+		// the message; with no live tab instance the action is dropped and the
+		// drop is logged so the silent no-op stays diagnosable.
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			"focusInput: no live provider for the tracked tab panel; action dropped",
+		)
 	})
 
 	it("focusInput posts the focus message on the tab instance when a tab panel is tracked", async () => {
@@ -428,9 +436,13 @@ describe("registerCommands handlers", () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
 		setPanel({} as vscode.WebviewPanel, "tab")
 
-		// The tab ref does not wipe the sidebar ref...
+		// The tab ref does not wipe the sidebar ref... (the dead-tab drop is
+		// logged, and the sidebar still must not receive the message).
 		await handlers["zoo-code.focusInput"]()
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			"focusInput: no live provider for the tracked tab panel; action dropped",
+		)
 
 		// ...and clearing only the tab ref re-enables the sidebar post.
 		setPanel(undefined, "tab")
