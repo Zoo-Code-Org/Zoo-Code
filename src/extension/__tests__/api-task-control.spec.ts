@@ -51,10 +51,13 @@ type CreatedTask = {
 
 type ProviderDouble = EventEmitter & {
 	// Minimal context surface exercised by the task-control tests: the mode guard
-	// reads extensionMode and getGlobalState reads globalState.get.
+	// reads extensionMode and getGlobalState/setGlobalState read/update globalState.
 	context: {
 		extensionMode: vscode.ExtensionMode
-		globalState: { get: (key: string) => unknown }
+		globalState: {
+			get: (key: string) => unknown
+			update?: (key: string, value: unknown) => Promise<void>
+		}
 	}
 	evictCurrentTask: Mock<() => Promise<void>>
 	postStateToWebview: Mock<() => Promise<void>>
@@ -87,7 +90,9 @@ function asClineProvider(provider: ProviderDouble): ClineProvider {
 
 function createProvider(taskId = "task-1"): ProviderDouble {
 	const provider = new EventEmitter() as ProviderDouble
-	provider.context = {} as vscode.ExtensionContext
+	// The default double leaves extensionMode unset (never Production), so the test-only
+	// guard stays inert for the task-control tests.
+	provider.context = {} as ProviderDouble["context"]
 	provider.evictCurrentTask = vi.fn().mockResolvedValue(undefined)
 	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 	provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
@@ -462,18 +467,23 @@ describe("API task controls - per-view review fixes", () => {
 				"selectTaskFollowupSuggestion is a test-only API",
 			)
 			expect(() => api.getGlobalState("mode")).toThrow("getGlobalState is a test-only API")
+			// setGlobalState is async: the guard rejects instead of throwing synchronously.
+			await expect(api.setGlobalState("mode", "ask")).rejects.toThrow("setGlobalState is a test-only API")
 		})
 
 		it("keeps the task ask and global-state surface available outside production mode", async () => {
 			const get = vi.fn().mockReturnValue("code")
+			const update = vi.fn().mockResolvedValue(undefined)
 			sidebarProvider.context = {
 				extensionMode: vscode.ExtensionMode.Test,
-				globalState: { get },
+				globalState: { get, update },
 			}
 			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
 			expect(api.getGlobalState("mode")).toBe("code")
 			expect(get).toHaveBeenCalledWith("mode")
+			await api.setGlobalState("mode", "ask")
+			expect(update).toHaveBeenCalledWith("mode", "ask")
 			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)
 		})
 	})

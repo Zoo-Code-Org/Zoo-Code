@@ -760,6 +760,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
+	public async setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void> {
+		this.assertTestOnlyApi("setGlobalState")
+		await this.context.globalState.update(key, value)
+	}
+
 	public setTerminalProfile(name: string | undefined): void {
 		const previousProfile = Terminal.getTerminalProfile()
 		Terminal.setTerminalProfile(name)
