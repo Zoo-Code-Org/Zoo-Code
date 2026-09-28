@@ -184,6 +184,63 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			expect.objectContaining({ provider: providerIdentifiers.moonshot }),
 			expect.anything(),
 		)
+		expect(routerModels).toHaveProperty(providerIdentifiers.fireworks)
+		expect(routerModels.fireworks).toEqual({})
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.fireworks }),
+		)
+	})
+
+	it("fetches Fireworks models with the stored API key without flushing", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.fireworks
+				? { "accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false } }
+				: {},
+		)
+
+		await webviewMessageHandler(mockProvider, { type: RouterModelsMessageType.requestRouterModels })
+
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.fireworks,
+				apiKey: "stored-fw-key",
+			},
+			handlerForProvider(providerIdentifiers.fireworks),
+		)
+		expect(flushModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.fireworks }),
+			true,
+		)
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				routerModels: expect.objectContaining({
+					[providerIdentifiers.fireworks]: {
+						"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+					},
+				}),
+			}),
+		)
+	})
+
+	it("flushes and fetches Fireworks models with an explicit key from the refresh button", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-fw-key" },
+		})
+
+		const options = { provider: providerIdentifiers.fireworks, apiKey: "new-fw-key" }
+		const handler = handlerForProvider(providerIdentifiers.fireworks)
+		expect(flushModelsMock).toHaveBeenCalledWith(options, handler, true)
+		expect(getModelsMock).toHaveBeenCalledWith(options, handler)
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ apiKey: "stored-fw-key" }))
 	})
 
 	it("fetches DeepSeek models when stored DeepSeek credentials exist", async () => {

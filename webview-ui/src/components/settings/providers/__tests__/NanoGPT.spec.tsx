@@ -100,6 +100,7 @@ describe("NanoGPT", () => {
 		poe: {},
 		deepseek: {},
 		moonshot: {},
+		fireworks: {},
 		"opencode-go": {},
 		kenari: {},
 		nanogpt: { "openai/test": { contextWindow: 1, maxTokens: 1, supportsPromptCache: false } },

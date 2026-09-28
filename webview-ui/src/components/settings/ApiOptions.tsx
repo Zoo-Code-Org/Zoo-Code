@@ -746,6 +746,9 @@ const ApiOptions = ({
 						<Fireworks
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
 						/>
 					)}
 

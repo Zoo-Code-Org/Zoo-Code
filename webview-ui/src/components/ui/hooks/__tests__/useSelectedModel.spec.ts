@@ -306,6 +306,59 @@ describe("useSelectedModel", () => {
 		},
 	)
 
+	describe("Fireworks model selection", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("uses API-fetched metadata for a model missing from the static list", () => {
+			const modelId = "accounts/fireworks/models/glm-5p3"
+			const modelInfo: ModelInfo = { contextWindow: 1_048_576, supportsPromptCache: false, supportsImages: true }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ [providerIdentifiers.fireworks]: { [modelId]: modelInfo } }),
+			)
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: modelId }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(modelId)
+			expect(result.current.info).toEqual(modelInfo)
+		})
+
+		it("prefers curated static metadata (with pricing) for known models", () => {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					[providerIdentifiers.fireworks]: {
+						[fireworksDefaultModelId]: { contextWindow: 1, supportsPromptCache: false },
+					},
+				}),
+			)
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(fireworksDefaultModelId)
+			expect(result.current.info).toEqual(fireworksModels[fireworksDefaultModelId])
+		})
+
+		it("keeps an unknown configured id with sane default info when absent from both lists", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.fireworks]: {} }))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: "custom/model" }),
+				{ wrapper: createWrapper() },
+			)
+
+			// Mirrors FireworksHandler.getModel(), which falls back to sane defaults for
+			// custom ids so the UI shows sensible limits instead of an unknown model.
+			expect(result.current.id).toBe("custom/model")
+			expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+		})
+	})
+
 	it("uses router data for Poe", () => {
 		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
 		mockUseRouterModels.mockReturnValue(
@@ -2122,6 +2175,7 @@ describe("useSelectedModel", () => {
 					requesty: {},
 					litellm: {},
 					moonshot: {},
+					fireworks: {},
 				},
 				isLoading: false,
 				isError: false,

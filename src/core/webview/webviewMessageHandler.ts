@@ -1153,6 +1153,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.fireworks]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.ioIntelligence]: {},
@@ -1293,6 +1294,25 @@ export const webviewMessageHandler = async (
 						apiKey: moonshotApiKey,
 						baseUrl: moonshotBaseUrl,
 					},
+				})
+			}
+
+			// Fireworks is conditional on apiKey (its /models endpoint requires auth and the
+			// returned list is scoped to the account).
+			const fireworksApiKey = message?.values?.fireworksApiKey ?? apiConfiguration.fireworksApiKey
+
+			if (fireworksApiKey) {
+				if (message?.values?.fireworksApiKey) {
+					await flushModels(
+						{ provider: providerIdentifiers.fireworks, apiKey: fireworksApiKey },
+						handlerFor(apiConfiguration, providerIdentifiers.fireworks),
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.fireworks,
+					options: { provider: providerIdentifiers.fireworks, apiKey: fireworksApiKey },
 				})
 			}
 

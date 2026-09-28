@@ -3,14 +3,25 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { type FireworksModelId, fireworksDefaultModelId, fireworksModels } from "@roo-code/types"
+import {
+	type FireworksModelId,
+	fireworksDefaultModelId,
+	fireworksModels,
+	openAiModelInfoSaneDefaults,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { FireworksHandler } from "../fireworks"
+import { getModelsFromCache } from "../fetchers/modelCache"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
+
+vi.mock("../fetchers/modelCache", () => ({
+	getModelsFromCache: vi.fn(() => undefined),
+}))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -98,7 +109,67 @@ describe("FireworksHandler", () => {
 		expect(model.info).toEqual(expect.objectContaining(fireworksModels[testModelId]))
 	})
 
-	it("should omit max_tokens for a custom model", async () => {
+	it("should use cached API metadata for a dynamically fetched model", async () => {
+		const dynamicId = "accounts/fireworks/models/glm-5p3"
+		vi.mocked(getModelsFromCache).mockReturnValue({
+			[dynamicId]: {
+				maxTokens: 16384,
+				contextWindow: 1_048_576,
+				supportsImages: true,
+				supportsPromptCache: false,
+			},
+		})
+
+		const handlerWithModel = new FireworksHandler({
+			apiModelId: dynamicId,
+			fireworksApiKey: "test-fireworks-api-key",
+		})
+		const model = handlerWithModel.getModel()
+
+		expect(getModelsFromCache).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.fireworks,
+				apiKey: "test-fireworks-api-key",
+			},
+			handlerWithModel,
+		)
+		expect(model.id).toBe(dynamicId)
+		expect(model.info.contextWindow).toBe(1_048_576)
+		expect(model.info.supportsImages).toBe(true)
+
+		await collectStream(handlerWithModel.createMessage("system prompt", []))
+		expect(mockCreate.mock.calls[0][0].model).toBe(dynamicId)
+		expect(mockCreate.mock.calls[0][0].max_tokens).toBe(16384)
+	})
+
+	it("should prefer static metadata over cached metadata for known models", () => {
+		const knownId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
+		vi.mocked(getModelsFromCache).mockReturnValue({
+			[knownId]: { contextWindow: 1, supportsPromptCache: false },
+		})
+
+		const model = new FireworksHandler({ apiModelId: knownId, fireworksApiKey: "k" }).getModel()
+
+		expect(model.info).toEqual(fireworksModels[knownId])
+	})
+
+	it("should fall back to sane defaults when an unknown model is not in the cache", () => {
+		vi.mocked(getModelsFromCache).mockReturnValue({})
+
+		const model = new FireworksHandler({
+			apiModelId: "accounts/fireworks/models/not-cached",
+			fireworksApiKey: "k",
+		}).getModel()
+
+		expect(model.id).toBe("accounts/fireworks/models/not-cached")
+		// Sane defaults intentionally omit maxTokens so no output limit is sent.
+		expect(model.info).toEqual(openAiModelInfoSaneDefaults)
+		expect(model.info.maxTokens).toBeUndefined()
+	})
+
+	it("should omit max_tokens for a custom model because Fireworks rejects -1", async () => {
+		// Regression: custom models get sane-default metadata with maxTokens: -1, which
+		// Fireworks rejects with `400 max_tokens must be non-negative`.
 		const handlerWithCustomModel = new FireworksHandler({
 			apiModelId: "accounts/fireworks/models/deepseek-v4p1-flash",
 			fireworksApiKey: "test-fireworks-api-key",

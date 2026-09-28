@@ -127,14 +127,18 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM and IO Intelligence may legitimately have no entry in the router
-	// payload (partial listing, failed fetch, renamed deployment) even though
-	// the configured ID is a valid selection, so they only need the fetch to
-	// settle. Other dynamic providers require a populated provider entry
-	// before the selection is resolved.
+	// LiteLLM, IO Intelligence and Fireworks may legitimately have no entry in
+	// the router payload (partial listing, failed fetch, renamed deployment, or
+	// no API key yet) even though the configured ID is a valid selection, so
+	// they only need the fetch to settle. Fireworks additionally has a curated
+	// static catalog, so it can resolve before any catalog arrives. Other
+	// dynamic providers require a populated provider entry before the selection
+	// is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
+			? dynamicProvider === providerIdentifiers.litellm ||
+				dynamicProvider === providerIdentifiers.ioIntelligence ||
+				dynamicProvider === providerIdentifiers.fireworks
 				? !routerModels.isLoading
 				: routerModels.data &&
 					routerModels.data[dynamicProvider] !== undefined &&
@@ -504,7 +508,14 @@ function getSelectedModel({
 		case providerIdentifiers.sambanova:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, sambaNovaModels, defaultModelId)
 		case providerIdentifiers.fireworks:
-			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
+			// Curated static specs (with pricing) win over API-fetched metadata, which only
+			// fills in models the static map does not know. A configured id absent from both
+			// is still honoured (the backend sends it as-is) with sane defaults.
+			return getStaticCatalogModel(
+				apiConfiguration.apiModelId,
+				{ ...routerModels[providerIdentifiers.fireworks], ...fireworksModels },
+				defaultModelId,
+			)
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = friendliModels[id as keyof typeof friendliModels]

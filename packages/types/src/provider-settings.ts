@@ -96,6 +96,7 @@ export const dynamicProviders = [
 	providerIdentifiers.poe,
 	providerIdentifiers.deepseek,
 	providerIdentifiers.moonshot,
+	providerIdentifiers.fireworks,
 	providerIdentifiers.opencodeGo,
 	providerIdentifiers.kenari,
 	providerIdentifiers.nanogpt,

@@ -78,6 +78,7 @@ const LITELLM_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authS
 const REQUESTY_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const IOINTELLIGENCE_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
+const FIREWORKS_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
 const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 
@@ -287,6 +288,39 @@ describe("getModels with new GetModelsOptions", () => {
 
 		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches Fireworks through the handler's fetchModels with the API key", async () => {
+		const mockModels = {
+			"accounts/fireworks/models/glm-5p3": {
+				maxTokens: 16384,
+				contextWindow: 1048576,
+				supportsPromptCache: false,
+			},
+		}
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(FIREWORKS_SCOPE, fetchModels)
+
+		const options = { provider: providerIdentifiers.fireworks, apiKey: "fw-key" } as const
+		const result = await getModels(options, handler)
+
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
+		expect(result).toEqual(mockModels)
+	})
+
+	it("scopes the Fireworks cache per API key", async () => {
+		const fetchModels = vi
+			.fn()
+			.mockResolvedValueOnce({ "a/model": { contextWindow: 1, supportsPromptCache: false } })
+			.mockResolvedValueOnce({ "b/model": { contextWindow: 2, supportsPromptCache: false } })
+		const handler = makeHandler(FIREWORKS_SCOPE, fetchModels)
+
+		const first = await getModels({ provider: providerIdentifiers.fireworks, apiKey: "fw-key-a" }, handler)
+		const second = await getModels({ provider: providerIdentifiers.fireworks, apiKey: "fw-key-b" }, handler)
+
+		expect(fetchModels).toHaveBeenCalledTimes(2)
+		expect(first).toHaveProperty("a/model")
+		expect(second).toHaveProperty("b/model")
 	})
 
 	it("rejects when the handler does not expose a dynamic model catalog", async () => {
