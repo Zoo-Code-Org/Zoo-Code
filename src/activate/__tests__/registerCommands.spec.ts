@@ -432,6 +432,9 @@ describe("registerCommands handlers", () => {
 			type: "action",
 			action: "focusInput",
 		})
+		// Pin the "never the sidebar" claim: the sidebar registration's provider
+		// double must stay untouched.
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	it("focusInput posts the focus message on the tab instance when a tab panel is tracked", async () => {
