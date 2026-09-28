@@ -18,6 +18,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { TagMatcher } from "../../utils/tag-matcher"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -101,7 +102,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 		let systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
 			role: "system",
-			content: systemPrompt,
+			// Sanitize lone UTF-16 surrogates: providers validating the JSON body
+			// (e.g. DeepSeek) reject the whole request otherwise. See #461.
+			content: sanitizeSurrogates(systemPrompt),
 		}
 
 		if (this.options.openAiStreamingEnabled ?? true) {
@@ -116,7 +119,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 						content: [
 							{
 								type: "text",
-								text: systemPrompt,
+								text: sanitizeSurrogates(systemPrompt),
 								// @ts-ignore-next-line
 								cache_control: { type: "ephemeral" },
 							},
@@ -365,7 +368,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				messages: [
 					{
 						role: "developer",
-						content: `Formatting re-enabled\n${systemPrompt}`,
+						content: sanitizeSurrogates(`Formatting re-enabled\n${systemPrompt}`),
 					},
 					...convertToOpenAiMessages(messages),
 				],
@@ -402,7 +405,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				messages: [
 					{
 						role: "developer",
-						content: `Formatting re-enabled\n${systemPrompt}`,
+						content: sanitizeSurrogates(`Formatting re-enabled\n${systemPrompt}`),
 					},
 					...convertToOpenAiMessages(messages),
 				],

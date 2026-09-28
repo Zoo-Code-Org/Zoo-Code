@@ -267,6 +267,50 @@ describe("BaseProvider", () => {
 			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
 		})
 
+		it("should sanitize lone UTF-16 surrogates in name, description, and parameters (#461)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "bad\uD800end",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string", description: "bad\uDC00end" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			expect(result?.[0].function.description).toBe("bad\uFFFDend")
+			expect(result?.[0].function.parameters.properties.path.description).toBe("bad\uFFFDend")
+			// The serialized body must not contain a lone surrogate anywhere.
+			expect(JSON.stringify(result)).not.toMatch(
+				/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
+			)
+		})
+
+		it("should sanitize lone UTF-16 surrogates in tool names (#461)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read\uD800file",
+						description: "Read a file",
+						parameters: { type: "object", properties: {} },
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			expect(result?.[0].function.name).toBe("read\uFFFDfile")
+		})
+
 		it("should preserve non-function tools unchanged", () => {
 			const tools = [
 				{

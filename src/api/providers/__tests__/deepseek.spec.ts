@@ -824,3 +824,70 @@ describe("DeepSeekHandler", () => {
 		})
 	})
 })
+
+describe("DeepSeekHandler lone surrogate sanitization (#461)", () => {
+	// Matches any unpaired UTF-16 code unit; the serialized request body must never contain one.
+	const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+	beforeEach(() => {
+		mockCreate.mockClear()
+	})
+
+	const surrogateOptions: ApiHandlerOptions = {
+		deepSeekApiKey: "test-api-key",
+		apiModelId: "deepseek-v4-flash",
+		deepSeekBaseUrl: "https://api.deepseek.com",
+	}
+
+	it("sends a request body free of lone surrogates, keeping tool call/result pairing intact", async () => {
+		const lone = "bad\uD800end"
+		const sanitized = "bad\uFFFDend"
+		const handler = new DeepSeekHandler(surrogateOptions)
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{ role: "user", content: lone },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call-\uD800", name: "read_file", input: { path: lone } }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: lone }] },
+		]
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", messages, {
+				taskId: "task-1",
+				tools: [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: lone,
+							parameters: {
+								type: "object",
+								properties: { path: { type: "string", description: lone } },
+							},
+						},
+					},
+				],
+			}),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+
+		// The whole body (messages + tools) must serialize without a lone surrogate.
+		expect(JSON.stringify(request)).not.toMatch(LONE_SURROGATE)
+
+		// The tool call and its result stay paired after injective id sanitization.
+		const assistantMessage = request.messages.find(
+			(message: { role: string }) => message.role === "assistant",
+		) as OpenAI.Chat.ChatCompletionAssistantMessageParam
+		const toolMessage = request.messages.find(
+			(message: { role: string }) => message.role === "tool",
+		) as OpenAI.Chat.ChatCompletionToolMessageParam
+		const toolCalls = assistantMessage.tool_calls as OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+		expect(toolMessage.tool_call_id).toBe(toolCalls[0].id)
+		expect(toolMessage.content).toBe(sanitized)
+		expect(JSON.parse(toolCalls[0].function.arguments)).toEqual({ path: sanitized })
+		expect(request.tools[0].function.description).toBe(sanitized)
+	})
+})
