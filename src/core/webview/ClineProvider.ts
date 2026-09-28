@@ -1126,6 +1126,15 @@ export class ClineProvider
 			},
 		)
 
+		// The awaits above yield; disposal or a view replacement may have
+		// landed while this resolve was pending. Installing listeners or the
+		// watchdog now would leak an interval on a disposed provider (the
+		// recovery path's _disposed check cannot stop the interval itself) or
+		// duplicate the replacement view's subscriptions.
+		if (this._disposed || this.view !== webviewView) {
+			return
+		}
+
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView)

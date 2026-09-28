@@ -1419,6 +1419,55 @@ describe("ClineProvider", () => {
 				panelB.fireViewState()
 				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore + 1)
 			})
+
+			test("installs no listeners or watchdog when the provider is disposed mid-resolve", async () => {
+				// Hold the resolve's initial HTML generation so disposal lands
+				// inside the pending resolve.
+				let finishHtml: (html: string) => void = () => {}
+				provider["getWebviewHtml"] = vi.fn().mockImplementation(
+					() =>
+						new Promise<string>((resolve) => {
+							finishHtml = resolve
+						}),
+				)
+
+				const resolvePromise = provider.resolveWebviewView(mockWebviewView)
+				await provider.dispose()
+				finishHtml("<!DOCTYPE html><html><body>initial</body></html>")
+				await resolvePromise
+
+				expect(provider["webviewWatchdogInterval"]).toBeNull()
+				expect(provider["resolvedViewDisposables"].length).toBe(0)
+			})
+
+			test("installs nothing when a different view replaces the pending resolve", async () => {
+				// A's initial HTML stays pending; B's resolves immediately.
+				let finishHtmlA: (html: string) => void = () => {}
+				provider["getWebviewHtml"] = vi
+					.fn()
+					.mockImplementationOnce(
+						() =>
+							new Promise<string>((resolve) => {
+								finishHtmlA = resolve
+							}),
+					)
+					.mockImplementation(() => Promise.resolve("<!DOCTYPE html><html><body>viewB-initial</body></html>"))
+
+				const resolveA = provider.resolveWebviewView(mockWebviewView)
+				const { viewB } = createViewB()
+				await provider.resolveWebviewView(viewB)
+
+				finishHtmlA("<!DOCTYPE html><html><body>stale-A</body></html>")
+				await resolveA
+
+				// A's stale resolve bailed out: only B's subscriptions (message,
+				// visibility, active editor, configuration) are installed and B
+				// keeps the watchdog.
+				expect(provider["resolvedViewDisposables"].length).toBe(4)
+				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+				// @ts-ignore - accessing private property for testing
+				expect(provider.view).toBe(viewB)
+			})
 		})
 
 		describe("tab panel (WebviewPanel shape)", () => {
