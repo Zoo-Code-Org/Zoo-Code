@@ -64,6 +64,7 @@ import { CloudService } from "@roo-code/cloud"
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
+import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
 import { findLastIndex } from "../../shared/array"
@@ -142,6 +143,17 @@ import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+// Upper bound on awaiting lazily loaded model metadata. Some model-catalog
+// fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
+// hung endpoint must not stall streaming, condense, or context-window
+// handling. On expiry the caller aborts its per-call AbortSignal (detaching
+// the provider-side waiter) and falls back to the handler's existing
+// getModel().info metadata — the same degradation a rejected fetch produces.
+// Kept in sync with PREVIEW_MODEL_FETCH_TIMEOUT_MS in the preview path
+// (src/core/webview/generateSystemPrompt.ts). Deliberately duplicated, not
+// shared: importing from the webview layer would close a
+// Task -> generateSystemPrompt -> ClineProvider -> Task circular import.
+export const MODEL_FETCH_TIMEOUT_MS = 5_000
 const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
 
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
@@ -313,6 +325,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private readonly globalStoragePath: string
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
+	/**
+	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
+	 * safeEnsureModelFetched). Aborting it detaches this task from the provider-side
+	 * metadata fetch; it is aborted when the bounded wait expires and when the task's
+	 * current request is cancelled (cancel/dispose path in cancelCurrentRequest).
+	 */
+	metadataFetchAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
 
 	// TaskStatus
@@ -1855,10 +1874,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
 
-		const systemPrompt = await this.getSystemPrompt()
+		// Capture provider state and one model-info snapshot once and thread them into
+		// getSystemPrompt so the prompt and the condensing tool array below resolve
+		// from one snapshot.
+		const state = await this.providerRef.deref()?.getState()
+		const requestModelInfo = await this.safeEnsureModelFetched()
+
+		// A cancellation landing during the bounded metadata wait must stop
+		// manual condensation before any prompt build or summarization request.
+		if (this.abort || this.abandoned) {
+			return
+		}
+
+		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+
+		// A cancellation landing during the prompt build's bounded MCP wait must
+		// stop manual condensation before any summarization request is issued.
+		if (this.abort || this.abandoned) {
+			return
+		}
 
 		// Get condensing configuration
-		const state = await this.providerRef.deref()?.getState()
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
@@ -1870,7 +1906,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const provider = this.providerRef.deref()
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
-			const modelInfo = this.api.getModel().info
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
 				provider,
 				cwd: this.cwd,
@@ -1879,7 +1914,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				experiments: state?.experiments,
 				apiConfiguration,
 				disabledTools: state?.disabledTools,
-				modelInfo,
+				modelInfo: requestModelInfo,
 				includeAllToolsWithRestrictions: false,
 			})
 			allTools = toolsResult.tools
@@ -1907,6 +1942,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const filesReadByRoo = await this.getFilesReadByRooSafely("condenseContext")
 
+		// A cancellation landing while the summarization inputs are gathered must
+		// stop manual condensation before any summarization request is issued.
+		if (this.abort || this.abandoned) {
+			return
+		}
+
 		const {
 			messages,
 			summary,
@@ -1928,6 +1969,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			cwd: this.cwd,
 			rooIgnoreController: this.rooIgnoreController,
 		})
+		// A cancellation landing during the summarization request must stop
+		// manual condensation before it replaces and persists the history.
+		if (this.abort || this.abandoned) {
+			return
+		}
 		if (error) {
 			await this.say(
 				"condense_context_error",
@@ -2616,6 +2662,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.currentRequestAbortController.abort()
 			this.currentRequestAbortController = undefined
 		}
+		// A metadata-fetch waiter still in flight is as stale as an abandoned
+		// stream: detach it from the provider-side fetch on cancel/dispose.
+		if (this.metadataFetchAbortController) {
+			this.metadataFetchAbortController.abort()
+			this.metadataFetchAbortController = undefined
+		}
 	}
 
 	/**
@@ -2711,6 +2763,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error flushing shutdown telemetry:", error)
 		}
+
+		// A task being disposed is no longer serving requests: set the same
+		// cancellation state `abortTask()` sets, synchronously before the aborts
+		// below, so the request-construction guard (`abort || abandoned` in
+		// attemptApiRequest) and the outer loop's `abort` checks observe disposal
+		// even when it lands before any explicit cancel. Without this, only the
+		// signals below are cancelled and a request already past those checks
+		// could still build tools and call `createMessage()`.
+		this.abort = true
 
 		// Cancel any in-progress HTTP request
 		try {
@@ -3045,7 +3106,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const state = await provider.getState()
 					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
 					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode)
+						await provider.handleModeSwitch(slashCommandMode, null)
 					}
 				}
 			}
@@ -3189,6 +3250,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.didFinishAbortingStream = false
 				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
@@ -3213,7 +3275,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
 				// limit error, which gets thrown on the first chunk).
-				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, { skipProviderRateLimit: true })
+				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, {
+					skipProviderRateLimit: true,
+					requestModelInfo: streamModelInfo,
+				})
 				let assistantMessage = ""
 				let reasoningMessage = ""
 				const pendingGroundingSources: GroundingSource[] = []
@@ -3665,9 +3730,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// User cancelled - abort the entire task
-							this.abortReason = cancelReason
+							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
+							this.abortReason ??= "user_cancelled"
 							await this.abortTask()
+						} else if (error instanceof OutputTokenLimitError) {
+							// Truncation repeats on an identical request, so never auto-retry it
+							// (even with auto-approval); let the user decide once.
+							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+
+							if (response !== "yesButtonClicked") {
+								throw new Error("API request failed")
+							}
+
+							await this.say("api_req_retried")
+							stack.push({
+								userContent: currentUserContent,
+								includeFileDetails: false,
+								retryAttempt: 0,
+							})
+							continue
 						} else {
 							// Stream failed - log the error and retry with the same content
 							// The existing rate limiting will prevent rapid retries
@@ -3685,8 +3766,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
+									this.abortReason ??= "user_cancelled"
 									await this.abortTask()
 									break
 								}
@@ -3760,12 +3840,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 							this.presentAssistantMessageSafe()
 						} else if (toolUseIndex !== undefined) {
-							// finalizeStreamingToolCall returned null (malformed JSON or missing args)
-							// We still need to mark the tool as non-partial so it gets executed
-							// The tool's validation will catch any missing required parameters
+							// finalizeStreamingToolCall returned null (malformed JSON or missing args).
+							// existingToolUse is the same object the streaming phase was mutating in
+							// place, so it still carries nativeArgs AND params built from the incomplete
+							// partial parse (e.g. a truncated write_to_file `content` string) - both were
+							// only ever meant for live progress display, never for execution or for
+							// ending up in conversation history. Mark the tool as non-partial so it's
+							// presented as complete, and clear both so presentAssistantMessage's
+							// `!block.nativeArgs` guard short-circuits with a structured tool_result
+							// instead of executing the truncated value, and so the toolUse.nativeArgs ||
+							// toolUse.params fallback used when recording history doesn't fall through to
+							// the same truncated data under a different name.
 							const existingToolUse = this.assistantMessageContent[toolUseIndex]
 							if (existingToolUse && existingToolUse.type === "tool_use") {
 								existingToolUse.partial = false
+								existingToolUse.nativeArgs = undefined
+								existingToolUse.params = {}
 								// Ensure it has the ID for native protocol
 								;(existingToolUse as any).id = event.id
 							}
@@ -4175,8 +4265,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return false
 	}
 
-	private async getSystemPrompt(): Promise<string> {
-		const { mcpEnabled } = (await this.providerRef.deref()?.getState()) ?? {}
+	/**
+	 * Builds the SYSTEM_PROMPT from the caller's provider-state snapshot. This
+	 * method never reads provider state itself: callers that also construct
+	 * runtime tools for the same request (attemptApiRequest, condenseContext,
+	 * handleContextWindowExceededError) must thread the very snapshot they build
+	 * those tools from, so the prompt and the runtime tool array resolve from one
+	 * consistent set of values — otherwise a settings change during the MCP wait
+	 * can make the prompt advertise a tool the runtime rejects, or hide a
+	 * callable tool. An `undefined` snapshot declares that the caller's own read
+	 * came back empty because the provider was already gone; the prompt then
+	 * resolves from defaults. Pass `requestModelInfo` (captured via
+	 * safeEnsureModelFetched) in the same situation so the prompt's tool
+	 * guidance and the request's tool arrays resolve from one model-metadata
+	 * snapshot.
+	 */
+	private async getSystemPrompt(
+		requestState: Awaited<ReturnType<ClineProvider["getState"]>> | undefined,
+		requestModelInfo?: ModelInfo,
+	): Promise<string> {
+		const { mcpEnabled } = requestState ?? {}
 		let mcpHub: McpHub | undefined
 		if (mcpEnabled ?? true) {
 			const provider = this.providerRef.deref()
@@ -4200,10 +4308,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const rooIgnoreInstructions = this.rooIgnoreController?.getInstructions()
 
-		const state = await this.providerRef.deref()?.getState()
-
 		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
-			state ?? {}
+			requestState ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
@@ -4215,7 +4321,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Provider not available")
 			}
 
-			const modelInfo = this.api.getModel().info
+			// Load dynamically discovered model metadata (router providers) before
+			// reading it, so the prompt's included/excluded tool guidance matches
+			// the runtime path; prefer the caller's per-request snapshot when threaded.
+			const modelInfo = requestModelInfo ?? (await this.safeEnsureModelFetched())
 
 			return SYSTEM_PROMPT(
 				provider.context,
@@ -4243,6 +4352,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				undefined, // todoList
 				this.api.getModel().id,
 				provider.getSkillsManager(),
+				requestState?.disabledTools,
+				modelInfo,
 			)
 		})()
 	}
@@ -4257,20 +4368,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Ensures router-provider model metadata is loaded before getModel() is used for
 	 * context management or streaming. Failures fall back to hardcoded defaults rather
-	 * than aborting the task.
+	 * than aborting the task; the wait is bounded by MODEL_FETCH_TIMEOUT_MS (see the
+	 * constant for the degradation semantics). On expiry or cancellation the per-call
+	 * AbortSignal detaches this task's waiter from the provider-side fetch instead of
+	 * leaving a handler-side promise waiting on it indefinitely.
+	 *
+	 * The return value is the settled post-wait read of getModel().info: request
+	 * entry points (attemptApiRequest, condenseContext) await this once before
+	 * prompt generation and share the returned snapshot between getSystemPrompt
+	 * and every tool-array build of the same request, so a fetch that resolves after
+	 * the bounded wait was abandoned cannot move model-specific tool policy between
+	 * prompt time and request time. Callers that do not thread a snapshot keep
+	 * awaiting this immediately before their own getModel() read; that per-site guard
+	 * remains the standalone/fallback read path, and repeat awaits stay cheap once a
+	 * fetch has succeeded because the provider caches successes. RouterProvider
+	 * already negative-caches catalog misses with a TTL (`missingModelRefreshAt`).
 	 */
-	private async safeEnsureModelFetched(): Promise<void> {
+	private async safeEnsureModelFetched(): Promise<ModelInfo> {
+		// Per-call controller: its signal makes ensureModelFetched() settle on
+		// abort, so neither this race nor the provider-side waiter outlives the
+		// bounded wait. cancel/dispose aborts it early via cancelCurrentRequest.
+		const controller = new AbortController()
+		this.metadataFetchAbortController = controller
+		// Promise.race attaches handlers to both inputs, so the fetch rejecting
+		// after the abort is already considered handled — no extra .catch needed.
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		let timedOut = false
 		try {
-			await this.api.ensureModelFetched?.()
+			await Promise.race([
+				this.api.ensureModelFetched?.(controller.signal),
+				new Promise<void>((resolve) => {
+					timeoutId = setTimeout(() => {
+						timedOut = true
+						resolve()
+					}, MODEL_FETCH_TIMEOUT_MS)
+				}),
+			])
+			if (timedOut) {
+				console.warn(
+					`[Task#${this.taskId}] Timed out after ${MODEL_FETCH_TIMEOUT_MS}ms fetching model metadata; using fallback model info.`,
+				)
+			}
 		} catch (error) {
 			console.error(
 				`[Task#${this.taskId}] Failed to fetch model metadata:`,
 				error instanceof Error ? error.message : error,
 			)
+		} finally {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
+			if (this.metadataFetchAbortController === controller) {
+				this.metadataFetchAbortController = undefined
+			}
+			// Unconditional: settles any waiter still attached to this call.
+			controller.abort()
 		}
+		// The post-wait read is the settled snapshot callers must share per request.
+		return this.api.getModel().info
 	}
 
-	private async handleContextWindowExceededError(): Promise<void> {
+	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
@@ -4278,8 +4436,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
-		await this.safeEnsureModelFetched()
-		const modelInfo = this.api.getModel().info
+		// Truncation permanently rewrites apiConversationHistory, and the retry
+		// hop that consumes the result builds from the caller's snapshot; sizing
+		// against a fresh read here could discard history the retry would still
+		// have fit, so recovery shares the caller's snapshot instead of re-fetching.
+		const modelInfo = requestModelInfo
 
 		const maxTokens = getModelMaxOutputTokens({
 			modelId: this.api.getModel().id,
@@ -4353,7 +4514,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(),
+				systemPrompt: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
 				profileThresholds,
 				currentProfileId,
@@ -4443,7 +4604,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public async *attemptApiRequest(
 		retryAttempt: number = 0,
-		options: { skipProviderRateLimit?: boolean } = {},
+		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo } = {},
 	): ApiStream {
 		const state = await this.providerRef.deref()?.getState()
 
@@ -4474,12 +4635,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// in the caller.
 		this.rateLimitClock.recordRequest()
 
-		const systemPrompt = await this.getSystemPrompt()
+		// Thread the request state snapshot into prompt generation so the prompt
+		// and the runtime tools (built below from the same `state`) stay aligned
+		// even if settings change while this method waits on MCP or rate limits.
+		// Capture one bounded-wait model-info snapshot per request, shared by the
+		// prompt and every tool array built below; prefer the caller's snapshot
+		// when one was threaded.
+		const requestModelInfo = options.requestModelInfo ?? (await this.safeEnsureModelFetched())
+		// Retry recursions must reuse this snapshot instead of re-deriving it: a
+		// metadata fetch landing between attempts would otherwise move
+		// model-specific tool policy or `preserveReasoning` mid-request. When the
+		// caller threaded a snapshot its options object is forwarded unchanged —
+		// same reference, and never mutated.
+		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
+		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+
+		// A cancellation landing during the rate-limit countdown, the bounded metadata
+		// wait, or the MCP wait inside getSystemPrompt must stop this request before any
+		// tool array, AbortController, or createMessage call is issued for it.
+		if (this.abort || this.abandoned) {
+			throw new Error(
+				`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during request construction`,
+			)
+		}
+
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
-			await this.safeEnsureModelFetched()
-			const modelInfo = this.api.getModel().info
+			// Context sizing resolves from the same model-info snapshot as the prompt and
+			// every tool array of this request, not from a fresh getModel() re-read.
+			const modelInfo = requestModelInfo
 
 			const maxTokens = getModelMaxOutputTokens({
 				modelId: this.api.getModel().id,
@@ -4541,7 +4726,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						experiments: state?.experiments,
 						apiConfiguration,
 						disabledTools: state?.disabledTools,
-						modelInfo,
+						modelInfo: requestModelInfo,
 						includeAllToolsWithRestrictions: false,
 					})
 					contextMgmtTools = toolsResult.tools
@@ -4666,7 +4851,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
 		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
 		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
-		const cleanConversationHistory = this.buildCleanConversationHistory(messagesWithoutImages as ApiMessage[])
+		const cleanConversationHistory = this.buildCleanConversationHistory(
+			messagesWithoutImages as ApiMessage[],
+			requestModelInfo,
+		)
 
 		// Check auto-approval limits
 		const approvalResult = await this.autoApprovalHandler.checkAutoApprovalLimits(
@@ -4680,8 +4868,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error("Auto-approval limit reached and user did not approve continuation")
 		}
 
-		// Whether we include tools is determined by whether we have any tools to send.
-		const modelInfo = this.api.getModel().info
+		// Tool policy resolves from the same model-info snapshot as the system prompt
+		// built earlier in this request, not from a fresh getModel() re-read.
+		const modelInfo = requestModelInfo
 
 		// Build complete tools array: native tools + dynamic MCP tools
 		// When includeAllToolsWithRestrictions is true, returns all tools but provides
@@ -4800,9 +4989,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						`Retry attempt ${retryAttempt + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +
 						`Attempting automatic truncation...`,
 				)
-				await this.handleContextWindowExceededError()
+				await this.handleContextWindowExceededError(requestModelInfo)
 				// Retry the request after handling the context window error
-				yield* this.attemptApiRequest(retryAttempt + 1)
+				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
 				return
 			}
 
@@ -4822,7 +5011,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// Delegate generator output from the recursive call with
 				// incremented retry count.
-				yield* this.attemptApiRequest(retryAttempt + 1)
+				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
 
 				return
 			} else {
@@ -4840,7 +5029,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				await this.say("api_req_retried")
 
 				// Delegate generator output from the recursive call.
-				yield* this.attemptApiRequest()
+				yield* this.attemptApiRequest(0, retryOptions)
 				return
 			}
 		}
@@ -4939,6 +5128,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private buildCleanConversationHistory(
 		messages: ApiMessage[],
+		requestModelInfo: ModelInfo,
 	): Array<
 		Anthropic.Messages.MessageParam | { type: "reasoning"; encrypted_content: string; id?: string; summary?: any[] }
 	> {
@@ -5038,10 +5228,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					continue
 				} else if (hasPlainTextReasoning) {
-					// Check if the model's preserveReasoning flag is set
+					// Check if the model's preserveReasoning flag is set, resolved from
+					// the request's threaded model snapshot (same per-request source as
+					// the prompt and tool arrays) rather than a fresh getModel() re-read,
+					// so a mid-request metadata refresh cannot change what this request sends.
 					// If true, include the reasoning block in API requests
 					// If false/undefined, strip it out (stored for history only, not sent back to API)
-					const shouldPreserveForApi = this.api.getModel().info.preserveReasoning === true
+					const shouldPreserveForApi = requestModelInfo.preserveReasoning === true
 					let assistantContent: Anthropic.Messages.MessageParam["content"]
 
 					if (shouldPreserveForApi) {

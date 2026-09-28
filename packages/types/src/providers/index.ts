@@ -42,6 +42,7 @@ import { geminiDefaultModelId } from "./gemini.js"
 import { litellmDefaultModelId } from "./lite-llm.js"
 import { mistralDefaultModelId } from "./mistral.js"
 import { moonshotDefaultModelId } from "./moonshot.js"
+import { openAiNativeDefaultModelId } from "./openai.js"
 import { openAiCodexDefaultModelId } from "./openai-codex.js"
 import { openRouterDefaultModelId } from "./openrouter.js"
 import { poeDefaultModelId } from "./poe.js"
@@ -105,8 +106,7 @@ export function getProviderDefaultModelId(
 		case providerIdentifiers.zai:
 			return options?.isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId
 		case providerIdentifiers.openaiNative:
-			// TODO(#992): Replace this stale fallback with openAiNativeDefaultModelId.
-			return "gpt-4o" // Based on openai-native patterns
+			return openAiNativeDefaultModelId
 		case providerIdentifiers.openaiCodex:
 			return openAiCodexDefaultModelId
 		case providerIdentifiers.mistral:

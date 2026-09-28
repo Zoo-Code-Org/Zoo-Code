@@ -34,7 +34,7 @@ import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
-import { CodeIndexManager } from "./services/code-index/manager"
+import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -196,15 +196,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	)
 
 	// Initialize code index managers for all workspace folders.
-	const codeIndexManagers: CodeIndexManager[] = []
-
 	if (vscode.workspace.workspaceFolders) {
 		for (const folder of vscode.workspace.workspaceFolders) {
-			const manager = CodeIndexManager.getInstance(context, folder.uri.fsPath)
+			const manager = CodeIndexManagerRegistry.getOrCreate(context, folder.uri.fsPath)
 
 			if (manager) {
-				codeIndexManagers.push(manager)
-
 				// Initialize in background; do not block extension activation
 				void manager.initialize(contextProxy).catch((error) => {
 					const message = error instanceof Error ? error.message : String(error)
@@ -412,4 +408,5 @@ export async function deactivate() {
 
 	Terminal.setTerminalProfile(undefined)
 	TerminalRegistry.cleanup()
+	CodeIndexManagerRegistry.disposeAll()
 }
