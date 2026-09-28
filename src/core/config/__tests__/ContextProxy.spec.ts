@@ -454,6 +454,47 @@ describe("ContextProxy", () => {
 			await expect(resetPromise).rejects.toThrow("reset failed")
 		})
 
+		it("does not reseed the durable record from a pre-reset write that completes after the reset", async () => {
+			// A write issued before resetAllState may still be in flight when the reset
+			// clears the durable maps and the re-initialization re-seeds them from
+			// (now empty) storage. Its late completion must not re-record its obsolete
+			// value over the re-seeded record: a later failed write would then roll the
+			// cache back to a value storage no longer holds.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let resolveWrite!: (value?: unknown) => void
+			mockGlobalState.update.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveWrite = resolve
+					}),
+			)
+			const stale = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// Reset reads through globalState.get (undefined by default): the
+			// re-seeded durable record holds nothing for this key.
+			await proxy.resetAllState()
+
+			// The pre-reset write lands after the re-seed.
+			resolveWrite()
+			await stale
+
+			let failWrite!: (error: Error) => void
+			mockGlobalState.update.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failWrite = reject
+					}),
+			)
+			const pending = proxy.updateGlobalState("apiProvider", "openrouter")
+			failWrite(new Error("storage failed"))
+			await expect(pending).rejects.toThrow("storage failed")
+
+			// The rollback target is the re-seeded (empty) durable record, not the
+			// stale pre-reset write's value.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 
@@ -555,6 +596,45 @@ describe("ContextProxy", () => {
 
 			failDelete(new Error("reset failed"))
 			await expect(resetPromise).rejects.toThrow("reset failed")
+		})
+
+		it("does not reseed the durable record from a pre-refresh secret write that completes after the refresh", async () => {
+			// Same race as the pre-reset case, for the refresh re-seed: a write
+			// issued before refreshSecrets may complete after the refresh has
+			// re-seeded the durable secret records from storage.
+			await proxy.storeSecret("apiKey", "old-key")
+
+			let resolveStore!: (value?: unknown) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveStore = resolve
+					}),
+			)
+			const stale = proxy.storeSecret("apiKey", "stale-key")
+
+			// The refresh re-seeds from storage.
+			mockSecrets.get.mockResolvedValue("storage-key")
+			await proxy.refreshSecrets()
+
+			// The pre-refresh write lands after the re-seed.
+			resolveStore()
+			await stale
+
+			let failStore!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failStore = reject
+					}),
+			)
+			const pending = proxy.storeSecret("apiKey", "new-key")
+			failStore(new Error("secrets failed"))
+			await expect(pending).rejects.toThrow("secrets failed")
+
+			// The rollback target is the freshly loaded value, not the stale
+			// pre-refresh write's value.
+			expect(proxy.getSecret("apiKey")).toBe("storage-key")
 		})
 	})
 
