@@ -792,6 +792,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		const provider = {
 			taskScheduler: new TaskScheduler(),
+			recentTasksCache: [parentHistoryItem],
 			emit: vi.fn(),
 			getCurrentTask,
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
@@ -817,6 +818,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		expect(current.pendingAction).toBeUndefined()
 		expect(current.status).toBe("interrupted")
+		expect((provider as unknown as { recentTasksCache?: HistoryItem[] }).recentTasksCache).toBeUndefined()
 		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
 		expect(provider.createTaskWithHistoryItem).toHaveBeenCalledWith(
 			expect.objectContaining({

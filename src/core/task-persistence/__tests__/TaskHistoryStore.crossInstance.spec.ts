@@ -225,6 +225,34 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(storeA.get(cached.id)).toEqual(cached)
 	})
 
+	it("evicts stale cache state when the disk record is invalid without recreating it", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "action-a",
+			approvalText: "{}",
+			mode: "code",
+			message: "action A",
+			todos: [],
+		}
+		const cached = makeHistoryItem({ id: "invalid-settlement-task", pendingAction })
+		const filePath = path.join(tmpDir, "tasks", cached.id, GlobalFileNames.historyItem)
+		await fs.mkdir(path.dirname(filePath), { recursive: true })
+		await fs.writeFile(filePath, "{invalid", "utf8")
+		const storeState = storeA as unknown as {
+			cache: Map<string, HistoryItem>
+			taskFileMtimes: Map<string, number>
+		}
+		storeState.cache.set(cached.id, cached)
+		storeState.taskFileMtimes.set(cached.id, Date.now())
+
+		await expect(storeA.clearPendingActionIfMatching(cached.id, pendingAction.actionId)).rejects.toThrow(
+			`task ${cached.id} not found in cache`,
+		)
+		expect(storeA.get(cached.id)).toBeUndefined()
+		expect(storeState.taskFileMtimes.has(cached.id)).toBe(false)
+		expect(await fs.readFile(filePath, "utf8")).toBe("{invalid")
+	})
+
 	/**
 	 * Host B completes a task on disk while host A's cache still has it
 	 * active. Host A's next save updates only totalCost (a full-object

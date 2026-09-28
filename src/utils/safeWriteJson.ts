@@ -31,6 +31,14 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * Replace an existing target with one rename from the completed temporary file.
+	 * Use this when an absent target during a process stop is less safe than losing
+	 * the backup-based rollback that the default write path provides.
+	 * @default false
+	 */
+	atomicReplace?: boolean
 }
 
 /**
@@ -126,23 +134,25 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Check if the target file exists. If so, rename it to a backup path.
-		try {
-			// Check for target file existence
-			await fs.access(absoluteFilePath)
-			// Target exists, create a backup path and rename.
-			actualTempBackupFilePath = path.join(
-				path.dirname(absoluteFilePath),
-				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-			)
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: any) {
-			// Explicitly type accessError
-			if (accessError.code !== "ENOENT") {
-				// An error other than "file not found" occurred during access check.
-				throw accessError
+		if (!options?.atomicReplace) {
+			// Step 2: Check if the target file exists. If so, rename it to a backup path.
+			try {
+				// Check for target file existence
+				await fs.access(absoluteFilePath)
+				// Target exists, create a backup path and rename.
+				actualTempBackupFilePath = path.join(
+					path.dirname(absoluteFilePath),
+					`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+				)
+				await fs.rename(absoluteFilePath, actualTempBackupFilePath)
+			} catch (accessError: any) {
+				// Explicitly type accessError
+				if (accessError.code !== "ENOENT") {
+					// An error other than "file not found" occurred during access check.
+					throw accessError
+				}
+				// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
 			}
-			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
 		}
 
 		// Step 3: Rename the new temporary file to the target file path.

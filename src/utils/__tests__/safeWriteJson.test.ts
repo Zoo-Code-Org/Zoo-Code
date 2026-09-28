@@ -211,6 +211,18 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(initialData)
 	})
 
+	test("should replace an existing file with one rename when atomicReplace is enabled", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+		vi.mocked(fs.rename).mockClear()
+
+		await safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })
+
+		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(1)
+		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+	})
+
 	// Tests for directory creation functionality
 	test("should create parent directory if it doesn't exist", async () => {
 		// Create a path in a non-existent subdirectory of the temp dir

@@ -177,10 +177,16 @@ function scheduleTask(
 	task: Task,
 	source: string,
 	run: () => Promise<void> = () => task.run(),
+	onError?: (error: unknown) => void | Promise<void>,
 ): void {
-	void scheduler
-		.schedule(task, run)
-		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+	void scheduler.schedule(task, run).catch(async (error) => {
+		console.error(`[${source}] taskScheduler.schedule failed:`, error)
+		try {
+			await onError?.(error)
+		} catch (cleanupError) {
+			console.error(`[${source}] task failure cleanup failed:`, cleanupError)
+		}
+	})
 }
 
 type GetStateOptions = {
@@ -647,6 +653,29 @@ export class ClineProvider
 			// Make sure no reference kept, once promises end it will be
 			// garbage collected.
 			task = undefined
+		}
+	}
+
+	private async cleanupFailedHistoryTask(task: Task): Promise<void> {
+		if (this.taskRegistry.getById(task.taskId) !== task) {
+			return
+		}
+
+		this.taskRegistry.remove(task.taskId)
+		task.emit(RooCodeEventName.TaskUnfocused)
+
+		const cleanupFunctions = this.taskEventListeners.get(task)
+		if (cleanupFunctions) {
+			cleanupFunctions.forEach((cleanup) => cleanup())
+			this.taskEventListeners.delete(task)
+		}
+
+		try {
+			await task.dispose()
+		} catch (error) {
+			this.log(
+				`[cleanupFailedHistoryTask] dispose() failed for ${task.taskId}.${task.instanceId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
 	}
 
@@ -1415,7 +1444,9 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, () =>
+					this.cleanupFailedHistoryTask(task),
+				)
 			}
 		} else {
 			await this.addClineToStack(task)
@@ -1425,7 +1456,9 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, () =>
+					this.cleanupFailedHistoryTask(task),
+				)
 			}
 		}
 

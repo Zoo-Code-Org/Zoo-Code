@@ -1089,6 +1089,7 @@ export class TaskHistoryStore {
 			try {
 				await safeWriteJson(filePath, cached, {
 					createParentDirectory: false,
+					atomicReplace: true,
 					merge: (existing) => {
 						if (!existing || typeof existing !== "object" || !("id" in existing)) {
 							// Writing the cached record back would recreate a task

@@ -14,6 +14,7 @@ type MockTask = Pick<Task, "taskId" | "instanceId"> &
 
 type PrivateClineProviderMethods = {
 	removeClineFromStack: (this: ClineProvider) => ReturnType<ClineProvider["removeClineFromStack"]>
+	cleanupFailedHistoryTask: (this: ClineProvider, task: Task) => Promise<void>
 	markDelegatedChildInterrupted: (
 		this: ClineProvider,
 		...args: Parameters<ClineProvider["markDelegatedChildInterrupted"]>
@@ -173,6 +174,34 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		expect(provider["getTaskWithId"]).not.toHaveBeenCalled()
 		expect(provider["updateTaskHistory"]).not.toHaveBeenCalled()
+	})
+})
+
+describe("ClineProvider failed history restoration cleanup", () => {
+	it("removes the failed task, its listeners, and its resources without saving stale history", async () => {
+		const cleanupListener = vi.fn()
+		const task = {
+			taskId: "failed-history-task",
+			instanceId: "inst-1",
+			emit: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		} as unknown as Task
+		const taskRegistry = new TaskRegistry()
+		taskRegistry.push(task)
+		const taskEventListeners = new Map([[task, [cleanupListener]]])
+		const provider = {
+			taskRegistry,
+			taskEventListeners,
+			log: vi.fn(),
+		} as unknown as ClineProvider
+
+		await privateClineProvider.cleanupFailedHistoryTask.call(provider, task)
+
+		expect(taskRegistry.getById(task.taskId)).toBeUndefined()
+		expect(taskRegistry.current).toBeUndefined()
+		expect(cleanupListener).toHaveBeenCalledOnce()
+		expect(taskEventListeners.has(task)).toBe(false)
+		expect(task.dispose).toHaveBeenCalledOnce()
 	})
 })
 
