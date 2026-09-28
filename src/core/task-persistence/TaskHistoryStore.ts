@@ -4,10 +4,11 @@ import * as path from "path"
 import crypto from "crypto"
 
 import deepEqual from "fast-deep-equal"
-import type { HistoryItem } from "@roo-code/types"
+import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -269,12 +270,25 @@ export class TaskHistoryStore {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
 
-			// Remove per-task file (best-effort)
+			// Remove per-task file (best-effort). The unlink runs under the
+			// same per-file advisory lock that `safeWriteJson` holds, so a
+			// deletion cannot interleave with another host's locked
+			// read-modify-write (for example the settlement in
+			// `clearPendingActionIfMatching`). Lock ordering stays store
+			// lock first, then one per-file lock, matching the write path.
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await fs.unlink(filePath)
+				await withFileLock(filePath, async (absoluteFilePath) => {
+					try {
+						await fs.unlink(absoluteFilePath)
+					} catch {
+						// File may already be deleted
+					}
+				})
 			} catch {
-				// File may already be deleted
+				// A missing task directory also proves the history file is
+				// absent, so remaining failures keep the base best-effort
+				// deletion semantics.
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -293,11 +307,21 @@ export class TaskHistoryStore {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
 
+				// Serialize each unlink with `safeWriteJson` under the same
+				// per-file advisory lock. See `delete` for the lock order.
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await fs.unlink(filePath)
+					await withFileLock(filePath, async (absoluteFilePath) => {
+						try {
+							await fs.unlink(absoluteFilePath)
+						} catch {
+							// File may already be deleted
+						}
+					})
 				} catch {
-					// File may already be deleted
+					// A missing task directory also proves the history file
+					// is absent, so remaining failures keep the base
+					// best-effort deletion semantics.
 				}
 			}
 
@@ -1073,9 +1097,13 @@ export class TaskHistoryStore {
 	 *
 	 * Deletion by another host is authoritative (#1726): when no persisted
 	 * record exists, the merge callback removes the stale cache entry and
-	 * throws instead of writing the cached record back to disk.
+	 * throws instead of writing the cached record back to disk. A persisted
+	 * record must also match the canonical task-history schema and carry the
+	 * requested task ID; malformed or mismatched records drop the stale
+	 * cache entry and fail settlement closed without rewriting the record.
 	 *
-	 * @throws If the task ID is not present in the cache or no persisted record remains on disk.
+	 * @throws If the task ID is not present in the cache, no persisted record remains on disk,
+	 * or the persisted record is invalid or belongs to a different task ID.
 	 */
 	public async clearPendingActionIfMatching(taskId: string, expectedActionId: string): Promise<HistoryItem> {
 		return this.withLock(async () => {
@@ -1089,7 +1117,7 @@ export class TaskHistoryStore {
 			try {
 				await safeWriteJson(filePath, cached, {
 					merge: (existing) => {
-						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+						if (existing === null || existing === undefined) {
 							// Writing the cached record back would recreate a task
 							// another host deleted, so drop the stale entry first.
 							// A throwing merge writes nothing, so the deleted
@@ -1099,6 +1127,27 @@ export class TaskHistoryStore {
 							this.taskFileMtimes.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+							)
+						}
+						// Validate the locked disk record with the canonical
+						// task-history schema (#1726). Settlement must not
+						// rewrite malformed data and must not clear the action
+						// on a record persisted under a different task ID, so
+						// both cases drop the stale cache entry and fail
+						// closed without touching the disk record.
+						const parsed = historyItemSchema.safeParse(existing)
+						if (!parsed.success) {
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has an invalid disk record`,
+							)
+						}
+						if (parsed.data.id !== taskId) {
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has a disk record with mismatched id ${parsed.data.id}`,
 							)
 						}
 						const disk = existing as HistoryItem

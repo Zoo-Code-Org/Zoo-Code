@@ -6,6 +6,13 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
+// Wrap the real fs/promises so a test can pause inside the per-file lock
+// while every call still runs against the real filesystem.
+vi.mock("fs/promises", async () => {
+	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+	return { ...actual, readFile: vi.fn(actual.readFile) }
+})
+
 type WriteTaskFile = (item: HistoryItem, delta?: Partial<HistoryItem>) => Promise<HistoryItem>
 
 interface WriteBarrier {
@@ -306,6 +313,72 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			await storeB.invalidate("shared-task")
 			expect(storeB.get("shared-task")).toBeUndefined()
 		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("serializes deletion after settlement reads disk without recreating the record", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-during-settlement-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const action = createAction("action-a", "action A")
+		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+		const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		let signalReadComplete!: () => void
+		const readComplete = new Promise<void>((resolve) => {
+			signalReadComplete = resolve
+		})
+		let releaseSettlement!: () => void
+		const settlementCanContinue = new Promise<void>((resolve) => {
+			releaseSettlement = resolve
+		})
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert({ ...item("shared-task"), pendingAction: action })
+			await storeB.initialize()
+
+			// Pause settlement inside its locked disk read, then start a
+			// deletion from another store so it targets the settlement's
+			// read-to-commit window.
+			vi.mocked(fs.readFile).mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+				const result = await actualFs.readFile(...args)
+				if (args[0] === filePath) {
+					signalReadComplete()
+					await settlementCanContinue
+				}
+				return result
+			})
+
+			const settlement = storeA.clearPendingActionIfMatching("shared-task", action.actionId)
+			await readComplete
+			const deletion = storeB.delete("shared-task")
+			let deletionSettled = false
+			void deletion.finally(() => {
+				deletionSettled = true
+			})
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			// The deletion must stay blocked while settlement holds the
+			// per-file lock across its read-to-commit window.
+			expect(deletionSettled).toBe(false)
+
+			releaseSettlement()
+			await expect(settlement).resolves.toMatchObject({ id: "shared-task", pendingAction: undefined })
+			await deletion
+
+			// The settlement committed first and the locked deletion
+			// removed the file afterwards, so the record stays deleted
+			// instead of being resurrected.
+			await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" })
+			await expect(storeA.clearPendingActionIfMatching("shared-task", action.actionId)).rejects.toThrow(
+				"task shared-task not found",
+			)
+			expect(storeA.get("shared-task")).toBeUndefined()
+			expect(storeB.get("shared-task")).toBeUndefined()
+		} finally {
+			vi.mocked(fs.readFile).mockImplementation(actualFs.readFile)
 			storeA.dispose()
 			storeB.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })

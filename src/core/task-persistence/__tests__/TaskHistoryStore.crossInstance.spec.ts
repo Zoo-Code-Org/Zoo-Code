@@ -253,6 +253,69 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(await fs.readFile(filePath, "utf8")).toBe("{invalid")
 	})
 
+	it("fails settlement closed for a malformed disk record without rewriting it", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "action-a",
+			approvalText: "{}",
+			mode: "code",
+			message: "action A",
+			todos: [],
+		}
+		const cached = makeHistoryItem({ id: "malformed-settlement-task", pendingAction })
+		const filePath = path.join(tmpDir, "tasks", cached.id, GlobalFileNames.historyItem)
+		await fs.mkdir(path.dirname(filePath), { recursive: true })
+		// Valid JSON that fails the canonical task-history schema: id must
+		// be a string and the required history fields are absent.
+		const malformed = JSON.stringify({ id: 123, pendingAction })
+		await fs.writeFile(filePath, malformed, "utf8")
+		const storeState = storeA as unknown as {
+			cache: Map<string, HistoryItem>
+			taskFileMtimes: Map<string, number>
+		}
+		storeState.cache.set(cached.id, cached)
+		storeState.taskFileMtimes.set(cached.id, Date.now())
+
+		await expect(storeA.clearPendingActionIfMatching(cached.id, pendingAction.actionId)).rejects.toThrow(
+			`task ${cached.id} has an invalid disk record`,
+		)
+		expect(storeA.get(cached.id)).toBeUndefined()
+		expect(storeState.taskFileMtimes.has(cached.id)).toBe(false)
+		// The malformed record stays on disk untouched.
+		expect(await fs.readFile(filePath, "utf8")).toBe(malformed)
+	})
+
+	it("fails settlement closed when the disk record carries a different task id", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "action-a",
+			approvalText: "{}",
+			mode: "code",
+			message: "action A",
+			todos: [],
+		}
+		const cached = makeHistoryItem({ id: "mismatch-settlement-task", pendingAction })
+		const other = makeHistoryItem({ id: "other-task" })
+		const filePath = path.join(tmpDir, "tasks", cached.id, GlobalFileNames.historyItem)
+		await fs.mkdir(path.dirname(filePath), { recursive: true })
+		const mismatched = JSON.stringify(other, null, "\t")
+		await fs.writeFile(filePath, mismatched, "utf8")
+		const storeState = storeA as unknown as {
+			cache: Map<string, HistoryItem>
+			taskFileMtimes: Map<string, number>
+		}
+		storeState.cache.set(cached.id, cached)
+		storeState.taskFileMtimes.set(cached.id, Date.now())
+
+		await expect(storeA.clearPendingActionIfMatching(cached.id, pendingAction.actionId)).rejects.toThrow(
+			`task ${cached.id} has a disk record with mismatched id other-task`,
+		)
+		expect(storeA.get(cached.id)).toBeUndefined()
+		expect(storeState.taskFileMtimes.has(cached.id)).toBe(false)
+		// The other task's record stays on disk untouched.
+		expect(await fs.readFile(filePath, "utf8")).toBe(mismatched)
+	})
+
 	/**
 	 * Host B completes a task on disk while host A's cache still has it
 	 * active. Host A's next save updates only totalCost (a full-object

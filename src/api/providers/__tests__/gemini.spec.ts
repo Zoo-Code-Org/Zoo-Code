@@ -352,12 +352,21 @@ describe("GeminiHandler", () => {
 					]),
 				)
 				const chunks = await collectStream(handler.createMessage(systemPrompt, messages, metadata))
-				const partialIds = chunks
+				const partials = chunks
 					.filter((chunk) => chunk.type === "tool_call_partial")
-					.map((chunk) => (chunk as { id: string }).id)
+					.map((chunk) => chunk as { id: string; name?: string; arguments?: string })
 				// The handler emits one name partial and one arguments partial
-				// for the synthesized call.
-				expect(partialIds).toHaveLength(2)
+				// for the synthesized call. Assert both semantic halves so a
+				// duplicate name partial cannot satisfy the ID comparison.
+				expect(partials).toHaveLength(2)
+				expect(
+					partials.filter(({ name, arguments: args }) => name === "new_task" && args === undefined),
+				).toHaveLength(1)
+				expect(
+					partials.filter(({ name, arguments: args }) => name === undefined && args === "{}"),
+				).toHaveLength(1)
+
+				const partialIds = partials.map(({ id }) => id)
 				expect(new Set(partialIds).size).toBe(1)
 				firstCallIds.push(partialIds[0])
 			}
