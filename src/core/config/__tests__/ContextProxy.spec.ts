@@ -454,36 +454,6 @@ describe("ContextProxy", () => {
 			await expect(resetPromise).rejects.toThrow("reset failed")
 		})
 
-		it("does not roll a post-reset secret write back over the pre-reset durable value", async () => {
-			// Same window as the state case, for the secret durable record.
-			await proxy.storeSecret("apiKey", "old-key")
-
-			let failDelete!: (error: Error) => void
-			mockSecrets.delete.mockImplementationOnce(
-				() =>
-					new Promise((_resolve, reject) => {
-						failDelete = reject
-					}),
-			)
-			const resetPromise = proxy.resetAllState()
-
-			let failWrite!: (error: Error) => void
-			mockSecrets.store.mockImplementationOnce(
-				() =>
-					new Promise((_resolve, reject) => {
-						failWrite = reject
-					}),
-			)
-			const pending = proxy.storeSecret("apiKey", "post-reset-key")
-
-			failWrite(new Error("secrets failed"))
-			await expect(pending).rejects.toThrow("secrets failed")
-			expect(proxy.getSecret("apiKey")).toBeUndefined()
-
-			failDelete(new Error("reset failed"))
-			await expect(resetPromise).rejects.toThrow("reset failed")
-		})
-
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 
@@ -555,6 +525,36 @@ describe("ContextProxy", () => {
 			// Should have stored undefined in cache
 			const storedValue = await proxy.getSecret("apiKey")
 			expect(storedValue).toBeUndefined()
+		})
+
+		it("does not roll a post-reset secret write back over the pre-reset durable value", async () => {
+			// Same window as the state case, for the secret durable record.
+			await proxy.storeSecret("apiKey", "old-key")
+
+			let failDelete!: (error: Error) => void
+			mockSecrets.delete.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failDelete = reject
+					}),
+			)
+			const resetPromise = proxy.resetAllState()
+
+			let failWrite!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failWrite = reject
+					}),
+			)
+			const pending = proxy.storeSecret("apiKey", "post-reset-key")
+
+			failWrite(new Error("secrets failed"))
+			await expect(pending).rejects.toThrow("secrets failed")
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+
+			failDelete(new Error("reset failed"))
+			await expect(resetPromise).rejects.toThrow("reset failed")
 		})
 	})
 
