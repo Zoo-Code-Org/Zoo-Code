@@ -11,6 +11,7 @@ type QueueTaskTestAccess = {
 	queuedFeedbackRows: Map<string, ClineMessage>
 	lastMessageTs?: number
 	abort: boolean
+	abandoned: boolean
 	queuedMessageDrainChain: Promise<unknown>
 }
 
@@ -409,6 +410,34 @@ describe("Task.ask queued message drain", () => {
 		expect(task["askResponse"]).toBeUndefined()
 	})
 
+	it("does not submit queued messages once the task is abandoned", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+		task.messageQueueService.addMessage("too late")
+		getQueueTaskTestAccess(task).abandoned = true
+
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+		expect(submitSpy).not.toHaveBeenCalled()
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["too late"])
+		expect(task["askResponse"]).toBeUndefined()
+	})
+
+	it("drops the drain quietly when abandonment lands mid-submission", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		task.messageQueueService.addMessage("too late")
+		const realSubmit = task.submitUserMessage.bind(task)
+		vi.spyOn(task, "submitUserMessage").mockImplementation((...args) => {
+			getQueueTaskTestAccess(task).abandoned = true
+			return realSubmit(...args)
+		})
+
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(task["askResponse"]).toBeUndefined()
+	})
+
 	describe("sayUserFeedbackAndAckQueued", () => {
 		it("delegates to the durable ack when a queued message was consumed", async () => {
 			const task = await createTask()
@@ -499,13 +528,29 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
-	it("preserves approve-with-feedback behavior for ordinary tool asks", async () => {
+	it("does not consume a queued message as a tool approval; it stays queued for a conversational turn", async () => {
 		const task = await createTask()
 		task.messageQueueService.addMessage("Use this context")
 
-		const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		// The conversational message must not approve the tool: the ask is
+		// still blocked waiting for an explicit user response.
+		let settled = false
+		void askPromise.then(() => {
+			settled = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		expect(settled).toBe(false)
 
-		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Use this context" })
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// The message is retained for a conversational ask, not consumed here.
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Use this context"])
+
+		const nextResult = await task.ask("followup", "Q?", false)
+		expect(nextResult).toMatchObject({ response: "messageResponse", text: "Use this context" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -513,13 +558,54 @@ describe("Task.ask queued message drain", () => {
 		["command", "npm test"],
 		["use_mcp_server", "{}"],
 		["tool", "not-json"],
-	] as const)("preserves approve-with-feedback behavior for %s asks", async (type, text) => {
+	] as const)("leaves queued conversational text out of %s approvals", async (type, text) => {
 		const task = await createTask()
 		task.messageQueueService.addMessage("Approval context")
 
-		const result = await task.ask(type, text, false)
+		const askPromise = task.ask(type, text, false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		let settled = false
+		void askPromise.then(() => {
+			settled = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		expect(settled).toBe(false)
 
-		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Approval context"])
+	})
+
+	it("never lets a drained queued message approve a later command ask", async () => {
+		const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		// The user queues conversational feedback while command A runs.
+		task.messageQueueService.addMessage("also fix the tests")
+		// Command A finishes: the drain submits the feedback (conversational
+		// delivery) and retains the entry until an ask consumes it.
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+
+		// The model now requests command B. The retained entry must not be
+		// claimed as an approval: the ask keeps waiting for the user.
+		const askPromise = task.ask("command", "git push --force", false)
+		let settled = false
+		void askPromise.then(() => {
+			settled = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		expect(settled).toBe(false)
+
+		// Explicit approval executes B; the feedback is still delivered later.
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["also fix the tests"])
+
+		const followup = await task.ask("followup", "anything else?", false)
+		expect(followup).toMatchObject({ response: "messageResponse", text: "also fix the tests" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 

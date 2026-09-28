@@ -169,13 +169,18 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 				return { response: "messageResponse", requiresDurableAck: true }
 			}
 		} catch {
-			// Malformed tool asks retain the existing approve-with-feedback behavior.
+			// Malformed tool asks retain the existing behavior: the queued
+			// message is left for a conversational turn, not read as an answer.
 		}
 
-		return { response: "yesButtonClicked", requiresDurableAck: false }
+		// A queued conversational message must never approve tool execution:
+		// only an explicit user response may return yesButtonClicked.
+		return undefined
 	}
 	if (type === "command" || type === "use_mcp_server") {
-		return { response: "yesButtonClicked", requiresDurableAck: false }
+		// Approval-gating asks: a queued conversational message is not an
+		// approval, so the claim path must not convert it to yesButtonClicked.
+		return undefined
 	}
 
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
@@ -1554,9 +1559,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
-		const queuedMessage =
-			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
-		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
+		// Resolve before claiming: approval-gating ask types never consume a
+		// queued conversational message, and claiming without a resolution
+		// would leak the claim.
+		const queuedAskResolution =
+			partial === true || type === "command_output" ? undefined : queuedResponseForAsk(type, text)
+		const queuedMessage = queuedAskResolution ? this.messageQueueService.claimNextMessage() : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
@@ -1756,10 +1764,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
 				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang.
+				// immediately so the task doesn't hang. Approval-gating ask types get no
+				// resolution, so the message stays queued for a conversational turn.
 				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.claimNextMessage()
-					const resolution = message ? queuedResponseForAsk(type, text) : undefined
+					const resolution = queuedResponseForAsk(type, text)
+					const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
 					if (message && resolution) {
 						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
 					}

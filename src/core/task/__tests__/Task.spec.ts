@@ -5902,11 +5902,11 @@ describe("Queued message processing after condense", () => {
 			undefined,
 			task.messageQueueService.messages[0]?.id,
 		)
-		// Submission does not remove: the message stays queued until an ask
-		// consumes it.
+		// Submission does not remove: the message stays queued until a
+		// conversational ask consumes it.
 		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
-		const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-		expect(result.text).toBe("queued text")
+		const result = await task.ask("followup", "Anything else?", false)
+		expect(result).toMatchObject({ response: "messageResponse", text: "queued text" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -5964,8 +5964,8 @@ describe("Queued message processing after condense", () => {
 		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
 		expect(taskB.messageQueueService.messages.map((message) => message.text)).toEqual(["B message"])
 
-		const resultB = await taskB.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-		expect(resultB.text).toBe("B message")
+		const resultB = await taskB.ask("followup", "Anything else?", false)
+		expect(resultB).toMatchObject({ response: "messageResponse", text: "B message" })
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
 		// Consuming B's message must not touch A's queue.
 		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
@@ -5980,7 +5980,7 @@ describe("Queued message processing after condense", () => {
 				startTask: false,
 			})
 
-		it("submits the next queued message and retains it until an ask consumes it", async () => {
+		it("submits the next queued message and retains it until a conversational ask consumes it", async () => {
 			const task = createQueueTask()
 			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
 			task.messageQueueService.addMessage("queued text", ["img1.png"])
@@ -5991,9 +5991,17 @@ describe("Queued message processing after condense", () => {
 			// the message stays queued until an ask claims it.
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
 
-			const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			// An approval-gating tool ask must not consume the conversational
+			// message (this file mocks p-wait-for, so the ask resolves without a
+			// response; the explicit-approval blocking flow is covered in
+			// ask-queued-message-drain.spec.ts).
+			const approval = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			expect(approval.text).toBeUndefined()
+			expect(approval.queuedMessageId).toBeUndefined()
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
 
-			expect(result).toMatchObject({ response: "yesButtonClicked", text: "queued text", images: ["img1.png"] })
+			const result = await task.ask("followup", "Anything else?", false)
+			expect(result).toMatchObject({ response: "messageResponse", text: "queued text", images: ["img1.png"] })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 
@@ -6081,10 +6089,10 @@ describe("Queued message processing after condense", () => {
 			expect(submitSpy).toHaveBeenCalledTimes(1)
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
 
-			const firstResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-			expect(firstResult).toMatchObject({ response: "yesButtonClicked", text: "first" })
-			const secondResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-			expect(secondResult).toMatchObject({ response: "yesButtonClicked", text: "second" })
+			const firstResult = await task.ask("followup", "first question?", false)
+			expect(firstResult).toMatchObject({ response: "messageResponse", text: "first" })
+			const secondResult = await task.ask("followup", "second question?", false)
+			expect(secondResult).toMatchObject({ response: "messageResponse", text: "second" })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 
@@ -6105,10 +6113,10 @@ describe("Queued message processing after condense", () => {
 				"retry me",
 				"still deliverable",
 			])
-			const firstResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-			expect(firstResult).toMatchObject({ response: "yesButtonClicked", text: "retry me" })
-			const secondResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-			expect(secondResult).toMatchObject({ response: "yesButtonClicked", text: "still deliverable" })
+			const firstResult = await task.ask("followup", "first question?", false)
+			expect(firstResult).toMatchObject({ response: "messageResponse", text: "retry me" })
+			const secondResult = await task.ask("followup", "second question?", false)
+			expect(secondResult).toMatchObject({ response: "messageResponse", text: "still deliverable" })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 	})
