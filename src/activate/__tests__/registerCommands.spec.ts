@@ -7,6 +7,7 @@ import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
 import {
+	__getLiveTabPanelCountForTests,
 	__resetLiveTabPanelsForTests,
 	createClineTabPanel,
 	getPanel,
@@ -1187,6 +1188,7 @@ describe("createClineTabPanel", () => {
 		// Reset module-level panel state.
 		setPanel(undefined, "sidebar")
 		setPanel(undefined, "tab")
+		__resetLiveTabPanelsForTests()
 	})
 
 	it("always creates a fresh panel even when a tab is already tracked", async () => {
@@ -1203,5 +1205,27 @@ describe("createClineTabPanel", () => {
 
 		expect(mockTrackedPanel.reveal).not.toHaveBeenCalled()
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("cleans up the tracked refs and disposes the provider when initialization fails", async () => {
+		const resolveSpy = vi
+			.spyOn(ClineProvider.prototype, "resolveWebviewView")
+			.mockRejectedValue(new Error("init failed"))
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockResolvedValue(undefined)
+
+		await expect(createClineTabPanel({ context: mockContext, outputChannel: mockOutputChannel })).rejects.toThrow(
+			"init failed",
+		)
+
+		// The half-registered panel must not stay tracked: the live registry
+		// drops it, the tracked tab ref is cleared (identity-guarded), and the
+		// provider is disposed so the failed surface leaves no listeners or
+		// state behind.
+		expect(__getLiveTabPanelCountForTests()).toBe(0)
+		expect(getPanel()).toBeUndefined()
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
 	})
 })

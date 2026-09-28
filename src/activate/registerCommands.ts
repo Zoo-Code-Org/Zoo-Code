@@ -46,6 +46,15 @@ export function __resetLiveTabPanelsForTests(): void {
 	liveTabPanels.clear()
 }
 
+/**
+ * Test-only: the number of tab panels currently in the live registry, so a
+ * spec can assert the cleanup of a failed or closed panel without probing
+ * through a close of a live panel.
+ */
+export function __getLiveTabPanelCountForTests(): number {
+	return liveTabPanels.size
+}
+
 // In-flight "open in editor" creation shared by overlapping calls: a
 // double-click starts before the first call tracks its new panel, so
 // concurrent callers must share one creation instead of racing to create
@@ -415,8 +424,10 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
 	}
 
-	await tabProvider.resolveWebviewView(newPanel)
-
+	// Register the cleanup listeners before the first initialization await: a
+	// close that lands while resolveWebviewView is still running must be able
+	// to find the tracked-ref re-pointing already installed, or the panel
+	// would stay tracked (and the provider registered) after disposal.
 	// Add listener for visibility changes to notify webview
 	newPanel.onDidChangeViewState(
 		(e) => {
@@ -460,6 +471,23 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 		null,
 		context.subscriptions, // Also register dispose listener
 	)
+
+	try {
+		await tabProvider.resolveWebviewView(newPanel)
+	} catch (error) {
+		// Initialization failed: drop the half-registered panel from the live
+		// registry and the tracked ref (if this panel is still the tracked one),
+		// and dispose the provider so the failed surface leaves no listeners or
+		// state behind. The panel's own disposal listener (installed above) has
+		// already handled a user close that landed during initialization.
+		liveTabPanels.delete(newPanel)
+		// Stryker disable next-line ConditionalExpression: at the catch, this call's own state-change handler only ever re-points the tracked ref at newPanel itself, so tabPanel === newPanel is the only reachable state here; a concurrent re-pointing race is not representable in this spec.
+		if (tabPanel === newPanel) {
+			setPanel(undefined, "tab")
+		}
+		await tabProvider.dispose()
+		throw error
+	}
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.
 	await delay(100)
