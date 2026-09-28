@@ -779,6 +779,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// A clean re-read must not log a drop: the log must stay tied to dropped > 0.
 			await provider.saveViewState("mode", "debugger")
 			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("dropped 0"))
+
+			// Release the provider from the static instance registry so later tests' cross-
+			// instance broadcasts do not iterate a provider bound to this test's context.
+			await provider.dispose()
 		})
 
 		it("should drop malformed stored entries before pruning", async () => {

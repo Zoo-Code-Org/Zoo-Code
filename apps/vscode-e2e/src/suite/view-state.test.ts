@@ -374,17 +374,48 @@ suite("Roo Code View State", function () {
 		// startup).
 		await vscode.commands.executeCommand("zoo-code.SidebarProvider.focus")
 
+		// Stage a durable rehydration marker: rewrite every persisted 'ask' entry to
+		// mode 'build' through the test-only global-state write. The sidebar provider's
+		// in-memory mode is still 'ask' at this point, so the two assertions below each
+		// pin a value only one failure mode can break: (a) passes only if the hide/show
+		// cycle did not wipe, prune, or re-key the durable entry the marker was written
+		// to (an unrelated surviving entry cannot satisfy a 'some entry is build'
+		// assertion because no other test in this suite uses the build mode), and (b)
+		// passes only if the cycle did not wipe the provider's in-memory view state.
+		// Asserting the marker through getConfiguration() instead would not work: the
+		// sidebar provider is a per-extension singleton that does not re-read durable
+		// viewStates when its webview is re-shown, so its in-memory value is the one
+		// getConfiguration() reports after the reload.
+		{
+			const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
+			assert.ok(persisted, "Expected persisted viewStates before writing the rehydration marker")
+
+			const marked: NonNullable<GlobalState["viewStates"]> = { ...persisted }
+			let markedAny = false
+			for (const [viewStateId, entry] of Object.entries(marked)) {
+				if (entry.mode === "ask") {
+					marked[viewStateId] = { ...entry, mode: "build" }
+					markedAny = true
+				}
+			}
+			assert.ok(markedAny, "Expected a persisted 'ask' entry to mark before the reload")
+			await globalThis.api.setGlobalState("viewStates", marked)
+		}
+
 		// Hide the primary sidebar and let the dispose settle, show it again and let
-		// the webview recreation settle, then wait for the extension to rehydrate the
-		// reloaded webview's durable view state.
+		// the webview recreation settle, then wait for the reloaded webview to report
+		// the provider's state.
 		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
 		await sleep(2_000)
 		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
 		await sleep(2_000)
 		await sleep(5_000)
 
-		// (a) The durable viewStates still contain the per-view entry with mode 'ask'
-		// after the reload. Poll in case the rehydrated provider needs a moment.
+		// (a) The durable entry the marker was written to still exists after the reload.
+		// A wipe, prune, or re-key of the durable map during the cycle would drop the
+		// marker even though a looser 'some entry is ask' assertion could still be
+		// satisfied by an unrelated entry. Poll in case the just-written memento value
+		// lags a synchronous read.
 		await waitFor(
 			() => {
 				const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
@@ -392,20 +423,21 @@ suite("Roo Code View State", function () {
 					return false
 				}
 
-				return Object.entries(persisted).some(([, entry]) => entry.mode === "ask")
+				return Object.entries(persisted).some(([, entry]) => entry.mode === "build")
 			},
 			{ timeout: 30_000 },
 		)
 		const viewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
 		assert.ok(viewStates, "Expected persisted viewStates to exist after the sidebar webview reload")
 		assert.ok(
-			Object.entries(viewStates).some(([, entry]) => entry.mode === "ask"),
-			"Expected the persisted view states to still contain a per-view entry with the ask mode after the reload",
+			Object.entries(viewStates).some(([, entry]) => entry.mode === "build"),
+			"Expected the persisted view states to still contain the rehydration marker after the reload",
 		)
 
-		// (b) The rehydrated sidebar view reports the durable mode. getConfiguration()
-		// always reads the sidebar provider, so a rehydration failure would surface
-		// as the view falling back to the global mode instead of 'ask'.
+		// (b) The reloaded sidebar view still reports the pre-reload in-memory mode.
+		// getConfiguration() always reads the sidebar provider, so a regression that
+		// wipes the provider's view state during the hide/show cycle surfaces as the
+		// view falling back to the global mode instead of 'ask'.
 		assert.strictEqual(globalThis.api.getConfiguration().mode, "ask")
 
 		// (c) Deliberately skipped: asserting that a fresh task started from this view

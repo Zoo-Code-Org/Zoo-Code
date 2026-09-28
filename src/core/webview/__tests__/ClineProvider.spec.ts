@@ -2353,7 +2353,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("re-points the persisted view pin before the settings deletion can fail", async () => {
+		it("leaves the durable pin and the shared list untouched when the settings deletion fails", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const oldProfile: ProviderSettingsEntry = {
 				name: "old-profile",
@@ -2367,7 +2367,8 @@ describe("ClineProvider", () => {
 			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
 			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
-			// Persist this view's pin under the deleted profile so the deletion must re-point it.
+			// Persist this view's pin under the profile being deleted so a failed deletion
+			// must leave it intact.
 			await provider.contextProxy.setValue("viewStates", {
 				"pinning-view": { currentApiConfigName: "old-profile", updatedAt: Date.now() },
 			})
@@ -2384,11 +2385,58 @@ describe("ClineProvider", () => {
 
 			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("storage down")
 
-			// The durable pin re-point must have landed before the failure so a reload never
-			// rehydrates the deleted profile name.
+			// The deletion rejected, so no compensating write may have landed: the durable
+			// pin still names the profile that still exists, the shared list is intact, and
+			// the shared selection is untouched.
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"pinning-view": { currentApiConfigName: "old-profile" },
+			})
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([oldProfile, keeperProfile])
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+
+			await provider.dispose()
+		})
+
+		it("prunes the stale list entry and re-points the pin when the secret is already gone", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("viewStates", {
+				"pinning-view": { currentApiConfigName: "old-profile", updatedAt: Date.now() },
+			})
+			// @ts-ignore - Replace providerSettingsManager with a double whose deletion
+			// reports the secret as already gone: an idempotent no-op that must still prune
+			// the stale list entry and re-point the pin.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("missing")),
+				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider["setViewStateId"]("pinning-view")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("old-profile")
+
+			await provider.deleteProviderProfile(oldProfile)
+
+			// The not-found rejection is an idempotent success: the compensating writes run,
+			// and the log records that the stale list entry was pruned only.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
 			expect(mockContext.globalState.get("viewStates")).toMatchObject({
 				"pinning-view": { currentApiConfigName: "keeper-profile" },
 			})
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("not found"))
 
 			await provider.dispose()
 		})
