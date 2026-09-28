@@ -1,5 +1,72 @@
 # Zoo Code Changelog
 
+## [3.84.0]
+
+- ✨ **New SOTA models added:** Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.
+- 🧭 **More reliable tasks and subtasks:** Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.
+- 🛠️ **More dependable terminal, provider, and code-search behavior:** Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.
+
+### Minor Changes
+
+- Add GPT-6 Sol and GPT-6 Luna to OpenAI model catalogs (PR #1755 by @app/zoomote)
+- Add Claude Opus 5.5 across supported model providers (PR #1756 by @app/zoomote)
+- Correct the Vertex Claude Opus 5.5 maximum output limit to 128K tokens (PR #1777 by @wrsfmss)
+- Report Amazon Bedrock output truncation and expose model token limits (#1668 by @LouisClt, PR #1718 by @PierrunoYT)
+- Sanitize lone UTF-16 surrogates in VS Code LM text and tool input (PR #1605 by @simurg79)
+- Clear stale native tool-call arguments when finalization fails (#1221 by @canblmz1, PR #1634 by @canblmz1)
+- Preserve concurrent MCP settings when the settings file is first created (#1371 by @pajitosingh, PR #1380 by @easonLiangWorldedtech)
+- Use the canonical default model for the native OpenAI provider (#992 by @WebMad, PR #1627 by @JunyongParkDev)
+- Propagate caller cancellation into dynamic model-catalog fetches (#1615 by @DaubnerF, PR #1683 by @DaubnerF)
+- Inherit the host UTF-8 locale in terminals instead of forcing `en_US.UTF-8` (#1084 by @scottdk, PR #1713 by @hebulin)
+- Prevent Inline Terminal from falling back to `cmd.exe` incorrectly on Windows (#705 by @myk1yt, PR #1673 by @xcloudx01)
+- Report the shell that actually runs commands under Inline Terminal (#1568 by @DaubnerF, PR #1682 by @DaubnerF)
+- Search the task workspace instead of the active editor workspace in codebase search (PR #1629 by @WebMad)
+- Initialize external code-index task managers before search begins (#1722 by @WebMad, PR #1725 by @WebMad)
+- Align codebase-search readiness checks across mode filters (PR #1630 by @WebMad)
+- Keep delegated child modes isolated from their parent task (#1632 by @robert-shade, PR #1637 by @PierrunoYT)
+- Prevent slash-command mode frontmatter from overwriting the orchestrator task mode (#1776 by @edelauna, PR #1784 by @edelauna)
+- Preserve parent and child task links after repeated Stop actions (#1676 by @jaszhix, PR #1678 by @jaszhix)
+- Stop task-history updates from writing the entire history to global state (#1542 by @edelauna, PR #1664 by @PierrunoYT)
+- Add a guarded VS Code LM tool-call recovery parser and normalized schema conversion (PR #1188 by @simurg79)
+- Stabilize restart conversation-history E2E coverage with polling (#1641 by @DaubnerF, PR #1663 by @PierrunoYT)
+- Update Vitest to 4.1.11 for security fixes (PR #1582 by @app/renovate)
+- Reduce Windows CI cold-start time (PR #1654 by @app/zoomote)
+- Mask the context-token counter in Electron sidebar snapshots (#1679 by @edelauna, PR #1680 by @edelauna)
+- Add scope-boundary guidance to CodeRabbit global path instructions (PR #1757 by @app/zoomote)
+- Allow non-organization members to interact with CodeRabbit chat (PR #1775 by @app/zoomote)
+- Isolate workflow configuration tests from the Turbo cache (#1722 by @WebMad, PR #1782 by @edelauna)
+- Add the task-lifecycle verification gap report and remediation blocks (PR #1626 by @app/zoomote)
+- Add the stable release documentation PR step to the release workflow (PR #1786 by @taltas)
+- Update the weekly release-reminder rotation (#1698 by @app/zoomote, PR #1700 by @app/zoomote)
+- Merge the v3.82.2 release preparation state into `main` (PR #1677 by @edelauna)
+
+## [3.82.2]
+
+### Patch Changes
+
+- Prevent unavailable tools from appearing in system prompts (#505 by @DScoNOIZ, #1240 by @JunyongParkDev, PR #1505 by @DaubnerF)
+- Fix DeepSeek Flash image input by adding the new deepseek-flash model ID (PR #1618 by @app/zoomote)
+- Fix token usage tracking for Grok and xAI-compatible endpoints whose domains contain "x.ai" (#1483 by @BambinoSK, PR #1484 by @BambinoSK)
+- Apply the configured reasoning effort consistently across OpenAI-compatible requests (#993 by @Gringo675, PR #1604 by @JunyongParkDev)
+- Preserve the configured LiteLLM model ID in the model picker (#1367 by @easonLiangWorldedtech, PR #1368 by @easonLiangWorldedtech)
+- Fix delegated subtasks reading the parent mode in environment details and tool validation (#1623 by @edelauna, PR #1625 by @edelauna)
+- Add a file version token to the guarded-write path to prevent stale overwrites (PR #1383 by @easonLiangWorldedtech)
+- Extract the code-index manager registry for clearer ownership (PR #1622 by @WebMad)
+- Route Roomote pull requests through the CodeRabbit review path (PR #1598 by @app/zoomote)
+- Make mutation-testing findings advisory instead of blocking (PR #1610 by @app/zoomote)
+- Group mutation warnings by source location to remove duplicate warnings (PR #1619 by @app/zoomote)
+- Skip mutation testing while pull requests are in draft (PR #1645 by @app/zoomote)
+- Scope the mutation diff against the exact merge base so unrelated changes on main stop inflating the scope (PR #1655 by @app/zoomote)
+- Model test bundle dependencies in Turbo so caching stays correct (#114 by @edelauna, PR #1611 by @app/zoomote)
+- Separate extension unit tests from bundle smoke tests (PR #1614 by @app/zoomote)
+- Move extension source coverage to cacheable test lanes (#118 by @edelauna, PR #1620 by @app/zoomote)
+- Cache extension coverage by ownership lanes (#115 by @edelauna, PR #1631 by @app/zoomote)
+- Keep coverage caches valid when only verification scripts change (PR #1649 by @app/zoomote)
+- Union ownership-lane coverage reports before uploading to Codecov (#1647 by @DaubnerF, PR #1650 by @app/zoomote)
+- Validate coverage lanes dynamically in the merge queue (PR #1644 by @app/zoomote)
+- Stabilize the accessibility contrast audit during theme changes (#1612 by @edelauna, PR #1613 by @app/zoomote)
+- Make CodeRabbit completeness checks advisory (PR #1621 by @app/zoomote)
+
 ## [3.82.1]
 
 ### Patch Changes

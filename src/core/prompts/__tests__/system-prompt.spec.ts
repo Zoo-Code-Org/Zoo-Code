@@ -41,11 +41,12 @@ vi.mock("fs/promises")
 
 import * as vscode from "vscode"
 
-import { ModeConfig } from "@roo-code/types"
+import { ModeConfig, ModelInfo } from "@roo-code/types"
 
 import { SYSTEM_PROMPT } from "../system"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { defaultModeSlug, modes, Mode } from "../../../shared/modes"
+import type { SystemPromptSettings } from "../types"
 import "../../../utils/path"
 import { addCustomInstructions } from "../sections/custom-instructions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
@@ -638,6 +639,146 @@ describe("SYSTEM_PROMPT", () => {
 			)
 
 			expect(prompt).toContain("MCP servers")
+		})
+	})
+
+	describe("effective tool policy reflected in the system prompt", () => {
+		// Section-scoped extraction: capture the text between two "====" headers so
+		// user-authored roleDefinition/customInstructions can't pollute the assertions.
+		function extractSection(prompt: string, header: string): string {
+			const marker = `\n\n${header}\n\n`
+			const idx = prompt.indexOf(marker)
+			expect(idx).toBeGreaterThan(-1)
+			const afterHeader = prompt.slice(idx + marker.length)
+			const nextMarker = afterHeader.indexOf("\n\n====")
+			return nextMarker === -1 ? afterHeader : afterHeader.slice(0, nextMarker)
+		}
+
+		const fullToolSettings: SystemPromptSettings = {
+			todoListEnabled: true,
+			useAgentRules: true,
+			newTaskRequireTodos: false,
+		}
+
+		function run(
+			mode: string,
+			extra: Partial<{
+				customModes?: ModeConfig[]
+				mcpHub?: McpHub
+				settings?: SystemPromptSettings
+				disabledTools?: string[]
+				modelInfo?: ModelInfo
+			}> = {},
+		) {
+			return SYSTEM_PROMPT(
+				mockContext,
+				"/test/path",
+				false,
+				extra.mcpHub,
+				undefined, // diffStrategy
+				mode,
+				undefined, // customModePrompts
+				extra.customModes,
+				undefined, // globalCustomInstructions
+				experiments,
+				undefined, // language
+				undefined, // rooIgnoreInstructions
+				extra.settings ?? fullToolSettings, // settings
+				undefined, // todoList
+				undefined, // modelId
+				undefined, // skillsManager
+				extra.disabledTools, // disabledTools
+				extra.modelInfo, // modelInfo
+			)
+		}
+
+		it("Code & Debug expose execute_command guidance (CAPABILITIES + RULES)", async () => {
+			for (const mode of ["code", "debug"]) {
+				const prompt = await run(mode)
+				const capabilities = extractSection(prompt, "CAPABILITIES")
+				const rules = extractSection(prompt, "RULES")
+
+				expect(capabilities).toContain("execute CLI commands on the user's computer")
+				expect(rules).toContain("Before using the execute_command tool")
+				expect(rules).toContain('check the "Actively Running Terminals" section')
+			}
+		})
+
+		it("Architect has no execute_command and advertises the \\ .md$ edit restriction", async () => {
+			const prompt = await run("architect")
+			const capabilities = extractSection(prompt, "CAPABILITIES")
+			const rules = extractSection(prompt, "RULES")
+			const systemInfo = extractSection(prompt, "SYSTEM INFORMATION")
+
+			// No execute_command anywhere.
+			expect(capabilities).not.toContain("execute CLI commands")
+			expect(rules).not.toContain("Before using the execute_command tool")
+			expect(rules).not.toContain('check the "Actively Running Terminals" section')
+			expect(systemInfo).not.toContain("New terminals will be created")
+			// Architect-style edit restriction reflected in CAPABILITIES.
+			expect(capabilities).toContain("in this mode only files matching")
+			expect(capabilities).toContain("\\.md$")
+			expect(capabilities).toContain("Markdown files only")
+		})
+
+		it("Ask advertises no write clause and no execute_command", async () => {
+			const prompt = await run("ask")
+			const capabilities = extractSection(prompt, "CAPABILITIES")
+
+			expect(capabilities).not.toContain("execute CLI commands")
+			expect(capabilities).not.toContain("write and edit files")
+			expect(capabilities).toContain("read files")
+		})
+
+		it("Orchestrator advertises no read/list/edit clauses", async () => {
+			const prompt = await run("orchestrator")
+			const capabilities = extractSection(prompt, "CAPABILITIES")
+
+			expect(capabilities).not.toContain("read files")
+			expect(capabilities).not.toContain("execute CLI commands")
+			expect(capabilities).not.toContain("write and edit files")
+		})
+
+		it("empty groups -> fallback sentence, no per-tool clauses", async () => {
+			const customModes: ModeConfig[] = [
+				{
+					slug: "empty-mode",
+					name: "Empty Mode",
+					roleDefinition: "An empty mode",
+					groups: [],
+				},
+			]
+			const prompt = await run("empty-mode", { customModes })
+			const capabilities = extractSection(prompt, "CAPABILITIES")
+
+			// No per-tool clauses remain -> the fallback sentence is emitted.
+			expect(capabilities).toContain("You have access to a limited set of tools for this mode")
+			expect(capabilities).not.toContain("You have access to tools that let you")
+			// A control-only set must never advertise tool-execution clauses.
+			expect(capabilities).not.toContain("execute CLI commands")
+			expect(capabilities).not.toContain("regex search")
+			expect(capabilities).not.toContain("The project base directory is:")
+		})
+
+		it("disabledTools: ['execute_command'] removes command guidance from the prompt", async () => {
+			const prompt = await run("code", { disabledTools: ["execute_command"] })
+			const capabilities = extractSection(prompt, "CAPABILITIES")
+			const rules = extractSection(prompt, "RULES")
+
+			expect(rules).not.toContain("Before using the execute_command tool")
+			expect(rules).not.toContain("Actively Running Terminals")
+			expect(capabilities).not.toContain("execute CLI commands")
+		})
+
+		it("modelInfo.excludedTools removes the matching capability clause", async () => {
+			const prompt = await run("code", {
+				modelInfo: { contextWindow: 100_000, supportsPromptCache: true, excludedTools: ["read_file"] },
+			})
+			const capabilities = extractSection(prompt, "CAPABILITIES")
+
+			expect(capabilities).not.toContain("read files")
+			// other clauses survive, proving the exclusion is scoped to the one tool
+			expect(capabilities).toContain("execute CLI commands")
 		})
 	})
 
