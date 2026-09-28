@@ -286,6 +286,14 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		// tempPath is now the committed file; no cleanup needed.
+
+		// Best-effort: remove the now-empty staging directory. Self-staged
+		// writes only; ENOTEMPTY means a concurrent write in the same
+		// directory is still using it, and a failure must never un-commit a
+		// published file, so the removal swallows all errors.
+		if (!options?.tempPath) {
+			await fs.rmdir(_stagingDir(dirPath)).catch(() => {})
+		}
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
 		if (backupPath && releaseBackupOnSuccess) {

@@ -12,6 +12,7 @@ vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	rename: vi.fn(),
 	unlink: vi.fn(),
+	rmdir: vi.fn(),
 	realpath: vi.fn(),
 }))
 
@@ -67,6 +68,7 @@ describe("safeWriteText", () => {
 		vi.mocked(fs.access).mockResolvedValue(undefined)
 		vi.mocked(fs.rename).mockResolvedValue(undefined)
 		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		vi.mocked(fs.rmdir).mockResolvedValue(undefined)
 		// Existing-target default: a regular 0o644 file.
 		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
 		// Default sync-write behaviour: report that all requested bytes were
@@ -113,6 +115,46 @@ describe("safeWriteText", () => {
 
 			// no unlink of temp (it's now the committed file; DACL skipped via platform:linux)
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("removes the now-empty staging directory after a successful self-staged commit", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "hello", { platform: "linux" })
+
+			// the staging subdir is removed best-effort after the commit rename
+			// (stringContaining: the SUT and the test helper resolve Windows
+			// drive-relative paths differently, as in the existing staging tests)
+			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		it("does not remove the staging directory when the caller supplies its own tempPath", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const callerTemp = "/tmp/test-dir/caller-staged.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "hello", { platform: "linux", tempPath: callerTemp })
+
+			// the caller owns its temp file's directory; safeWriteText must not
+			// rmdir a directory it did not create
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
+
+		it("a failed staging-dir removal never fails the committed write", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
+
+			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).resolves.toBeUndefined()
+
+			// the commit rename still happened and the rmdir error was swallowed
+			expect(fs.rename).toHaveBeenCalled()
+			expect(fs.rmdir).toHaveBeenCalled()
 		})
 	})
 

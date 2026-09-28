@@ -84,6 +84,14 @@ export class DiffViewProvider {
 		viewColumn: vscode.ViewColumn
 	}> = []
 	private taskRef: WeakRef<Task>
+	/**
+	 * Version token of the empty placeholder open() wrote for a new file (the
+	 * create branch), captured under the S2 stat-matched contract. A rejected
+	 * guarded save removes the placeholder only while its on-disk token still
+	 * equals this value, so a file created by someone else in the meantime is
+	 * never unlinked.
+	 */
+	private placeholderVersion: string | undefined = undefined
 
 	constructor(
 		private cwd: string,
@@ -131,7 +139,16 @@ export class DiffViewProvider {
 			this.originalContent = await fs.readFile(absolutePath, "utf-8")
 			const postStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const displayTask = this.taskRef.deref()
-			if (displayTask && preStats && postStats) {
+			// Only record the preview token when the task has no observation for
+			// this path: a read_file observation recorded the version the model's
+			// content was built on, and the accept-time guard must compare against
+			// THAT token. Replacing it with the current on-disk token would blind
+			// the save to changes that happened between the model's read and this
+			// preview (e.g. an external editor), letting a v1-based overwrite
+			// clobber the v2 change. An unread target has no observation, so the
+			// preview token is recorded (stat-matched) and the save checks against
+			// the on-disk version the preview was built on.
+			if (displayTask && preStats && postStats && !displayTask.observationRegistry.has(absolutePath)) {
 				const displayToken = versionTokenOfStat(preStats)
 				if (displayToken === versionTokenOfStat(postStats)) {
 					displayTask.observationRegistry.observe(absolutePath, displayToken, true)
@@ -150,11 +167,21 @@ export class DiffViewProvider {
 			await fs.writeFile(absolutePath, "")
 			// S4b follow-up (#44): the empty placeholder is fully known (empty),
 			// so observe the just-written on-disk version as complete; the accepted
-			// save then publishes through the guard's version check.
+			// save then publishes through the guard's version check. As with the
+			// modify branch above, an existing observation for this path (the file
+			// was read before it vanished) wins: the save checks against the
+			// model's read token and fails closed rather than overwriting content
+			// the model has not seen.
 			const displayTask = this.taskRef.deref()
-			const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-			if (displayTask && placeholderStats) {
-				displayTask.observationRegistry.observe(absolutePath, versionTokenOfStat(placeholderStats), true)
+			if (displayTask && !displayTask.observationRegistry.has(absolutePath)) {
+				const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				if (placeholderStats) {
+					const placeholderVersion = versionTokenOfStat(placeholderStats)
+					displayTask.observationRegistry.observe(absolutePath, placeholderVersion, true)
+					// Remember the placeholder token so a rejected save can remove
+					// the placeholder only while it is still the exact file we wrote.
+					this.placeholderVersion = placeholderVersion
+				}
 			}
 		}
 
@@ -375,7 +402,52 @@ export class DiffViewProvider {
 			// unreachable and the save cannot be guarded.
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
-		await guardedWrite(saveTask, this.relPath, editedContent, "update")
+		try {
+			await guardedWrite(saveTask, this.relPath, editedContent, "update")
+		} catch (error) {
+			// Discard-only failure cleanup. The guard rejected the publish
+			// (stale version, unobserved target, or a partial-read observation),
+			// so the on-disk content is the newer source of truth. Reload it
+			// into the buffer (discarding the rejected edit), remove the empty
+			// new-file placeholder while it is still exactly the file open()
+			// wrote, and close the diff views. Never use revertChanges() here:
+			// it restores originalContent and saves it, which would overwrite
+			// the newer disk content that caused the rejection. Best-effort —
+			// the guard verdict is rethrown below.
+			try {
+				if (updatedDocument.isDirty) {
+					await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
+					await vscode.commands.executeCommand("workbench.action.files.revert")
+				}
+				if (this.editType === "create" && this.placeholderVersion) {
+					const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+					if (placeholderStats && versionTokenOfStat(placeholderStats) === this.placeholderVersion) {
+						await fs.unlink(absolutePath).catch(() => undefined)
+					}
+				}
+				await this.closeAllDiffViews()
+			} catch {
+				// cleanup is best-effort; the guard verdict below is the outcome
+			}
+			throw error
+		}
+
+		// The publish wrote the buffer's exact content to disk, but the
+		// document still carries its pre-save dirty flag and the close helpers
+		// skip dirty tabs. Revert from disk (content is identical — no write,
+		// no token change) to clear the dirty state before the close logic.
+		// document.save() would re-publish through the unguarded VS Code file
+		// service and advance the on-disk token, so the revert is the
+		// content-safe way to clear it.
+		if (updatedDocument.isDirty) {
+			try {
+				await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
+				await vscode.commands.executeCommand("workbench.action.files.revert")
+			} catch {
+				// best-effort: a dirty tab that cannot be cleared stays open
+				// rather than risking a save-prompt loop
+			}
+		}
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -1161,6 +1233,7 @@ export class DiffViewProvider {
 		this.userTouchedDocument = false
 		this.userTouchedDiffEditor = false
 		this.snapshotPreviewTabs = []
+		this.placeholderVersion = undefined
 	}
 
 	/**

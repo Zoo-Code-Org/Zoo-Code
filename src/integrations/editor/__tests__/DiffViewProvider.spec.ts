@@ -1187,6 +1187,122 @@ describe("DiffViewProvider", () => {
 				"Cannot guard the write: the owning task is no longer available",
 			)
 		})
+
+		it("open() keeps the model's existing observation instead of replacing it with the preview token", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/t3-modify.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/t3-modify.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+			// The model read the file before the preview: its observation must
+			// survive so the accept-time guard compares against the version the
+			// model's content was built on, not the on-disk version at preview
+			// time.
+			mockTask.observationRegistry.observe(`${mockCwd}/t3-modify.ts`, "model-token", true)
+
+			await diffViewProvider.open("t3-modify.ts")
+
+			const obs = mockTask.observationRegistry.get(`${mockCwd}/t3-modify.ts`)
+			expect(obs?.version).toBe("model-token")
+			expect(obs?.version).not.toBe(versionTokenOfStat(previewStats))
+			// the stat-matched pair is still taken; only the observation is kept
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
+		})
+
+		it("open() keeps the model's existing observation for a recreated file instead of the placeholder token", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/t3-create.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/t3-create.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+			mockTask.observationRegistry.observe(`${mockCwd}/t3-create.ts`, "model-token", true)
+
+			await diffViewProvider.open("t3-create.ts")
+
+			// the placeholder is still written, but the model's observation wins:
+			// no placeholder stat, no observation replacement, no placeholder
+			// token remembered for cleanup
+			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "")
+			expect(vi.mocked(fs.stat)).not.toHaveBeenCalled()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe("model-token")
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+		})
+
+		it("clears the dirty buffer via a disk revert after a successful guarded publish", async () => {
+			// The user edited the buffer before accepting, so the document is
+			// dirty: the publish wrote the exact buffer content, and the dirty
+			// flag must be cleared by reverting from disk rather than saving the
+			// buffer (which would republish through the unguarded file service).
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+
+			const result = await diffViewProvider.saveChanges(false)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(expect.any(Object), {
+				preserveFocus: true,
+				preview: false,
+			})
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(dirtyEditor.document.save).not.toHaveBeenCalled()
+			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("discards the dirty buffer and removes the new-file placeholder after a guarded rejection, then rethrows", async () => {
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			// open() wrote and observed the empty placeholder; the on-disk token
+			// then moved past it, so the guard rejects the publish.
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved-past-placeholder")
+			diffViewProvider["placeholderVersion"] = placeholderToken
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+			// discard-only cleanup: the newer disk content is reloaded into the
+			// buffer (never re-saved from originalContent), and the placeholder
+			// is unlinked while it is still exactly the file open() wrote
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
 	})
 
 	describe("saveChanges method with diagnostic settings", () => {

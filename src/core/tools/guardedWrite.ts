@@ -211,8 +211,15 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
  *    - observed + create on a file that vanished after the read: recreate;
  *    - observed otherwise: replaceIfVersion (CAS on the S1 version token);
  *    - unobserved + edit: unobservedEditGuard.
- * 3. Runs the chosen guard on the per-path FIFO chain so concurrent writes to
+ * 3. A full-file replacement ("update", or a "create" whose target still
+ *    exists) additionally requires a complete observation: a partial read
+ *    (slice, range, truncated, indentation block) authorizes targeted edits
+ *    only, never a full-file overwrite of the existing content.
+ * 4. Runs the chosen guard on the per-path FIFO chain so concurrent writes to
  *    the same path are deterministically ordered.
+ * 5. After a successful publish, refreshes the observation with the new
+ *    on-disk token (complete) so consecutive writes by the same task do not
+ *    fail stale against the version they just published.
  */
 export async function guardedWrite(
 	task: Task,
@@ -225,43 +232,57 @@ export async function guardedWrite(
 	return enqueue(absolutePath, async () => {
 		const obs = task.observationRegistry.get(absolutePath)
 
-		// A full-file replacement (kind "update") requires the model to have
-		// seen the whole file: an observation recorded from a slice, range,
-		// truncated, or indentation-block read only authorizes the view the
-		// model saw. Publishing a full file built on a partial view would
-		// silently drop everything the model never read, so the guard fails
-		// closed with a re-read-the-whole-file remediation.
-		if (kind === "update" && obs !== undefined && obs.complete === false) {
-			throw new GuardRejectedError(
-				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
-					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
-				absolutePath,
-			)
-		}
-
-		if (obs === undefined) {
-			// Edit-style writes require a prior read: no observation, no write.
-			if (kind === "edit") {
-				await unobservedEditGuard(absolutePath)
-			}
-			// Never read: only an absent target may be created. (The edit guard
-			// above rejects before reaching this line.)
-			await createIfAbsent(absolutePath, content)
-			return
-		}
-
 		if (kind === "edit") {
-			await replaceIfVersion(absolutePath, obs.version, content)
-			return
+			// Edit-style writes require a prior read: no observation, no write.
+			// A targeted edit only authorizes the view the model saw, so a
+			// partial observation is valid for the edit itself; the version
+			// check still rejects a file that moved since the read.
+			if (obs === undefined) {
+				await unobservedEditGuard(absolutePath)
+			} else {
+				await replaceIfVersion(absolutePath, obs.version, content)
+			}
+		} else {
+			// "create" or "update" publish a full file built on the model's
+			// content. A replacement of an existing target -- an "update", or a
+			// "create" whose target is still on disk -- therefore requires a
+			// complete observation: a slice, range, truncated, or
+			// indentation-block read only authorizes the view the model saw, and
+			// publishing over the existing file would silently drop everything
+			// the model never read, so the guard fails closed with a
+			// re-read-the-whole-file remediation. A fresh create (absent target)
+			// needs no prior read and stays allowed.
+			const absent = kind === "create" && (await fileIsAbsent(absolutePath))
+			if (!absent && obs !== undefined && obs.complete === false) {
+				throw new GuardRejectedError(
+					"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+						"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+					absolutePath,
+				)
+			}
+
+			if (obs === undefined) {
+				// Never read: only an absent target may be created.
+				await createIfAbsent(absolutePath, content)
+			} else if (absent) {
+				// A "create" on a file that vanished after the read recreates it.
+				await createIfAbsent(absolutePath, content)
+			} else {
+				// The version recorded at read time must still match the on-disk
+				// token.
+				await replaceIfVersion(absolutePath, obs.version, content)
+			}
 		}
 
-		// kind is "create" or "update": a "create" on a file that vanished
-		// after the read recreates it; otherwise the version recorded at read
-		// time must still match the on-disk token.
-		if (kind === "create" && (await fileIsAbsent(absolutePath))) {
-			await createIfAbsent(absolutePath, content)
-		} else {
-			await replaceIfVersion(absolutePath, obs.version, content)
+		// A successful publish changes the on-disk token (the temp-file rename
+		// changes ino, size, and mtime). The model just wrote the full file
+		// content, so refresh the observation with the new complete token: a
+		// consecutive write by the same task must not fail stale against the
+		// version it just published. Rejected guards throw above, so this only
+		// runs after a publish actually happened.
+		const publishedToken = await computeVersionToken(absolutePath).catch(() => undefined)
+		if (publishedToken !== undefined) {
+			task.observationRegistry.observe(absolutePath, publishedToken, true)
 		}
 	})
 }
