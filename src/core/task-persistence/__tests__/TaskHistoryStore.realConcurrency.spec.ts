@@ -6,10 +6,57 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
-vi.mock("fs/promises", async () => {
-	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-	return { ...actual, readFile: vi.fn(actual.readFile) }
-})
+type WriteTaskFile = (item: HistoryItem, delta?: Partial<HistoryItem>) => Promise<HistoryItem>
+
+interface WriteBarrier {
+	arrivals(): number
+	dispose(): void
+}
+
+function synchronizeNextWrites(stores: TaskHistoryStore[], timeoutMs = 2_000): WriteBarrier {
+	let arrivals = 0
+	let release!: () => void
+	let rejectBarrier!: (error: Error) => void
+	let settled = false
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const barrier = new Promise<void>((resolve, reject) => {
+		rejectBarrier = reject
+		release = () => {
+			if (settled) return
+			settled = true
+			if (timer) clearTimeout(timer)
+			resolve()
+		}
+		timer = setTimeout(() => {
+			if (settled) return
+			settled = true
+			reject(new Error(`Only ${arrivals}/${stores.length} stores reached writeTaskFile within ${timeoutMs}ms`))
+		}, timeoutMs)
+	})
+	void barrier.catch(() => {})
+
+	for (const store of stores) {
+		const value: unknown = Reflect.get(store, "writeTaskFile")
+		if (typeof value !== "function") throw new Error("TaskHistoryStore.writeTaskFile is unavailable")
+		const original = value.bind(store) as WriteTaskFile
+		Reflect.set(store, "writeTaskFile", async (historyItem: HistoryItem, delta?: Partial<HistoryItem>) => {
+			arrivals++
+			if (arrivals === stores.length) release()
+			await barrier
+			return original(historyItem, delta)
+		})
+	}
+
+	return {
+		arrivals: () => arrivals,
+		dispose: () => {
+			if (settled) return
+			settled = true
+			if (timer) clearTimeout(timer)
+			rejectBarrier(new Error("Write barrier disposed before all stores arrived"))
+		},
+	}
+}
 
 function item(id: string): HistoryItem {
 	return {
@@ -37,18 +84,63 @@ function createAction(actionId: string, message: string) {
 }
 
 describe("TaskHistoryStore real cross-host locking", () => {
+	it("preserves independent stale-cache deltas through the real per-file lock", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-real-lock-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		let writeBarrier: WriteBarrier | undefined
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+			writeBarrier = synchronizeNextWrites([storeA, storeB])
+
+			await Promise.all([
+				storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, mode: "architect" })),
+				storeB.atomicReadAndUpdate("shared-task", (current) => ({ ...current, totalCost: 42 })),
+			])
+
+			expect(writeBarrier.arrivals()).toBe(2)
+			await storeA.invalidate("shared-task")
+			expect(storeA.get("shared-task")).toMatchObject({ mode: "architect", totalCost: 42 })
+		} finally {
+			writeBarrier?.dispose()
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("reports a bounded error when one store never reaches the write barrier", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missed-barrier-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		let writeBarrier: WriteBarrier | undefined
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+			writeBarrier = synchronizeNextWrites([storeA, storeB], 50)
+
+			await expect(
+				storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, mode: "architect" })),
+			).rejects.toThrow("Only 1/2 stores reached writeTaskFile within 50ms")
+			expect(writeBarrier.arrivals()).toBe(1)
+		} finally {
+			writeBarrier?.dispose()
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves a replacement pending action when a stale store settles the prior action", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-stale-settlement-"))
 		const storeA = new TaskHistoryStore(storagePath)
 		const storeB = new TaskHistoryStore(storagePath)
-		const actionA = {
-			kind: "create_subtask" as const,
-			actionId: "action-a",
-			approvalText: "{}",
-			mode: "code",
-			message: "action A",
-			todos: [],
-		}
+		const actionA = createAction("action-a", "action A")
 		const actionB = { ...actionA, actionId: "action-b", message: "action B" }
 
 		try {
@@ -216,86 +308,6 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		} finally {
 			storeA.dispose()
 			storeB.dispose()
-			await fs.rm(storagePath, { recursive: true, force: true })
-		}
-	})
-
-	it("serializes deletion after settlement reads disk without recreating the record", async () => {
-		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-during-settlement-"))
-		const storeA = new TaskHistoryStore(storagePath)
-		const storeB = new TaskHistoryStore(storagePath)
-		const action = createAction("action-a", "action A")
-		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
-		let signalReadComplete!: () => void
-		const readComplete = new Promise<void>((resolve) => {
-			signalReadComplete = resolve
-		})
-		let releaseSettlement!: () => void
-		const settlementCanContinue = new Promise<void>((resolve) => {
-			releaseSettlement = resolve
-		})
-
-		try {
-			await storeA.initialize()
-			await storeA.upsert({ ...item("shared-task"), pendingAction: action })
-			await storeB.initialize()
-
-			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-			vi.mocked(fs.readFile).mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
-				const result = await actualFs.readFile(...args)
-				if (args[0] === filePath) {
-					signalReadComplete()
-					await settlementCanContinue
-				}
-				return result
-			})
-
-			const settlement = storeA.clearPendingActionIfMatching("shared-task", action.actionId)
-			await readComplete
-			const deletion = storeB.delete("shared-task")
-			let deletionSettled = false
-			void deletion.finally(() => {
-				deletionSettled = true
-			})
-			await new Promise((resolve) => setTimeout(resolve, 25))
-			expect(deletionSettled).toBe(false)
-
-			releaseSettlement()
-			await expect(settlement).resolves.toMatchObject({ id: "shared-task", pendingAction: undefined })
-			await deletion
-
-			await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" })
-			await expect(storeA.clearPendingActionIfMatching("shared-task", action.actionId)).rejects.toThrow(
-				"task shared-task not found",
-			)
-			expect(storeA.get("shared-task")).toBeUndefined()
-			expect(storeB.get("shared-task")).toBeUndefined()
-		} finally {
-			storeA.dispose()
-			storeB.dispose()
-			await fs.rm(storagePath, { recursive: true, force: true })
-		}
-	})
-
-	it("rejects and evicts stale cache without recreating artifacts after full directory deletion", async () => {
-		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-deleted-directory-settlement-"))
-		const store = new TaskHistoryStore(storagePath)
-		const action = createAction("action-a", "action A")
-		const taskDirectory = path.join(storagePath, "tasks", "shared-task")
-
-		try {
-			await store.initialize()
-			await store.upsert({ ...item("shared-task"), pendingAction: action })
-			await fs.rm(taskDirectory, { recursive: true })
-
-			await expect(store.clearPendingActionIfMatching("shared-task", action.actionId)).rejects.toThrow(
-				"task shared-task not found",
-			)
-			expect(store.get("shared-task")).toBeUndefined()
-			await expect(fs.access(taskDirectory)).rejects.toMatchObject({ code: "ENOENT" })
-			expect(await fs.readdir(path.join(storagePath, "tasks"))).not.toContain("shared-task")
-		} finally {
-			store.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
 		}
 	})

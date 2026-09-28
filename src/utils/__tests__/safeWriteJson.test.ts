@@ -10,7 +10,6 @@ import { safeWriteJson } from "../safeWriteJson"
 // test mockImplementation callbacks delegate to the real implementation.
 const fsPromisesActuals = vi.hoisted(() => ({
 	rename: undefined as (typeof import("fs/promises"))["rename"] | undefined,
-	copyFile: undefined as (typeof import("fs/promises"))["copyFile"] | undefined,
 	unlink: undefined as (typeof import("fs/promises"))["unlink"] | undefined,
 	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
 }))
@@ -18,7 +17,6 @@ const fsPromisesActuals = vi.hoisted(() => ({
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
 	fsPromisesActuals.rename = actual.rename
-	fsPromisesActuals.copyFile = actual.copyFile
 	fsPromisesActuals.unlink = actual.unlink
 	fsPromisesActuals.writeFile = actual.writeFile
 	// Start with all actual implementations.
@@ -30,7 +28,6 @@ vi.mock("fs/promises", async () => {
 	mockedFs.writeFile = vi.fn(actual.writeFile) as any
 	mockedFs.readFile = vi.fn(actual.readFile) as any
 	mockedFs.rename = vi.fn(actual.rename) as any
-	mockedFs.copyFile = vi.fn(actual.copyFile) as typeof actual.copyFile
 	mockedFs.unlink = vi.fn(actual.unlink) as any
 	mockedFs.access = vi.fn(actual.access) as any
 	mockedFs.mkdtemp = vi.fn(actual.mkdtemp) as any
@@ -214,82 +211,6 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(initialData)
 	})
 
-	test("should replace an existing file with one rename when atomicReplace is enabled", async () => {
-		const initialData = { message: "Initial content" }
-		const newData = { message: "New content" }
-		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
-		vi.mocked(fs.rename).mockClear()
-
-		await safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })
-
-		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(1)
-		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(1)
-		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
-	})
-
-	test("should restore the copied backup when atomic replacement fails", async () => {
-		const initialData = { message: "Initial content, should be restored" }
-		const newData = { message: "New content" }
-		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
-		vi.mocked(fs.copyFile).mockClear()
-		vi.mocked(fs.rename).mockClear()
-		vi.mocked(fs.rename).mockRejectedValueOnce(new Error("Atomic replacement failed"))
-
-		await expect(safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })).rejects.toThrow(
-			"Atomic replacement failed",
-		)
-
-		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(2)
-		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(2)
-		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
-	})
-
-	test("should not roll back from an incomplete backup copy", async () => {
-		const initialData = { message: "Initial content" }
-		const newData = { message: "New content" }
-		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
-		vi.mocked(fs.copyFile).mockClear()
-		vi.mocked(fs.rename).mockClear()
-		vi.mocked(fs.copyFile).mockRejectedValueOnce(new Error("Backup copy failed"))
-
-		await expect(safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })).rejects.toThrow(
-			"Backup copy failed",
-		)
-
-		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(1)
-		expect(vi.mocked(fs.rename)).not.toHaveBeenCalled()
-		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
-	})
-
-	test("should preserve the completed backup and remove an incomplete rollback copy when atomic rollback fails", async () => {
-		const initialData = { message: "Initial content" }
-		const newData = { message: "New content" }
-		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-		vi.mocked(fs.rename).mockRejectedValueOnce(new Error("Atomic replacement failed"))
-		vi.mocked(fs.copyFile)
-			.mockImplementationOnce(fsPromisesActuals.copyFile!)
-			.mockImplementationOnce(async (_source, target) => {
-				await fsPromisesActuals.writeFile!(target, "incomplete rollback")
-				throw new Error("Rollback copy failed")
-			})
-
-		await expect(safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })).rejects.toThrow(
-			"Atomic replacement failed",
-		)
-
-		const remainingFiles = await fs.readdir(tempDir)
-		const backupFiles = remainingFiles.filter((file) => file.includes(".bak_"))
-		expect(backupFiles).toHaveLength(1)
-		expect(await readFileContent(path.join(tempDir, backupFiles[0]))).toEqual(initialData)
-		expect(remainingFiles.some((file) => file.includes(".rollback_"))).toBe(false)
-		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Failed to restore backup"),
-			expect.objectContaining({ message: "Rollback copy failed" }),
-		)
-	})
-
 	// Tests for directory creation functionality
 	test("should create parent directory if it doesn't exist", async () => {
 		// Create a path in a non-existent subdirectory of the temp dir
@@ -309,17 +230,6 @@ describe("safeWriteJson", () => {
 		// Verify file was written
 		const content = await readFileContent(filePath)
 		expect(content).toEqual(data)
-	})
-
-	test("should reject without creating the parent directory when parent creation is disabled", async () => {
-		const subDir = path.join(tempDir, "missing-parent")
-		const filePath = path.join(subDir, "file.json")
-
-		await expect(safeWriteJson(filePath, { value: 1 }, { createParentDirectory: false })).rejects.toMatchObject({
-			code: "ENOENT",
-			path: `${filePath}.lock`,
-		})
-		await expect(fs.access(subDir)).rejects.toMatchObject({ code: "ENOENT" })
 	})
 
 	test("should handle multi-level directory creation", async () => {
@@ -477,67 +387,6 @@ describe("safeWriteJson", () => {
 		await fs.unlink(lockTestFilePath).catch(() => {}) // Ignore errors if file doesn't exist
 		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
 	})
-
-	test("rejects with a lock compromise error after a successful write", async () => {
-		vi.resetModules()
-
-		const data = { message: "compromise after success" }
-		const compromiseTestFilePath = path.join(tempDir, "compromise-test-file.json")
-		await fs.writeFile(compromiseTestFilePath, JSON.stringify({ initial: "content" }))
-
-		const compromiseError = Object.assign(new Error("lock was compromised"), { code: "ECOMPROMISED" })
-		vi.doMock("proper-lockfile", () => ({
-			...vi.importActual("proper-lockfile"),
-			lock: vi.fn().mockResolvedValue(vi.fn().mockRejectedValue(compromiseError)),
-		}))
-
-		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
-
-		// The write itself succeeds, but the release reports a compromised
-		// lock, so the operation must reject instead of reporting success.
-		await expect(mockedSafeWriteJson(compromiseTestFilePath, data)).rejects.toBe(compromiseError)
-
-		await fs.unlink(compromiseTestFilePath).catch(() => {})
-		vi.doUnmock("proper-lockfile")
-	})
-
-	test("keeps the original write error when the write fails and the lock was compromised", async () => {
-		vi.resetModules()
-
-		const data = { message: "compromise after failure" }
-		const compromiseTestFilePath = path.join(tempDir, "compromise-failure-test-file.json")
-		await fs.writeFile(compromiseTestFilePath, JSON.stringify({ initial: "content" }))
-
-		const compromiseError = Object.assign(new Error("lock was compromised"), { code: "ECOMPROMISED" })
-		vi.doMock("proper-lockfile", () => ({
-			...vi.importActual("proper-lockfile"),
-			lock: vi.fn().mockResolvedValue(vi.fn().mockRejectedValue(compromiseError)),
-		}))
-
-		const createWriteStreamSpy = vi.spyOn(fsSyncActual, "createWriteStream")
-		createWriteStreamSpy.mockImplementationOnce(() => {
-			// A plain Writable provides the pipe and error surface that
-			// `_streamDataToFile` uses, but not the full WriteStream
-			// interface, so this cast is deliberate.
-			const errorStream = new Writable({
-				write: (_chunk, _encoding, callback) => {
-					callback(new Error("Stream write error"))
-				},
-			}) as unknown as fsSyncActual.WriteStream
-			errorStream.close = vi.fn()
-			return errorStream
-		})
-
-		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
-
-		// The write failure is the primary error and must not be masked by
-		// the compromise reported at release time.
-		await expect(mockedSafeWriteJson(compromiseTestFilePath, data)).rejects.toThrow("Stream write error")
-
-		createWriteStreamSpy.mockRestore()
-		await fs.unlink(compromiseTestFilePath).catch(() => {})
-		vi.doUnmock("proper-lockfile")
-	})
 	test("should release lock even if an error occurs mid-operation", async () => {
 		const data = { message: "test lock release on error" }
 
@@ -637,11 +486,11 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ a: 1, b: 3, c: 4 })
 	})
 
-	test("should pass null to merge callback under the lock when the parent exists but the file does not", async () => {
+	test("should pass null to merge callback when file does not exist", async () => {
 		const newFilePath = path.join(tempDir, "nonexistent.json")
 		const mergeFn = vi.fn((existing, incoming) => incoming)
 
-		await safeWriteJson(newFilePath, { value: 42 }, { createParentDirectory: false, merge: mergeFn })
+		await safeWriteJson(newFilePath, { value: 42 }, { merge: mergeFn })
 
 		expect(mergeFn).toHaveBeenCalledWith(null, { value: 42 })
 		const content = await readFileContent(newFilePath)

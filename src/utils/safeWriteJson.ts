@@ -1,20 +1,13 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
+import * as lockfile from "proper-lockfile"
 import { JsonStreamStringify } from "json-stream-stringify"
-
-import { acquireFileLock, LOCK_STALE_MS } from "./fileLock"
 
 /**
  * Options for safeWriteJson function
  */
 export interface SafeWriteJsonOptions {
-	/**
-	 * Whether to create and verify the target file's parent directory.
-	 * @default true
-	 */
-	createParentDirectory?: boolean
-
 	/**
 	 * Whether to pretty-print the JSON output with indentation.
 	 * When true, uses tab characters for indentation.
@@ -32,14 +25,6 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
-
-	/**
-	 * Replace an existing target with one rename from the completed temporary file.
-	 * A copied backup retains rollback support without removing the target before
-	 * the replacement rename.
-	 * @default false
-	 */
-	atomicReplace?: boolean
 }
 
 /**
@@ -64,23 +49,36 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// For directory creation
 	const dirPath = path.dirname(absoluteFilePath)
 
-	if (options?.createParentDirectory !== false) {
-		// Ensure directory structure exists with improved reliability
-		try {
-			// Create directory with recursive option
-			await fs.mkdir(dirPath, { recursive: true })
+	// Ensure directory structure exists with improved reliability
+	try {
+		// Create directory with recursive option
+		await fs.mkdir(dirPath, { recursive: true })
 
-			// Verify directory exists after creation attempt
-			await fs.access(dirPath)
-		} catch (dirError: any) {
-			console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
-			throw dirError
-		}
+		// Verify directory exists after creation attempt
+		await fs.access(dirPath)
+	} catch (dirError: any) {
+		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
+		throw dirError
 	}
 
 	// Acquire the lock before any file operations
 	try {
-		releaseLock = await acquireFileLock(absoluteFilePath)
+		releaseLock = await lockfile.lock(absoluteFilePath, {
+			stale: LOCK_STALE_MS,
+			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
+			realpath: false, // the file may not exist yet, which is acceptable
+			retries: {
+				// Configuration for retrying lock acquisition
+				retries: 5, // Number of retries after the initial attempt
+				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
+				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
+				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
+			},
+			onCompromised: (err) => {
+				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
+				throw err
+			},
+		})
 	} catch (lockError) {
 		// If lock acquisition fails, we throw immediately.
 		// The releaseLock remains a no-op, so the finally block in the main file operations
@@ -93,7 +91,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
 	let actualTempBackupFilePath: string | null = null
-	let actualTempRollbackFilePath: string | null = null
 
 	try {
 		// If a merge callback was provided, read the current file under the lock
@@ -121,24 +118,23 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Check if the target file exists. If so, retain a rollback backup.
+		// Step 2: Check if the target file exists. If so, rename it to a backup path.
 		try {
+			// Check for target file existence
 			await fs.access(absoluteFilePath)
-			const candidateBackupFilePath = path.join(
+			// Target exists, create a backup path and rename.
+			actualTempBackupFilePath = path.join(
 				path.dirname(absoluteFilePath),
 				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
 			)
-			if (options?.atomicReplace) {
-				await fs.copyFile(absoluteFilePath, candidateBackupFilePath)
-			} else {
-				await fs.rename(absoluteFilePath, candidateBackupFilePath)
-			}
-			actualTempBackupFilePath = candidateBackupFilePath
+			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
 		} catch (accessError: any) {
+			// Explicitly type accessError
 			if (accessError.code !== "ENOENT") {
+				// An error other than "file not found" occurred during access check.
 				throw accessError
 			}
-			actualTempBackupFilePath = null
+			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
 		}
 
 		// Step 3: Rename the new temporary file to the target file path.
@@ -174,18 +170,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// Attempt rollback if a backup was made
 		if (backupFileToRollbackOrCleanupWithinCatch) {
 			try {
-				if (options?.atomicReplace) {
-					actualTempRollbackFilePath = path.join(
-						path.dirname(absoluteFilePath),
-						`.${path.basename(absoluteFilePath)}.rollback_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-					)
-					await fs.copyFile(backupFileToRollbackOrCleanupWithinCatch, actualTempRollbackFilePath)
-					await fs.rename(actualTempRollbackFilePath, absoluteFilePath)
-					actualTempRollbackFilePath = null
-					await fs.unlink(backupFileToRollbackOrCleanupWithinCatch)
-				} else {
-					await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-				}
+				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
 				// Mark as handled, prevent later unlink of this path
 				actualTempBackupFilePath = null
 			} catch (rollbackError) {
@@ -193,19 +178,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				console.error(
 					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
 					rollbackError,
-				)
-			}
-		}
-
-		// A failed rollback can leave an incomplete rollback copy. The completed backup remains available for recovery.
-		if (actualTempRollbackFilePath) {
-			try {
-				await fs.unlink(actualTempRollbackFilePath)
-				actualTempRollbackFilePath = null
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary rollback file ${actualTempRollbackFilePath}:`,
-					cleanupError,
 				)
 			}
 		}
@@ -222,8 +194,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// A copied backup remains available for recovery when atomic rollback fails.
-		if (actualTempBackupFilePath && !options?.atomicReplace) {
+		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
+		if (actualTempBackupFilePath) {
 			try {
 				await fs.unlink(actualTempBackupFilePath)
 			} catch (cleanupError) {
@@ -233,30 +205,17 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				)
 			}
 		}
-		// Release the lock before rejecting. The original write failure is the
-		// rejection and a release failure cannot mask it.
+		throw originalError // This MUST be the error that rejects the promise.
+	} finally {
+		// Release the lock in the main finally block.
 		try {
+			// releaseLock will be the actual unlock function if lock was acquired,
+			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
+			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
 			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 		}
-		throw originalError // This MUST be the error that rejects the promise.
-	}
-
-	// Release the lock on the success path. A compromised lock means this
-	// write ran without mutual exclusion, so reject this operation instead
-	// of reporting success.
-	try {
-		await releaseLock()
-	} catch (unlockError) {
-		const code =
-			unlockError && typeof unlockError === "object" && "code" in unlockError
-				? (unlockError as { code: unknown }).code
-				: undefined
-		if (code === "ECOMPROMISED") {
-			throw unlockError
-		}
-		console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 	}
 }
 
@@ -288,4 +247,6 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 	})
 }
 
-export { LOCK_STALE_MS, safeWriteJson }
+export const LOCK_STALE_MS = 31_000
+
+export { safeWriteJson }

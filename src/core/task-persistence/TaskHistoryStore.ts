@@ -7,8 +7,7 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -267,7 +266,16 @@ export class TaskHistoryStore {
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
-			await this.deleteTaskFile(taskId)
+			this.cache.delete(taskId)
+			this.taskFileMtimes.delete(taskId)
+
+			// Remove per-task file (best-effort)
+			try {
+				const filePath = await this.getTaskFilePath(taskId)
+				await fs.unlink(filePath)
+			} catch {
+				// File may already be deleted
+			}
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -281,30 +289,16 @@ export class TaskHistoryStore {
 	 */
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
-			let deletedCount = 0
-			try {
-				for (const taskId of taskIds) {
-					await this.deleteTaskFile(taskId)
-					deletedCount++
+			for (const taskId of taskIds) {
+				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
+
+				try {
+					const filePath = await this.getTaskFilePath(taskId)
+					await fs.unlink(filePath)
+				} catch {
+					// File may already be deleted
 				}
-			} catch (error) {
-				// Earlier deletions already removed their files and cache entries.
-				// Await the write-through with the current cache before the
-				// original deletion error rejects the call, so persisted
-				// globalState does not keep already-deleted tasks.
-				if (deletedCount > 0 && this.onWrite) {
-					try {
-						await this.onWrite(this.getAll())
-					} catch (writeError) {
-						// The deletion failure is the primary error. Report the
-						// write-through failure without masking it.
-						console.error(
-							"[TaskHistoryStore] deleteMany write-through after partial deletion failed:",
-							writeError,
-						)
-					}
-				}
-				throw error
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -889,34 +883,6 @@ export class TaskHistoryStore {
 		}
 	}
 
-	/**
-	 * Delete one task file under the same advisory lock used by `safeWriteJson`.
-	 * Cache state changes only after the file is absent or unlink succeeds.
-	 */
-	private async deleteTaskFile(taskId: string): Promise<void> {
-		const filePath = await this.getTaskFilePath(taskId)
-		try {
-			await withFileLock(filePath, async (absoluteFilePath) => {
-				try {
-					await fs.unlink(absoluteFilePath)
-				} catch (error) {
-					if (!this.isFileNotFoundError(error)) {
-						throw error
-					}
-				}
-			})
-		} catch (error) {
-			// A missing parent directory prevents lock creation and also proves
-			// that the history file is absent.
-			if (!this.isFileNotFoundError(error)) {
-				throw error
-			}
-		}
-
-		this.cache.delete(taskId)
-		this.taskFileMtimes.delete(taskId)
-	}
-
 	// ────────────────────────────── Private: fs.watch ──────────────────────────────
 
 	/**
@@ -1122,12 +1088,12 @@ export class TaskHistoryStore {
 			let missingDiskRecord = false
 			try {
 				await safeWriteJson(filePath, cached, {
-					createParentDirectory: false,
-					atomicReplace: true,
 					merge: (existing) => {
 						if (!existing || typeof existing !== "object" || !("id" in existing)) {
 							// Writing the cached record back would recreate a task
 							// another host deleted, so drop the stale entry first.
+							// A throwing merge writes nothing, so the deleted
+							// record stays deleted.
 							missingDiskRecord = true
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
@@ -1141,16 +1107,7 @@ export class TaskHistoryStore {
 					},
 				})
 			} catch (error) {
-				const missingLockPath =
-					error &&
-					typeof error === "object" &&
-					"code" in error &&
-					error.code === "ENOENT" &&
-					"path" in error &&
-					error.path === `${filePath}.lock`
-				if (missingDiskRecord || missingLockPath) {
-					this.cache.delete(taskId)
-					this.taskFileMtimes.delete(taskId)
+				if (missingDiskRecord) {
 					throw new Error(
 						`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
 					)

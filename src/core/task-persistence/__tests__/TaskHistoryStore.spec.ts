@@ -10,11 +10,6 @@ import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { ClineProvider } from "../../webview/ClineProvider"
 
-vi.mock("fs/promises", async () => {
-	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-	return { ...actual, unlink: vi.fn(actual.unlink) }
-})
-
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
 		return defaultPath
@@ -27,15 +22,6 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 		await fs.mkdir(path.dirname(filePath), { recursive: true })
 		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
 	}),
-}))
-
-vi.mock("../../../utils/fileLock", () => ({
-	LOCK_STALE_MS: 31_000,
-	withFileLock: vi
-		.fn()
-		.mockImplementation(async (filePath: string, operation: (filePath: string) => Promise<unknown>) =>
-			operation(filePath),
-		),
 }))
 
 function makeHistoryItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
@@ -258,33 +244,6 @@ describe("TaskHistoryStore", () => {
 			await store.initialize()
 			await expect(store.delete("non-existent")).resolves.not.toThrow()
 		})
-
-		it("retains cache state when unlink fails", async () => {
-			await store.initialize()
-			const item = makeHistoryItem({ id: "unlink-failure" })
-			await store.upsert(item)
-			const unlinkError = Object.assign(new Error("unlink failed"), { code: "EACCES" })
-			vi.mocked(fs.unlink).mockRejectedValueOnce(unlinkError)
-
-			await expect(store.delete(item.id)).rejects.toBe(unlinkError)
-			expect(store.get(item.id)).toEqual(item)
-		})
-
-		it("retains cache state when lock acquisition fails", async () => {
-			const onWrite = vi.fn().mockResolvedValue(undefined)
-			store = new TaskHistoryStore(tmpDir, { onWrite })
-			await store.initialize()
-			const item = makeHistoryItem({ id: "lock-failure" })
-			await store.upsert(item)
-			onWrite.mockClear()
-			const { withFileLock } = await import("../../../utils/fileLock")
-			const lockError = new Error("lock failed")
-			vi.mocked(withFileLock).mockRejectedValueOnce(lockError)
-
-			await expect(store.delete(item.id)).rejects.toBe(lockError)
-			expect(store.get(item.id)).toEqual(item)
-			expect(onWrite).not.toHaveBeenCalled()
-		})
 	})
 
 	describe("deleteMany()", () => {
@@ -299,111 +258,6 @@ describe("TaskHistoryStore", () => {
 			await store.deleteMany(["batch-1", "batch-3"])
 			expect(store.getAll()).toHaveLength(1)
 			expect(store.get("batch-2")).toBeDefined()
-		})
-
-		it("retains the failed item and later items when unlink fails", async () => {
-			await store.initialize()
-			const first = makeHistoryItem({ id: "batch-success" })
-			const failed = makeHistoryItem({ id: "batch-failure" })
-			const later = makeHistoryItem({ id: "batch-later" })
-			await store.upsert(first)
-			await store.upsert(failed)
-			await store.upsert(later)
-			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-			const unlinkError = Object.assign(new Error("unlink failed"), { code: "EACCES" })
-			vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
-				if (filePath.toString().includes(failed.id)) {
-					throw unlinkError
-				}
-				return actualFs.unlink(filePath)
-			})
-
-			await expect(store.deleteMany([first.id, failed.id, later.id])).rejects.toBe(unlinkError)
-			expect(store.get(first.id)).toBeUndefined()
-			expect(store.get(failed.id)).toEqual(failed)
-			expect(store.get(later.id)).toEqual(later)
-		})
-
-		it("flushes the write-through with the current cache when a later deletion fails", async () => {
-			store.dispose()
-			const globalState: HistoryItem[] = []
-			const onWrite = vi.fn(async (items: HistoryItem[]) => {
-				globalState.splice(0, globalState.length, ...items)
-			})
-			store = new TaskHistoryStore(tmpDir, { onWrite })
-			await store.initialize()
-
-			const first = makeHistoryItem({ id: "batch-wt-success" })
-			const failed = makeHistoryItem({ id: "batch-wt-failure" })
-			const later = makeHistoryItem({ id: "batch-wt-later" })
-			await store.upsert(first)
-			await store.upsert(failed)
-			await store.upsert(later)
-
-			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-			const unlinkError = Object.assign(new Error("unlink failed"), { code: "EACCES" })
-			vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
-				if (filePath.toString().includes(failed.id)) {
-					throw unlinkError
-				}
-				return actualFs.unlink(filePath)
-			})
-
-			await expect(store.deleteMany([first.id, failed.id, later.id])).rejects.toBe(unlinkError)
-
-			// The earlier deleted task is evicted from the store cache.
-			expect(store.get(first.id)).toBeUndefined()
-			// The awaited write-through persisted that state before the original
-			// deletion error rejected the call, so stale globalState cannot
-			// return the deleted task.
-			expect(globalState.find((item) => item.id === first.id)).toBeUndefined()
-			expect(globalState.find((item) => item.id === failed.id)).toEqual(failed)
-			expect(globalState.find((item) => item.id === later.id)).toEqual(later)
-
-			vi.mocked(fs.unlink).mockImplementation(async (filePath) => actualFs.unlink(filePath))
-		})
-
-		it("keeps the original deletion error when the partial write-through also fails", async () => {
-			store.dispose()
-			const onWrite = vi.fn()
-			// Three upserts succeed, then the partial-failure flush rejects.
-			onWrite
-				.mockResolvedValueOnce(undefined)
-				.mockResolvedValueOnce(undefined)
-				.mockResolvedValueOnce(undefined)
-				.mockRejectedValueOnce(new Error("write-through failed"))
-			store = new TaskHistoryStore(tmpDir, { onWrite })
-			await store.initialize()
-
-			const first = makeHistoryItem({ id: "batch-wt2-success" })
-			const failed = makeHistoryItem({ id: "batch-wt2-failure" })
-			const later = makeHistoryItem({ id: "batch-wt2-later" })
-			await store.upsert(first)
-			await store.upsert(failed)
-			await store.upsert(later)
-
-			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-			const unlinkError = Object.assign(new Error("unlink failed"), { code: "EACCES" })
-			vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
-				if (filePath.toString().includes(failed.id)) {
-					throw unlinkError
-				}
-				return actualFs.unlink(filePath)
-			})
-
-			// The deletion failure is the primary error and must not be masked
-			// by the failed write-through.
-			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
-			await expect(store.deleteMany([first.id, failed.id, later.id])).rejects.toBe(unlinkError)
-			expect(onWrite).toHaveBeenCalledTimes(4)
-			expect(onWrite.mock.calls[3][0].map((item: HistoryItem) => item.id)).not.toContain(first.id)
-			expect(consoleError).toHaveBeenCalledWith(
-				"[TaskHistoryStore] deleteMany write-through after partial deletion failed:",
-				expect.objectContaining({ message: "write-through failed" }),
-			)
-			consoleError.mockRestore()
-
-			vi.mocked(fs.unlink).mockImplementation(async (filePath) => actualFs.unlink(filePath))
 		})
 	})
 

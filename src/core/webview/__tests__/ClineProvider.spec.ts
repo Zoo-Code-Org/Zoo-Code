@@ -87,7 +87,6 @@ vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
-	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
 }))
 
 vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
