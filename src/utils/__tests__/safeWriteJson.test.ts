@@ -240,8 +240,54 @@ describe("safeWriteJson", () => {
 		)
 
 		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(2)
-		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(2)
 		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
+	})
+
+	test("should not roll back from an incomplete backup copy", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+		vi.mocked(fs.copyFile).mockClear()
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.copyFile).mockRejectedValueOnce(new Error("Backup copy failed"))
+
+		await expect(safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })).rejects.toThrow(
+			"Backup copy failed",
+		)
+
+		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(fs.rename)).not.toHaveBeenCalled()
+		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
+	})
+
+	test("should preserve the completed backup and remove an incomplete rollback copy when atomic rollback fails", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(fs.rename).mockRejectedValueOnce(new Error("Atomic replacement failed"))
+		vi.mocked(fs.copyFile)
+			.mockImplementationOnce(fsPromisesActuals.copyFile!)
+			.mockImplementationOnce(async (_source, target) => {
+				await fsPromisesActuals.writeFile!(target, "incomplete rollback")
+				throw new Error("Rollback copy failed")
+			})
+
+		await expect(safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })).rejects.toThrow(
+			"Atomic replacement failed",
+		)
+
+		const remainingFiles = await fs.readdir(tempDir)
+		const backupFiles = remainingFiles.filter((file) => file.includes(".bak_"))
+		expect(backupFiles).toHaveLength(1)
+		expect(await readFileContent(path.join(tempDir, backupFiles[0]))).toEqual(initialData)
+		expect(remainingFiles.some((file) => file.includes(".rollback_"))).toBe(false)
+		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to restore backup"),
+			expect.objectContaining({ message: "Rollback copy failed" }),
+		)
 	})
 
 	// Tests for directory creation functionality

@@ -107,6 +107,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
 	let actualTempBackupFilePath: string | null = null
+	let actualTempRollbackFilePath: string | null = null
 
 	try {
 		// If a merge callback was provided, read the current file under the lock
@@ -137,15 +138,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// Step 2: Check if the target file exists. If so, retain a rollback backup.
 		try {
 			await fs.access(absoluteFilePath)
-			actualTempBackupFilePath = path.join(
+			const candidateBackupFilePath = path.join(
 				path.dirname(absoluteFilePath),
 				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
 			)
 			if (options?.atomicReplace) {
-				await fs.copyFile(absoluteFilePath, actualTempBackupFilePath)
+				await fs.copyFile(absoluteFilePath, candidateBackupFilePath)
 			} else {
-				await fs.rename(absoluteFilePath, actualTempBackupFilePath)
+				await fs.rename(absoluteFilePath, candidateBackupFilePath)
 			}
+			actualTempBackupFilePath = candidateBackupFilePath
 		} catch (accessError: any) {
 			if (accessError.code !== "ENOENT") {
 				throw accessError
@@ -187,7 +189,13 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (backupFileToRollbackOrCleanupWithinCatch) {
 			try {
 				if (options?.atomicReplace) {
-					await fs.copyFile(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
+					actualTempRollbackFilePath = path.join(
+						path.dirname(absoluteFilePath),
+						`.${path.basename(absoluteFilePath)}.rollback_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+					)
+					await fs.copyFile(backupFileToRollbackOrCleanupWithinCatch, actualTempRollbackFilePath)
+					await fs.rename(actualTempRollbackFilePath, absoluteFilePath)
+					actualTempRollbackFilePath = null
 					await fs.unlink(backupFileToRollbackOrCleanupWithinCatch)
 				} else {
 					await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
@@ -199,6 +207,19 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				console.error(
 					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
 					rollbackError,
+				)
+			}
+		}
+
+		// A failed rollback can leave an incomplete rollback copy. The completed backup remains available for recovery.
+		if (actualTempRollbackFilePath) {
+			try {
+				await fs.unlink(actualTempRollbackFilePath)
+				actualTempRollbackFilePath = null
+			} catch (cleanupError) {
+				console.error(
+					`[Catch] Failed to clean up temporary rollback file ${actualTempRollbackFilePath}:`,
+					cleanupError,
 				)
 			}
 		}
@@ -215,8 +236,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
+		// A copied backup remains available for recovery when atomic rollback fails.
+		if (actualTempBackupFilePath && !options?.atomicReplace) {
 			try {
 				await fs.unlink(actualTempBackupFilePath)
 			} catch (cleanupError) {
