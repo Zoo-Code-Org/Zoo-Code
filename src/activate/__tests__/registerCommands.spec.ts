@@ -1010,11 +1010,13 @@ describe("openClineInNewTab", () => {
 
 		// ...the failed panel is disposed...
 		expect(broken.dispose).toHaveBeenCalledTimes(1)
-		// ...the provider is disposed so it cannot linger as an orphaned
-		// active instance... and no active instance is left pointing at the
-		// failed panel.
+		// ...and the provider's own dispose runs in the failure path so it
+		// cannot linger as an orphaned active instance. The activeInstances
+		// removal itself is proven with a real provider in
+		// ClineProvider.spec.ts: this harness mocks the provider module, and a
+		// getInstanceForView assertion here would be vacuous because the
+		// mocked resolver never assigns the panel to provider.view.
 		expect(disposeSpy).toHaveBeenCalledTimes(1)
-		expect(ClineProvider.getInstanceForView(broken)).toBeUndefined()
 		// ...and its disposal handler was registered despite the failure. The
 		// mock panel does not wire dispose to the handler, so fire it manually
 		// to prove the cleanup it performs: the tracked ref is cleared with no

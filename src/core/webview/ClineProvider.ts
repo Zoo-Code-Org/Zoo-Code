@@ -1195,62 +1195,77 @@ export class ClineProvider
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
 
-		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
-		// so an active delegated child is marked interrupted before the extension shuts down,
-		// rather than being left persisted as "active" across the reload.
-		if (this.taskRegistry.length > 0) {
-			const task = this.taskRegistry.current!
-			await this.evictCurrentTask()
-			await this.drainTaskDisposal(task)
-		}
-		while (this.taskRegistry.length > 0) {
-			const task = this.taskRegistry.current!
-			await this.removeClineFromStack()
-			await this.drainTaskDisposal(task)
-		}
-
-		this.log("Cleared all tasks")
-
-		// Clear all pending edit operations to prevent memory leaks
-		this.clearAllPendingEditOperations()
-		this.log("Cleared pending operations")
-
-		if (this.view && "dispose" in this.view) {
-			this.view.dispose()
-			this.log("Disposed webview")
-		}
-
-		this.clearWebviewResources()
-
-		// Clean up cloud service event listener
-		if (CloudService.hasInstance()) {
-			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
-		}
-
-		while (this.disposables.length) {
-			const x = this.disposables.pop()
-
-			if (x) {
-				x.dispose()
+		// Cleanup steps (task eviction, MCP/skills/marketplace teardown) can
+		// reject. _disposed is already set, so no caller can retry disposal:
+		// a failure must not skip the release steps below, and the first error
+		// is preserved and reported once they have run.
+		let cleanupError: unknown
+		try {
+			// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
+			// so an active delegated child is marked interrupted before the extension shuts down,
+			// rather than being left persisted as "active" across the reload.
+			if (this.taskRegistry.length > 0) {
+				const task = this.taskRegistry.current!
+				await this.evictCurrentTask()
+				await this.drainTaskDisposal(task)
 			}
+			while (this.taskRegistry.length > 0) {
+				const task = this.taskRegistry.current!
+				await this.removeClineFromStack()
+				await this.drainTaskDisposal(task)
+			}
+
+			this.log("Cleared all tasks")
+
+			// Clear all pending edit operations to prevent memory leaks
+			this.clearAllPendingEditOperations()
+			this.log("Cleared pending operations")
+
+			if (this.view && "dispose" in this.view) {
+				this.view.dispose()
+				this.log("Disposed webview")
+			}
+
+			this.clearWebviewResources()
+
+			// Clean up cloud service event listener
+			if (CloudService.hasInstance()) {
+				CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
+			}
+
+			while (this.disposables.length) {
+				const x = this.disposables.pop()
+
+				if (x) {
+					x.dispose()
+				}
+			}
+
+			this._workspaceTracker?.dispose()
+			this._workspaceTracker = undefined
+			await this.mcpHub?.unregisterClient()
+			this.mcpHub = undefined
+			await this.skillsManager?.dispose()
+			this.skillsManager = undefined
+			await this.marketplaceManager?.cleanup()
+			this.customModesManager?.dispose()
+			this.taskHistoryStore.dispose()
+			this.log("Disposed all disposables")
+		} catch (error) {
+			cleanupError = error
+			this.log(`Provider cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
 		}
 
-		this._workspaceTracker?.dispose()
-		this._workspaceTracker = undefined
-		await this.mcpHub?.unregisterClient()
-		this.mcpHub = undefined
-		await this.skillsManager?.dispose()
-		this.skillsManager = undefined
-		await this.marketplaceManager?.cleanup()
-		this.customModesManager?.dispose()
-		this.taskHistoryStore.dispose()
-		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 
 		// Clean up any event listeners attached to this provider
 		this.removeAllListeners()
 
 		McpServerManager.unregisterProvider(this)
+
+		if (cleanupError !== undefined) {
+			throw cleanupError
+		}
 	}
 
 	public static getVisibleInstance(): ClineProvider | undefined {

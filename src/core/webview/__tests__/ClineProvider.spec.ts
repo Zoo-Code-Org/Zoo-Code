@@ -1106,6 +1106,41 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("active instance tracking", () => {
+		it("removes the provider from active instances when dispose completes", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			// A live provider is tracked...
+			expect(ClineProvider.getAllInstances()).toContain(provider)
+
+			await provider.dispose()
+
+			// ...and disposal releases it.
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		})
+
+		it("releases the provider and reports the failure when a cleanup step rejects", async () => {
+			// Force a cleanup step inside dispose() to reject. _disposed is set
+			// before cleanup runs, so the provider must still be released from
+			// activeInstances and the error must surface to the caller instead
+			// of being swallowed.
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const taskHistoryDispose = vi.spyOn(provider.taskHistoryStore, "dispose").mockImplementation(() => {
+				throw new Error("task history store dispose failed")
+			})
+
+			expect(ClineProvider.getAllInstances()).toContain(provider)
+
+			await expect(provider.dispose()).rejects.toThrow("task history store dispose failed")
+
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+			// The idempotency guard still holds: a second dispose is a no-op.
+			await provider.dispose()
+
+			taskHistoryDispose.mockRestore()
+		})
+	})
+
 	describe("saveViewState", () => {
 		it("should update viewLocalState and persist mode through registered viewStates", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
