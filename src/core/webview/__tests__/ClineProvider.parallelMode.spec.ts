@@ -1087,6 +1087,65 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider.dispose()
 		})
+
+		it("should re-pin a live sibling view that pins the deleted profile when the deleting view has no pin", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			// B pins the doomed profile without an overlay (a fresh pin via setValue).
+			await providerB.setValue("currentApiConfigName", "doomed-profile")
+
+			// A has no profile pin of its own; the shared selection names the doomed profile.
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await providerA.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+
+			// Structural cast: the env mock shapes activateProfile/getProfile results uniformly.
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "repl-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// The pre-return re-pin resolves the replacement's settings through the manager.
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (_args: { name?: string; id?: string }) =>
+					({
+						name: "replacement-profile",
+						id: "replacement-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterBaseUrl: "repl-url",
+					}) as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>,
+			)
+
+			await providerA.deleteProviderProfile({
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			// B must be re-pointed at the replacement with the replacement's settings,
+			// not left buffered on the deleted profile's name and configuration.
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("replacement-profile")
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "repl-url",
+			})
+			expect((await providerB.getState()).currentApiConfigName).toBe("replacement-profile")
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
 	})
 
 	describe("provider profile activation", () => {
