@@ -1130,7 +1130,12 @@ describe("writeToFileTool", () => {
 			})
 
 			// The parse error is still reported, and the open partial ask is finalized first.
+			// No argument: BaseTool.handle() calls finalizePartialToolAsk() with no text, so a
+			// mutation passing wrong text would leave findLast() unmatched and the spinner
+			// stuck. (toHaveBeenCalledWith(undefined) does not match a no-arg call under
+			// vitest's matcher semantics: [] is not equal to [undefined].)
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith()
 			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 		})
 
@@ -1158,7 +1163,10 @@ describe("writeToFileTool", () => {
 					pushToolResult: vi.fn(),
 				})
 
+				// Same no-argument contract as the sibling test above: the finalize call in
+				// BaseTool.handle() carries no text.
 				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					"Error finalizing write_to_file partial tool ask:",
 					expect.any(Error),
