@@ -924,6 +924,20 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await mockContext.globalState.update("viewStates", {
 				"view-deleted": { mode: "architect", currentApiConfigName: "doomed-profile", updatedAt: 2 },
 			})
+			// Pin the branch itself: a view following a shared selection that names the
+			// deleted profile would take the activation path, so a pinned view must take
+			// the fallback. The fallback resolves the survivor's settings through the
+			// profile manager and writes them to the shared provider settings.
+			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				async (_args: { name?: string; id?: string }) =>
+					({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterApiKey: "keeper-key",
+					}) as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+			)
 
 			await provider.deleteProviderProfile({
 				id: "doomed-id",
@@ -939,6 +953,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(mockContext.globalState.get("currentApiConfigName")).toBe("keeper-profile")
 			// ... and this view's own pin is left untouched.
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			// The view took the fallback, not the activation path ...
+			expect(activateSpy).not.toHaveBeenCalled()
+			// ... and the shared provider settings carry the survivor's configuration
+			// instead of the deleted profile's.
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				openRouterApiKey: "keeper-key",
+			})
 
 			await provider.dispose()
 		})

@@ -2542,6 +2542,10 @@ export class ClineProvider
 		// settings still carry its configuration.
 		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
+		// Stryker disable next-line ConditionalExpression: in this fallback the view
+		// does not pin the deleted profile, so when the deleted profile was not the
+		// shared selection profileToActivate equals the shared selection itself;
+		// forcing the branch only rewrites that same value back into the store.
 		if (deletedWasGlobal) {
 			// The shared selection changed, but this view's own pin (if any) still
 			// names a surviving profile: update the shared store only, leaving the
@@ -4043,9 +4047,20 @@ export class ClineProvider
 	 */
 	async broadcastResetToAllInstances(): Promise<void> {
 		const allInstances = ClineProvider.getAllInstances()
+
+		// The durable per-view selections live in one shared global-state slot, so
+		// the reset needs exactly one durable clear. Route it through the persisted
+		// write queue (and run it before the in-memory clears): a per-instance clear
+		// outside the queue could interleave with a queued view-state write and
+		// either clobber that write or leave a re-created entry behind.
+		const clearWrite = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			await this.contextProxy.setValue("viewStates", undefined)
+		})
+		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
+		await clearWrite
+
 		for (const instance of allInstances) {
 			instance._clearViewLocalState()
-			await instance.contextProxy.setValue("viewStates", undefined)
 
 			if (instance !== this) {
 				// A sibling's post can throw mid-reset (state generation reaches the
