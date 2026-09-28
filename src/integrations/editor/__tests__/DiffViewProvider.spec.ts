@@ -1246,6 +1246,32 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["placeholderVersion"]).toBe(placeholderToken)
 		})
 
+		it("open() on a create with a collected task writes the placeholder but tracks nothing", async () => {
+			// The task has been collected (dead WeakRef): the placeholder is still
+			// written (the file must exist to open the diff), but there is no live
+			// task to observe - the later save fails closed through the taskRef
+			// fail-closed path.
+			const mockEditor = mockTextEditor(`${mockCwd}/t3-dead-task.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/t3-dead-task.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+			diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
+
+			await diffViewProvider.open("t3-dead-task.ts")
+
+			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-dead-task.ts`, "")
+			// no live task: nothing observed, nothing remembered for cleanup
+			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-dead-task.ts`)).toBeUndefined()
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+		})
+
 		it("saveChanges() accepts a recreate after a prior read - the accept-time CAS checks the placeholder token", async () => {
 			// The exact recreate-always-failed trace: the model read the file
 			// (observed "v1" by the outer beforeEach), the file then vanished,
