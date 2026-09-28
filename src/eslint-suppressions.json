@@ -1306,7 +1306,7 @@
 	},
 	"services/code-index/__tests__/orchestrator.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 23
 		}
 	},
 	"services/code-index/__tests__/service-factory.spec.ts": {
@@ -1385,11 +1385,6 @@
 		}
 	},
 	"services/code-index/interfaces/vector-store.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/orchestrator.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
 		}

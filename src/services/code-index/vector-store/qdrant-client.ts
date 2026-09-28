@@ -144,7 +144,7 @@ export class QdrantVectorStore implements IVectorStore {
 
 	/**
 	 * Initializes the vector store
-	 * @returns Promise resolving to boolean indicating if a new collection was created
+	 * @returns Whether a new collection was created, including recreation after a dimension change
 	 */
 	async initialize(): Promise<boolean> {
 		let created = false
@@ -581,9 +581,20 @@ export class QdrantVectorStore implements IVectorStore {
 	}
 
 	/**
-	 * Checks if the collection exists and has indexed points
-	 * @returns Promise resolving to boolean indicating if the collection exists and has points
+	 * Checks actual data presence independently of the indexing completion marker.
+	 * Errors propagate so recovery cannot mistake an unreadable collection for an empty one.
 	 */
+	async hasCodePoints(): Promise<boolean> {
+		const result = await this.client.scroll(this.collectionName, {
+			filter: { must_not: [{ key: "type", match: { value: "metadata" } }] },
+			limit: 1,
+			with_payload: false,
+			with_vector: false,
+		})
+		return result.points.length > 0
+	}
+
+	/** Checks index readiness, retaining legacy completion-marker semantics. */
 	async hasIndexedData(): Promise<boolean> {
 		try {
 			const collectionInfo = await this.getCollectionInfo()

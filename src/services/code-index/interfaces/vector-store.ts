@@ -10,7 +10,7 @@ export type PointStruct = {
 export interface IVectorStore {
 	/**
 	 * Initializes the vector store
-	 * @returns Promise resolving to boolean indicating if a new collection was created
+	 * @returns Whether a new collection was created, including recreation after a dimension change
 	 */
 	initialize(): Promise<boolean>
 
@@ -64,10 +64,16 @@ export interface IVectorStore {
 	collectionExists(): Promise<boolean>
 
 	/**
-	 * Checks if the collection exists and has indexed points
-	 * @returns Promise resolving to boolean indicating if the collection exists and has points
+	 * Checks index readiness using completion metadata (or legacy point count without a marker).
+	 * Returns false for incomplete indexes or read errors; not suitable for authorizing cleanup.
 	 */
 	hasIndexedData(): Promise<boolean>
+
+	/**
+	 * Checks for non-metadata points in an initialized collection, regardless of completion status.
+	 * Rejects on query failure: unknown contents must not be treated as an empty collection.
+	 */
+	hasCodePoints(): Promise<boolean>
 
 	/**
 	 * Marks the indexing process as complete by storing metadata

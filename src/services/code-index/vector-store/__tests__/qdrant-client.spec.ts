@@ -39,6 +39,7 @@ const mockQdrantClientInstance = {
 	createPayloadIndex: vitest.fn(),
 	upsert: vitest.fn(),
 	query: vitest.fn(),
+	scroll: vi.fn<QdrantClient["scroll"]>(),
 	delete: vitest.fn(),
 }
 
@@ -73,6 +74,39 @@ describe("QdrantVectorStore", () => {
 		;(getWorkspacePath as any).mockReturnValue(mockWorkspacePath)
 
 		vectorStore = new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize, mockApiKey)
+	})
+
+	it.each([
+		{ name: "empty", complete: undefined, hasCode: false },
+		{ name: "incomplete metadata only", complete: false, hasCode: false },
+		{ name: "complete metadata only", complete: true, hasCode: false },
+		{ name: "incomplete index", complete: false, hasCode: true },
+		{ name: "complete index", complete: true, hasCode: true },
+		{ name: "legacy index", complete: undefined, hasCode: true },
+	])("detects actual code points in $name", async ({ complete, hasCode }) => {
+		const points = [
+			...(complete === undefined
+				? []
+				: [{ id: "metadata", payload: { type: "metadata", indexing_complete: complete } }]),
+			...(hasCode ? [{ id: "code", payload: { filePath: "existing.ts" } }] : []),
+		]
+		mockQdrantClientInstance.scroll.mockImplementation(async (_collection, request) => {
+			expect(request).toEqual({
+				filter: { must_not: [{ key: "type", match: { value: "metadata" } }] },
+				limit: 1,
+				with_payload: false,
+				with_vector: false,
+			})
+			return { points: points.filter((point) => !("type" in point.payload)).slice(0, 1) }
+		})
+		await expect(vectorStore.hasCodePoints()).resolves.toBe(hasCode)
+		expect(mockQdrantClientInstance.scroll).toHaveBeenCalledWith(expectedCollectionName, expect.any(Object))
+	})
+
+	it("propagates code-point query errors instead of reporting an empty collection", async () => {
+		const error = new Error("Qdrant unavailable")
+		mockQdrantClientInstance.scroll.mockRejectedValue(error)
+		await expect(vectorStore.hasCodePoints()).rejects.toBe(error)
 	})
 
 	it("should correctly initialize QdrantClient and collectionName in constructor", () => {

@@ -39,21 +39,24 @@ vi.mock("../parser", () => ({
 }))
 
 const createMockEventEmitter = () => {
+	let disposed = false
 	const listeners = new Set<(event: any) => void>()
 
 	return {
 		event: vi.fn((listener: (event: any) => void) => {
-			listeners.add(listener)
+			if (!disposed) listeners.add(listener)
 			return {
 				dispose: () => listeners.delete(listener),
 			}
 		}),
 		fire: vi.fn((event: any) => {
+			if (disposed) return
 			for (const listener of listeners) {
 				listener(event)
 			}
 		}),
 		dispose: vi.fn(() => {
+			disposed = true
 			listeners.clear()
 		}),
 	}
@@ -88,6 +91,101 @@ vi.mock("vscode", () => ({
 }))
 
 describe("FileWatcher", () => {
+	it("does not deliver an old batch into subscriptions created after restart", async () => {
+		await fileWatcher.initialize()
+		let release!: () => void
+		let notifyStarted!: () => void
+		const started = new Promise<void>((resolve) => {
+			notifyStarted = resolve
+		})
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		vi.spyOn(fileWatcher, "processFile").mockImplementationOnce(async (path) => {
+			notifyStarted()
+			await blocked
+			return { path, status: "skipped", reason: "test" }
+		})
+		await mockOnDidCreate(vscode.Uri.file("/mock/workspace/old.ts"))
+		const processing = flushBatch()
+		await started
+		fileWatcher.dispose()
+		await fileWatcher.initialize()
+		const progress = vi.fn()
+		const finished = vi.fn()
+		fileWatcher.onBatchProgressUpdate(progress)
+		fileWatcher.onDidFinishBatchProcessing(finished)
+		release()
+		await processing
+		expect(progress).not.toHaveBeenCalled()
+		expect(finished).not.toHaveBeenCalled()
+		await mockOnDidCreate(vscode.Uri.file("/mock/workspace/new.ts"))
+		await flushBatch()
+		expect(progress).toHaveBeenCalled()
+		expect(finished).toHaveBeenCalledOnce()
+	})
+
+	it("restores all batch events after disposal and reinitialization", async () => {
+		vi.mocked(vscode.workspace.createFileSystemWatcher).mockClear()
+		await fileWatcher.initialize()
+		const oldListener = vi.fn()
+		fileWatcher.onDidFinishBatchProcessing(oldListener)
+		fileWatcher.dispose()
+		await fileWatcher.initialize()
+		const started = vi.fn()
+		const progress = vi.fn()
+		const finished = vi.fn()
+		fileWatcher.onDidStartBatchProcessing(started)
+		fileWatcher.onBatchProgressUpdate(progress)
+		fileWatcher.onDidFinishBatchProcessing(finished)
+		fileWatcher["_onDidStartBatchProcessing"].fire(["file.ts"])
+		fileWatcher["_onBatchProgressUpdate"].fire({ processedInBatch: 1, totalInBatch: 1 })
+		fileWatcher["_onDidFinishBatchProcessing"].fire({ processedFiles: [] })
+		expect(started).toHaveBeenCalledOnce()
+		expect(progress).toHaveBeenCalledOnce()
+		expect(finished).toHaveBeenCalledOnce()
+		expect(oldListener).not.toHaveBeenCalled()
+		expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(2)
+	})
+
+	it("does not create duplicate native watchers on repeated initialization", async () => {
+		vi.mocked(vscode.workspace.createFileSystemWatcher).mockClear()
+		await fileWatcher.initialize()
+		await fileWatcher.initialize()
+		expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledOnce()
+	})
+	it("reports progress and preserves cached hashes when batch deletion fails", async () => {
+		await fileWatcher.initialize()
+		const error = new Error("deletion failed")
+		mockVectorStore.deletePointsByMultipleFilePaths.mockRejectedValueOnce(error)
+		const progress = vi.fn()
+		const finished = vi.fn()
+		fileWatcher.onBatchProgressUpdate(progress)
+		fileWatcher.onDidFinishBatchProcessing(finished)
+		const paths = ["/mock/workspace/first.ts", "/mock/workspace/second.ts"]
+
+		for (const path of paths) {
+			await mockOnDidDelete(vscode.Uri.file(path))
+		}
+		await flushBatch()
+
+		expect(mockVectorStore.deletePointsByMultipleFilePaths).toHaveBeenCalledExactlyOnceWith(paths)
+		expect(progress.mock.calls).toEqual([
+			[{ processedInBatch: 0, totalInBatch: 2, currentFile: undefined }],
+			[{ processedInBatch: 1, totalInBatch: 2, currentFile: paths[0] }],
+			[{ processedInBatch: 2, totalInBatch: 2, currentFile: paths[1] }],
+			[{ processedInBatch: 2, totalInBatch: 2 }],
+			[{ processedInBatch: 0, totalInBatch: 0, currentFile: undefined }],
+		])
+		expect(finished).toHaveBeenCalledExactlyOnceWith({
+			processedFiles: paths.map((path) => ({ path, status: "error", error })),
+			batchError: error,
+		})
+		expect(mockCacheManager.deleteHash).not.toHaveBeenCalled()
+		expect(mockCacheManager.updateHash).not.toHaveBeenCalled()
+		expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
+	})
+
 	let fileWatcher: FileWatcher
 	let mockWatcher: any
 	let mockOnDidCreate: any
