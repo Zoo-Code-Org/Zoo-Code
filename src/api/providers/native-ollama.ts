@@ -37,9 +37,10 @@ function createAbortError(): Error {
 /**
  * Races `pending` against `signal`: if the signal aborts before the promise
  * settles, the returned promise rejects with an AbortError instead of
- * resolving with a stale result. The Ollama model-discovery fetch accepts no
- * signal, so the underlying request is left to settle in the background
- * rather than being cancelled.
+ * resolving with a stale result. The abort listener is removed as soon as
+ * `pending` settles (in either direction), so a reusable caller signal does
+ * not accumulate one listener per race; a cancelled in-flight request still
+ * settles in the background.
  */
 export function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
 	if (!signal) {
@@ -49,8 +50,18 @@ export function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal 
 		return Promise.reject(createAbortError())
 	}
 	return new Promise<T>((resolve, reject) => {
-		signal.addEventListener("abort", () => reject(createAbortError()))
-		pending.then(resolve, reject)
+		const onAbort = () => reject(createAbortError())
+		signal.addEventListener("abort", onAbort)
+		pending.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
 	})
 }
 
@@ -465,10 +476,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				externalAbortSignal.addEventListener("abort", onExternalAbort)
 			}
 
-			// Race model discovery against the external signal: the SDK's model
-			// fetch accepts no signal, so a request aborted during discovery must
-			// reject instead of proceeding to chat() with a stale model.
-			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(), externalAbortSignal)
+			// Race model discovery against the external signal: the discovery
+			// fetch receives the signal so an aborted request is cancelled at
+			// the network level, and the race rejects a request aborted during
+			// discovery instead of proceeding to chat() with a stale model.
+			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(externalAbortSignal), externalAbortSignal)
 			// Stryker disable next-line MethodExpression,StringLiteral: DEEP_SEEK_DEFAULT_TEMPERATURE (0.0) is numerically equal to the 0 fallback, so the R1 check cannot change the emitted temperature
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
@@ -639,8 +651,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
-	async fetchModel() {
-		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey)
+	/**
+	 * Fetches the model list. The optional signal is forwarded to the
+	 * discovery fetch (both /api/tags and /api/show) so an aborted or
+	 * timed-out request is cancelled at the network level instead of
+	 * settling in the background.
+	 */
+	async fetchModel(signal?: AbortSignal) {
+		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey, { signal })
 		return this.getModel()
 	}
 
@@ -697,12 +715,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Model discovery goes through Axios (getOllamaModels) and never touches
-			// the Ollama client, so client.abort() alone cannot reject it. Race
-			// discovery against the per-request signal (bridged from the external
-			// abort) and the per-request timeout so a stalled discovery rejects
-			// instead of hanging past the deadline.
+			// the Ollama client, so client.abort() alone cannot reject it. The
+			// discovery fetch receives the per-request signal (bridged from the
+			// external abort, merged with the per-request timeout) so an aborted
+			// or timed-out request is cancelled at the network level; the race
+			// remains the backstop that rejects a stalled discovery instead of
+			// hanging past the deadline.
 			const discoverySignal = mergeAbortSignalAndTimeout(requestController.signal, options?.timeoutMs)
-			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(), discoverySignal)
+			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(discoverySignal), discoverySignal)
 
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 

@@ -1035,7 +1035,7 @@ describe("NativeOllamaHandler", () => {
 			expect(OllamaMock).toHaveBeenCalledWith(expect.objectContaining({ host: "http://localhost:11434" }))
 		})
 
-		it("should remove abort listener and clear timeout when abortSignal fires", async () => {
+		it("should reject with AbortError and remove the abort listener when abortSignal fires", async () => {
 			const controller = new AbortController()
 			// The timer id is only compared by identity here (clearTimeout is spied),
 			// so satisfy the ambient NodeJS.Timeout structurally with a single cast
@@ -1052,11 +1052,14 @@ describe("NativeOllamaHandler", () => {
 			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
 			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
 
-			let resolveChat: (value: { message: { content: string } }) => void = () => {}
+			// A cancelled request must reject, not resolve: once the bridge
+			// aborts the per-request controller, the in-flight chat rejects with
+			// the canonical AbortError and the promise surfaces it unwrapped.
+			let rejectChat: (error: Error) => void = () => {}
 			mockChat.mockImplementation(
 				() =>
-					new Promise((resolve) => {
-						resolveChat = resolve
+					new Promise((_resolve, reject) => {
+						rejectChat = reject
 					}),
 			)
 
@@ -1066,15 +1069,30 @@ describe("NativeOllamaHandler", () => {
 			}
 
 			controller.abort()
-			resolveChat({ message: { content: "Response" } })
+			const abortError = new Error("This operation was aborted")
+			abortError.name = "AbortError"
+			rejectChat(abortError)
 
-			await expect(promise).resolves.toBe("Response")
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 			expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutHandle)
 			// The listener removed in the finally block must be the exact function
 			// that was registered, proving the same reference is detached.
 			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
 			const registeredHandler = addEventListenerSpy.mock.calls[0]?.[1]
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", registeredHandler)
+		})
+
+		it("should forward the abort signal to model discovery so discovery is cancellable", async () => {
+			const controller = new AbortController()
+			mockGetOllamaModels.mockResolvedValue({})
+			mockChat.mockResolvedValue({ message: { content: "Response" } })
+
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			// Discovery must be cancellable: the merged per-request/timeout
+			// signal is forwarded to the fetcher (not just raced against).
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			expect(mockGetOllamaModels.mock.calls[0]?.[2]).toEqual({ signal: expect.any(AbortSignal) })
 		})
 
 		it("should clear timeoutId in finally block on success", async () => {
@@ -2278,6 +2296,31 @@ describe("NativeOllamaHandler", () => {
 			expect(result).toBe("done")
 			controller.abort() // a late abort must not disturb the settled result
 		})
+
+		it("should remove the abort listener when pending settles, on resolve and reject", async () => {
+			const resolveController = new AbortController()
+			const resolveAddSpy = vitest.spyOn(resolveController.signal, "addEventListener")
+			const resolveRemoveSpy = vitest.spyOn(resolveController.signal, "removeEventListener")
+			const resolved = await raceWithAbortSignal(Promise.resolve("done"), resolveController.signal)
+			expect(resolved).toBe("done")
+			// The listener detached must be the exact reference that was
+			// registered, so a reused caller signal cannot keep it.
+			expect(resolveRemoveSpy).toHaveBeenCalledWith("abort", resolveAddSpy.mock.calls[0]?.[1])
+
+			const rejectController = new AbortController()
+			const rejectAddSpy = vitest.spyOn(rejectController.signal, "addEventListener")
+			const rejectRemoveSpy = vitest.spyOn(rejectController.signal, "removeEventListener")
+			const rejected = expect(
+				raceWithAbortSignal(
+					new Promise<string>((_resolve, reject) => {
+						reject(new Error("boom"))
+					}),
+					rejectController.signal,
+				),
+			).rejects.toThrow("boom")
+			await withDeadline(rejected, 500)
+			expect(rejectRemoveSpy).toHaveBeenCalledWith("abort", rejectAddSpy.mock.calls[0]?.[1])
+		})
 	})
 
 	describe("per-request abortable transport", () => {
@@ -2748,6 +2791,9 @@ describe("NativeOllamaHandler", () => {
 			await withDeadline(settledDiscovery, 500)
 			expect(mockChat).not.toHaveBeenCalled()
 			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			// The external signal must reach the discovery fetch itself, so an
+			// aborted request is cancelled at the network level, not just raced.
+			expect(mockGetOllamaModels.mock.calls[0]?.[2]?.signal).toBe(controller.signal)
 			expect(clientAborted).toBe(true)
 
 			// Settle the held discovery fetch so no promise is left dangling.
