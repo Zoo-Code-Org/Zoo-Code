@@ -206,6 +206,15 @@ const App = () => {
 	// Tell the extension that we are ready to receive messages.
 	useEffect(() => vscode.postMessage({ type: "webviewDidLaunch" }), [])
 
+	// Heartbeat so the extension watchdog can detect a crashed webview renderer
+	// process (gray screen) and reload the view.
+	useEffect(() => {
+		const postHeartbeat = () => vscode.postMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
+		postHeartbeat()
+		const interval = setInterval(postHeartbeat, 30_000)
+		return () => clearInterval(interval)
+	}, [])
+
 	// Initialize source map support for better error reporting
 	useEffect(() => {
 		// Initialize source maps for better error reporting in production

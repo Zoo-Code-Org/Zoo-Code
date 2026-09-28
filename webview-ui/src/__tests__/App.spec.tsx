@@ -4,6 +4,7 @@ import React from "react"
 import { render, screen, act, cleanup } from "@/utils/test-utils"
 
 import AppWithProviders from "../App"
+import { vscode } from "@src/utils/vscode"
 
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
@@ -475,5 +476,42 @@ describe("App", () => {
 		const chatView = screen.getByTestId("chat-view")
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 		expect(screen.queryByTestId("marketplace-view")).not.toBeInTheDocument()
+	})
+
+	describe("webview heartbeat", () => {
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		it("posts an immediate heartbeat on mount and then every 30 seconds", () => {
+			vi.useFakeTimers()
+			render(<AppWithProviders />)
+
+			const postMessageMock = vi.mocked(vscode.postMessage)
+			expect(postMessageMock).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "webviewHeartbeat", timestamp: expect.any(Number) }),
+			)
+			const callsAfterMount = postMessageMock.mock.calls.length
+
+			vi.advanceTimersByTime(30_000)
+			expect(postMessageMock.mock.calls.length).toBe(callsAfterMount + 1)
+
+			vi.advanceTimersByTime(30_000)
+			expect(postMessageMock.mock.calls.length).toBe(callsAfterMount + 2)
+			expect(postMessageMock).toHaveBeenLastCalledWith(expect.objectContaining({ type: "webviewHeartbeat" }))
+		})
+
+		it("stops posting heartbeats after unmount", () => {
+			vi.useFakeTimers()
+			const { unmount } = render(<AppWithProviders />)
+
+			const postMessageMock = vi.mocked(vscode.postMessage)
+			const callsAfterMount = postMessageMock.mock.calls.length
+
+			unmount()
+			vi.advanceTimersByTime(90_000)
+
+			expect(postMessageMock.mock.calls.length).toBe(callsAfterMount)
+		})
 	})
 })
