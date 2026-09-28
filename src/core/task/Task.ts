@@ -3369,19 +3369,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											continue
 										}
 
-										// A call ID that already appears under a different tool name cannot be
+										// A call ID that already appears in assistantMessageContent cannot be
 										// round-tripped: the API history builder dedupes tool_use blocks by ID and
 										// results are matched by tool_use_id, so a second entry with the same ID
-										// would be orphaned. Reject it before presentation; the first call wins.
-										const collidesWithDifferentName = this.assistantMessageContent.some(
+										// would be orphaned. The compound-key check above already rejects an
+										// identical (id, name) start in this stream, so reject any remaining start
+										// that reuses an ID, regardless of the entry's displayed name: alias
+										// resolution renames a streaming entry to its canonical tool (the streamed
+										// name is kept in originalName), which would otherwise let a same-ID start
+										// under the canonical name slip past a name comparison. The first call wins.
+										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
-												entry.name !== event.name &&
 												(entry as { id?: string }).id === event.id,
 										)
-										if (collidesWithDifferentName) {
+										if (idAlreadyUsed) {
 											console.warn(
-												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} under a different name (tool: ${event.name})`,
+												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} (tool: ${event.name})`,
 											)
 											continue
 										}

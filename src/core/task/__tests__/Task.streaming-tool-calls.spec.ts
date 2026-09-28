@@ -1026,6 +1026,52 @@ describe("Task - Streaming Tool Call Handling", () => {
 			warnSpy.mockRestore()
 		})
 
+		it("rejects a same-ID start under the canonical name after alias resolution renamed the first entry", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					// Streamed under the alias `search_and_replace`: as its arguments stream in, the
+					// entry is replaced by a partial under the canonical name `edit` (the streamed
+					// name is preserved in originalName), so the displayed name no longer matches
+					// the name the call started under.
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "toolu_alias",
+						name: "search_and_replace",
+						arguments: '{"file_path":"a.ts","old_string":"x","new_string":"y"}',
+					},
+					// A later start reusing the same ID under the canonical name: the renamed
+					// first entry's displayed name equals this start's name, so a name comparison
+					// would let it through and orphan the second entry in the API history.
+					{
+						type: "tool_call_partial",
+						index: 1,
+						id: "toolu_alias",
+						name: "edit",
+						arguments: '{"file_path":"a.ts","old_string":"x","new_string":"y"}',
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// Only the alias-started call survives, finalized under the canonical name; the
+			// canonical-name reuse of the ID is rejected and tracking is fully cleaned up.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices.size).toBe(0)
+
+			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
+			expect(content).toHaveLength(1)
+			expect(content[0].type).toBe("tool_use")
+			expect(content[0].name).toBe("edit")
+			expect(content[0].partial).toBe(false)
+			expect(content[0].nativeArgs).toMatchObject({ file_path: "a.ts" })
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("reusing call ID toolu_alias"))
+			warnSpy.mockRestore()
+		})
+
 		it("keeps the start name when a later same-index chunk carries a different name", async () => {
 			const task = await createStreamingTask()
 
