@@ -57,9 +57,11 @@ vi.mock("vscode", () => ({
 // Mock modelCache getModels/flushModels used by the handler
 const getModelsMock = vi.fn()
 const flushModelsMock = vi.fn()
+const getModelsFromCacheMock = vi.fn()
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
-	getModels: (...args: any[]) => getModelsMock(...args),
-	flushModels: (...args: any[]) => flushModelsMock(...args),
+	getModels: (...args: unknown[]) => getModelsMock(...args),
+	flushModels: (...args: unknown[]) => flushModelsMock(...args),
+	getModelsFromCache: (...args: unknown[]) => getModelsFromCacheMock(...args),
 }))
 
 // Real handlers eagerly fetch models in their constructors, so use lightweight doubles.
@@ -112,6 +114,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		handlersByProvider.clear()
+		// No catalog is cached unless a test seeds one.
+		getModelsFromCacheMock.mockReturnValue(undefined)
 
 		mockProvider = {
 			// Only methods used by this code path
@@ -183,6 +187,335 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.moonshot }),
 			expect.anything(),
+		)
+		expect(routerModels).toHaveProperty(providerIdentifiers.fireworks)
+		expect(routerModels.fireworks).toEqual({})
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.fireworks }),
+		)
+	})
+
+	it("fetches Fireworks models with the stored API key without flushing", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.fireworks
+				? { "accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false } }
+				: {},
+		)
+
+		await webviewMessageHandler(mockProvider, { type: RouterModelsMessageType.requestRouterModels })
+
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.fireworks,
+				apiKey: "stored-fw-key",
+			},
+			handlerForProvider(providerIdentifiers.fireworks),
+		)
+		expect(flushModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.fireworks }),
+			true,
+		)
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				routerModels: expect.objectContaining({
+					[providerIdentifiers.fireworks]: {
+						"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+					},
+				}),
+			}),
+		)
+	})
+
+	it("flushes and fetches Fireworks models with an explicit key from the refresh button", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-fw-key" },
+		})
+
+		const options = { provider: providerIdentifiers.fireworks, apiKey: "new-fw-key" }
+		const handler = handlerForProvider(providerIdentifiers.fireworks)
+		expect(flushModelsMock).toHaveBeenCalledWith(options, handler, true)
+		expect(getModelsMock).toHaveBeenCalledWith(options, handler)
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ apiKey: "stored-fw-key" }))
+	})
+
+	it("echoes the request identifier on Fireworks router-model responses", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-7",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-fw-key" },
+		})
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				requestId: "fireworks-router-models-7",
+			}),
+		)
+	})
+
+	it("echoes the request identifier on Fireworks failure responses", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.fireworks) {
+				throw new Error("HTTP 401: Unauthorized")
+			}
+			return {}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-8",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "bad-fw-key" },
+		})
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.singleRouterModelFetchResponse,
+				success: false,
+				requestId: "fireworks-router-models-8",
+				values: { provider: providerIdentifiers.fireworks },
+			}),
+		)
+	})
+
+	it("does not publish a superseded Fireworks request's catalog", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+
+		const catalogs: Record<string, Record<string, { contextWindow: number; supportsPromptCache: boolean }>> = {
+			"old-fw-key": {
+				"accounts/fireworks/models/old-key-model": { contextWindow: 8192, supportsPromptCache: false },
+			},
+			"new-fw-key": {
+				"accounts/fireworks/models/new-key-model": { contextWindow: 8192, supportsPromptCache: false },
+			},
+		}
+
+		let releaseOldRequest: (() => void) | undefined
+		const oldRequestGate = new Promise<void>((resolve) => {
+			releaseOldRequest = resolve
+		})
+
+		getModelsMock.mockImplementation(async (options: { provider?: string; apiKey?: string }) => {
+			if (options?.provider !== providerIdentifiers.fireworks) {
+				return {}
+			}
+
+			// The older request finishes only after the newer one has already published.
+			if (options.apiKey === "old-fw-key") {
+				await oldRequestGate
+			}
+
+			return catalogs[options.apiKey ?? ""]
+		})
+
+		const oldRequest = webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-1",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "old-fw-key" },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-2",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-fw-key" },
+		})
+
+		releaseOldRequest?.()
+		await oldRequest
+
+		const published = mockProvider.postMessageToWebview.mock.calls
+			.map((call) => call[0])
+			.filter((posted) => posted?.type === RouterModelsMessageType.routerModels)
+
+		expect(published).toHaveLength(1)
+		expect(published[0]).toEqual(
+			expect.objectContaining({
+				requestId: "fireworks-router-models-2",
+				routerModels: { [providerIdentifiers.fireworks]: catalogs["new-fw-key"] },
+			}),
+		)
+	})
+
+	it("orders requests by arrival, not by when getState resolves", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+
+		const catalogs: Record<string, Record<string, { contextWindow: number; supportsPromptCache: boolean }>> = {
+			"old-fw-key": {
+				"accounts/fireworks/models/old-key-model": { contextWindow: 8192, supportsPromptCache: false },
+			},
+			"new-fw-key": {
+				"accounts/fireworks/models/new-key-model": { contextWindow: 8192, supportsPromptCache: false },
+			},
+		}
+
+		let releaseOldState: (() => void) | undefined
+		const oldStateGate = new Promise<void>((resolve) => {
+			releaseOldState = resolve
+		})
+		mockProvider.getState.mockImplementation(async () => {
+			// The older request reaches `getState` first but resolves it last.
+			await oldStateGate
+			return { apiConfiguration: { fireworksApiKey: "stored-fw-key" } }
+		})
+
+		getModelsMock.mockImplementation(async (options: { provider?: string; apiKey?: string }) =>
+			options?.provider === providerIdentifiers.fireworks ? catalogs[options.apiKey ?? ""] : {},
+		)
+
+		const oldRequest = webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-1",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "old-fw-key" },
+		})
+
+		// The newer request arrives second and resolves `getState` first.
+		mockProvider.getState.mockResolvedValue({ apiConfiguration: { fireworksApiKey: "stored-fw-key" } })
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-2",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-fw-key" },
+		})
+
+		releaseOldState?.()
+		await oldRequest
+
+		const published = mockProvider.postMessageToWebview.mock.calls
+			.map((call) => call[0])
+			.filter((posted) => posted?.type === RouterModelsMessageType.routerModels)
+
+		// The newer request owns the catalog even though the older one recorded later.
+		expect(published).toHaveLength(1)
+		expect(published[0]).toEqual(
+			expect.objectContaining({
+				requestId: "fireworks-router-models-2",
+				routerModels: { [providerIdentifiers.fireworks]: catalogs["new-fw-key"] },
+			}),
+		)
+	})
+
+	it("does not let an anonymous aggregate response replace a newer Fireworks catalog", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+
+		let releaseAggregate: (() => void) | undefined
+		const aggregateGate = new Promise<void>((resolve) => {
+			releaseAggregate = resolve
+		})
+
+		getModelsMock.mockImplementation(async (options: { provider?: string; apiKey?: string }) => {
+			if (options?.provider === providerIdentifiers.fireworks) {
+				return { "accounts/fireworks/models/fresh": { contextWindow: 8192, supportsPromptCache: false } }
+			}
+
+			// The anonymous aggregate request is still fetching while the newer one publishes.
+			await aggregateGate
+			return { "openrouter/stale": { contextWindow: 8192, supportsPromptCache: false } }
+		})
+
+		const aggregateRequest = webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-2",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "edited-fw-key" },
+		})
+
+		releaseAggregate?.()
+		await aggregateRequest
+
+		const published = mockProvider.postMessageToWebview.mock.calls
+			.map((call) => call[0])
+			.filter((posted) => posted?.type === RouterModelsMessageType.routerModels)
+
+		// The stale aggregate response must not publish at all: it carries a Fireworks entry
+		// that would replace the newer catalog in extension state and the query cache.
+		expect(published).toHaveLength(1)
+		expect(published[0].requestId).toBe("fireworks-router-models-2")
+	})
+
+	it("keeps the same key's cached catalog when a Fireworks refresh fails", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.fireworks) {
+				throw new Error("HTTP 500: Internal Server Error")
+			}
+			return {}
+		})
+		const cachedCatalog = {
+			"accounts/fireworks/models/cached": { contextWindow: 8192, supportsPromptCache: false },
+		}
+		getModelsFromCacheMock.mockReturnValue(cachedCatalog)
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-3",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "stored-fw-key" },
+		})
+
+		expect(getModelsFromCacheMock).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.fireworks, apiKey: "stored-fw-key" },
+			handlerForProvider(providerIdentifiers.fireworks),
+		)
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				routerModels: { [providerIdentifiers.fireworks]: cachedCatalog },
+			}),
+		)
+	})
+
+	it("clears the catalog when a Fireworks refresh fails for a different key", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { fireworksApiKey: "stored-fw-key" },
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.fireworks) {
+				throw new Error("HTTP 401: Unauthorized")
+			}
+			return {}
+		})
+		// Only the saved key has a cached catalog; the edited key has none.
+		getModelsFromCacheMock.mockImplementation((options: { apiKey?: string }) =>
+			options.apiKey === "stored-fw-key"
+				? { "accounts/fireworks/models/stored": { contextWindow: 8192, supportsPromptCache: false } }
+				: undefined,
+		)
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			requestId: "fireworks-router-models-4",
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "edited-fw-key" },
+		})
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				routerModels: { [providerIdentifiers.fireworks]: {} },
+			}),
 		)
 	})
 
