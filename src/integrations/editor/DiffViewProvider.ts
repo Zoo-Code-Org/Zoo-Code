@@ -403,6 +403,7 @@ export class DiffViewProvider {
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
 		try {
+			// Stryker disable next-line StringLiteral: "" is semantically identical to "update" in guardedWrite (only "edit" and "create" take distinct branches), so the StringLiteral mutant is equivalent at this sole production call site.
 			await guardedWrite(saveTask, this.relPath, editedContent, "update")
 		} catch (error) {
 			// Discard-only failure cleanup. The guard rejected the publish

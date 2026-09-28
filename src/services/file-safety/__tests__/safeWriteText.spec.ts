@@ -129,6 +129,21 @@ describe("safeWriteText", () => {
 			// drive-relative paths differently, as in the existing staging tests)
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+			// the win32 DACL restore gate must stay closed on other platforms:
+			// no icacls save or restore is attempted
+			expect(execFile).not.toHaveBeenCalled()
+		})
+
+		it("still removes the staging directory when no options are supplied at all", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			// options is undefined: the self-staged check must not dereference it
+			await expect(safeWriteText(targetPath, "hello")).resolves.toBeUndefined()
+
+			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
 		it("does not remove the staging directory when the caller supplies its own tempPath", async () => {

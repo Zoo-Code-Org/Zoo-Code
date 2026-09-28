@@ -157,6 +157,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
+	// Stryker disable next-line BooleanLiteral: the initial value is never observed - on win32 restoreDacl is always reassigned by the DACL save before the step-5 read, and on other platforms the step-5 gate is false.
 	let restoreDacl = false // true only when the DACL dump saved successfully
 
 	try {

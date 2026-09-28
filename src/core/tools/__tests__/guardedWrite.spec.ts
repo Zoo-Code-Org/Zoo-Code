@@ -349,6 +349,27 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 			expect(reg.get(abs("doc.txt"))?.complete).toBe(true)
 		})
+
+		it("keeps the previous observation when the post-publish token cannot be computed (deletion race after publish)", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			// The publish succeeded but the file was deleted before the refresh
+			// stat: the token computation rejects (ENOENT) and the guard's
+			// .catch normalizes it to undefined. The observation must keep the
+			// pre-publish version (the next write fails closed through the
+			// standard deleted/stale path) rather than a token-less record.
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // edit 1 pre-write CAS
+				.mockRejectedValueOnce({ code: "ENOENT" }) // edit 1 post-publish refresh - file deleted
+				.mockResolvedValue("v1") // edit 2 pre-write CAS
+
+			await guardedWrite(task, "doc.txt", "first edit", "edit")
+			await guardedWrite(task, "doc.txt", "second edit", "edit")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v1")
+		})
 	})
 
 	describe("edit", () => {

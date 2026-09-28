@@ -1261,7 +1261,9 @@ describe("DiffViewProvider", () => {
 			const result = await diffViewProvider.saveChanges(false)
 
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
-			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(expect.any(Object), {
+			// the revert activates the exact document with the exact options:
+			// preserveFocus keeps the user's focus, preview: false pins the tab
+			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(dirtyEditor.document, {
 				preserveFocus: true,
 				preview: false,
 			})
@@ -1299,8 +1301,97 @@ describe("DiffViewProvider", () => {
 			// discard-only cleanup: the newer disk content is reloaded into the
 			// buffer (never re-saved from originalContent), and the placeholder
 			// is unlinked while it is still exactly the file open() wrote
+			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(dirtyEditor.document, {
+				preserveFocus: true,
+				preview: false,
+			})
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
+			// the placeholder stat uses the bigint stat options (the version
+			// token requires the full-precision fields)
+			expect(fs.stat).toHaveBeenCalledWith(`${mockCwd}/test.ts`, { bigint: true })
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
+
+		it("does not reload a clean buffer when the guard rejects - only dirty buffers are discarded", async () => {
+			// The buffer was never touched (isDirty is falsy): there is nothing
+			// to discard, so the failure cleanup must not activate the document
+			// or run the revert command.
+			const cleanEditor = mockTextEditor(`${mockCwd}/test.ts`, "new content")
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			vi.mocked(computeVersionToken).mockResolvedValue("v2")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
+			expect(vi.mocked(vscode.commands.executeCommand)).not.toHaveBeenCalled()
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
+
+		it("does not unlink the placeholder when the edit type is not create - the outer gate short-circuits", async () => {
+			// placeholderVersion is remembered (open() took the placeholder path)
+			// but the edit type is not create: the outer gate must short-circuit
+			// before statting or unlinking, so the placeholder on disk is left
+			// untouched.
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "modify"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats) // placeholder still on disk
+			vi.mocked(computeVersionToken).mockResolvedValue("moved") // stale rejection
+			diffViewProvider["placeholderVersion"] = placeholderToken
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			expect(fs.stat).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+			// the dirty discard and the view close still ran
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
+
+		it("does not unlink when the placeholder stat is unavailable and still closes the diff views", async () => {
+			// The placeholder vanished between open() and the rejected save: the
+			// stat guard must short-circuit BEFORE the token comparison (no
+			// unlink) and the best-effort cleanup must not skip the view close.
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			// the placeholder vanished: stat rejects and the guard's .catch
+			// normalizes it to undefined stats
+			vi.mocked(fs.stat).mockRejectedValue(new Error("ENOENT: no such file or directory"))
+			vi.mocked(computeVersionToken).mockResolvedValue("moved") // stale rejection
+			diffViewProvider["placeholderVersion"] = placeholderToken
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 	})
