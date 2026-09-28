@@ -373,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Akses file yang lebih aman — gunakan allowlist Baca dan Tulis yang terpisah untuk mengontrol path yang dapat diakses Zoo Code.",
-			"highlight2": "Lebih banyak pilihan model — GLM 5.3 kini tersedia melalui Z.ai, serta Gemini 3.5 Flash Lite dan Gemini 3.1 Flash Lite telah ditambahkan ke provider Gemini.",
-			"highlight3": "Workflow sehari-hari yang lebih andal — peningkatan memperkuat pemulihan dan riwayat task, streaming dan penggunaan tool provider, impor pengaturan, serta keterbacaan di berbagai tema IDE."
+			"highlight1": "✨ Model SOTA baru ditambahkan: Gunakan GPT-6 Sol, GPT-6 Luna, dan Claude Opus 5.5 melalui provider yang didukung.",
+			"highlight2": "🧭 Task dan subtask yang lebih andal: Jaga mode yang didelegasikan tetap terisolasi, pertahankan tautan subtask setelah Stop berulang, dan lindungi pengaturan orchestrator saat slash command mengganti mode.",
+			"highlight3": "🛠️ Perilaku terminal, provider, dan pencarian kode yang lebih andal: Tingkatkan terminal di Windows dan lingkungan non-Inggris, perkuat respons serta pembatalan provider, dan pastikan pencarian kode lebih konsisten menggunakan workspace yang tepat."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

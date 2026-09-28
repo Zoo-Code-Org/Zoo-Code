@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.80.0'daki Yenilikler
+## v3.84.0'daki Yenilikler
 
-- **Daha güvenli dosya erişimi** — Zoo Code'un hangi yollara erişebileceğini kontrol etmek için ayrı Okuma ve Yazma izin listeleri kullan.
-- **Daha fazla model seçeneği** — GLM 5.3 artık Z.ai üzerinden kullanılabilir; Gemini 3.5 Flash Lite ve Gemini 3.1 Flash Lite da Gemini provider'ına eklendi.
-- **Daha güvenilir günlük iş akışları** — iyileştirmeler görev kurtarma ve geçmişini, provider streaming ve araç kullanımını, ayar içe aktarmayı ve IDE temalarındaki okunabilirliği güçlendiriyor.
+- ✨ **Yeni SOTA modelleri eklendi:** Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.
+- 🧭 **Daha güvenilir görevler ve alt görevler:** Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.
+- 🛠️ **Daha güvenilir terminal, sağlayıcı ve kod arama davranışı:** Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

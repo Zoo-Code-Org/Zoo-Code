@@ -345,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Daha güvenli dosya erişimi — Zoo Code'un hangi yollara erişebileceğini kontrol etmek için ayrı Okuma ve Yazma izin listeleri kullan.",
-			"highlight2": "Daha fazla model seçeneği — GLM 5.3 artık Z.ai üzerinden kullanılabilir; Gemini 3.5 Flash Lite ve Gemini 3.1 Flash Lite da Gemini provider'ına eklendi.",
-			"highlight3": "Daha güvenilir günlük iş akışları — iyileştirmeler görev kurtarma ve geçmişini, provider streaming ve araç kullanımını, ayar içe aktarmayı ve IDE temalarındaki okunabilirliği güçlendiriyor."
+			"highlight1": "✨ Yeni SOTA modelleri eklendi: Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.",
+			"highlight2": "🧭 Daha güvenilir görevler ve alt görevler: Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.",
+			"highlight3": "🛠️ Daha güvenilir terminal, sağlayıcı ve kod arama davranışı: Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

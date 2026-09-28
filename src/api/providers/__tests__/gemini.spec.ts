@@ -15,6 +15,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { type ModelInfo, geminiDefaultModelId, ApiProviderError } from "@roo-code/types"
 
 import { t } from "i18next"
+import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { GeminiHandler } from "../gemini"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
@@ -22,13 +23,14 @@ const GEMINI_MODEL_NAME = geminiDefaultModelId
 
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
+	let mockGenerateContentStream: ReturnType<typeof vitest.fn>
 
 	beforeEach(() => {
 		// Reset mocks
 		mockCaptureException.mockClear()
 
 		// Create mock functions
-		const mockGenerateContentStream = vitest.fn()
+		mockGenerateContentStream = vitest.fn()
 		const mockGenerateContent = vitest.fn()
 		const mockGetGenerativeModel = vitest.fn()
 
@@ -291,6 +293,43 @@ describe("GeminiHandler", () => {
 					}),
 				}),
 			)
+		})
+
+		it("should keep an empty tool result as the final user turn", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Run the tool" },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "empty.txt" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call-1", content: "" }],
+				},
+			]
+			const metadata = {
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "read_file", description: "", parameters: {} } }],
+			} satisfies ApiHandlerCreateMessageMetadata
+
+			mockGenerateContentStream.mockResolvedValue(
+				asyncStreamFrom([{ candidates: [{ content: { parts: [{ text: "Done" }] } }] }]),
+			)
+
+			await collectStream(handler.createMessage(systemPrompt, messages, metadata))
+
+			const params = mockGenerateContentStream.mock.calls[0][0]
+			expect(params.contents.at(-1)).toEqual({
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "read_file",
+							response: { name: "read_file", content: "(empty)" },
+						},
+					},
+				],
+			})
 		})
 
 		it("should handle API errors", async () => {

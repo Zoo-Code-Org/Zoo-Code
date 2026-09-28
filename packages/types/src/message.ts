@@ -293,6 +293,7 @@ export type ChangeCardData = z.infer<typeof changeCardSchema>
  * Note: These fields are mutually exclusive - a message will have at most one of them.
  */
 export const clineMessageSchema = z.object({
+	messageId: z.string().optional(),
 	ts: z.number(),
 	type: z.union([z.literal("ask"), z.literal("say")]),
 	ask: clineAskSchema.optional(),

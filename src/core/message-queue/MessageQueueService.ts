@@ -16,6 +16,7 @@ export interface QueueEvents {
 
 export class MessageQueueService extends EventEmitter<QueueEvents> {
 	private _messages: QueuedMessage[]
+	private claimedMessageIds = new Set<string>()
 
 	constructor() {
 		super()
@@ -59,6 +60,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		}
 
 		this._messages.splice(index, 1)
+		this.claimedMessageIds.delete(id)
 		this.emit("stateChanged", this._messages)
 		return true
 	}
@@ -78,9 +80,29 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	}
 
 	public dequeueMessage(): QueuedMessage | undefined {
-		const message = this._messages.shift()
+		const index = this._messages.findIndex((message) => !this.claimedMessageIds.has(message.id))
+		if (index === -1) {
+			return undefined
+		}
+		const [message] = this._messages.splice(index, 1)
 		this.emit("stateChanged", this._messages)
 		return message
+	}
+
+	public claimNextMessage(): QueuedMessage | undefined {
+		const message = this._messages.find((candidate) => !this.claimedMessageIds.has(candidate.id))
+		if (message) {
+			this.claimedMessageIds.add(message.id)
+		}
+		return message
+	}
+
+	/**
+	 * Makes a claimed message available to a later consumer without removing it.
+	 * Durable consumers must use removeMessage() only after their persistence write succeeds.
+	 */
+	public releaseMessage(messageId: string): boolean {
+		return this.claimedMessageIds.delete(messageId)
 	}
 
 	public get messages(): QueuedMessage[] {
@@ -93,6 +115,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 
 	public dispose(): void {
 		this._messages = []
+		this.claimedMessageIds.clear()
 		this.removeAllListeners()
 	}
 }

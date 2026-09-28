@@ -239,7 +239,12 @@ export const MarketplaceInstallModal: React.FC<MarketplaceInstallModalProps> = (
 					// Post-installation options
 					<div className="space-y-4 py-2">
 						<div className="text-center space-y-4">
-							<div className="text-green-500 text-lg">✓ {t("marketplace:install.installed")}</div>
+							<div className="text-vscode-foreground text-lg">
+								<span className="text-vscode-charts-green" aria-hidden="true">
+									✓
+								</span>{" "}
+								{t("marketplace:install.installed")}
+							</div>
 							<p className="text-sm text-muted-foreground">
 								{item.type === "mcp"
 									? t("marketplace:install.whatNextMcp")
@@ -264,7 +269,7 @@ export const MarketplaceInstallModal: React.FC<MarketplaceInstallModalProps> = (
 										disabled={!hasWorkspace}
 										className="rounded-full"
 									/>
-									<span className={!hasWorkspace ? "opacity-50" : ""}>
+									<span className={!hasWorkspace ? "text-vscode-descriptionForeground" : ""}>
 										{t("marketplace:install.project")}
 									</span>
 								</label>
@@ -352,7 +357,7 @@ export const MarketplaceInstallModal: React.FC<MarketplaceInstallModalProps> = (
 						)}
 						{/* Validation Error */}
 						{validationError && (
-							<div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded p-2">
+							<div className="text-sm text-vscode-errorForeground bg-vscode-editor-background border border-vscode-errorForeground rounded p-2">
 								{validationError}
 							</div>
 						)}

@@ -11,6 +11,13 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
  * Handles loading, validating, and providing access to configuration values.
  */
 export class CodeIndexConfigManager {
+	private _isConfigurationLoaded = false
+
+	/** Whether at least one full asynchronous configuration load has succeeded. */
+	public get isConfigurationLoaded(): boolean {
+		return this._isConfigurationLoaded
+	}
+
 	private codebaseIndexEnabled: boolean = false
 	private embedderProvider: EmbedderProvider = providerIdentifiers.openai
 	private modelId?: string
@@ -117,7 +124,7 @@ export class CodeIndexConfigManager {
 			this.embedderProvider = providerIdentifiers.mistral
 		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.vercelAiGateway) {
 			this.embedderProvider = providerIdentifiers.vercelAiGateway
-		} else if ((codebaseIndexEmbedderProvider as string) === "bedrock") {
+		} else if ((codebaseIndexEmbedderProvider as string) === providerIdentifiers.bedrock) {
 			this.embedderProvider = providerIdentifiers.bedrock
 		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.openrouter) {
 			this.embedderProvider = providerIdentifiers.openrouter
@@ -207,7 +214,7 @@ export class CodeIndexConfigManager {
 
 		const requiresRestart = this.doesConfigChangeRequireRestart(previousConfigSnapshot)
 
-		return {
+		const result = {
 			configSnapshot: previousConfigSnapshot,
 			currentConfig: {
 				isConfigured: this.isConfigured(),
@@ -228,6 +235,8 @@ export class CodeIndexConfigManager {
 			},
 			requiresRestart,
 		}
+		this._isConfigurationLoaded = true
+		return result
 	}
 
 	/**
@@ -306,7 +315,7 @@ export class CodeIndexConfigManager {
 		// Handle null/undefined values safely
 		const prevEnabled = prev?.enabled ?? false
 		const prevConfigured = prev?.configured ?? false
-		const prevProvider = prev?.embedderProvider ?? "openai"
+		const prevProvider = prev?.embedderProvider ?? providerIdentifiers.openai
 		const prevOpenAiKey = prev?.openAiKey ?? ""
 		const prevOllamaBaseUrl = prev?.ollamaBaseUrl ?? ""
 		const prevOpenAiCompatibleBaseUrl = prev?.openAiCompatibleBaseUrl ?? ""
