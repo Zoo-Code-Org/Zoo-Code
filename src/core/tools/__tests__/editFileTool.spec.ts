@@ -600,6 +600,7 @@ describe("editFileTool", () => {
 			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
 			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
 
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", queuedMessageId: "queued-finalize" })
 			await executeEditFileTool(
 				{ old_string: "NonExistent" },
 				{ isPartial: false, fileContent: "Line 1\nLine 2\nLine 3" },
@@ -608,6 +609,8 @@ describe("editFileTool", () => {
 			const askCalls = mockTask.ask.mock.calls
 			const hasFinalToolAsk = askCalls.some((call: any[]) => call[0] === "tool" && call[2] === false)
 			expect(hasFinalToolAsk).toBe(true)
+			// The finalize ask consumed a queued message that the tool drops.
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith("queued-finalize")
 		})
 
 		it("finalizes a partial tool preview row on no-op success (no changes needed)", async () => {
@@ -621,6 +624,7 @@ describe("editFileTool", () => {
 				{ isPartial: true, fileContent: "Line 1\nLine 2\nLine 3" },
 			)
 
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", queuedMessageId: "queued-finalize" })
 			const result = await executeEditFileTool(
 				{ old_string: " Line 2", new_string: "Line 2" },
 				{ isPartial: false, fileContent: "Line 1\nLine 2\nLine 3" },
@@ -630,6 +634,20 @@ describe("editFileTool", () => {
 			const askCalls = mockTask.ask.mock.calls
 			const hasFinalToolAsk = askCalls.some((call: any[]) => call[0] === "tool" && call[2] === false)
 			expect(hasFinalToolAsk).toBe(true)
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith("queued-finalize")
+		})
+
+		it("drops nothing when the finalize ask itself rejects", async () => {
+			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
+			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
+
+			mockTask.ask.mockRejectedValue(new Error("superseded partial message"))
+			await executeEditFileTool(
+				{ old_string: "NonExistent" },
+				{ isPartial: false, fileContent: "Line 1\nLine 2\nLine 3" },
+			)
+
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith(undefined)
 		})
 	})
 

@@ -801,4 +801,38 @@ describe("Task.ask queued message drain", () => {
 			vi.useRealTimers()
 		}
 	})
+
+	it("releases the claim promptly when abort lands mid-backoff, without further save attempts", async () => {
+		vi.useFakeTimers()
+		try {
+			const task = await createTask()
+			task.messageQueueService.addMessage("Retry after abort")
+			const result = await task.ask("completion_result", "Done", false)
+			const access = getQueueTaskTestAccess(task)
+			access.say = vi.fn().mockResolvedValue(true)
+			const saveClineMessages = vi.fn().mockResolvedValue(false)
+			access.saveClineMessages = saveClineMessages
+
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(saveClineMessages).toHaveBeenCalledTimes(1)
+
+			// Abort inside the 250ms backoff: the wait must interrupt well
+			// before the delay expires, release the claim, and skip the
+			// remaining retries instead of retaining the task.
+			access.abort = true
+			await vi.advanceTimersByTimeAsync(100)
+
+			await expect(persistence).resolves.toBe(false)
+			expect(saveClineMessages).toHaveBeenCalledTimes(1)
+			expect(task.messageQueueService.messages).toHaveLength(1)
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("Retry after abort")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 })

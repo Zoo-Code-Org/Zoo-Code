@@ -977,12 +977,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (row) {
 				// Redelivery after a partial save failure (e.g. the message file
 				// was written but metadata persistence failed): reconcile the same
-				// row instead of appending a duplicate feedback row.
+				// row instead of appending a duplicate feedback row. Awaited so a
+				// failed webview update reaches the catch below, which releases
+				// the queued message instead of acking over a stale row.
 				row.text = text ?? ""
 				row.images = images
-				this.updateClineMessage(row).catch((error) => {
-					console.error("[Task#persistQueuedFeedbackAndAcknowledge] updateClineMessage failed:", error)
-				})
+				await this.updateClineMessage(row)
 			} else {
 				row = {
 					ts: Date.now(),
@@ -1007,7 +1007,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw error
 		}
 		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
-			if (this.abort) {
+			if (this.abort || this.abandoned) {
 				this.messageQueueService.releaseMessage(messageId)
 				return false
 			}
@@ -1016,7 +1016,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return this.messageQueueService.removeMessage(messageId)
 			}
 			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
-				await delay(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+				// Interruptible backoff: an abort or abandonment during the wait
+				// resolves promptly (releasing the claim at the loop-top check)
+				// instead of retaining the task through the full delay.
+				await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
 			}
 		}
 		console.error(
@@ -1024,6 +1027,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 		this.messageQueueService.releaseMessage(messageId)
 		return false
+	}
+
+	private waitForQueuedFeedbackBackoff(ms: number): Promise<void> {
+		return new Promise<void>((resolve) => {
+			const finish = () => {
+				clearTimeout(timer)
+				clearInterval(poll)
+				resolve()
+			}
+			const timer = setTimeout(finish, ms)
+			const poll = setInterval(() => {
+				if (this.abort === true || this.abandoned === true) {
+					finish()
+				}
+			}, 50)
+		})
 	}
 
 	/**
