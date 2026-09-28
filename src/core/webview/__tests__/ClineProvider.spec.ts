@@ -1255,6 +1255,172 @@ describe("ClineProvider", () => {
 			}
 		})
 
+		describe("obsolete view gating and replacement cleanup", () => {
+			// Sidebar-shaped replacement view; callbacks are read through thunks
+			// because the mock assigns them when resolveWebviewView registers.
+			const createViewB = () => {
+				let messageCallbackB: (message: WebviewMessage) => Promise<void> = async () => {}
+				const viewB = {
+					webview: {
+						postMessage: vi.fn(),
+						html: "",
+						options: {},
+						onDidReceiveMessage: vi
+							.fn()
+							.mockImplementation((cb: (message: WebviewMessage) => Promise<void>) => {
+								messageCallbackB = cb
+								return { dispose: vi.fn() }
+							}),
+						asWebviewUri: vi.fn(),
+						cspSource: "vscode-webview://test-csp-source",
+					},
+					visible: true,
+					onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+					onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+				} as unknown as vscode.WebviewView
+				return { viewB, sendMessage: (message: WebviewMessage) => messageCallbackB(message) }
+			}
+
+			test("ignores messages from a replaced view but still dispatches for the current view", async () => {
+				let messageCallbackA: (message: WebviewMessage) => Promise<void> = async () => {}
+				mockWebviewView.webview.onDidReceiveMessage = vi
+					.fn()
+					.mockImplementation((cb: (message: WebviewMessage) => Promise<void>) => {
+						messageCallbackA = cb
+						return { dispose: vi.fn() }
+					})
+				await provider.resolveWebviewView(mockWebviewView)
+				const { viewB, sendMessage } = createViewB()
+				await provider.resolveWebviewView(viewB)
+
+				const revisionBefore = provider["webviewHeartbeatRevision"]
+				// The stale renderer reports in; its dispatch must be skipped.
+				await messageCallbackA({ type: "webviewHeartbeat", timestamp: Date.now() })
+				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore)
+
+				// The current view's dispatch reaches the handler as before.
+				await sendMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
+				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore + 1)
+			})
+
+			test("disposes the replaced view's subscriptions so listeners do not accumulate", async () => {
+				const aDisposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = []
+				let visibilityCallbackA: () => void = () => {}
+				mockWebviewView.webview.onDidReceiveMessage = vi.fn().mockImplementation(() => {
+					const d = { dispose: vi.fn() }
+					aDisposables.push(d)
+					return d
+				})
+				mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
+					visibilityCallbackA = cb
+					const d = { dispose: vi.fn() }
+					aDisposables.push(d)
+					return d
+				})
+				// Emulate the real onDidDispose(listener, thisArgs, disposables)
+				// contract so the disposal registration is tracked per view too.
+				mockWebviewView.onDidDispose = vi
+					.fn()
+					.mockImplementation((cb: () => void, _thisArgs: null, disposables?: vscode.Disposable[]) => {
+						const d = { dispose: vi.fn() }
+						aDisposables.push(d)
+						disposables?.push(d)
+						return d
+					})
+				await provider.resolveWebviewView(mockWebviewView)
+				expect(aDisposables.length).toBe(3) // message, visibility, disposal registration
+
+				const { viewB } = createViewB()
+				await provider.resolveWebviewView(viewB)
+
+				expect(aDisposables.map((d) => d.dispose.mock.calls.length)).toEqual([1, 1, 1])
+				// Only B's subscriptions remain: message, visibility, active
+				// editor, configuration.
+				expect(provider["resolvedViewDisposables"].length).toBe(4)
+
+				// Even if a stale visibility event races in, it must not refresh
+				// the provider-wide heartbeat the current view's watchdog reads.
+				const revisionBefore = provider["webviewHeartbeatRevision"]
+				visibilityCallbackA()
+				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore)
+			})
+
+			test("keeps the replacement view's watchdog and recovery when the replaced view's dispose callback fires", async () => {
+				let disposeCallbackA: () => void = () => {}
+				mockWebviewView.onDidDispose = vi.fn().mockImplementation((cb: () => void) => {
+					disposeCallbackA = cb
+					return { dispose: vi.fn() }
+				})
+				await provider.resolveWebviewView(mockWebviewView)
+				const { viewB } = createViewB()
+				await provider.resolveWebviewView(viewB)
+
+				// The stale view is finally torn down; its disposal must not
+				// clear the replacement's resources.
+				disposeCallbackA()
+				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+				// @ts-ignore - accessing private property for testing
+				expect(provider.view).toBe(viewB)
+
+				// B remains eligible for recovery: once its heartbeat goes stale
+				// the watchdog reloads B's webview.
+				const htmlAfterBResolve = viewB.webview.html
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(viewB.webview.html).not.toBe(htmlAfterBResolve)
+			})
+
+			test("ignores a replaced tab panel's view state changes and messages", async () => {
+				// WebviewPanel-shaped views: visibility arrives via
+				// onDidChangeViewState instead of onDidChangeVisibility.
+				const createPanel = () => {
+					let viewStateCallback: () => void = () => {}
+					let messageCallback: (message: WebviewMessage) => Promise<void> = async () => {}
+					const panel = {
+						webview: {
+							postMessage: vi.fn(),
+							html: "",
+							options: {},
+							onDidReceiveMessage: vi
+								.fn()
+								.mockImplementation((cb: (message: WebviewMessage) => Promise<void>) => {
+									messageCallback = cb
+									return { dispose: vi.fn() }
+								}),
+							asWebviewUri: vi.fn(),
+							cspSource: "vscode-webview://test-csp-source",
+						},
+						visible: true,
+						onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+						onDidChangeViewState: vi.fn().mockImplementation((cb: () => void) => {
+							viewStateCallback = cb
+							return { dispose: vi.fn() }
+						}),
+						dispose: vi.fn(),
+					} as unknown as vscode.WebviewPanel
+					return {
+						panel,
+						fireViewState: () => viewStateCallback(),
+						sendMessage: (message: WebviewMessage) => messageCallback(message),
+					}
+				}
+				const panelA = createPanel()
+				await provider.resolveWebviewView(panelA.panel)
+				const panelB = createPanel()
+				await provider.resolveWebviewView(panelB.panel)
+
+				// @ts-ignore - accessing private property for testing
+				expect(provider.view).toBe(panelB.panel)
+
+				const revisionBefore = provider["webviewHeartbeatRevision"]
+				panelA.fireViewState()
+				await panelA.sendMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
+				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore)
+
+				panelB.fireViewState()
+				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore + 1)
+			})
+		})
+
 		describe("tab panel (WebviewPanel shape)", () => {
 			let viewStateCallback: () => void
 			// Structural stand-in for the VS Code webview API surface this
