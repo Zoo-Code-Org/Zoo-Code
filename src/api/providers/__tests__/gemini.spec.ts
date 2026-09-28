@@ -355,8 +355,9 @@ describe("GeminiHandler", () => {
 				const partialIds = chunks
 					.filter((chunk) => chunk.type === "tool_call_partial")
 					.map((chunk) => (chunk as { id: string }).id)
-				expect(partialIds.length).toBeGreaterThan(0)
-				// Both partial chunks of one synthesized call share one ID.
+				// The handler emits one name partial and one arguments partial
+				// for the synthesized call.
+				expect(partialIds).toHaveLength(2)
 				expect(new Set(partialIds).size).toBe(1)
 				firstCallIds.push(partialIds[0])
 			}
