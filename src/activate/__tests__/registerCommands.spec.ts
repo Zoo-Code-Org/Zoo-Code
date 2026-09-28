@@ -403,15 +403,17 @@ describe("registerCommands handlers", () => {
 
 	it("focusInput logs the drop when a tab panel is tracked without a live tab instance", async () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
-		setPanel({} as vscode.WebviewPanel, "tab")
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
 
 		await handlers["zoo-code.focusInput"]()
 
 		// The tab takes selection priority, so the sidebar must not receive
 		// the message; with no live tab instance the action is dropped and the
 		// drop is logged so the silent no-op stays diagnosable. The guard must
-		// consult the instance lookup (not throw into the catch) before dropping.
-		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalled()
+		// consult the instance lookup for the tracked tab panel (not throw into
+		// the catch) before dropping.
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 			"focusInput: no live provider for the tracked tab panel; action dropped",
