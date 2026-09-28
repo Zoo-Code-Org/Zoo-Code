@@ -35,14 +35,6 @@ async function waitForMarkedCompletion(api: RooCodeAPI, taskId: string): Promise
 	)
 }
 
-async function waitForTaskInHistory(api: RooCodeAPI, taskId: string): Promise<void> {
-	// Poll the same read the assertion uses. A single read can observe the
-	// persisted state before it is visible on a fresh host (the atomic-rename
-	// swap window documented in #1641), so gate the assertion on a bounded
-	// wait instead of failing on the first miss.
-	await waitFor(() => api.isTaskInHistory(taskId))
-}
-
 async function runCreate(api: RooCodeAPI): Promise<void> {
 	let taskId: string | undefined
 	let createPhasePassed = false
@@ -100,7 +92,6 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		api.on(RooCodeEventName.Message, messageHandler)
 
 		await waitFor(() => api.isReady())
-		await waitForTaskInHistory(api, taskId)
 		assert.strictEqual(await api.isTaskInHistory(taskId), true, "Task should be present after restart")
 		const historyItem = await api.getTaskHistoryItem(taskId)
 		assert.ok(historyItem, "Task history item should be available after restart")
