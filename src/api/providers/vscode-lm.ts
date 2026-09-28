@@ -430,11 +430,6 @@ function writeToolResultText(block: Anthropic.Messages.ContentBlockParam, text: 
 }
 
 /**
- * Middle-out truncate `text` to at most `maxChars`, keeping the head and tail and replacing the
- * middle with a marker noting how many characters were removed. Head/tail are preserved because
- * logs and file dumps carry the most signal at their start (structure) and end (recent output).
- */
-/**
  * Drops a trailing lone high surrogate, whose low half was cut away. A lone surrogate cannot be
  * encoded as UTF-8, and the backend 400s the whole request when one is present.
  */
@@ -442,6 +437,11 @@ function trimTrailingHighSurrogate(text: string): string {
 	return text.length > 0 && (text.charCodeAt(text.length - 1) & 0xfc00) === 0xd800 ? text.slice(0, -1) : text
 }
 
+/**
+ * Middle-out truncate `text` to at most `maxChars`, keeping the head and tail and replacing the
+ * middle with a marker noting how many characters were removed. Head/tail are preserved because
+ * logs and file dumps carry the most signal at their start (structure) and end (recent output).
+ */
 export function middleOutTruncate(text: string, maxChars: number): string {
 	if (maxChars <= 0) {
 		return ""
@@ -547,9 +547,6 @@ export function truncateToolResultsToFitWindow(
 
 		const overage = total - budgetChars
 		const target = Math.max(MIN_TOOL_RESULT_CHARS, text.length - overage)
-		if (target >= text.length) {
-			continue
-		}
 
 		const truncated = middleOutTruncate(text, target)
 		total -= text.length - truncated.length

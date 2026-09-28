@@ -538,13 +538,22 @@ describe("VsCodeLmHandler", () => {
 			// The clamped floor cannot be met once the tool_result bottoms out at its minimum, so the
 			// request must be refused rather than sent over-window (which orphans the tool_result).
 			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
-			await expect(
-				(async () => {
-					for await (const _chunk of stream) {
-						// drain
-					}
-				})(),
-			).rejects.toThrow(/too large for this model's context window/)
+			let refusal: unknown
+			try {
+				for await (const _chunk of stream) {
+					// drain
+				}
+			} catch (error) {
+				refusal = error
+			}
+			const message = (refusal as Error | undefined)?.message ?? ""
+			expect(message).toMatch(/too large for this model's context window/)
+
+			// The reported figure proves trimming ran: without it the estimate would still carry the
+			// full 50,000-char tool_result.
+			const reported = Number(message.match(/estimated ([\d,]+) characters/)?.[1]?.replace(/,/g, ""))
+			expect(reported).toBeLessThan(10_000)
+
 			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
 		})
 
@@ -2867,8 +2876,8 @@ describe("context-window tool_result truncation", () => {
 			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
 		})
 
-		it("skips a tool_result already small enough to need no trimming", () => {
-			// Overage is tiny, so the largest block's target lands at its current length.
+		it("leaves every tool_result untouched when the conversation already fits the budget", () => {
+			// Budget exceeds the estimated total, so the early return fires and nothing is trimmed.
 			const messages: Anthropic.Messages.MessageParam[] = [
 				toolUseMessage("t1"),
 				toolResultMessage("t1", "U".repeat(3000)),
@@ -2876,11 +2885,10 @@ describe("context-window tool_result truncation", () => {
 				toolResultMessage("t2", "T".repeat(2500)),
 			]
 
-			truncateToolResultsToFitWindow(messages, 5600)
+			truncateToolResultsToFitWindow(messages, 5700)
 
-			const first = String(findBlock(messages[1], "tool_result").content)
-			const second = String(findBlock(messages[3], "tool_result").content)
-			expect(first.length + second.length).toBeLessThanOrEqual(5600)
+			expect(findBlock(messages[1], "tool_result").content).toBe("U".repeat(3000))
+			expect(findBlock(messages[3], "tool_result").content).toBe("T".repeat(2500))
 		})
 
 		it("leaves a tool_result at or below the minimum size alone", () => {
