@@ -243,8 +243,6 @@ export class ClineProvider
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
-	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
-	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
@@ -321,7 +319,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "sep-2026-v3.82.0-gateway-portability-free-models" // v3.82.0 portable Zoo Gateway keys, free MiniMax-M3, and new models
+	public readonly latestAnnouncementId = "sep-2026-v3.84.0-models-task-tool-reliability" // v3.84.0 new models, task reliability, and terminal/provider/code-search fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -344,14 +342,8 @@ export class ClineProvider
 		this.mdmService = mdmService
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
 
-		// Initialize the per-task file-based history store.
-		// The globalState write-through is debounced separately (not on every mutation)
-		// since per-task files are authoritative and globalState is only for downgrade compat.
-		this.taskHistoryStore = new TaskHistoryStore(this.contextProxy.globalStorageUri.fsPath, {
-			onWrite: async () => {
-				this.scheduleGlobalStateWriteThrough()
-			},
-		})
+		// Initialize the authoritative per-task file-based history store.
+		this.taskHistoryStore = new TaskHistoryStore(this.contextProxy.globalStorageUri.fsPath)
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
@@ -414,35 +406,7 @@ export class ClineProvider
 				}
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
 			}
-			const onTaskAborted = async () => {
-				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
-
-				try {
-					// Only rehydrate on genuine streaming failures.
-					// User-initiated cancels are handled by cancelTask().
-					if (instance.abortReason === "streaming_failed") {
-						// Defensive safeguard: if another path already replaced this instance, skip
-						const current = this.getCurrentTask()
-						if (current && current.instanceId !== instance.instanceId) {
-							this.log(
-								`[onTaskAborted] Skipping rehydrate: current instance ${current.instanceId} != aborted ${instance.instanceId}`,
-							)
-							return
-						}
-
-						const { historyItem } = await this.getTaskWithId(instance.taskId)
-						const rootTask = instance.rootTask
-						const parentTask = instance.parentTask
-						await this.createTaskWithHistoryItem({ ...historyItem, rootTask, parentTask })
-					}
-				} catch (error) {
-					this.log(
-						`[onTaskAborted] Failed to rehydrate after streaming failure: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-					)
-				}
-			}
+			const onTaskAborted = () => this.emit(RooCodeEventName.TaskAborted, instance.taskId)
 			const onTaskFocused = () => this.emit(RooCodeEventName.TaskFocused, instance.taskId)
 			const onTaskUnfocused = () => this.emit(RooCodeEventName.TaskUnfocused, instance.taskId)
 			const onTaskActive = (taskId: string) => this.emit(RooCodeEventName.TaskActive, taskId)
@@ -897,7 +861,6 @@ export class ClineProvider
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
 		this.taskHistoryStore.dispose()
-		this.flushGlobalStateWriteThrough()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 
@@ -1743,9 +1706,7 @@ export class ClineProvider
 
 			try {
 				// Update the task history with the new mode first.
-				const taskHistoryItem =
-					this.taskHistoryStore.get(task.taskId) ??
-					(this.getGlobalState("taskHistory") ?? []).find((item) => item.id === task.taskId)
+				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
@@ -1983,9 +1944,7 @@ export class ClineProvider
 			// been persisted into taskHistory (it will be captured on the next save).
 			task.setTaskApiConfigName(apiConfigName)
 
-			const taskHistoryItem =
-				this.taskHistoryStore.get(task.taskId) ??
-				(this.getGlobalState("taskHistory") ?? []).find((item) => item.id === task.taskId)
+			const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
 
 			if (taskHistoryItem) {
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
@@ -2241,6 +2200,18 @@ export class ClineProvider
 
 	// Task history
 
+	private getTaskHistoryItem(id: string): HistoryItem | undefined {
+		const historyItem = this.taskHistoryStore.get(id)
+
+		// Once initialization and migration succeed, the file-backed store is authoritative.
+		// Legacy global state is only a fallback while startup is incomplete or has failed.
+		if (historyItem || this.taskHistoryStoreInitialized) {
+			return historyItem
+		}
+
+		return (this.getGlobalState("taskHistory") ?? []).find((item) => item.id === id)
+	}
+
 	async getTaskWithId(id: string): Promise<{
 		historyItem: HistoryItem
 		taskDirPath: string
@@ -2248,8 +2219,7 @@ export class ClineProvider
 		uiMessagesFilePath: string
 		apiConversationHistory: Anthropic.MessageParam[]
 	}> {
-		const historyItem =
-			this.taskHistoryStore.get(id) ?? (this.getGlobalState("taskHistory") ?? []).find((item) => item.id === id)
+		const historyItem = this.getTaskHistoryItem(id)
 
 		if (!historyItem) {
 			throw new Error("Task not found")
@@ -3132,44 +3102,6 @@ export class ClineProvider
 		}
 
 		return history
-	}
-
-	/**
-	 * Schedule a debounced write-through of task history to globalState.
-	 * Only used for backward compatibility during the transition period.
-	 * Per-task files are authoritative; globalState is the downgrade fallback.
-	 */
-	private scheduleGlobalStateWriteThrough(): void {
-		if (this.globalStateWriteThroughTimer) {
-			clearTimeout(this.globalStateWriteThroughTimer)
-		}
-
-		this.globalStateWriteThroughTimer = setTimeout(async () => {
-			this.globalStateWriteThroughTimer = null
-			try {
-				const items = this.taskHistoryStore.getAll()
-				await this.updateGlobalState("taskHistory", items)
-			} catch (err) {
-				this.log(
-					`[scheduleGlobalStateWriteThrough] Failed: ${err instanceof Error ? err.message : String(err)}`,
-				)
-			}
-		}, ClineProvider.GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS)
-	}
-
-	/**
-	 * Flush any pending debounced globalState write-through immediately.
-	 */
-	private flushGlobalStateWriteThrough(): void {
-		if (this.globalStateWriteThroughTimer) {
-			clearTimeout(this.globalStateWriteThroughTimer)
-			this.globalStateWriteThroughTimer = null
-		}
-
-		const items = this.taskHistoryStore.getAll()
-		this.updateGlobalState("taskHistory", items).catch((err) => {
-			this.log(`[flushGlobalStateWriteThrough] Failed: ${err instanceof Error ? err.message : String(err)}`)
-		})
 	}
 
 	/**
