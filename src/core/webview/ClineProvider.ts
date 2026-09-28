@@ -4158,15 +4158,10 @@ export class ClineProvider
 		await clearWrite
 
 		for (const instance of allInstances) {
-			const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-				await instance.contextProxy.setValue("viewStates", undefined)
-			})
-			ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
-			await write
-
-			// Clear the in-memory buffer after the queued durable clear: a save enqueued
-			// before the clear updates its buffer when the durable write completes, so an
-			// immediate clear would let that stale pin survive in the live state.
+			// Clear the in-memory buffer only after the queued durable clear has run:
+			// a save enqueued before the clear writes its captured value back into the
+			// buffer when its durable write completes, so an immediate clear would let
+			// that stale pin survive in the live state.
 			instance._clearViewLocalState()
 
 			if (instance !== this) {
