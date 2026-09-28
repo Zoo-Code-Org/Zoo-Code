@@ -18,6 +18,8 @@ import {
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
+	openAiNativeDefaultModelId,
+	openAiNativeModels,
 	minimaxDefaultModelId,
 	minimaxModels,
 	friendliDefaultModelId,
@@ -108,6 +110,35 @@ describe("useSelectedModel", () => {
 		[providerIdentifiers.zooGateway, "zooGatewayModelId"],
 	] as const
 	const configuredModelInfo: ModelInfo = { contextWindow: 1, supportsPromptCache: false }
+
+	describe("OpenAI Native model selection", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it.each([false, true])("uses the canonical default with router loading=%s", (isLoading) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(isLoading ? undefined : {}, { isLoading }))
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(openAiNativeDefaultModelId)
+			expect(result.current.info).toEqual(openAiNativeModels[openAiNativeDefaultModelId])
+			expect(result.current.isLoading).toBe(false)
+		})
+
+		it("preserves an explicitly configured model even when it is the former fallback", () => {
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative, apiModelId: "gpt-4o" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("gpt-4o")
+			expect(result.current.info).toEqual(openAiNativeModels["gpt-4o"])
+		})
+	})
 
 	it.each(dynamicProviderCases)("uses router data for %s", (provider, modelIdKey) => {
 		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
@@ -700,15 +731,7 @@ describe("useSelectedModel", () => {
 
 	describe("bedrock provider with 1M context", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -762,15 +785,7 @@ describe("useSelectedModel", () => {
 
 	describe("bedrock provider with custom ARN", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -816,15 +831,7 @@ describe("useSelectedModel", () => {
 		})
 
 		it("should use litellmDefaultModelInfo as fallback when routerModels.litellm is empty", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.litellm,
@@ -842,15 +849,7 @@ describe("useSelectedModel", () => {
 		})
 
 		it("should return an empty model ID when the list is empty and no model is configured", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.litellm,
@@ -870,8 +869,8 @@ describe("useSelectedModel", () => {
 			// Primary user-visible scenario: a "Sync Models" click momentarily empties the
 			// router-models list before the refreshed list arrives. The selection must be held
 			// across that transition rather than reset.
-			mockUseRouterModels.mockReturnValue({
-				data: {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
 					openrouter: {},
 					requesty: {},
 					litellm: {
@@ -882,10 +881,8 @@ describe("useSelectedModel", () => {
 							supportsPromptCache: false,
 						},
 					},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+				}),
+			)
 
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.litellm,
@@ -899,24 +896,21 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("my-custom-model")
 
 			// Simulate the list emptying mid-sync.
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 			rerender()
 
 			// Selection is preserved through the empty window.
 			expect(result.current.id).toBe("my-custom-model")
 		})
 
-		it("should use litellmDefaultModelInfo when selected model not found in routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
+		it("preserves a configured model ID that is absent from the populated list", () => {
+			// Regression: LiteLLM is a proxy whose users may configure aliases or models
+			// that the fetched /models list does not include (custom aliases, incomplete or
+			// stale listings). The configured ID is the user's explicit selection and must
+			// not be replaced by a hardcoded default, which made the settings screen appear
+			// to ignore model ID changes.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
 					openrouter: {},
 					requesty: {},
 					litellm: {
@@ -927,10 +921,8 @@ describe("useSelectedModel", () => {
 							supportsPromptCache: false,
 						},
 					},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+				}),
+			)
 
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.litellm,
@@ -941,9 +933,59 @@ describe("useSelectedModel", () => {
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
 			expect(result.current.provider).toBe(providerIdentifiers.litellm)
-			// Falls back to default model ID
+			// The configured ID is preserved even though it is absent from the fetched list
+			expect(result.current.id).toBe("non-existing-model")
+			// Model info falls back to litellmDefaultModelInfo since the model is not in router models
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("falls back to the default model ID only when nothing is configured but a list exists", () => {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					openrouter: {},
+					requesty: {},
+					litellm: {
+						"existing-model": {
+							maxTokens: 4096,
+							contextWindow: 8192,
+							supportsImages: false,
+							supportsPromptCache: false,
+						},
+					},
+				}),
+			)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.litellm,
+				// litellmModelId intentionally omitted
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// Nothing configured: fall back to the provider default so the picker shows a selection
 			expect(result.current.id).toBe("claude-3-7-sonnet-20250219")
-			// Should use litellmDefaultModelInfo as fallback since default model also not in router models
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("preserves a configured model ID when the router payload has no litellm entry", () => {
+			// Regression: when the router-models payload lacks the litellm provider entry
+			// (partial or failed response), the hook must not substitute the provider
+			// default, which would silently replace the user's configured ID.
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.litellm,
+				litellmModelId: "my-litellm-alias",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe(providerIdentifiers.litellm)
+			// The configured ID survives even though the payload has no litellm entry at all
+			expect(result.current.id).toBe("my-litellm-alias")
+			// No router info is available for the configured ID, so the fallback info applies
 			expect(result.current.info).toEqual(litellmDefaultModelInfo)
 		})
 
@@ -956,17 +998,13 @@ describe("useSelectedModel", () => {
 				description: "Custom LiteLLM model",
 			}
 
-			mockUseRouterModels.mockReturnValue({
-				data: {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
 					openrouter: {},
 					requesty: {},
-					litellm: {
-						"custom-model": customModelInfo,
-					},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+					litellm: { "custom-model": customModelInfo },
+				}),
+			)
 
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.litellm,
@@ -979,6 +1017,30 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.litellm)
 			expect(result.current.id).toBe("custom-model")
 			expect(result.current.info).toEqual(customModelInfo)
+		})
+
+		it("resolves the configured model ID even when the router fetch errors", () => {
+			// Regression guard: hasValidRouterData for LiteLLM now only requires
+			// !isLoading, so a failed fetch (isError=true, isLoading=false) must
+			// still resolve the hook and preserve the configured ID rather than
+			// resetting to the provider default.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
+			)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.litellm,
+				litellmModelId: "my-litellm-alias",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// Configured ID preserved — a fetch failure must not reset the user's selection.
+			expect(result.current.id).toBe("my-litellm-alias")
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+			// Callers that surface error banners still see the flag.
+			expect(result.current.isError).toBe(true)
 		})
 	})
 
@@ -1098,15 +1160,7 @@ describe("useSelectedModel", () => {
 
 	describe("openai provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1179,15 +1233,7 @@ describe("useSelectedModel", () => {
 
 	describe("minimax provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1226,15 +1272,7 @@ describe("useSelectedModel", () => {
 
 	describe("vscode-lm provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1297,15 +1335,7 @@ describe("useSelectedModel", () => {
 
 	describe("friendli provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					openrouter: {},
-					requesty: {},
-					litellm: {},
-				},
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},

@@ -485,5 +485,82 @@ describe("Ollama Fetcher", () => {
 
 			consoleErrorSpy.mockRestore()
 		})
+
+		it("should pass the caller's abort signal to both the list and per-model requests", async () => {
+			const baseUrl = "http://localhost:11434"
+			const controller = new AbortController()
+
+			mockedAxios.get.mockResolvedValueOnce({
+				data: {
+					models: [
+						{
+							name: "test-model:latest",
+							model: "test-model:latest",
+							details: { family: "llama", parameter_size: "7B" },
+						},
+					],
+				},
+			})
+			mockedAxios.post.mockResolvedValueOnce({ data: { details: { family: "llama" }, model_info: {} } })
+
+			await getOllamaModels(baseUrl, undefined, { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, {
+				headers: {},
+				signal: controller.signal,
+			})
+			expect(mockedAxios.post).toHaveBeenCalledWith(
+				`${baseUrl}/api/show`,
+				{ model: "test-model:latest" },
+				{ headers: {}, signal: controller.signal },
+			)
+		})
+
+		it("should reject with an AbortError when the signal aborts the fan-out requests", async () => {
+			const baseUrl = "http://localhost:11434"
+			const controller = new AbortController()
+
+			mockedAxios.get.mockResolvedValueOnce({
+				data: {
+					models: [
+						{
+							name: "model-a:latest",
+							model: "model-a:latest",
+							details: { family: "llama", parameter_size: "7B" },
+						},
+						{
+							name: "model-b:latest",
+							model: "model-b:latest",
+							details: { family: "llama", parameter_size: "7B" },
+						},
+					],
+				},
+			})
+			mockedAxios.post.mockImplementation((_url: string, _body: unknown, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a request rejects when its signal fires,
+				// including when the signal was already aborted when the request started.
+				return new Promise<never>((_resolve, reject) => {
+					if (config?.signal?.aborted) {
+						reject(new Error("canceled"))
+						return
+					}
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
+
+			// The abort lands while the model list is still awaiting, so every
+			// per-model request is created already-aborted; the fan-out's per-model
+			// catch swallows those rejections, and the function-level abort guard
+			// must still turn the pending cancellation into a rejection rather
+			// than an (empty) success.
+			const fetchPromise = getOllamaModels(baseUrl, undefined, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+
+			consoleErrorSpy.mockRestore()
+		})
 	})
 })
