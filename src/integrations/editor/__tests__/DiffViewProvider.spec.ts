@@ -1037,7 +1037,8 @@ describe("DiffViewProvider", () => {
 			expect(obs).toBeDefined()
 			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
 			expect(obs!.complete).toBe(true)
-			expect(vi.mocked(fs.stat)).toHaveBeenCalledWith(`${mockCwd}/observed.ts`, { bigint: true })
+			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(1, `${mockCwd}/observed.ts`, { bigint: true })
+			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(2, `${mockCwd}/observed.ts`, { bigint: true })
 		})
 
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
@@ -1059,7 +1060,10 @@ describe("DiffViewProvider", () => {
 			expect(obs).toBeDefined()
 			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
 			expect(obs!.complete).toBe(true)
-			expect(vi.mocked(fs.stat)).toHaveBeenCalledWith(`${mockCwd}/brand-new.ts`, { bigint: true })
+			// The create path stats exactly once (the placeholder), so the single
+			// call carries the bigint requirement.
+			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(1, `${mockCwd}/brand-new.ts`, { bigint: true })
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(1)
 		})
 
 		it("open() leaves the target unobserved when the pre/post stat mismatch (mid-preview mutation)", async () => {
@@ -1087,6 +1091,7 @@ describe("DiffViewProvider", () => {
 
 			expect(mockTask.observationRegistry.get(`${mockCwd}/mutated.ts`)).toBeUndefined()
 			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(1, `${mockCwd}/mutated.ts`, { bigint: true })
+			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(2, `${mockCwd}/mutated.ts`, { bigint: true })
 		})
 
 		it("open() leaves the target unobserved when the pre-read stat fails (stat gap)", async () => {
