@@ -189,16 +189,22 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// The background-completion drain inside executeCommandInTerminal
 			// must not run before this command's tool result is published: a
 			// background command can finish during the settle delay while the
-			// result is still pending. Resolve at each pushToolResult site so
-			// the drain waits on a structural signal, not on timer or
-			// microtask ordering.
-			let resolveToolResultPublished: (() => void) | undefined
-			const toolResultPublished = new Promise<void>((resolve) => {
-				resolveToolResultPublished = resolve
+			// result is still pending. Settle at each pushToolResult site with
+			// the publication outcome so the drain waits on a structural signal
+			// and skips draining after a failed publication (handleError
+			// reports first; the queued message waits for a later turn).
+			let settleToolResultPublished: ((published: boolean) => void) | undefined
+			const toolResultPublished = new Promise<boolean>((resolve) => {
+				settleToolResultPublished = resolve
 			})
 			const publishToolResult = (result: ToolResponse): void => {
-				pushToolResult(result)
-				resolveToolResultPublished?.()
+				try {
+					pushToolResult(result)
+				} catch (error) {
+					settleToolResultPublished?.(false)
+					throw error
+				}
+				settleToolResultPublished?.(true)
 			}
 
 			const options: ExecuteCommandOptions = {
@@ -258,8 +264,10 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					// Settle the publication signal before the error bubbles: the
 					// background-completion drain chain captured toolResultPublished
 					// and awaits it, so an unresolved promise would hang that chain
-					// (and hold task references) forever. Resolving is idempotent.
-					resolveToolResultPublished?.()
+					// (and hold task references) forever. The outcome is false, so
+					// the chain never drains after a failed publication. Settling
+					// is idempotent.
+					settleToolResultPublished?.(false)
 					throw error
 				}
 			}
@@ -299,10 +307,12 @@ export type ExecuteCommandOptions = {
 	agentTimeout?: number
 	/**
 	 * Resolves once the tool result for this command has been published.
-	 * The background-completion drain awaits this before processing queued
-	 * messages so they are never submitted ahead of the current tool result.
+	 * Resolves true on successful publication and false when publication
+	 * failed; the background-completion drain awaits this before processing
+	 * queued messages so they are never submitted ahead of the current tool
+	 * result, and skips draining entirely after a failed publication.
 	 */
-	toolResultPublished?: Promise<void>
+	toolResultPublished?: Promise<boolean>
 }
 
 export async function executeCommandInTerminal(
@@ -315,7 +325,7 @@ export async function executeCommandInTerminal(
 		commandExecutionTimeout = 0,
 		agentTimeout = 0,
 		// Direct callers without a tool-result lifecycle drain immediately.
-		toolResultPublished = Promise.resolve(),
+		toolResultPublished = Promise.resolve(true),
 	}: ExecuteCommandOptions,
 ): Promise<[boolean, ToolResponse, boolean]> {
 	// Convert milliseconds back to seconds for display purposes.
@@ -495,12 +505,18 @@ export async function executeCommandInTerminal(
 					if (!runInBackground) {
 						return
 					}
-					await toolResultPublished
+					const published = await toolResultPublished
 					// A task cancelled while the command finished in the
 					// background must not drain: the guards inside
 					// processQueuedMessages would no-op anyway, and skipping here
 					// avoids pointless work plus error-log noise on the dying task.
 					if (task.abort || task.abandoned) {
+						return
+					}
+					// A failed publication must not drain either: handleError
+					// reports the command error first, and the queued message
+					// waits for a later turn.
+					if (!published) {
 						return
 					}
 					return task.processQueuedMessages().catch((error) => {

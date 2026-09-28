@@ -1276,7 +1276,7 @@ describe("executeCommandTool", () => {
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 
-		it("settles the background drain chain when publication fails on a backgrounded command", async () => {
+		it("does not drain the background chain when publication fails on a backgrounded command", async () => {
 			vitest.useFakeTimers()
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
 			try {
@@ -1320,16 +1320,79 @@ describe("executeCommandTool", () => {
 
 				// The settle delay elapses, the tool tries to publish, and the
 				// publication error rethrows through the generic error path. The
-				// publication signal must settle so the awaiting background drain
-				// chain cannot hang: it is the chain's only possible settler.
+				// signal settles with a failure outcome, so the awaiting chain
+				// releases without draining: handleError reports the error first
+				// and the queued message waits for a later turn.
 				await vitest.advanceTimersByTimeAsync(100)
 				await handlePromise
 				await vitest.advanceTimersByTimeAsync(0)
 
 				expect(mockHandleError).toHaveBeenCalledWith("executing command", publishError)
-				// The settled chain runs the background-completion drain exactly
-				// once (no post-result drain exists on the error path).
-				expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+				expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("settles the chain without draining when the retry publication throws", async () => {
+			vitest.useFakeTimers()
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				// Attempt 1 (vscode): shell-integration startup race, command not
+				// submitted, so the tool retries through execa.
+				const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+				const failedProcess = Object.assign(Promise.reject(shellError), {
+					continue: vitest.fn(),
+					abort: vitest.fn(),
+				})
+				// Attempt 2 (execa): a process that never settles; the agent
+				// timeout moves the retried command to background.
+				const pendingProcess = Object.assign(new Promise<void>(() => {}), {
+					continue: vitest.fn(),
+					abort: vitest.fn(),
+				}) as unknown as RooTerminalProcess
+				let retryCallbacks: RooTerminalCallbacks | undefined
+				vitest
+					.mocked(TerminalRegistry.getOrCreateTerminal)
+					.mockResolvedValueOnce({
+						runCommand: vitest.fn().mockReturnValue(failedProcess),
+						getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+					} as never)
+					.mockResolvedValueOnce({
+						runCommand: vitest
+							.fn()
+							.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+								retryCallbacks = callbacks
+								return pendingProcess
+							}),
+						getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+					} as never)
+
+				// The retry's own publication throws: the fallback publish call
+				// must also settle the signal (success=false) instead of leaving
+				// the completion chain waiting.
+				const publishError = new Error("retry publication failed")
+				mockPushToolResult.mockImplementationOnce(() => {
+					throw publishError
+				})
+
+				const handlePromise = handleCommand("npm test", 2)
+
+				await vitest.waitFor(() => expect(retryCallbacks).toBeDefined())
+				const callbacks = retryCallbacks!
+				callbacks.onShellExecutionStarted!(1234, pendingProcess)
+				await callbacks.onLine!("retry output\n", pendingProcess)
+
+				await vitest.advanceTimersByTimeAsync(2_000)
+
+				await callbacks.onCompleted!("retry output\n", pendingProcess)
+				callbacks.onShellExecutionComplete!({ exitCode: 0 }, pendingProcess)
+				await vitest.advanceTimersByTimeAsync(100)
+				await handlePromise
+				await vitest.advanceTimersByTimeAsync(0)
+
+				expect(mockHandleError).toHaveBeenCalledWith("executing command", publishError)
+				expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}
