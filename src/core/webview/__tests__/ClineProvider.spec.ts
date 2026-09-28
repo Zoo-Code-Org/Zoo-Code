@@ -3233,6 +3233,109 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("should not activate a replacement when an unrelated profile is deleted with no view pin", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const deletedProfile: ProviderSettingsEntry = {
+				name: "unrelated-victim",
+				id: "victim-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keptProfile: ProviderSettingsEntry = {
+				name: "kept-profile",
+				id: "kept-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// A fresh view (no view-local pin) whose shared selection points at a profile
+			// that survives the deletion: the deletion is unrelated to this view.
+			await provider.contextProxy.setValue("listApiConfigMeta", [deletedProfile, keptProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "kept-profile")
+			const activateProfile = vi.fn().mockResolvedValue(keptProfile)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				activateProfile,
+				listConfig: vi.fn().mockResolvedValue([keptProfile]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.deleteProviderProfile(deletedProfile)
+
+			// The activation path must not run for an unrelated deletion (it would
+			// rebuild this view's task handler) and the shared slot is left untouched.
+			expect(activateProfile).not.toHaveBeenCalled()
+			expect(provider.getValues().currentApiConfigName).toBe("kept-profile")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("kept-profile")
+			// The shared list sync drops the deleted entry.
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keptProfile])
+			await provider.dispose()
+		})
+
+		it("should prune a stale entry when deleteConfig reports the typed not-found signal", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const ghostProfile: ProviderSettingsEntry = {
+				name: "ghost-profile",
+				id: "ghost-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keptProfile: ProviderSettingsEntry = {
+				name: "kept-profile",
+				id: "kept-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [ghostProfile, keptProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "ghost-profile")
+			// @ts-ignore - Replace providerSettingsManager with a test double: the store
+			// reports the profile's secret as already gone via the typed signal.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("ghost-profile")),
+				activateProfile: vi.fn().mockResolvedValue(keptProfile),
+				listConfig: vi.fn().mockResolvedValue([keptProfile]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The typed not-found outcome is an idempotent success ... (no throw) ...
+			await expect(provider.deleteProviderProfile(ghostProfile)).resolves.toBeUndefined()
+			// ... so the stale entry is still pruned and the selection repointed.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("kept-profile")
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keptProfile])
+			await provider.dispose()
+		})
+
+		it("should propagate a wrapped delete failure whose message merely mentions not found", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const victimProfile: ProviderSettingsEntry = {
+				name: "victim-profile",
+				id: "victim-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keptProfile: ProviderSettingsEntry = {
+				name: "kept-profile",
+				id: "kept-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [victimProfile, keptProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "victim-profile")
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				// A non-not-found failure whose wrapped message happens to contain the
+				// "not found" substring: the former message-matching check would have
+				// swallowed it as an idempotent delete.
+				deleteConfig: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("Failed to delete config: vault entry for 'victim-profile' not found"),
+					),
+				activateProfile: vi.fn().mockResolvedValue(keptProfile),
+				listConfig: vi.fn().mockResolvedValue([keptProfile]),
+				setModeConfig: vi.fn(),
+			}
+
+			// The typed-signal check must let any non-not-found rejection propagate.
+			await expect(provider.deleteProviderProfile(victimProfile)).rejects.toThrow("Failed to delete config")
+		})
 	})
 
 	describe("postStateToWebviewThrottled", () => {

@@ -742,7 +742,7 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.default.id).toBeTruthy()
 		})
 
-		it("should throw error when trying to delete non-existent config", async () => {
+		it("should throw the typed not-found error when trying to delete a non-existent config", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
 					currentApiConfigName: "default",

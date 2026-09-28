@@ -1136,5 +1136,65 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(values.currentApiConfigName).toBe("default")
 			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "ghost-profile"])
 		})
+
+		it("keeps an unrelated view-local pin when a different profile is deleted", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Three stored profiles: the view pins the keeper (unrelated to the
+			// deletion) and the shared selection also points at the keeper.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const keeperId = await provider.providerSettingsManager.saveConfig("keeper-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			const victimId = await provider.providerSettingsManager.saveConfig("victim-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-nano",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "keeper-profile", id: keeperId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "victim-profile", id: victimId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "keeper-profile",
+			})
+
+			// This view pins the surviving keeper profile, while a different view's
+			// persisted pin references the profile about to be deleted.
+			await provider.saveViewState("currentApiConfigName", "keeper-profile")
+			await provider.contextProxy.setValue("viewStates", {
+				"other-view": { currentApiConfigName: "victim-profile", updatedAt: 1 },
+			})
+
+			await provider.deleteProviderProfile({
+				name: "victim-profile",
+				id: victimId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// The unrelated pin survives: the fallback branch syncs the shared list
+			// only, so neither this view's buffer nor the shared selection changes.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("keeper-profile")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "keeper-profile"])
+
+			// The other view's persisted pin was re-pointed at the replacement profile
+			// (the shared selection) instead of rehydrating the deleted name.
+			const viewStates = mockContext.globalState.get("viewStates") as Record<
+				string,
+				{ currentApiConfigName?: string }
+			>
+			expect(viewStates["other-view"]).toEqual(
+				expect.objectContaining({ currentApiConfigName: "keeper-profile" }),
+			)
+		})
 	})
 })

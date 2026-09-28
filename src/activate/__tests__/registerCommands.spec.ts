@@ -409,11 +409,29 @@ describe("registerCommands handlers", () => {
 
 		// The tab takes selection priority, so the sidebar must not receive
 		// the message; with no live tab instance the action is dropped and the
-		// drop is logged so the silent no-op stays diagnosable.
+		// drop is logged so the silent no-op stays diagnosable. The guard must
+		// consult the instance lookup (not throw into the catch) before dropping.
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalled()
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 			"focusInput: no live provider for the tracked tab panel; action dropped",
 		)
+	})
+
+	it("focusInput posts to the tracked tab provider when a tab panel is tracked alongside the sidebar", async () => {
+		setPanel({} as vscode.WebviewView, "sidebar")
+		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		setPanel({} as vscode.WebviewPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
+
+		await handlers["zoo-code.focusInput"]()
+
+		// The tab owns the focus (focusPanel priority), so the post targets the
+		// tab's provider and never the sidebar registration.
+		expect((tabProvider as { postMessageToWebview: Mock }).postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
 	})
 
 	it("focusInput posts the focus message on the tab instance when a tab panel is tracked", async () => {
