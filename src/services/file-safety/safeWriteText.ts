@@ -156,9 +156,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
-	let daclDumpPath: string | null = null // tracked for cleanup in finally
-	// Stryker disable next-line BooleanLiteral: the initial value is never observed - on win32 restoreDacl is always reassigned by the DACL save before the step-5 read, and on other platforms the step-5 gate is false.
-	let restoreDacl = false // true only when the DACL dump saved successfully
+	// Non-null only when the win32 step-2 block saved a successful DACL dump:
+	// it gates the step-5 restore and is tracked for the cleanup unlinks.
+	let daclDumpPath: string | null = null
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -215,13 +215,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		if (platform === "win32") {
 			try {
 				await fs.access(targetPath) // target exists?
-				daclDumpPath = targetPath + ".acl.tmp"
-				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
-				// Keep tracking the dump path even when the save failed: a failed
-				// icacls may have left a partial dump behind, and the cleanup paths
-				// below must remove it. Only a successfully saved dump may be
-				// restored onto the committed file.
-				restoreDacl = saved
+				const dumpPath = targetPath + ".acl.tmp"
+				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
+				if (saved) {
+					// Only a successfully saved dump may be restored onto the
+					// committed file (step 5).
+					daclDumpPath = dumpPath
+				} else {
+					// A failed icacls may have left a partial dump behind;
+					// remove it now (best-effort) so no partial dump survives and
+					// no later step can restore from it.
+					await fs.unlink(dumpPath).catch(() => {})
+				}
 			} catch {
 				// target does not exist or access failed — no DACL handling
 				daclDumpPath = null
@@ -264,9 +269,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
-			// Restore only from a successfully saved dump; a failed save leaves
-			// restoreDacl false while daclDumpPath stays tracked for cleanup.
-			if (platform === "win32" && restoreDacl && daclDumpPath !== null) {
+			// daclDumpPath is non-null only when the win32 step-2 block saved a
+			// successful dump, so this gate is closed on every other platform
+			// and on every failed save.
+			if (daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
 				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 			}

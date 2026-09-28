@@ -1394,6 +1394,42 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
+
+		it("does not unlink a placeholder whose content changed after open() - the token gate refuses", async () => {
+			// The placeholder is still on disk, but its stats no longer match the
+			// token open() recorded: another writer touched the file, so the
+			// cleanup must refuse to unlink (it would destroy the other
+			// writer's content).
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			// the on-disk placeholder moved on since open(): same identity, new
+			// size -> a different token than the one open() recorded
+			const movedStats = { ...previewStats, size: BigInt(301) } as unknown as BigIntStats
+			vi.mocked(fs.stat).mockResolvedValue(movedStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved") // stale rejection
+			diffViewProvider["placeholderVersion"] = placeholderToken
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			expect(fs.stat).toHaveBeenCalledWith(`${mockCwd}/test.ts`, { bigint: true })
+			// token mismatch -> the placeholder is NOT ours anymore: no unlink
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
 	})
 
 	describe("saveChanges method with diagnostic settings", () => {
