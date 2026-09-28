@@ -3,9 +3,9 @@ import type { ModelInfo } from "../model.js"
 // Opencode "Go" plan — OpenAI-compatible gateway.
 // https://opencode.ai/docs/go/ · base URL: https://opencode.ai/zen/go/v1
 //
-// The full model list (and metadata) is fetched dynamically from
-// `https://opencode.ai/zen/go/v1/models`, so models can be switched on the fly.
-// The values below are only a fallback used before the live list resolves.
+// Model IDs are fetched dynamically from `https://opencode.ai/zen/go/v1/models`
+// so models can be switched on the fly. The endpoint currently omits metadata,
+// so Zoo Code supplies limits and capabilities from the registries below.
 export const opencodeGoDefaultModelId = "glm-5.2"
 
 export const opencodeGoDefaultModelInfo: ModelInfo = {
@@ -16,7 +16,7 @@ export const opencodeGoDefaultModelInfo: ModelInfo = {
 	// Pricing is intentionally omitted: ModelInfoView renders a `0` field as "$0.00 / 1M tokens"
 	// (implying the service is free), so we leave it unknown — consistent with the dynamically
 	// fetched models, which also leave price fields absent. See PR #319 review.
-	description: "Opencode Go plan model. Available models and metadata are resolved dynamically from /v1/models.",
+	description: "Opencode Go plan model. Model IDs are fetched dynamically; metadata uses Zoo Code's model registry.",
 }
 
 export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
@@ -34,10 +34,11 @@ export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
  * This registry encodes the native capabilities of each curated Go model,
  * sourced from the same vendor specs used by the dedicated providers
  * (zai/moonshot/mimo/minimax/deepseek/qwen) and the Go pricing table at
- * https://opencode.ai/docs/go/#usage-limits. The fetcher merges the live
- * `/models` payload on top of these defaults so that context-window and
- * max-token values stay in sync with the gateway while capability flags and
- * pricing remain correct.
+ * https://opencode.ai/docs/go/#usage-limits. It also includes explicitly
+ * curated Responses-format models whose gateway metadata is not available
+ * through `/models`. The fetcher merges the live `/models` payload on top of
+ * these defaults so that context-window and max-token values stay in sync
+ * with the gateway while capability flags and pricing remain correct.
  *
  * `supportsPromptCache` has two distinct meanings depending on the wire format:
  *
@@ -101,6 +102,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available via the Opencode Go plan.",
 	},
+	"glm-5.3-flash": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		inputPrice: 0.15,
+		outputPrice: 0.5,
+		cacheReadsPrice: 0.03,
+		description:
+			"GLM-5.3 Flash is Zhipu's fast multimodal coding and agent model with a 1M context window and configurable reasoning effort. Available via the Opencode Go plan.",
+	},
 	"glm-5.2": {
 		maxTokens: 131_072,
 		contextWindow: 1_000_000,
@@ -162,6 +178,36 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Kimi K2.6 is Moonshot AI's native multimodal agentic MoE model with a 256k context window, built for long-horizon coding and tool use. Available via the Opencode Go plan.",
 	},
+	"kimi-k2.7-code": {
+		maxTokens: 262_144,
+		contextWindow: 262_144,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		preserveReasoning: true,
+		defaultTemperature: 1.0,
+		inputPrice: 0.95,
+		outputPrice: 4.0,
+		cacheReadsPrice: 0.19,
+		description:
+			"Kimi K2.7 Code is Moonshot AI's coding model for long-context programming tasks, with multimodal input and a 256k context window. Available via the Opencode Go plan.",
+	},
+
+	// --- Meituan LongCat ---
+	"longcat-2.0": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningBinary: true,
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheReadsPrice: 0.006,
+		description:
+			"LongCat 2.0 is Meituan's long-context reasoning and coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
 
 	// --- Xiaomi MiMo ---
 	"mimo-v2.5": {
@@ -199,6 +245,36 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		},
 		description:
 			"MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context, deep thinking, and tool calling. Available via the Opencode Go plan.",
+	},
+	"mimo-v2-pro": {
+		maxTokens: 128_000,
+		contextWindow: 1_048_576,
+		supportsImages: false,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 1.0,
+		outputPrice: 3.0,
+		cacheReadsPrice: 0.2,
+		longContextPricing: {
+			thresholdTokens: 256_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"MiMo V2 Pro is Xiaomi's text reasoning and coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"mimo-v2-omni": {
+		maxTokens: 128_000,
+		contextWindow: 262_144,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.4,
+		outputPrice: 2.0,
+		cacheReadsPrice: 0.08,
+		description:
+			"MiMo V2 Omni is Xiaomi's multimodal reasoning model with a 256k context window. Available via the Opencode Go plan.",
 	},
 
 	// --- MiniMax ---
@@ -254,6 +330,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 	},
 
 	// --- Alibaba Qwen ---
+	"qwen3.5-plus": {
+		maxTokens: 65_536,
+		contextWindow: 262_144,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		preserveReasoning: true,
+		inputPrice: 0.2,
+		outputPrice: 1.2,
+		cacheReadsPrice: 0.02,
+		cacheWritesPrice: 0.25,
+		description:
+			"Qwen3.5 Plus is Alibaba's multimodal reasoning model with a 256k context window. Available via the Opencode Go plan.",
+	},
 	"qwen3.6-plus": {
 		maxTokens: 65_536,
 		contextWindow: 1_000_000,
@@ -320,6 +411,22 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Qwen3.8 Max - Alibaba's flagship multimodal reasoning model with a 1M context window, 128k max output, and long-horizon coding and agentic capabilities. Available via the Opencode Go plan.",
 	},
+	"qwen3.8-flash": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		preserveReasoning: true,
+		inputPrice: 0.15,
+		outputPrice: 0.47,
+		cacheReadsPrice: 0.016,
+		cacheWritesPrice: 0.2,
+		description:
+			"Qwen3.8 Flash is Alibaba's fast multimodal reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
 
 	// --- DeepSeek ---
 	"deepseek-v4-pro": {
@@ -358,6 +465,183 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model supporting thinking and non-thinking modes. Available via the Opencode Go plan.",
 	},
+	"deepseek-v4-flash-vision-exp": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "high", "max"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		// Go has weekday peak/off-peak pricing; use peak rates until ModelInfo can express schedules.
+		inputPrice: 0.44,
+		outputPrice: 1.32,
+		cacheReadsPrice: 0.014,
+		description:
+			"DeepSeek V4 Flash Vision Experimental is a fast multimodal reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+
+	// --- Tencent Hunyuan ---
+	"hy4-preview": {
+		maxTokens: 64_000,
+		contextWindow: 1_024_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.834,
+		outputPrice: 2.501,
+		cacheReadsPrice: 0.042,
+		description:
+			"Hunyuan 4 Preview is Tencent's long-context reasoning and coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	hy3: {
+		maxTokens: 64_000,
+		contextWindow: 256_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.14,
+		outputPrice: 0.58,
+		cacheReadsPrice: 0.035,
+		description:
+			"Hunyuan 3 is Tencent's reasoning and coding model with a 256k context window. Available via the Opencode Go plan.",
+	},
+	"hy3-preview": {
+		// The live endpoint still lists this historical alias; it shares HY3's limits and pricing.
+		maxTokens: 64_000,
+		contextWindow: 256_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.14,
+		outputPrice: 0.58,
+		cacheReadsPrice: 0.035,
+		description:
+			"Hunyuan 3 Preview is Tencent's preview reasoning and coding model with a 256k context window. Available via the Opencode Go plan.",
+	},
+
+	// --- Omen ---
+	"omen-alpha": {
+		maxTokens: 128_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		supportsTemperature: true,
+		inputPrice: 0.2,
+		outputPrice: 0.66,
+		cacheReadsPrice: 0.04,
+		description:
+			"Omen Alpha is a multimodal reasoning model for coding workflows. Available via the Opencode Go plan.",
+	},
+
+	// --- OpenAI Responses ---
+	// Luna is curated here because the Go gateway's model catalogue does not
+	// currently provide its capability metadata. These values intentionally
+	// describe the Go Responses route, not the OpenAI-native or Codex routes.
+	"gpt-5.6-luna": {
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 0.2,
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.25,
+		cacheReadsPrice: 0.02,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"GPT-5.6 Luna is OpenAI's fast reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"grok-4.5": {
+		maxTokens: 500_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "high",
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.3,
+		longContextPricing: {
+			thresholdTokens: 200_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"Grok 4.5 is xAI's multimodal reasoning and agent model with a 500k context window. Available via the Opencode Go plan.",
+	},
+	"grok-4.6": {
+		maxTokens: 500_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.5,
+		longContextPricing: {
+			thresholdTokens: 200_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"Grok 4.6 is xAI's multimodal reasoning and agent model with a 500k context window. Available via the Opencode Go plan.",
+	},
+	"muse-spark-1.3-contributor": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.2,
+		cacheReadsPrice: 0.002,
+		description:
+			"Muse Spark 1.3 Contributor is Meta's multimodal reasoning model for coding and agentic workflows. Available via the Opencode Go plan.",
+	},
+	"muse-spark-1.2-contributor": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.2,
+		cacheReadsPrice: 0.002,
+		description:
+			"Muse Spark 1.2 Contributor is Meta's multimodal coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
 }
 
 /**
@@ -379,6 +663,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 	// --- Alibaba Qwen ---
 	"qwen3.8-max",
+	"qwen3.8-flash",
 	"qwen3.7-max",
 	"qwen3.7-plus",
 	"qwen3.6-plus",
@@ -389,13 +674,49 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 ])
 
 /**
+ * OpenCode Go models that must be requested via the OpenAI Responses API
+ * (`/v1/responses`), not the OpenAI-compatible Chat Completions endpoint
+ * (`/v1/chat/completions`).
+ *
+ * The Go gateway maps every model to exactly one wire format. Responses-only
+ * models are explicitly curated in `opencodeGoModels`: the gateway's
+ * `/v1/chat/completions` adapter for these models can fail with an opaque HTTP 500
+ * (`{"type":"error","error":{"type":"error","message":"Internal server error"}}`),
+ * while `/v1/responses` succeeds (Zoo-Code-Org/Zoo-Code#1431).
+ *
+ * Drive routing from this set rather than from the model ID string so the
+ * gateway's protocol contract stays explicit, testable, and easy to extend
+ * when the next Responses-only model lands. Unknown model IDs default to the
+ * OpenAI-compatible chat completions format.
+ */
+export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
+	// --- OpenAI ---
+	"gpt-5.6-luna",
+	// --- xAI ---
+	"grok-4.6",
+	// --- Meta ---
+	"muse-spark-1.3-contributor",
+	"muse-spark-1.2-contributor",
+])
+
+/**
  * Returns `true` when the given Go-plan model ID must be requested via the
  * Anthropic Messages format (`/v1/messages`) rather than the OpenAI-compatible
- * chat completions format. Unknown (non-curated) model IDs default to the
- * OpenAI-compatible format, matching the gateway's default routing.
+ * chat completions format. Unknown model IDs default to the OpenAI-compatible
+ * format, matching the gateway's default routing.
  */
 export function isOpencodeGoAnthropicFormatModel(modelId: string): boolean {
 	return OPENCODE_GO_ANTHROPIC_FORMAT_MODELS.has(modelId)
+}
+
+/**
+ * Returns `true` when the given Go-plan model ID must be requested via the
+ * OpenAI Responses API (`/v1/responses`) rather than the OpenAI-compatible
+ * chat completions format. Unknown model IDs default to the OpenAI-compatible
+ * format, matching the gateway's default routing.
+ */
+export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
+	return OPENCODE_GO_RESPONSES_FORMAT_MODELS.has(modelId)
 }
 
 /**

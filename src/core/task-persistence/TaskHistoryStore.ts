@@ -9,66 +9,18 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
+import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
-/** Valid status values for a task's HistoryItem. */
-export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
-
-export class DeltaRejectedError extends Error {
-	constructor(
-		public readonly taskId: string,
-		public readonly diskStatus: HistoryItemStatus,
-		public readonly attemptedStatus: HistoryItemStatus,
-	) {
-		super(`Delta rejected for task ${taskId}: disk status ${diskStatus} rejects transition to ${attemptedStatus}`)
-		this.name = "DeltaRejectedError"
-	}
-}
-
-const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
-	active: ["delegated", "completed", "interrupted"],
-	delegated: ["active"],
-	interrupted: ["completed"],
-	completed: [],
-}
-
-/**
- * Asserts that a task status transition is valid, throwing if not.
- *
- * @throws {Error} When the transition is not allowed by the state machine.
- */
-export function assertValidTransition(from: HistoryItemStatus | undefined, to: HistoryItemStatus): void {
-	const fromStatus: HistoryItemStatus = from ?? "active"
-	const validTargets = VALID_TRANSITIONS[fromStatus]
-	if (!validTargets.includes(to)) {
-		throw new Error(`Invalid task status transition: ${fromStatus} → ${to}`)
-	}
-}
+export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+export { DeltaRejectedError } from "./taskStoreConcurrency"
 
 /**
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
  * current disk state, preserving fields written by another process.
  */
 function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
-	return (existing, incoming) => {
-		if (!existing || typeof existing !== "object" || !("id" in existing)) {
-			return incoming
-		}
-		const disk = existing as HistoryItem
-		if (delta.status !== undefined) {
-			const diskStatus: HistoryItemStatus = disk.status ?? "active"
-			if (delta.status !== diskStatus) {
-				const validTargets = VALID_TRANSITIONS[diskStatus]
-				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
-					throw new DeltaRejectedError(disk.id, diskStatus, delta.status as HistoryItemStatus)
-				}
-			}
-		}
-		const merged = { ...disk, ...delta }
-		if (delta.childIds && disk.childIds) {
-			merged.childIds = [...new Set([...disk.childIds, ...delta.childIds])]
-		}
-		return merged
-	}
+	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
 }
 
 /**
@@ -882,9 +834,7 @@ export class TaskHistoryStore {
 	 * Return only the fields in `incoming` that differ from `cached`.
 	 */
 	private computeDelta(cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
-		return Object.fromEntries(
-			Object.entries(incoming).filter(([k, v]) => !deepEqual(v, (cached as Record<string, unknown>)[k])),
-		) as Partial<HistoryItem>
+		return computeHistoryDelta(cached, incoming)
 	}
 
 	private buildDelta(id: string, cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {

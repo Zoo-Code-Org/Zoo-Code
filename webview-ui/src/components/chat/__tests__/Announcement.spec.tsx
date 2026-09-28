@@ -1,7 +1,8 @@
 import React from "react"
 
-import { render, screen } from "@/utils/test-utils"
+import { fireEvent, render, screen } from "@/utils/test-utils"
 import { EXTERNAL_LINKS } from "@/constants/externalLinks"
+import { vscode } from "@/utils/vscode"
 
 import Announcement from "../Announcement"
 
@@ -13,16 +14,8 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.78.0",
+		version: "3.84.0",
 	},
-}))
-
-vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeLink: ({ children, href, onClick, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-		<a href={href} onClick={onClick} {...props}>
-			{children}
-		</a>
-	),
 }))
 
 vi.mock("react-i18next", () => ({
@@ -41,15 +34,14 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What's New:",
 				"chat:announcement.release.highlight1":
-					"Three major new models have arrived — use the brand-new Gemini 3.7 Flash, GLM 5.3, and Qwen3.8 Max models, plus updated DeepSeek V4 reasoning, pricing, and provider coverage.",
+					"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
 				"chat:announcement.release.highlight2":
-					"Connect to NanoGPT — use dynamic model discovery, streaming and prompt completions, and routing preferences for speed, price, latency, throughput, tool support, and caching.",
+					"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
 				"chat:announcement.release.highlight3":
-					"More reliable providers and tasks — fixes improve Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation, and Zoo settings import/export.",
-				"chat:announcement.handoff.heading": "The Roo Code plugin is not going away.",
+					"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
 			}
 
-			if (key === "chat:announcement.title" || key === "chat:announcement.finalRelease.title") {
+			if (key === "chat:announcement.title") {
 				return `Zoo Code ${options?.version ?? ""} Released`
 			}
 
@@ -62,20 +54,20 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.78.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.84.0 Released")).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Three major new models have arrived — use the brand-new Gemini 3.7 Flash, GLM 5.3, and Qwen3.8 Max models, plus updated DeepSeek V4 reasoning, pricing, and provider coverage.",
+				"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Connect to NanoGPT — use dynamic model discovery, streaming and prompt completions, and routing preferences for speed, price, latency, throughput, tool support, and caching.",
+				"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"More reliable providers and tasks — fixes improve Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation, and Zoo settings import/export.",
+				"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
 			),
 		).toBeInTheDocument()
 	})
@@ -90,5 +82,60 @@ describe("Announcement", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
 		expect(screen.getByRole("link", { name: "GitHub" })).toHaveAttribute("href", EXTERNAL_LINKS.GITHUB_REPO)
+	})
+
+	it("posts each announcement link to the extension host exactly once", () => {
+		render(<Announcement hideAnnouncement={vi.fn()} />)
+
+		fireEvent.click(screen.getByRole("link", { name: "GitHub" }))
+		fireEvent.click(screen.getByRole("link", { name: "X" }))
+		fireEvent.click(screen.getByRole("link", { name: "Discord" }))
+		fireEvent.click(screen.getByRole("link", { name: "Reddit" }))
+
+		expect(vscode.postMessage).toHaveBeenCalledTimes(4)
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(1, { type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "openExternal", url: "https://x.com/ZooCodeDev" })
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(3, {
+			type: "openExternal",
+			url: "https://discord.gg/VxfP4Vx3gX",
+		})
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(4, {
+			type: "openExternal",
+			url: "https://www.reddit.com/r/ZooCode/",
+		})
+	})
+
+	// VS Code's webview bootstrap intercepts clicks on any anchor with an href
+	// at the document level and never checks defaultPrevented, so the
+	// announcement links must stop propagation to avoid opening twice.
+	it("keeps announcement link clicks from reaching the document level", () => {
+		const documentClick = vi.fn()
+		document.addEventListener("click", documentClick)
+
+		try {
+			render(
+				<div>
+					<a href="#control">control</a>
+					<Announcement hideAnnouncement={vi.fn()} />
+				</div>,
+			)
+
+			fireEvent.click(screen.getByRole("link", { name: "GitHub" }))
+			expect(documentClick).not.toHaveBeenCalled()
+
+			fireEvent.click(screen.getByText("control"))
+			expect(documentClick).toHaveBeenCalledTimes(1)
+		} finally {
+			document.removeEventListener("click", documentClick)
+		}
+	})
+
+	it("hides the announcement when the dialog closes", () => {
+		const hideAnnouncement = vi.fn()
+		render(<Announcement hideAnnouncement={hideAnnouncement} />)
+
+		fireEvent.keyDown(document.body, { key: "Escape" })
+
+		expect(hideAnnouncement).toHaveBeenCalledTimes(1)
 	})
 })
