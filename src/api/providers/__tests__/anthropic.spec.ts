@@ -596,7 +596,10 @@ describe("AnthropicHandler", () => {
 			)
 			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
 			expect(startUsage).toBeDefined()
-			expect(startUsage?.reasoningTokens).toBeUndefined()
+			// Property absence, not just undefined: toEqual ignores own properties
+			// whose value is undefined, so a regression that adds
+			// `reasoningTokens: undefined` must fail this assertion.
+			expect(startUsage).not.toHaveProperty("reasoningTokens")
 
 			// message_delta surfaces the final reasoning token count
 			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
@@ -681,7 +684,8 @@ describe("AnthropicHandler", () => {
 			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
 			expect(deltaUsage).toBeDefined()
 			expect(deltaUsage?.outputTokens).toBe(200)
-			expect(deltaUsage?.reasoningTokens).toBeUndefined()
+			// Property absence, not just undefined (toEqual ignores undefined values).
+			expect(deltaUsage).not.toHaveProperty("reasoningTokens")
 		})
 
 		it("should preserve a zero-valued thinking_tokens in message_start and message_delta usage chunks", async () => {

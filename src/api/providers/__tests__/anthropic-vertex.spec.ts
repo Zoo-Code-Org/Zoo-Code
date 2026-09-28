@@ -1558,6 +1558,11 @@ describe("VertexHandler", () => {
 					outputTokens: 200,
 				},
 			])
+			// Property absence, not just undefined: toEqual ignores own properties whose
+			// value is undefined, so a regression that adds `reasoningTokens: undefined`
+			// to either chunk must fail these assertions.
+			expect(chunks[0]).not.toHaveProperty("reasoningTokens")
+			expect(chunks[1]).not.toHaveProperty("reasoningTokens")
 		})
 
 		it("should preserve a zero-valued thinking_tokens in message_start and message_delta usage chunks", async () => {
