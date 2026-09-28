@@ -1206,6 +1206,151 @@ describe("OpenAiNativeHandler", () => {
 				const chunks1 = await collected1
 				expect(textChunks(chunks1).map((chunk) => chunk.text)).toEqual(["one"])
 			})
+
+			it("should not issue a fallback POST when the SDK request was aborted by this request's own signal", async () => {
+				// Regression: the SDK catch path used to fall through to the manual SSE
+				// fallback for every error, including the AbortError raised when this
+				// request's own controller aborted — issuing a second POST for a request
+				// the caller already cancelled.
+				const mockFetch = vitest.fn()
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				let sdkSignal: AbortSignal | undefined
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkSignal = options?.signal
+					// Emulate the SDK: an aborted in-flight request rejects with AbortError.
+					return new Promise((_resolve, reject) => {
+						if (!sdkSignal) {
+							reject(new Error("expected the SDK request to carry a request signal"))
+							return
+						}
+						if (sdkSignal.aborted) {
+							reject(makeAbortError())
+							return
+						}
+						sdkSignal.addEventListener("abort", () => reject(makeAbortError()), { once: true })
+					})
+				})
+
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				await tick()
+				expect(sdkSignal).toBeDefined()
+				expect(sdkSignal?.aborted).toBe(false)
+
+				controller.abort()
+				await expect(collected).rejects.toMatchObject({ name: "AbortError" })
+
+				// The fallback must not run: a cancelled request must not trigger a second POST.
+				expect(mockFetch).not.toHaveBeenCalled()
+			})
+
+			it("should cancel only the aborted fallback body when overlapping requests share a handler", async () => {
+				// Regression: the SSE loop gated on the shared this.abortController
+				// field, so with two overlapping fallback reads an abort of one
+				// request's signal could terminate (or be ignored by) the other
+				// request's stream. Each request must react only to its own
+				// request-local controller, and the aborted request's body must be
+				// cancelled before the reader lock is released so the socket is
+				// torn down.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+				const firstExternal = new AbortController()
+				const secondExternal = new AbortController()
+				let firstReadSettled = false
+				const cancelCalls = [false, false]
+				let fetchCall = 0
+				const mockFetch = vitest.fn().mockImplementation(() => {
+					fetchCall += 1
+					if (fetchCall === 1) {
+						// First request's body: one chunk now, then a pull that stays
+						// pending until this request's external signal aborts, where it
+						// enqueues an empty [DONE] chunk so the loop's next per-request
+						// abort check can break it.
+						const body = new ReadableStream<Uint8Array>({
+							start: (startController) => {
+								startController.enqueue(
+									new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
+								)
+							},
+							pull: (pullController) =>
+								new Promise<void>((resolve) => {
+									const onAbort = () => {
+										if (!firstReadSettled) {
+											firstReadSettled = true
+											pullController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+										}
+										resolve()
+									}
+									if (firstExternal.signal.aborted) {
+										onAbort()
+										return
+									}
+									firstExternal.signal.addEventListener("abort", onAbort, { once: true })
+								}),
+							cancel: () => {
+								cancelCalls[0] = true
+							},
+						})
+						return Promise.resolve({ ok: true, body })
+					}
+					// Second request's body: completes normally.
+					const body = new ReadableStream<Uint8Array>({
+						start: (startController) => {
+							startController.enqueue(
+								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"two"}\n\n'),
+							)
+							startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							startController.close()
+						},
+						cancel: () => {
+							cancelCalls[1] = true
+						},
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const collected1 = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: firstExternal.signal }),
+					),
+				)
+				await tick()
+				const collected2 = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: secondExternal.signal }),
+					),
+				)
+				await tick()
+
+				// Abort only the first request's signal while both fallback reads are open.
+				firstExternal.abort()
+
+				// The second request must complete normally with its own content and
+				// must not have its body cancelled.
+				const chunks2 = await collected2
+				expect(textChunks(chunks2).map((chunk) => chunk.text)).toEqual(["two"])
+				expect(secondExternal.signal.aborted).toBe(false)
+				expect(cancelCalls[1]).toBe(false)
+
+				// The first request reacts to its own abort: the loop breaks once the
+				// pending read settles, and its body is cancelled before the lock is
+				// released. No second POST is issued for the aborted request.
+				const chunks1 = await collected1
+				expect(textChunks(chunks1).map((chunk) => chunk.text)).toEqual(["one"])
+				expect(cancelCalls[0]).toBe(true)
+				expect(fetchCall).toBe(2)
+			})
 		})
 	})
 
