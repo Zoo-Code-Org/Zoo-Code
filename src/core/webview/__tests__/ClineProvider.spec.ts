@@ -1436,6 +1436,8 @@ describe("ClineProvider", () => {
 				finishHtml("<!DOCTYPE html><html><body>initial</body></html>")
 				await resolvePromise
 
+				// The stale resolve assigned no HTML and installed nothing.
+				expect(mockWebviewView.webview.html).toBe("")
 				expect(provider["webviewWatchdogInterval"]).toBeNull()
 				expect(provider["resolvedViewDisposables"].length).toBe(0)
 			})
@@ -1460,9 +1462,10 @@ describe("ClineProvider", () => {
 				finishHtmlA("<!DOCTYPE html><html><body>stale-A</body></html>")
 				await resolveA
 
-				// A's stale resolve bailed out: only B's subscriptions (message,
-				// visibility, active editor, configuration) are installed and B
-				// keeps the watchdog.
+				// A's stale resolve bailed out: no HTML landed on the obsolete
+				// view, only B's subscriptions (message, visibility, active
+				// editor, configuration) are installed and B keeps the watchdog.
+				expect(mockWebviewView.webview.html).toBe("")
 				expect(provider["resolvedViewDisposables"].length).toBe(4)
 				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
 				// @ts-ignore - accessing private property for testing

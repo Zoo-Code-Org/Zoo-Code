@@ -1094,7 +1094,15 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		webviewView.webview.html = await this.getWebviewHtml(webviewView.webview)
+		const html = await this.getWebviewHtml(webviewView.webview)
+		// The await yields; a disposal or replacement that landed mid-generation
+		// must not receive this HTML. The VS Code API throws when assigning to a
+		// destroyed webview, and a stale resolve must not touch the obsolete
+		// view it no longer owns.
+		if (this._disposed || this.view !== webviewView) {
+			return
+		}
+		webviewView.webview.html = html
 
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
