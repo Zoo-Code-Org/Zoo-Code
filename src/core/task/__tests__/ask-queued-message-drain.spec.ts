@@ -381,6 +381,53 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("releases the queued message when the reconciled row update fails", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("dedupe me")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+		const messageId = result.queuedMessageId!
+
+		const taskAccess = getQueueTaskTestAccess(task)
+		const updateClineMessage = vi.fn(async () => {})
+		taskAccess.updateClineMessage = updateClineMessage
+		taskAccess.addToClineMessages = async (message) => {
+			taskAccess.clineMessages.push(message!)
+			return true
+		}
+		// First ack: all saves fail, releasing the entry queued while the row
+		// association is retained for a later redelivery.
+		const saveClineMessages = vi.fn().mockResolvedValue(false)
+		taskAccess.saveClineMessages = saveClineMessages
+
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(task.messageQueueService.messages).toHaveLength(1)
+
+		// Redelivery: the reconciled row update fails. The failure must
+		// propagate and release the entry — it must NOT be acked/removed.
+		updateClineMessage.mockRejectedValueOnce(new Error("webview update failed"))
+		saveClineMessages.mockResolvedValue(true)
+
+		await expect(task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)).rejects.toThrow(
+			"webview update failed",
+		)
+		expect(saveClineMessages).toHaveBeenCalledTimes(4)
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["dedupe me"])
+	})
+
 	it("does not submit queued messages once the task is aborted", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
