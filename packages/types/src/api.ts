@@ -217,6 +217,10 @@ export interface RooCodeTestOnlyApi {
 	 * Returns a value from VS Code globalState. Intended for use in tests only.
 	 */
 	getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K]
+	/**
+	 * Writes a value to VS Code globalState. Intended for use in tests only.
+	 */
+	setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void>
 }
 
 export interface RooCodeTestAPI extends RooCodeAPI {

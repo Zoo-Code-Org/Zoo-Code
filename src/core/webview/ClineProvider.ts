@@ -789,6 +789,11 @@ export class ClineProvider
 			// Object.prototype setter and be silently dropped by the later spread.
 			normalizedViewStateId === "__proto__"
 		) {
+			// No stable id will be registered for this view (no usable id in the launch
+			// message, or this exact id was already registered): the view falls back to
+			// shared state, and API-driven task creation must not time out waiting on a
+			// view state that never registers. Resolve now; the promise is idempotent.
+			this.viewStateReadinessResolve()
 			return
 		}
 
@@ -2495,9 +2500,33 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
-		// Stage the durable view-pin re-point before the secret deletion so a
-		// deleteConfig failure cannot leave persisted pins referencing a deleted
-		// profile.
+		// Commit the secret deletion before the compensating writes. If the deletion
+		// fails, nothing else runs: the durable pins still reference the profile that
+		// still exists and the shared list still contains it. Staging the re-point or
+		// the list prune before the deletion would let a failed deleteConfig leave a
+		// shared list missing a profile that is still stored, with the pins already
+		// moved to the replacement.
+		// A not-found rejection means the secret was already gone (e.g. pruned by an
+		// earlier run): branch on the typed ProviderSettingsNotFoundError so the stale
+		// list entry is still pruned as an idempotent success, while any other failure
+		// (e.g. refusing to delete the last remaining configuration) propagates before
+		// the compensating writes run. Matching message text instead would let a
+		// profile whose name contains "not found" swallow an unrelated failure.
+		try {
+			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+		} catch (error) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw error
+			}
+			this.log(
+				`deleteProviderProfile: settings for '${profileToDelete.name}' were not found; pruning the stale list entry only`,
+			)
+		}
+
+		// Only after the deletion has committed: re-point the durable view pins. A
+		// re-point failure now leaves at most a dangling pin naming a profile whose
+		// entry no longer exists, which the view load tolerates, instead of corrupting
+		// the shared list when the deletion itself failed.
 		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 		const viewPinsDeletedProfile =
@@ -2508,34 +2537,14 @@ export class ClineProvider
 			(this.viewLocalState.currentApiConfigName === undefined &&
 				globalSettings.currentApiConfigName === profileToDelete.name)
 
-		// Stage the profile-list write before the secret deletion when this view keeps an
-		// unrelated pin: a deleteConfig failure then leaves a consistent list with no
-		// dangling pins. The activation path below writes the list itself after the
-		// deletion, because it re-reads the profile entries from the settings store.
+		// Prune the profile from the shared list after the deletion has committed when
+		// this view keeps an unrelated pin: the activation path below writes the list
+		// itself, because it re-reads the profile entries from the settings store.
 		if (!viewPinsDeletedProfile) {
 			const survivingEntries = this.getProviderProfileEntries().filter(
 				({ name }) => name !== profileToDelete.name,
 			)
 			await this.contextProxy.setValue("listApiConfigMeta", survivingEntries)
-		}
-
-		// Remove the profile from the settings store (context.secrets) so it cannot be
-		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
-		// the secret was already gone (e.g. pruned by an earlier run): branch on the
-		// typed ProviderSettingsNotFoundError so the stale list entry below is still
-		// pruned as an idempotent success, while any other failure (e.g. refusing to
-		// delete the last remaining configuration) propagates. Matching message text
-		// instead would let a profile whose name contains "not found" swallow an
-		// unrelated failure.
-		try {
-			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
-		} catch (error) {
-			if (!(error instanceof ProviderSettingsNotFoundError)) {
-				throw error
-			}
-			this.log(
-				`deleteProviderProfile: settings for '${profileToDelete.name}' were not found; pruning the stale list entry only`,
-			)
 		}
 
 		if (viewPinsDeletedProfile) {
