@@ -35,6 +35,7 @@ import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
 import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
+import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -194,6 +195,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			void ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
 		}),
 	)
+
+	const codeIndexScope = CodeIndexScope.getOrCreate(context)
+	context.subscriptions.push(codeIndexScope)
+	try {
+		codeIndexScope.init()
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		outputChannel.appendLine(`[CodeIndexScope] Failed to initialize: ${message}`)
+	}
 
 	// Initialize code index managers for all workspace folders.
 	if (vscode.workspace.workspaceFolders) {
