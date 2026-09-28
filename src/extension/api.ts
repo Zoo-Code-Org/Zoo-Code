@@ -235,6 +235,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		]).finally(() => {
 			clearTimeout(readinessTimer)
 		})
+		// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
+		// the wait was pending must fail task creation rather than create a task against the
+		// disposed view (its posts and task registration would be orphaned).
+		if (provider.isDisposed) {
+			throw new Error("The provider was disposed while waiting for the view state to become ready")
+		}
 		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })

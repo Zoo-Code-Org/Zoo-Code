@@ -761,6 +761,15 @@ export class ClineProvider
 	})
 
 	/**
+	 * True once dispose has started. Dispose resolves viewStateReadiness to release
+	 * waiters, so API-driven flows awaiting readiness must consult this flag to tell a real
+	 * readiness apart from a teardown: a disposed provider must never create a task.
+	 */
+	public get isDisposed(): boolean {
+		return this._disposed
+	}
+
+	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */

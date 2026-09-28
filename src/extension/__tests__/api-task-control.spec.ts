@@ -65,6 +65,7 @@ type ProviderDouble = EventEmitter & {
 	getState: Mock<() => Promise<{ customModes?: ModeConfig[] }>>
 	handleModeSwitch: Mock<(mode: string, targetTask?: unknown) => Promise<void>>
 	viewLaunched: boolean
+	isDisposed: boolean
 	viewStateReadiness: Promise<void>
 	taskHistoryStore: Map<string, unknown>
 }
@@ -96,6 +97,7 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.getState = vi.fn().mockResolvedValue({ customModes: [] })
 	provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 	provider.viewLaunched = true
+	provider.isDisposed = false
 	provider.viewStateReadiness = Promise.resolve()
 	provider.taskHistoryStore = new Map()
 	return provider
@@ -200,6 +202,26 @@ describe("API task controls", () => {
 			expect(clearSpy).toHaveBeenCalled()
 			clearSpy.mockRestore()
 		})
+
+		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {
+			// Disposal resolves viewStateReadiness to release waiters (see ClineProvider.dispose)
+			// and marks the provider disposed first: the wait must then fail instead of
+			// creating a task against the disposed view.
+			let resolveReady!: () => void
+			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
+				resolveReady = resolve
+			})
+
+			const started = api.startNewTask({ configuration, text: "new task" })
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			sidebarProvider.isDisposed = true
+			resolveReady()
+
+			await expect(started).rejects.toThrow(
+				"The provider was disposed while waiting for the view state to become ready",
+			)
+			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("task ask registry", () => {
@@ -263,6 +285,24 @@ describe("API task controls", () => {
 			// must be a silent no-op, not a crash on the missing entry.
 			expect(() => task.emit(RooCodeEventName.TaskAborted)).not.toThrow()
 			await expect(api.approveTaskAsk(task.taskId)).resolves.toBe(false)
+		})
+
+		it("re-emits TaskStarted and records it in the message log for a registered task", async () => {
+			// The per-task TaskStarted listener re-emits the event on the API and records it
+			// through fileLog: spy on the prototype so the message content is observable
+			// (fileLog is a no-op without the enableLogging flag).
+			const fileLogSpy = vi.spyOn(API.prototype, "fileLog" as keyof API).mockResolvedValue(undefined)
+			const task = createTask("task-to-start")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const started = new Promise<string>((resolve) => {
+				api.once(RooCodeEventName.TaskStarted, (taskId: string) => resolve(taskId))
+			})
+			task.emit(RooCodeEventName.TaskStarted)
+
+			await expect(started).resolves.toBe("task-to-start")
+			expect(fileLogSpy).toHaveBeenCalledWith(expect.stringContaining("taskStarted -> task-to-start"))
+			fileLogSpy.mockRestore()
 		})
 	})
 
