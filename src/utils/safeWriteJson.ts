@@ -233,17 +233,30 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				)
 			}
 		}
-		throw originalError // This MUST be the error that rejects the promise.
-	} finally {
-		// Release the lock in the main finally block.
+		// Release the lock before rejecting. The original write failure is the
+		// rejection and a release failure cannot mask it.
 		try {
-			// releaseLock will be the actual unlock function if lock was acquired,
-			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
 			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 		}
+		throw originalError // This MUST be the error that rejects the promise.
+	}
+
+	// Release the lock on the success path. A compromised lock means this
+	// write ran without mutual exclusion, so reject this operation instead
+	// of reporting success.
+	try {
+		await releaseLock()
+	} catch (unlockError) {
+		const code =
+			unlockError && typeof unlockError === "object" && "code" in unlockError
+				? (unlockError as { code: unknown }).code
+				: undefined
+		if (code === "ECOMPROMISED") {
+			throw unlockError
+		}
+		console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 	}
 }
 

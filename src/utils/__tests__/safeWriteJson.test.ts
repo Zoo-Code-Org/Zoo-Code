@@ -477,6 +477,67 @@ describe("safeWriteJson", () => {
 		await fs.unlink(lockTestFilePath).catch(() => {}) // Ignore errors if file doesn't exist
 		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
 	})
+
+	test("rejects with a lock compromise error after a successful write", async () => {
+		vi.resetModules()
+
+		const data = { message: "compromise after success" }
+		const compromiseTestFilePath = path.join(tempDir, "compromise-test-file.json")
+		await fs.writeFile(compromiseTestFilePath, JSON.stringify({ initial: "content" }))
+
+		const compromiseError = Object.assign(new Error("lock was compromised"), { code: "ECOMPROMISED" })
+		vi.doMock("proper-lockfile", () => ({
+			...vi.importActual("proper-lockfile"),
+			lock: vi.fn().mockResolvedValue(vi.fn().mockRejectedValue(compromiseError)),
+		}))
+
+		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
+
+		// The write itself succeeds, but the release reports a compromised
+		// lock, so the operation must reject instead of reporting success.
+		await expect(mockedSafeWriteJson(compromiseTestFilePath, data)).rejects.toBe(compromiseError)
+
+		await fs.unlink(compromiseTestFilePath).catch(() => {})
+		vi.doUnmock("proper-lockfile")
+	})
+
+	test("keeps the original write error when the write fails and the lock was compromised", async () => {
+		vi.resetModules()
+
+		const data = { message: "compromise after failure" }
+		const compromiseTestFilePath = path.join(tempDir, "compromise-failure-test-file.json")
+		await fs.writeFile(compromiseTestFilePath, JSON.stringify({ initial: "content" }))
+
+		const compromiseError = Object.assign(new Error("lock was compromised"), { code: "ECOMPROMISED" })
+		vi.doMock("proper-lockfile", () => ({
+			...vi.importActual("proper-lockfile"),
+			lock: vi.fn().mockResolvedValue(vi.fn().mockRejectedValue(compromiseError)),
+		}))
+
+		const createWriteStreamSpy = vi.spyOn(fsSyncActual, "createWriteStream")
+		createWriteStreamSpy.mockImplementationOnce(() => {
+			// A plain Writable provides the pipe and error surface that
+			// `_streamDataToFile` uses, but not the full WriteStream
+			// interface, so this cast is deliberate.
+			const errorStream = new Writable({
+				write: (_chunk, _encoding, callback) => {
+					callback(new Error("Stream write error"))
+				},
+			}) as unknown as fsSyncActual.WriteStream
+			errorStream.close = vi.fn()
+			return errorStream
+		})
+
+		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
+
+		// The write failure is the primary error and must not be masked by
+		// the compromise reported at release time.
+		await expect(mockedSafeWriteJson(compromiseTestFilePath, data)).rejects.toThrow("Stream write error")
+
+		createWriteStreamSpy.mockRestore()
+		await fs.unlink(compromiseTestFilePath).catch(() => {})
+		vi.doUnmock("proper-lockfile")
+	})
 	test("should release lock even if an error occurs mid-operation", async () => {
 		const data = { message: "test lock release on error" }
 

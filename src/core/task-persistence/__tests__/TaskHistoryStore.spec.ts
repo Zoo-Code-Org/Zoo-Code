@@ -323,6 +323,80 @@ describe("TaskHistoryStore", () => {
 			expect(store.get(failed.id)).toEqual(failed)
 			expect(store.get(later.id)).toEqual(later)
 		})
+
+		it("flushes the write-through with the current cache when a later deletion fails", async () => {
+			store.dispose()
+			const globalState: HistoryItem[] = []
+			const onWrite = vi.fn(async (items: HistoryItem[]) => {
+				globalState.splice(0, globalState.length, ...items)
+			})
+			store = new TaskHistoryStore(tmpDir, { onWrite })
+			await store.initialize()
+
+			const first = makeHistoryItem({ id: "batch-wt-success" })
+			const failed = makeHistoryItem({ id: "batch-wt-failure" })
+			const later = makeHistoryItem({ id: "batch-wt-later" })
+			await store.upsert(first)
+			await store.upsert(failed)
+			await store.upsert(later)
+
+			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			const unlinkError = Object.assign(new Error("unlink failed"), { code: "EACCES" })
+			vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
+				if (filePath.toString().includes(failed.id)) {
+					throw unlinkError
+				}
+				return actualFs.unlink(filePath)
+			})
+
+			await expect(store.deleteMany([first.id, failed.id, later.id])).rejects.toBe(unlinkError)
+
+			// The earlier deleted task is evicted from the store cache.
+			expect(store.get(first.id)).toBeUndefined()
+			// The awaited write-through persisted that state before the original
+			// deletion error rejected the call, so stale globalState cannot
+			// return the deleted task.
+			expect(globalState.find((item) => item.id === first.id)).toBeUndefined()
+			expect(globalState.find((item) => item.id === failed.id)).toEqual(failed)
+			expect(globalState.find((item) => item.id === later.id)).toEqual(later)
+
+			vi.mocked(fs.unlink).mockImplementation(async (filePath) => actualFs.unlink(filePath))
+		})
+
+		it("keeps the original deletion error when the partial write-through also fails", async () => {
+			store.dispose()
+			const onWrite = vi.fn()
+			// Three upserts succeed, then the partial-failure flush rejects.
+			onWrite
+				.mockResolvedValueOnce(undefined)
+				.mockResolvedValueOnce(undefined)
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error("write-through failed"))
+			store = new TaskHistoryStore(tmpDir, { onWrite })
+			await store.initialize()
+
+			const first = makeHistoryItem({ id: "batch-wt2-success" })
+			const failed = makeHistoryItem({ id: "batch-wt2-failure" })
+			const later = makeHistoryItem({ id: "batch-wt2-later" })
+			await store.upsert(first)
+			await store.upsert(failed)
+			await store.upsert(later)
+
+			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			const unlinkError = Object.assign(new Error("unlink failed"), { code: "EACCES" })
+			vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
+				if (filePath.toString().includes(failed.id)) {
+					throw unlinkError
+				}
+				return actualFs.unlink(filePath)
+			})
+
+			// The deletion failure is the primary error and must not be masked
+			// by the failed write-through.
+			await expect(store.deleteMany([first.id, failed.id, later.id])).rejects.toBe(unlinkError)
+
+			vi.mocked(fs.unlink).mockImplementation(async (filePath) => actualFs.unlink(filePath))
+		})
 	})
 
 	describe("reconcile()", () => {

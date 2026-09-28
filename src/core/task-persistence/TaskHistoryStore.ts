@@ -281,8 +281,30 @@ export class TaskHistoryStore {
 	 */
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
-			for (const taskId of taskIds) {
-				await this.deleteTaskFile(taskId)
+			let deletedCount = 0
+			try {
+				for (const taskId of taskIds) {
+					await this.deleteTaskFile(taskId)
+					deletedCount++
+				}
+			} catch (error) {
+				// Earlier deletions already removed their files and cache entries.
+				// Await the write-through with the current cache before the
+				// original deletion error rejects the call, so persisted
+				// globalState does not keep already-deleted tasks.
+				if (deletedCount > 0 && this.onWrite) {
+					try {
+						await this.onWrite(this.getAll())
+					} catch (writeError) {
+						// The deletion failure is the primary error. Report the
+						// write-through failure without masking it.
+						console.error(
+							"[TaskHistoryStore] deleteMany write-through after partial deletion failed:",
+							writeError,
+						)
+					}
+				}
+				throw error
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
