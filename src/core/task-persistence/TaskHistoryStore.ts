@@ -7,7 +7,8 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -266,16 +267,7 @@ export class TaskHistoryStore {
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
-			this.cache.delete(taskId)
-			this.taskFileMtimes.delete(taskId)
-
-			// Remove per-task file (best-effort)
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				await fs.unlink(filePath)
-			} catch {
-				// File may already be deleted
-			}
+			await this.deleteTaskFile(taskId)
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -290,15 +282,7 @@ export class TaskHistoryStore {
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
 			for (const taskId of taskIds) {
-				this.cache.delete(taskId)
-				this.taskFileMtimes.delete(taskId)
-
-				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					await fs.unlink(filePath)
-				} catch {
-					// File may already be deleted
-				}
+				await this.deleteTaskFile(taskId)
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -881,6 +865,34 @@ export class TaskHistoryStore {
 		} catch {
 			return null
 		}
+	}
+
+	/**
+	 * Delete one task file under the same advisory lock used by `safeWriteJson`.
+	 * Cache state changes only after the file is absent or unlink succeeds.
+	 */
+	private async deleteTaskFile(taskId: string): Promise<void> {
+		const filePath = await this.getTaskFilePath(taskId)
+		try {
+			await withFileLock(filePath, async (absoluteFilePath) => {
+				try {
+					await fs.unlink(absoluteFilePath)
+				} catch (error) {
+					if (!this.isFileNotFoundError(error)) {
+						throw error
+					}
+				}
+			})
+		} catch (error) {
+			// A missing parent directory prevents lock creation and also proves
+			// that the history file is absent.
+			if (!this.isFileNotFoundError(error)) {
+				throw error
+			}
+		}
+
+		this.cache.delete(taskId)
+		this.taskFileMtimes.delete(taskId)
 	}
 
 	// ────────────────────────────── Private: fs.watch ──────────────────────────────
