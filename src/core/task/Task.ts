@@ -437,7 +437,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Reset to `false` at the start of each API request.
 	 * Set to `true` only after the assistant message is durably saved.
 	 */
-	assistantMessageSavedToHistory = true
+	assistantMessageSavedToHistory = false
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
@@ -499,46 +499,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Native tool call streaming state (track which index each tool is at)
 	private streamingToolCallIndices: Map<string, number> = new Map()
-
-	/**
-	 * Finalize a streaming native tool call by id and present it.
-	 *
-	 * Shared by every site that observes a tool_call_end: the per-chunk event
-	 * loop, the stream-level tool_call_end case, and the end-of-stream
-	 * finalizeRawChunks() pass. Calling it again for an already-finalized id is a
-	 * safe no-op because finalizeStreamingToolCall() and the index map entry are
-	 * both cleared on first finalize.
-	 */
-	private finalizeStreamingToolCallById(id: string, nativeToolCallParserScope: object): void {
-		const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(id, nativeToolCallParserScope)
-		const toolUseIndex = this.streamingToolCallIndices.get(id)
-
-		if (finalToolUse) {
-			;(finalToolUse as any).id = id
-			if (toolUseIndex !== undefined) {
-				this.assistantMessageContent[toolUseIndex] = finalToolUse
-			}
-			this.streamingToolCallIndices.delete(id)
-			this.userMessageContentReady = false
-			/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-			this.presentAssistantMessageSafe()
-		} else if (toolUseIndex !== undefined) {
-			// finalizeStreamingToolCall returned null (malformed JSON or missing args).
-			// Clear partial arguments before presentation so truncated values cannot run
-			// or enter conversation history.
-			const existingToolUse = this.assistantMessageContent[toolUseIndex]
-			if (existingToolUse && existingToolUse.type === "tool_use") {
-				existingToolUse.partial = false
-				existingToolUse.nativeArgs = undefined
-				existingToolUse.params = {}
-				;(existingToolUse as any).id = id
-			}
-			this.streamingToolCallIndices.delete(id)
-			this.userMessageContentReady = false
-			/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-			this.presentAssistantMessageSafe()
-		}
-	}
 
 	// Cached model info for current streaming session (set at start of each API request)
 	// This prevents excessive getModel() calls during tool execution
@@ -1074,9 +1034,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
 	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
-		if (message.role === "assistant") {
-			this.assistantMessageSavedToHistory = false
-		}
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1194,18 +1151,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * So we usually only need to flush the pending user message with tool_results.
 	 */
 	public async flushPendingToolResultsToHistory(): Promise<boolean> {
+		// Only flush if there's actually pending content to save
+		if (this.userMessageContent.length === 0) {
+			return true
+		}
 		if (this.abort) {
 			return false
 		}
 
-		// CRITICAL: Wait for the assistant message to be saved to API history before
-		// any early return, including the empty-content case below. Delegation relies
-		// on this barrier: an auto-approved new_task can execute while the parent
-		// assistant turn still awaits persistence, and disposing the parent at that
-		// point would leave its tool_use turn out of the durable history.
-		//
-		// Without the wait, tool_result blocks would also appear BEFORE tool_use blocks
-		// in the conversation history, causing API errors like:
+		// CRITICAL: Wait for the assistant message to be saved to API history first.
+		// Without this, tool_result blocks would appear BEFORE tool_use blocks in the
+		// conversation history, causing API errors like:
 		// "unexpected `tool_use_id` found in `tool_result` blocks"
 		//
 		// This can happen when parallel tools are called (e.g., update_todo_list + new_task).
@@ -1228,11 +1184,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 				return false
 			}
-		}
-
-		// Only flush if there's actually pending content to save
-		if (this.userMessageContent.length === 0) {
-			return true
 		}
 
 		// If task was aborted while waiting, don't flush
@@ -3475,19 +3426,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												this.presentAssistantMessageSafe()
 											}
 										}
-									} else if (event.type === "tool_call_end") {
-										this.finalizeStreamingToolCallById(event.id, nativeToolCallParserScope)
 									}
 								}
-								break
-							}
-
-							case "tool_call_end": {
-								// Providers emit a tool_call_end chunk when finish_reason is
-								// "tool_calls" (either directly or via processFinishReason).
-								// Finalize the streaming tool call now so it is presented during
-								// streaming rather than waiting for finalizeRawChunks() at stream end.
-								this.finalizeStreamingToolCallById(chunk.id, nativeToolCallParserScope)
 								break
 							}
 
@@ -3858,7 +3798,64 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks(nativeToolCallParserScope)
 				for (const event of finalizeEvents) {
 					if (event.type === "tool_call_end") {
-						this.finalizeStreamingToolCallById(event.id, nativeToolCallParserScope)
+						// Finalize the streaming tool call
+						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+							event.id,
+							nativeToolCallParserScope,
+						)
+
+						// Get the index for this tool call
+						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+
+						if (finalToolUse) {
+							// Store the tool call ID
+							;(finalToolUse as any).id = event.id
+
+							// Get the index and replace partial with final
+							if (toolUseIndex !== undefined) {
+								this.assistantMessageContent[toolUseIndex] = finalToolUse
+							}
+
+							// Clean up tracking
+							this.streamingToolCallIndices.delete(event.id)
+
+							// Mark that we have new content to process
+							this.userMessageContentReady = false
+
+							// Present the finalized tool call
+							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+							this.presentAssistantMessageSafe()
+						} else if (toolUseIndex !== undefined) {
+							// finalizeStreamingToolCall returned null (malformed JSON or missing args).
+							// existingToolUse is the same object the streaming phase was mutating in
+							// place, so it still carries nativeArgs AND params built from the incomplete
+							// partial parse (e.g. a truncated write_to_file `content` string) - both were
+							// only ever meant for live progress display, never for execution or for
+							// ending up in conversation history. Mark the tool as non-partial so it's
+							// presented as complete, and clear both so presentAssistantMessage's
+							// `!block.nativeArgs` guard short-circuits with a structured tool_result
+							// instead of executing the truncated value, and so the toolUse.nativeArgs ||
+							// toolUse.params fallback used when recording history doesn't fall through to
+							// the same truncated data under a different name.
+							const existingToolUse = this.assistantMessageContent[toolUseIndex]
+							if (existingToolUse && existingToolUse.type === "tool_use") {
+								existingToolUse.partial = false
+								existingToolUse.nativeArgs = undefined
+								existingToolUse.params = {}
+								// Ensure it has the ID for native protocol
+								;(existingToolUse as any).id = event.id
+							}
+
+							// Clean up tracking
+							this.streamingToolCallIndices.delete(event.id)
+
+							// Mark that we have new content to process
+							this.userMessageContentReady = false
+
+							// Present the tool call - validation will handle missing params
+							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+							this.presentAssistantMessageSafe()
+						}
 					}
 				}
 
