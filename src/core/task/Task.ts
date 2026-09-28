@@ -430,6 +430,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// submission was consumed (hand the ID to the caller for a durable ack) or
 	// overwritten unconsumed (retain for a later ask).
 	private pendingSubmittedQueuedMessageId: string | undefined
+	// Association between a queued message ID and the user_feedback row its ack
+	// persisted. A redelivery after a partial save failure reconciles the same
+	// row instead of appending a duplicate feedback row.
+	private queuedFeedbackRows = new Map<string, ClineMessage>()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -963,8 +967,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
+		let row = this.queuedFeedbackRows.get(messageId)
 		try {
-			await this.say("user_feedback", text ?? "", images)
+			if (row) {
+				// Redelivery after a partial save failure (e.g. the message file
+				// was written but metadata persistence failed): reconcile the same
+				// row instead of appending a duplicate feedback row.
+				row.text = text ?? ""
+				row.images = images
+				this.updateClineMessage(row).catch((error) => {
+					console.error("[Task#persistQueuedFeedbackAndAcknowledge] updateClineMessage failed:", error)
+				})
+			} else {
+				row = {
+					ts: Date.now(),
+					type: "say",
+					say: "user_feedback",
+					text: text ?? "",
+					images,
+				}
+				// Mirrors say()'s interactive user_feedback append: bump
+				// lastMessageTs and let the retry loop below own persistence.
+				// The association is recorded only after the append succeeds so
+				// a redelivery can never reconcile a row that was never added.
+				this.lastMessageTs = row.ts
+				await this.addToClineMessages(row)
+				this.queuedFeedbackRows.set(messageId, row)
+			}
 		} catch (error) {
 			// A failed write must not leave the message claimed: release it so a
 			// later drain can redeliver it. (No-op when the drain path already
@@ -978,6 +1007,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return false
 			}
 			if (await this.saveClineMessages()) {
+				this.queuedFeedbackRows.delete(messageId)
 				return this.messageQueueService.removeMessage(messageId)
 			}
 			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
@@ -1948,6 +1978,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (newState?.apiConfiguration) {
 						this.updateApiConfiguration(newState.apiConfiguration)
 					}
+				}
+
+				// Cancellation guard immediately before the slot write: abort and
+				// dispose both set this flag, and the emit/checkpoint side effects
+				// below must never run on a cancelled task. The check is adjacent
+				// to the write so no cancellation can interleave (single-threaded).
+				if (this.abort || this.abandoned) {
+					console.error("[Task#submitUserMessage] Task aborted, dropping user message submission")
+					return false
 				}
 
 				this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
@@ -5589,6 +5628,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private async claimAndSubmitNextQueuedMessage(): Promise<boolean> {
+		// A cancelled task must not submit: abortTask sets this flag before its
+		// awaited webview flush, and dispose clears the queue afterwards, so this
+		// guard closes the window where a drain could otherwise post into a
+		// dying task.
+		if (this.abort || this.abandoned) {
+			return false
+		}
 		const queued = this.messageQueueService.claimNextMessage()
 		if (!queued) {
 			return false
@@ -5604,7 +5650,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			const submitted = await this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.id)
 			if (!submitted) {
+				if (this.abort || this.abandoned) {
+					// Cancelled mid-handoff: the guard in submitUserMessage
+					// dropped the write, so release quietly instead of failing
+					// the drain on a task that is already stopping.
+					this.messageQueueService.releaseMessage(queued.id)
+					return false
+				}
 				throw new Error(`[Task] Failed to submit queued message ${queued.id}`)
+			}
+			if (this.abort || this.abandoned) {
+				// The submission raced with cancellation: no consuming ask will
+				// run on a dying task, so do not track it as pending.
+				if (this.pendingSubmittedQueuedMessageId === queued.id) {
+					this.pendingSubmittedQueuedMessageId = undefined
+				}
+				this.messageQueueService.releaseMessage(queued.id)
+				return false
 			}
 		} catch (error) {
 			// Release the claim so a later drain can retry the message.

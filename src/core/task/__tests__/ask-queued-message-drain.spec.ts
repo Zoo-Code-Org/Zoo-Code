@@ -1,9 +1,14 @@
+import type { ClineMessage } from "@roo-code/types"
+
 import { Task } from "../Task"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
-	addToClineMessages: () => Promise<void>
+	addToClineMessages: (message?: ClineMessage) => Promise<boolean>
+	updateClineMessage: (message?: ClineMessage) => Promise<void>
+	clineMessages: ClineMessage[]
+	queuedFeedbackRows: Map<string, ClineMessage>
 	lastMessageTs?: number
 	abort: boolean
 	queuedMessageDrainChain: Promise<unknown>
@@ -28,6 +33,9 @@ describe("Task.ask queued message drain", () => {
 			// Object.create skips field initializers; the drain chain must exist
 			// for processQueuedMessages to schedule behind it.
 			getQueueTaskTestAccess(task).queuedMessageDrainChain = Promise.resolve()
+			// Object.create skips field initializers; the drain chain and the
+			// feedback-row association map must exist for their paths.
+			getQueueTaskTestAccess(task).queuedFeedbackRows = new Map()
 			;(task as any).addToClineMessages = vi.fn(async () => {})
 			;(task as any).saveClineMessages = vi.fn(async () => {})
 			;(task as any).updateClineMessage = vi.fn(async () => {})
@@ -326,6 +334,121 @@ describe("Task.ask queued message drain", () => {
 		expect(submitSpy).toHaveBeenCalledTimes(1)
 	})
 
+	it("keeps exactly one feedback row when a redelivery follows a partial save failure", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("dedupe me")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+		const messageId = result.queuedMessageId!
+
+		const taskAccess = getQueueTaskTestAccess(task)
+		taskAccess.addToClineMessages = async (message) => {
+			taskAccess.clineMessages.push(message!)
+			return true
+		}
+		// The messages-file write succeeds but metadata persistence fails, so
+		// saveClineMessages reports false and the entry is released queued.
+		const saveClineMessages = vi.fn().mockResolvedValue(false)
+		taskAccess.saveClineMessages = saveClineMessages
+
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(taskAccess.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
+
+		// Redelivery: the retained entry is acked again and the reconciled
+		// attempt must update the same row instead of appending a duplicate.
+		saveClineMessages.mockResolvedValue(true)
+		await expect(task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)).resolves.toBe(
+			true,
+		)
+		const rows = taskAccess.clineMessages.filter((message) => message.say === "user_feedback")
+		expect(rows).toHaveLength(1)
+		expect(rows[0].text).toBe("dedupe me")
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("does not submit queued messages once the task is aborted", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+		task.messageQueueService.addMessage("too late")
+		getQueueTaskTestAccess(task).abort = true
+
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+		expect(submitSpy).not.toHaveBeenCalled()
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["too late"])
+		// The ask-response slot stays empty: no emission, no checkpoint.
+		expect(task["askResponse"]).toBeUndefined()
+	})
+
+	it("drops the drain quietly when abort lands mid-submission", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		task.messageQueueService.addMessage("too late")
+		const realSubmit = task.submitUserMessage.bind(task)
+		vi.spyOn(task, "submitUserMessage").mockImplementation((...args) => {
+			getQueueTaskTestAccess(task).abort = true
+			return realSubmit(...args)
+		})
+
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(task["askResponse"]).toBeUndefined()
+	})
+
+	describe("sayUserFeedbackAndAckQueued", () => {
+		it("delegates to the durable ack when a queued message was consumed", async () => {
+			const task = await createTask()
+			const persist = vi.spyOn(task, "persistQueuedFeedbackAndAcknowledge").mockResolvedValue(true)
+			const say = vi.spyOn(task, "say")
+
+			await task.sayUserFeedbackAndAckQueued("words", ["img.png"], "queued-1")
+
+			expect(persist).toHaveBeenCalledExactlyOnceWith("queued-1", "words", ["img.png"])
+			expect(say).not.toHaveBeenCalled()
+		})
+
+		it("throws when the durable ack fails", async () => {
+			const task = await createTask()
+			vi.spyOn(task, "persistQueuedFeedbackAndAcknowledge").mockResolvedValue(false)
+
+			await expect(task.sayUserFeedbackAndAckQueued("words", undefined, "queued-1")).rejects.toThrow(
+				"Failed to persist queued feedback queued-1",
+			)
+		})
+
+		it("says user feedback without a queued message", async () => {
+			const task = await createTask()
+			const say = vi.spyOn(task, "say").mockResolvedValue(true)
+
+			await task.sayUserFeedbackAndAckQueued("direct words", undefined, undefined)
+
+			expect(say).toHaveBeenCalledExactlyOnceWith("user_feedback", "direct words", undefined)
+		})
+
+		it("skips saying when there is no feedback content and no queued message", async () => {
+			const task = await createTask()
+			const say = vi.spyOn(task, "say")
+
+			await task.sayUserFeedbackAndAckQueued(undefined, undefined, undefined)
+
+			expect(say).not.toHaveBeenCalled()
+		})
+	})
+
 	it("does not consume queued messages for command_output asks", async () => {
 		const task = await createTask()
 
@@ -459,9 +582,12 @@ describe("Task.ask queued message drain", () => {
 			task.messageQueueService.addMessage("Retry feedback")
 			const result = await task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
 			const saveClineMessages = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
-			const say = vi.fn().mockResolvedValue(undefined)
 			const taskAccess = getQueueTaskTestAccess(task)
-			taskAccess.say = say
+			const addToClineMessages = vi.fn(async (message?: ClineMessage) => {
+				taskAccess.clineMessages.push(message!)
+				return true
+			})
+			taskAccess.addToClineMessages = addToClineMessages
 			taskAccess.saveClineMessages = saveClineMessages
 
 			const persistence = task.persistQueuedFeedbackAndAcknowledge(
@@ -472,8 +598,9 @@ describe("Task.ask queued message drain", () => {
 			await vi.advanceTimersByTimeAsync(250)
 			await persistence
 
-			expect(say).toHaveBeenCalledTimes(1)
+			expect(addToClineMessages).toHaveBeenCalledTimes(1)
 			expect(saveClineMessages).toHaveBeenCalledTimes(2)
+			expect(taskAccess.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		} finally {
 			vi.useRealTimers()
@@ -487,7 +614,7 @@ describe("Task.ask queued message drain", () => {
 			finishAddingAsk = resolve
 		})
 		const access = getQueueTaskTestAccess(task)
-		access.addToClineMessages = vi.fn(() => addingAsk)
+		access.addToClineMessages = vi.fn(() => addingAsk.then(() => true))
 		task.messageQueueService.addMessage("Still durable")
 		const ask = task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
 		await Promise.resolve()
@@ -506,7 +633,7 @@ describe("Task.ask queued message drain", () => {
 			finishAddingAsk = resolve
 		})
 		const access = getQueueTaskTestAccess(task)
-		access.addToClineMessages = vi.fn(() => addingAsk)
+		access.addToClineMessages = vi.fn(() => addingAsk.then(() => true))
 		task.messageQueueService.addMessage("Persist me later")
 		const ask = task.ask("completion_result", "Done", false)
 		await Promise.resolve()

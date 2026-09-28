@@ -491,6 +491,13 @@ export async function executeCommandInTerminal(
 						return
 					}
 					await toolResultPublished
+					// A task cancelled while the command finished in the
+					// background must not drain: the guards inside
+					// processQueuedMessages would no-op anyway, and skipping here
+					// avoids pointless work plus error-log noise on the dying task.
+					if (task.abort || task.abandoned) {
+						return
+					}
 					return task.processQueuedMessages().catch((error) => {
 						console.error("[ExecuteCommandTool] Failed to process queued messages:", error)
 					})
