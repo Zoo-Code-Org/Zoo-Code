@@ -1540,6 +1540,27 @@ describe("ClineProvider", () => {
 			expect(await settled).toBe(true)
 		})
 
+		it("settles viewStateReadiness when the launch carries no usable view id", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const readiness = provider.viewStateReadiness
+
+			const settled = readiness.then(
+				() => true,
+				() => false,
+			)
+
+			// The CLI launch sends the registration message without a view-state id: the
+			// early return must still settle readiness so API-driven task creation does
+			// not fall through to its timeout waiting for a state that never registers.
+			await provider["setViewStateId"](undefined)
+			await provider["setViewStateId"]("   ")
+
+			expect(await settled).toBe(true)
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+
+			await provider.dispose()
+		})
+
 		it("settles viewStateReadiness even when first read after the id is registered", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
@@ -2289,8 +2310,17 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn(),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
 
 			await provider.deleteProviderProfile(oldProfile)
+
+			// This view pinned the deleted profile, so the deletion routes through the
+			// activation path, which writes the profile list itself (re-reading the
+			// entries from the settings store): exactly one list write may occur, and a
+			// stray compensating pre-write for a view that pins the deleted profile would
+			// be a second one.
+			const listWrites = setValueSpy.mock.calls.filter(([key]) => key === "listApiConfigMeta")
+			expect(listWrites).toHaveLength(1)
 
 			// The fallback profile must replace the deleted one in both the proxy and the buffer.
 			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
