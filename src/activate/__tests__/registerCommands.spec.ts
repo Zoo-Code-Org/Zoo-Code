@@ -963,6 +963,9 @@ describe("openClineInNewTab", () => {
 			type: "action",
 			action: "historyButtonClicked",
 		})
+		// The lookup must target the re-pointed tracked panel (A), not B or the
+		// sidebar: a lookup of the wrong panel would still reach the mock.
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(panelA)
 
 		// Closing the last live tab clears the ref again.
 		const disposeA = (panelA.onDidDispose as Mock).mock.calls[0]![0] as () => void
