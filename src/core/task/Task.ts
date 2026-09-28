@@ -181,10 +181,6 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
 }
 
-export function queuedImagesEqual(a: string[], b: string[]): boolean {
-	return a.length === b.length && a.every((value, index) => value === b[index])
-}
-
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
@@ -373,6 +369,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	// ID of the queued message that produced the current ask-response slot
+	// value (set only when a queued-message drain submitted it). Direct
+	// responses clear it, so Task.ask can tie consumption to message identity
+	// instead of matching response text/images.
+	private askResponseQueuedMessageId?: string
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
@@ -422,13 +423,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// slot (which would drop the earlier response after both messages were
 	// already removed from the queue).
 	private queuedMessageDrainChain: Promise<unknown> = Promise.resolve()
-	// Snapshot of the last drain-submitted queued message. A successful submit
-	// only posts into the pending ask-response slot; the message stays queued
-	// until an ask actually consumes that response. The consuming ask matches
-	// the returned response against this snapshot to decide whether the
-	// submission was consumed (interception → remove) or overwritten
-	// unconsumed (retain for a later ask).
-	private pendingSubmittedQueuedMessage: { id: string; text: string; images: string[] } | undefined
+	// ID of the last drain-submitted queued message. A successful submit only
+	// posts into the pending ask-response slot (which records this ID); the
+	// message stays queued until an ask consumes that response. The consuming
+	// ask matches the slot's recorded ID against this one to decide whether the
+	// submission was consumed (hand the ID to the caller for a durable ack) or
+	// overwritten unconsumed (retain for a later ask).
+	private pendingSubmittedQueuedMessageId: string | undefined
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -962,7 +963,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
-		await this.say("user_feedback", text ?? "", images)
+		try {
+			await this.say("user_feedback", text ?? "", images)
+		} catch (error) {
+			// A failed write must not leave the message claimed: release it so a
+			// later drain can redeliver it. (No-op when the drain path already
+			// released the claim.)
+			this.messageQueueService.releaseMessage(messageId)
+			throw error
+		}
 		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
 			if (this.abort) {
 				this.messageQueueService.releaseMessage(messageId)
@@ -1303,7 +1312,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return readTaskMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
 	}
 
-	private async addToClineMessages(message: ClineMessage) {
+	/** Appends a message, posts it, and persists. @returns whether the history save succeeded. */
+	private async addToClineMessages(message: ClineMessage): Promise<boolean> {
 		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
@@ -1323,7 +1333,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
-		await this.saveClineMessages()
+		const saved = await this.saveClineMessages()
 
 		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
 
@@ -1335,6 +1345,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Track that this message has been synced to cloud
 			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
+
+		return saved
 	}
 
 	/**
@@ -1530,6 +1542,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseQueuedMessageId = undefined
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -1563,6 +1576,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseQueuedMessageId = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
 					await this.addToClineMessages({
@@ -1581,6 +1595,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseQueuedMessageId = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
 			await this.addToClineMessages({
@@ -1706,36 +1721,44 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new AskIgnoredError("superseded")
 		}
 
+		// Tie a drain-submitted queued message to actual consumption by identity:
+		// the ask consumed the submission only if the pending slot still carries
+		// that message's ID. A direct response clears the slot ID even when its
+		// text/images are identical, so it cannot consume the queue entry. The
+		// claim path is excluded (durable flows already carry queuedMessageId;
+		// non-durable flows removed the message inline).
+		if (this.pendingSubmittedQueuedMessageId) {
+			const consumedViaPendingSlot =
+				queuedMessageId === undefined &&
+				this.askResponseQueuedMessageId === this.pendingSubmittedQueuedMessageId
+			if (consumedViaPendingSlot) {
+				// Hand the ID to the caller instead of removing inline: the queue
+				// entry is deleted only after the feedback is durably saved
+				// (persistQueuedFeedbackAndAcknowledge), so a failed history write
+				// cannot lose a message that was already dequeued.
+				queuedMessageId = this.pendingSubmittedQueuedMessageId
+				this.pendingSubmittedQueuedMessageId = undefined
+			} else if (
+				!this.messageQueueService.messages.some(
+					(message) => message.id === this.pendingSubmittedQueuedMessageId,
+				)
+			) {
+				// The message was consumed via the ask claim path or discarded
+				// by an existing path; the tracker is stale, so clear it.
+				this.pendingSubmittedQueuedMessageId = undefined
+			}
+		}
+
 		const result = {
 			response: this.askResponse!,
 			text: this.askResponseText,
 			images: this.askResponseImages,
 			queuedMessageId,
 		}
-		// Tie a drain-submitted queued message to actual consumption. The ask
-		// consumed the submission only if it returned the posted response from
-		// the pending slot: the claim path is excluded (durable flows carry
-		// queuedMessageId for later persistence; non-durable flows already
-		// removed the message inline).
-		const pendingSubmitted = this.pendingSubmittedQueuedMessage
-		if (pendingSubmitted) {
-			const consumedViaPendingSlot =
-				result.queuedMessageId === undefined &&
-				result.response === "messageResponse" &&
-				result.text === pendingSubmitted.text &&
-				queuedImagesEqual(result.images ?? [], pendingSubmitted.images)
-			if (consumedViaPendingSlot) {
-				this.messageQueueService.removeMessage(pendingSubmitted.id)
-				this.pendingSubmittedQueuedMessage = undefined
-			} else if (!this.messageQueueService.messages.some((message) => message.id === pendingSubmitted.id)) {
-				// The message was consumed via the ask claim path or discarded
-				// by an existing path; the tracker is stale, so clear it.
-				this.pendingSubmittedQueuedMessage = undefined
-			}
-		}
 		this.askResponse = undefined
 		this.askResponseText = undefined
 		this.askResponseImages = undefined
+		this.askResponseQueuedMessageId = undefined
 
 		// Cancel the timeouts if they are still running.
 		timeouts.forEach((timeout) => clearTimeout(timeout))
@@ -1752,13 +1775,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return result
 	}
 
-	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+		sourceQueuedMessageId?: string,
+	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+		this.askResponseQueuedMessageId = sourceQueuedMessageId
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -1841,6 +1870,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Submit a user message through the ask-response channel.
 	 *
+	 * @param sourceQueuedMessageId - ID of the durable queue message being
+	 * submitted, when this submission drains the queue. Recorded on the
+	 * ask-response slot so the consuming ask can tie consumption to message
+	 * identity; direct (non-queue) submissions leave it undefined.
 	 * @returns true when the message was handed to the ask-response channel;
 	 * false when there was nothing to submit or the handoff failed (the failure
 	 * is logged either way). Callers draining a durable queue must check this.
@@ -1850,6 +1883,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
+		sourceQueuedMessageId?: string,
 	): Promise<boolean> {
 		try {
 			text = (text ?? "").trim()
@@ -1884,7 +1918,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images)
+				this.handleWebviewAskResponse("messageResponse", text, images, sourceQueuedMessageId)
 				return true
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
@@ -2066,7 +2100,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} = {},
 		contextCondense?: ContextCondense,
 		contextTruncation?: ContextTruncation,
-	): Promise<undefined> {
+	): Promise<boolean> {
 		if (this.abort) {
 			throw new Error(`[RooCode#say] task ${this.taskId}.${this.instanceId} aborted`)
 		}
@@ -2091,6 +2125,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
+					return true
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -2099,7 +2134,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					return this.addToClineMessages({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -2126,7 +2161,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
-					await this.saveClineMessages()
+					const saved = await this.saveClineMessages()
 
 					// More performant than an entire `postStateToWebview`.
 					// Fire-and-forget: see updateClineMessage call above for the
@@ -2134,6 +2169,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
+					return saved
 				} else {
 					// This is a new and complete message, so add it like normal.
 					const sayTs = Date.now()
@@ -2142,7 +2178,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					return this.addToClineMessages({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -2165,7 +2201,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.lastMessageTs = sayTs
 			}
 
-			await this.addToClineMessages({
+			return this.addToClineMessages({
 				ts: sayTs,
 				type: "say",
 				say: type,
@@ -2459,13 +2495,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.isInitialized = true
 
-			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images, queuedMessageId } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
 
 			if (response === "messageResponse") {
-				await this.say("user_feedback", text, images)
+				if (queuedMessageId) {
+					const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+					if (!persisted) {
+						throw new Error(
+							`[Task#resumeTaskFromHistory] Failed to persist queued feedback ${queuedMessageId}`,
+						)
+					}
+				} else {
+					await this.say("user_feedback", text, images)
+				}
 				responseText = text
 				responseImages = images
 			}
@@ -5473,8 +5518,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Drains are serialized per task: each run claims only after the previous
 	 * run's submission handoff completed, so the background-completion drain
 	 * and the post-result drain cannot interleave two different messages into
-	 * the single pending ask-response. A rejected drain does not block later
-	 * drains.
+	 * the single pending ask-response. A drain whose claimed message is still
+	 * pending consumption (already submitted, not yet observed by an ask) does
+	 * not re-post it; it releases the claim and resolves true, leaving the
+	 * message queued so a distinct pending response cannot be overwritten. A
+	 * rejected drain does not block later drains.
 	 *
 	 * @returns Promise resolving to true when a queued message was submitted
 	 * (and remains queued until consumed); false when the queue was empty.
@@ -5495,8 +5543,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (!queued) {
 			return false
 		}
+		// An earlier drain already submitted this message and no ask has
+		// consumed it yet: re-posting would overwrite a distinct pending
+		// response and lose it, so release the claim and keep the message
+		// queued for the ask.
+		if (this.pendingSubmittedQueuedMessageId === queued.id) {
+			this.messageQueueService.releaseMessage(queued.id)
+			return true
+		}
 		try {
-			const submitted = await this.submitUserMessage(queued.text, queued.images)
+			const submitted = await this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.id)
 			if (!submitted) {
 				throw new Error(`[Task] Failed to submit queued message ${queued.id}`)
 			}
@@ -5506,16 +5562,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw error
 		}
 		// Submission succeeded, but the message is only removed once an ask
-		// consumes it. Snapshot the posted response so the consuming ask can
-		// tell interception (consumption → remove) from an unconsumed
-		// overwrite (retain); release the claim so the ask path can claim it.
-		// The snapshot mirrors submitUserMessage's normalization (trim, images
-		// default) so the interception match compares post-trim values.
-		this.pendingSubmittedQueuedMessage = {
-			id: queued.id,
-			text: queued.text.trim(),
-			images: queued.images ?? [],
-		}
+		// consumes it. Track the ID so the consuming ask can tell interception
+		// (consumption → durable ack) from an unconsumed overwrite (retain),
+		// and release the claim so the ask path can claim it.
+		this.pendingSubmittedQueuedMessageId = queued.id
 		this.messageQueueService.releaseMessage(queued.id)
 		return true
 	}

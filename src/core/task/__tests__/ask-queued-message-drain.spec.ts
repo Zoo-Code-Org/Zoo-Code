@@ -1,4 +1,4 @@
-import { queuedImagesEqual, Task } from "../Task"
+import { Task } from "../Task"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
@@ -13,15 +13,6 @@ const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestA
 
 // Keep this test focused: if a queued message arrives while Task.ask() is blocked,
 // it should be consumed and used to fulfill the ask.
-
-describe("queuedImagesEqual", () => {
-	it("compares image arrays by content", () => {
-		expect(queuedImagesEqual([], [])).toBe(true)
-		expect(queuedImagesEqual(["a.png", "b.png"], ["a.png", "b.png"])).toBe(true)
-		expect(queuedImagesEqual(["a.png"], ["b.png"])).toBe(false)
-		expect(queuedImagesEqual(["a.png"], ["a.png", "b.png"])).toBe(false)
-	})
-})
 
 describe("Task.ask queued message drain", () => {
 	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
@@ -61,14 +52,14 @@ describe("Task.ask queued message drain", () => {
 		expect(result.text).toBe("picked answer")
 	})
 
-	it("removes a drained padded message when its submission intercepts a blocked ask", async () => {
+	it("acks a drained padded message through the consuming ask", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
 		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		// editQueuedMessage saves untrimmed text; submitUserMessage trims before
-		// posting, so the interception match must compare post-trim values.
+		// posting, so the drained submission is the trimmed text.
 		task.messageQueueService.addMessage("  padded correction  ")
 		const drain = task.processQueuedMessages()
 
@@ -76,6 +67,15 @@ describe("Task.ask queued message drain", () => {
 		await drain
 
 		expect(result).toMatchObject({ response: "messageResponse", text: "padded correction" })
+		// Interception is consumption, but removal is deferred to the durable
+		// ack: the entry stays queued until the history write succeeds.
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		getQueueTaskTestAccess(task).saveClineMessages = vi.fn(async () => true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 
 		setTimeout(() => task.approveAsk(), 0)
@@ -83,7 +83,7 @@ describe("Task.ask queued message drain", () => {
 		expect(nextResult).toMatchObject({ response: "yesButtonClicked", text: undefined })
 	})
 
-	it("removes a drained message when its submission intercepts a blocked ask", async () => {
+	it("acks an intercepted drained message through the consuming ask", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
 		// Park a tool ask in the real pWaitFor: no auto-approval and nothing
@@ -103,8 +103,14 @@ describe("Task.ask queued message drain", () => {
 		// Interception: the blocked tool ask is answered with the submitted
 		// message (the claim path would have answered yesButtonClicked).
 		expect(result).toMatchObject({ response: "messageResponse", text: "queued correction" })
-		// Interception is consumption: the message is removed, not retained for
-		// a second delivery at the next ask.
+		// The entry stays queued until the consuming ask's durable ack removes it.
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		getQueueTaskTestAccess(task).saveClineMessages = vi.fn(async () => true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 
 		setTimeout(() => task.approveAsk(), 0)
@@ -135,6 +141,134 @@ describe("Task.ask queued message drain", () => {
 		const nextResult = await task.ask("followup", "Q?", false)
 		expect(nextResult).toMatchObject({ response: "messageResponse", text: "queued correction" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("does not consume a drained message when a direct response has identical text and images", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("same words", ["img.png"])
+		await task.processQueuedMessages()
+
+		// A direct user response with the exact same trimmed text and images
+		// lands before the ask observes the pending slot; identity, not
+		// content, decides consumption.
+		task.handleWebviewAskResponse("messageResponse", "same words", ["img.png"])
+
+		const result = await askPromise
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "same words", images: ["img.png"] })
+		expect(result.queuedMessageId).toBeUndefined()
+		// The direct response did not consume the queue entry.
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["same words"])
+	})
+
+	it("does not resubmit a drained message that is still pending consumption", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("queued correction")
+		await task.processQueuedMessages()
+
+		// A direct response lands before the ask observes the pending slot.
+		task.handleWebviewAskResponse("yesButtonClicked")
+
+		// The second drain (background-completion + post-result orchestration)
+		// must not re-post the retained message over the direct response.
+		const secondDrain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await secondDrain
+
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued correction"])
+
+		// The retained message is still deliverable to a later ask.
+		const nextResult = await task.ask("followup", "Q?", false)
+		expect(nextResult).toMatchObject({ response: "messageResponse", text: "queued correction" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("retains an intercepted drained message until its history write succeeds", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("Keep this correction")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "Keep this correction" })
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		// A failed history write must keep the message queued; the ack retries
+		// and removes the entry only after the save succeeds.
+		const taskAccess = getQueueTaskTestAccess(task)
+		taskAccess.say = vi.fn().mockResolvedValue(true)
+		taskAccess.saveClineMessages = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(task.messageQueueService.isEmpty()).toBe(false)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Keep this correction"])
+
+			await vi.advanceTimersByTimeAsync(250)
+			await expect(persistence).resolves.toBe(true)
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("re-queues an intercepted drained message when its history write keeps failing", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("Do not lose me")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		const taskAccess = getQueueTaskTestAccess(task)
+		taskAccess.say = vi.fn().mockResolvedValue(true)
+		taskAccess.saveClineMessages = vi.fn().mockResolvedValue(false)
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.runAllTimersAsync()
+
+			await expect(persistence).resolves.toBe(false)
+			expect(taskAccess.saveClineMessages).toHaveBeenCalledTimes(4)
+			// The message is released back to the queue for a later drain.
+			expect(task.messageQueueService.messages).toHaveLength(1)
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("Do not lose me")
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("does not consume queued messages for command_output asks", async () => {

@@ -523,7 +523,7 @@ describe("Task persistence", () => {
 			let saving: Promise<void> | undefined
 
 			try {
-				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				vi.spyOn(task, "say").mockResolvedValue(true)
 				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 				vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
 				vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
@@ -618,7 +618,7 @@ describe("Task persistence", () => {
 				toolDescription: vi.fn(),
 				toolCallId: completionCallId,
 			}
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 			vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
 			vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
@@ -688,7 +688,7 @@ describe("Task persistence", () => {
 				toolDescription: vi.fn(),
 				toolCallId: completionCallId,
 			}
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 			vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
 			vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)

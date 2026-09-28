@@ -23,7 +23,8 @@ describe("AskFollowupQuestionTool", () => {
 			didToolFailInCurrentTurn: false,
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
 			ask: vi.fn().mockResolvedValue({ text: "User answer", images: [] }),
-			say: vi.fn().mockResolvedValue(undefined),
+			say: vi.fn().mockResolvedValue(true),
+			persistQueuedFeedbackAndAcknowledge: vi.fn().mockResolvedValue(true),
 		} as unknown as Task
 
 		mockCallbacks = {
@@ -259,6 +260,46 @@ describe("AskFollowupQuestionTool", () => {
 		await tool.execute(params, mockTask, mockCallbacks)
 
 		expect(mockCallbacks.handleError).toHaveBeenCalledWith("asking question", error)
+	})
+
+	// ===== Queued answer ack tests =====
+
+	it("should persist and ack a queued answer instead of saying it", async () => {
+		const params = { question: "Which approach?", follow_up: [{ text: "Approach 1" }] }
+		vi.mocked(mockTask.ask).mockResolvedValue({
+			response: "messageResponse",
+			text: "queued words",
+			images: [],
+			queuedMessageId: "queued-1",
+		})
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith("queued-1", "queued words", [])
+		expect(mockTask.say).not.toHaveBeenCalled()
+		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
+			formatResponse.toolResult("<user_message>\nqueued words\n</user_message>", []),
+		)
+		expect(mockCallbacks.handleError).not.toHaveBeenCalled()
+	})
+
+	it("should call handleError without pushing a tool result when the queued ack fails", async () => {
+		const params = { question: "Which approach?", follow_up: [{ text: "Approach 1" }] }
+		vi.mocked(mockTask.ask).mockResolvedValue({
+			response: "messageResponse",
+			text: "queued words",
+			images: [],
+			queuedMessageId: "queued-1",
+		})
+		vi.mocked(mockTask.persistQueuedFeedbackAndAcknowledge).mockResolvedValue(false)
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		expect(mockCallbacks.handleError).toHaveBeenCalledWith(
+			"asking question",
+			new Error("Failed to persist queued follow-up feedback queued-1"),
+		)
+		expect(mockCallbacks.pushToolResult).not.toHaveBeenCalled()
 	})
 
 	// ===== handlePartial tests =====

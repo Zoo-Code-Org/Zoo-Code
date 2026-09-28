@@ -1361,7 +1361,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
-			const saySpy = vi.spyOn(cline, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(cline, "say").mockResolvedValue(true)
 
 			// relPath provided -> the "...WithPath" message branch.
 			const withPath = await cline.sayAndCreateMissingParamError("read_file", "path", "src/foo.ts")
@@ -2484,7 +2484,12 @@ describe("Cline", () => {
 				await task.submitUserMessage("test message", ["image1.png"])
 
 				// Verify handleWebviewAskResponse was called directly (not webview)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"test message",
+					["image1.png"],
+					undefined,
+				)
 				// Should NOT route through webview anymore
 				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 			})
@@ -2579,7 +2584,7 @@ describe("Cline", () => {
 				task.clineMessages = []
 				await task.submitUserMessage("new task", ["image1.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"], undefined)
 
 				// Clear mock
 				handleResponseSpy.mockClear()
@@ -2595,7 +2600,12 @@ describe("Cline", () => {
 				]
 				await task.submitUserMessage("follow-up message", ["image2.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "follow-up message", ["image2.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"follow-up message",
+					["image2.png"],
+					undefined,
+				)
 			})
 
 			it("should handle undefined provider gracefully", async () => {
@@ -2641,7 +2651,12 @@ describe("Cline", () => {
 				const submitted = await task.submitUserMessage("test message", ["image1.png"])
 
 				expect(submitted).toBe(true)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"test message",
+					["image1.png"],
+					undefined,
+				)
 			})
 
 			it("returns false when there is nothing to submit", async () => {
@@ -2718,7 +2733,7 @@ describe("Cline", () => {
 				const submitted = await task.submitUserMessage(undefined as unknown as string, ["image1.png"])
 
 				expect(submitted).toBe(true)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "", ["image1.png"], undefined)
 			})
 		})
 	})
@@ -2807,7 +2822,7 @@ describe("Cline", () => {
 				ask: "resume_task" as const,
 			}
 
-			await expect(taskAccess.addToClineMessages(message)).resolves.toBeUndefined()
+			await expect(taskAccess.addToClineMessages(message)).resolves.toBe(true)
 
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				"[Task#addToClineMessages] postStateToWebviewThrottled failed:",
@@ -3911,7 +3926,7 @@ describe("Cline", () => {
 					totalTokensOut: 0,
 					contextTokens: 0,
 				})
-				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				vi.spyOn(task, "say").mockResolvedValue(true)
 				task.apiConversationHistory = [
 					{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 				]
@@ -4537,7 +4552,7 @@ describe("Cline", () => {
 			// The early return this guards never reaches say; the spy only keeps
 			// the aborted task's post-overwrite say from throwing before the
 			// summarize/overwrite assertions can report a regression.
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
@@ -4589,7 +4604,7 @@ describe("Cline", () => {
 			// The early return this guards never reaches say; the spy only keeps
 			// the aborted task's post-overwrite say from throwing before the
 			// overwrite assertion can report the regression.
-			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
@@ -4639,7 +4654,7 @@ describe("Cline", () => {
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// Suspend inside the collector so the abort lands while the
 			// summarization request cannot have started yet.
@@ -4686,7 +4701,7 @@ describe("Cline", () => {
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			let releaseFilesRead!: (value: string[] | undefined) => void
 			const filesReadGate = new Promise<string[] | undefined>((resolve) => {
@@ -5362,7 +5377,7 @@ describe("Cline", () => {
 					expect(task.clineMessages).toEqual([])
 					await pendingPostState
 				})
-			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(true)
 			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
 				enabledToolCount: 0,
 				enabledServerCount: 0,
@@ -5880,7 +5895,13 @@ describe("Queued message processing after condense", () => {
 
 		await task.condenseContext()
 
-		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+		expect(submitSpy).toHaveBeenCalledWith(
+			"queued text",
+			["img1.png"],
+			undefined,
+			undefined,
+			task.messageQueueService.messages[0]?.id,
+		)
 		// Submission does not remove: the message stays queued until an ask
 		// consumes it.
 		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
@@ -5918,14 +5939,26 @@ describe("Queued message processing after condense", () => {
 		// Condense in task A should only drain A's queue
 		await taskA.condenseContext()
 
-		expect(spyA).toHaveBeenCalledWith("A message", undefined)
+		expect(spyA).toHaveBeenCalledWith(
+			"A message",
+			undefined,
+			undefined,
+			undefined,
+			taskA.messageQueueService.messages[0]?.id,
+		)
 		expect(spyB).not.toHaveBeenCalled()
 		expect(taskB.messageQueueService.isEmpty()).toBe(false)
 
 		// Now condense in task B should drain B's queue
 		await taskB.condenseContext()
 
-		expect(spyB).toHaveBeenCalledWith("B message", undefined)
+		expect(spyB).toHaveBeenCalledWith(
+			"B message",
+			undefined,
+			undefined,
+			undefined,
+			taskB.messageQueueService.messages[0]?.id,
+		)
 		// Drains submit but do not remove; each task retains its own message
 		// until an ask consumes it.
 		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
@@ -6036,18 +6069,16 @@ describe("Queued message processing after condense", () => {
 			// second drain must not claim or submit the next message yet.
 			await Promise.resolve()
 			expect(submitSpy).toHaveBeenCalledTimes(1)
-			expect(submitSpy).toHaveBeenCalledWith("first", undefined)
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
 
 			releaseFirstSubmission()
 			await expect(firstDrain).resolves.toBe(true)
 			await expect(secondDrain).resolves.toBe(true)
 
-			// The second drain waited for the first, then re-claimed the
-			// retained head message (submit is idempotent for the same content);
-			// the next queued message was still not submitted early.
-			expect(submitSpy).toHaveBeenCalledTimes(2)
-			expect(submitSpy).toHaveBeenNthCalledWith(2, "first", undefined)
+			// The second drain saw "first" still pending consumption and did not
+			// re-post it (a re-post could overwrite a distinct pending response);
+			// both messages stay queued until asks consume them in order.
+			expect(submitSpy).toHaveBeenCalledTimes(1)
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
 
 			const firstResult = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
