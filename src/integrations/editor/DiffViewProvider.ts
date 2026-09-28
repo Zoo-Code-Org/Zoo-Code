@@ -167,13 +167,17 @@ export class DiffViewProvider {
 			await fs.writeFile(absolutePath, "")
 			// S4b follow-up (#44): the empty placeholder is fully known (empty),
 			// so observe the just-written on-disk version as complete; the accepted
-			// save then publishes through the guard's version check. As with the
-			// modify branch above, an existing observation for this path (the file
-			// was read before it vanished) wins: the save checks against the
-			// model's read token and fails closed rather than overwriting content
-			// the model has not seen.
+			// save then publishes through the guard's version check. Unlike the
+			// modify branch above, this is recorded even when the task already has
+			// an observation for the path: that observation describes a file that
+			// no longer exists, and keeping it would make the accept-time CAS
+			// (the placeholder token on disk vs. the vanished file's token) fail
+			// every time, so recreating the file would always fail and the
+			// placeholder would leak. The placeholder token is the correct baseline
+			// for the new file: an external change to the placeholder before the
+			// accept still moves the on-disk token and fails the CAS.
 			const displayTask = this.taskRef.deref()
-			if (displayTask && !displayTask.observationRegistry.has(absolutePath)) {
+			if (displayTask) {
 				const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 				if (placeholderStats) {
 					const placeholderVersion = versionTokenOfStat(placeholderStats)

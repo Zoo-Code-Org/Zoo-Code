@@ -1215,7 +1215,13 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
 		})
 
-		it("open() keeps the model's existing observation for a recreated file instead of the placeholder token", async () => {
+		it("open() records the placeholder token for a create even when the model read the file before it vanished", async () => {
+			// The vanished file's old observation must NOT win here: it describes
+			// a file that no longer exists, and keeping it would make the
+			// accept-time CAS (placeholder token on disk vs. the vanished file's
+			// token) fail every time, so recreating the file would always fail
+			// and the placeholder would leak. The placeholder token is the
+			// correct baseline for the new file.
 			const mockEditor = mockTextEditor(`${mockCwd}/t3-create.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
@@ -1224,19 +1230,50 @@ describe("DiffViewProvider", () => {
 			})
 			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
 			diffViewProvider.editType = "create"
 			mockTask.observationRegistry.clear()
 			mockTask.observationRegistry.observe(`${mockCwd}/t3-create.ts`, "model-token", true)
 
 			await diffViewProvider.open("t3-create.ts")
 
-			// the placeholder is still written, but the model's observation wins:
-			// no placeholder stat, no observation replacement, no placeholder
-			// token remembered for cleanup
+			const placeholderToken = versionTokenOfStat(previewStats)
+			// the placeholder is written, stat-matched, observed (replacing the
+			// vanished file's stale token), and remembered for cleanup
 			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "")
-			expect(vi.mocked(fs.stat)).not.toHaveBeenCalled()
-			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe("model-token")
-			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(1)
+			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe(placeholderToken)
+			expect(diffViewProvider["placeholderVersion"]).toBe(placeholderToken)
+		})
+
+		it("saveChanges() accepts a recreate after a prior read - the accept-time CAS checks the placeholder token", async () => {
+			// The exact recreate-always-failed trace: the model read the file
+			// (observed "v1" by the outer beforeEach), the file then vanished,
+			// open() wrote the placeholder, and the accept must succeed against
+			// the placeholder token (not the vanished file's stale token).
+			const mockEditor = mockTextEditor(`${mockCwd}/test.ts`, "new content")
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/test.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider.editType = "create"
+			// prior read observation (the file has since vanished)
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe("v1")
+
+			await diffViewProvider.open("test.ts")
+
+			// the placeholder is untouched on disk: the accept-time token matches
+			// the placeholder token open() recorded
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			const result = await diffViewProvider.saveChanges(false)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(result.newProblemsMessage).toBe("")
 		})
 
 		it("clears the dirty buffer via a disk revert after a successful guarded publish", async () => {
