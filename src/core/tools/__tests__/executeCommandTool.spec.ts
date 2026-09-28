@@ -1276,15 +1276,13 @@ describe("executeCommandTool", () => {
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 
-		it("settles the background drain chain when terminal execution fails after output", async () => {
+		it("settles the background drain chain when publication fails on a backgrounded command", async () => {
 			vitest.useFakeTimers()
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
 			try {
-				let rejectProcess!: (error: Error) => void
-				const processPromise = new Promise<void>((_resolve, reject) => {
-					rejectProcess = reject
-				})
-				const failingProcess = Object.assign(processPromise, {
+				// A process that never settles: the agent-timeout racer moves the
+				// command to background while the process stays pending.
+				const pendingProcess = Object.assign(new Promise<void>(() => {}), {
 					continue: vitest.fn(),
 					abort: vitest.fn(),
 				}) as unknown as RooTerminalProcess
@@ -1292,36 +1290,46 @@ describe("executeCommandTool", () => {
 				vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
 					runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 						capturedCallbacks = callbacks
-						return failingProcess
+						return pendingProcess
 					}),
 					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
 				} as never)
 
-				const handlePromise = handleCommand("npm test")
+				// The tool-result publication itself throws: a generic
+				// (non-shell-integration) error that reaches the else branch.
+				const publishError = new Error("tool result publication failed")
+				mockPushToolResult.mockImplementationOnce(() => {
+					throw publishError
+				})
+
+				const handlePromise = handleCommand("npm test", 2)
 
 				await vitest.waitFor(() => expect(capturedCallbacks).toBeDefined())
 				const callbacks = capturedCallbacks!
-				callbacks.onShellExecutionStarted!(1234, failingProcess)
-				await callbacks.onLine!("partial output\n", failingProcess)
-				// Completion creates the background-completion drain chain, which
-				// awaits the per-invocation publication signal.
-				await callbacks.onCompleted!("partial output\n", failingProcess)
-				callbacks.onShellExecutionComplete!({ exitCode: 0 }, failingProcess)
+				callbacks.onShellExecutionStarted!(1234, pendingProcess)
+				await callbacks.onLine!("partial output\n", pendingProcess)
 
-				// The terminal then fails with a generic (non-shell-integration)
-				// error. The publication signal must settle so the awaiting drain
-				// chain cannot hang, and the error must surface through the tool
-				// error path.
-				const failure = new Error("terminal process crashed")
-				rejectProcess(failure)
+				// The agent timeout fires while the tool sits in the settle
+				// delay: runInBackground is set, so the completion chain created
+				// below really awaits the publication signal.
+				await vitest.advanceTimersByTimeAsync(2_000)
 
+				await callbacks.onCompleted!("partial output\n", pendingProcess)
+				callbacks.onShellExecutionComplete!({ exitCode: 0 }, pendingProcess)
+				await vitest.advanceTimersByTimeAsync(0)
+
+				// The settle delay elapses, the tool tries to publish, and the
+				// publication error rethrows through the generic error path. The
+				// publication signal must settle so the awaiting background drain
+				// chain cannot hang: it is the chain's only possible settler.
 				await vitest.advanceTimersByTimeAsync(100)
 				await handlePromise
 				await vitest.advanceTimersByTimeAsync(0)
 
-				expect(mockHandleError).toHaveBeenCalledWith("executing command", failure)
-				expect(mockPushToolResult).not.toHaveBeenCalled()
-				expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+				expect(mockHandleError).toHaveBeenCalledWith("executing command", publishError)
+				// The settled chain runs the background-completion drain exactly
+				// once (no post-result drain exists on the error path).
+				expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}
