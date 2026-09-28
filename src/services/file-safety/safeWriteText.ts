@@ -157,6 +157,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
+	let restoreDacl = false // true only when the DACL dump saved successfully
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -215,9 +216,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				await fs.access(targetPath) // target exists?
 				daclDumpPath = targetPath + ".acl.tmp"
 				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
-				if (!saved) {
-					daclDumpPath = null // skip DACL handling entirely
-				}
+				// Keep tracking the dump path even when the save failed: a failed
+				// icacls may have left a partial dump behind, and the cleanup paths
+				// below must remove it. Only a successfully saved dump may be
+				// restored onto the committed file.
+				restoreDacl = saved
 			} catch {
 				// target does not exist or access failed — no DACL handling
 				daclDumpPath = null
@@ -260,7 +263,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
-			if (platform === "win32" && daclDumpPath !== null) {
+			// Restore only from a successfully saved dump; a failed save leaves
+			// restoreDacl false while daclDumpPath stays tracked for cleanup.
+			if (platform === "win32" && restoreDacl && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
 				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 			}
