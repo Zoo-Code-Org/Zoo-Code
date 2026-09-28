@@ -1051,6 +1051,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
 			diffViewProvider.editType = "create"
 			mockTask.observationRegistry.clear()
 
@@ -1060,10 +1061,13 @@ describe("DiffViewProvider", () => {
 			expect(obs).toBeDefined()
 			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
 			expect(obs!.complete).toBe(true)
-			// The create path stats exactly once (the placeholder), so the single
-			// call carries the bigint requirement.
+			// The create path stat-matches the placeholder (pre + post read), so
+			// both calls carry the bigint requirement, and the verification read
+			// uses utf-8.
 			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(1, `${mockCwd}/brand-new.ts`, { bigint: true })
-			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(2, `${mockCwd}/brand-new.ts`, { bigint: true })
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
+			expect(vi.mocked(fs.readFile)).toHaveBeenCalledWith(`${mockCwd}/brand-new.ts`, "utf-8")
 		})
 
 		it("open() leaves the target unobserved when the pre/post stat mismatch (mid-preview mutation)", async () => {
@@ -1231,6 +1235,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
 			diffViewProvider.editType = "create"
 			mockTask.observationRegistry.clear()
 			mockTask.observationRegistry.observe(`${mockCwd}/t3-create.ts`, "model-token", true)
@@ -1241,7 +1246,7 @@ describe("DiffViewProvider", () => {
 			// the placeholder is written, stat-matched, observed (replacing the
 			// vanished file's stale token), and remembered for cleanup
 			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "")
-			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
 			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe(placeholderToken)
 			expect(diffViewProvider["placeholderVersion"]).toBe(placeholderToken)
 		})
@@ -1260,6 +1265,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
 			diffViewProvider.editType = "create"
 			mockTask.observationRegistry.clear()
 			diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
@@ -1267,8 +1273,95 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider.open("t3-dead-task.ts")
 
 			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-dead-task.ts`, "")
-			// no live task: nothing observed, nothing remembered for cleanup
+			// no live task: nothing observed, but the cleanup token is still
+			// captured (provider state) so the fail-closed save rejection can
+			// remove the placeholder instead of leaking it
 			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-dead-task.ts`)).toBeUndefined()
+			expect(diffViewProvider["placeholderVersion"]).toBe(versionTokenOfStat(previewStats))
+		})
+
+		it("open() does not record a placeholder another writer touched after the write", async () => {
+			// CR d037753 finding: a writer that touched the placeholder between
+			// open()'s fs.writeFile() and the observation would have its token
+			// recorded as a complete observation of content open() never read.
+			// The stat-matched verification must reject it: no observation (the
+			// prior observation stays untouched), no cleanup token (so a rejected
+			// save cannot unlink the writer's file), and the save fails closed.
+			const mockEditor = mockTextEditor(`${mockCwd}/contested.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/contested.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("external content")
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+			mockTask.observationRegistry.observe(`${mockCwd}/contested.ts`, "model-token", true)
+
+			await diffViewProvider.open("contested.ts")
+
+			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/contested.ts`, "")
+			// nothing recorded, and the vanished file's prior observation was
+			// not replaced with the writer's token
+			expect(mockTask.observationRegistry.get(`${mockCwd}/contested.ts`)?.version).toBe("model-token")
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+		})
+
+		it("open() does not record the placeholder when the post-stat fails after the write", async () => {
+			// The bracketing stats must both succeed: a failed post-stat means
+			// the read is not trustworthy, so nothing is recorded.
+			const mockEditor = mockTextEditor(`${mockCwd}/statfail.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/statfail.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat)
+				.mockResolvedValueOnce(previewStats)
+				.mockRejectedValueOnce(Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" }))
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("statfail.ts")
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/statfail.ts`)).toBeUndefined()
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+		})
+
+		it("open() does not record the placeholder when the bracketing stats disagree (mid-preview mutation)", async () => {
+			// A token change between the bracketing stats means the placeholder
+			// was replaced or rewritten while open() was reading it - same S2
+			// rule as the modify branch: nothing is recorded.
+			const mutatedStats = {
+				isDirectory: () => false,
+				dev: BigInt(1),
+				ino: BigInt(2),
+				size: BigInt(301),
+				mtimeNs: BigInt(4_000_000_001n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			const mockEditor = mockTextEditor(`${mockCwd}/mutated-new.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/mutated-new.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValueOnce(previewStats).mockResolvedValueOnce(mutatedStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("mutated-new.ts")
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/mutated-new.ts`)).toBeUndefined()
 			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
 		})
 
@@ -1286,6 +1379,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
 			diffViewProvider.editType = "create"
 			// prior read observation (the file has since vanished)
 			expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe("v1")

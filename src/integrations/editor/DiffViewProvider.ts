@@ -165,26 +165,44 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
-			// S4b follow-up (#44): the empty placeholder is fully known (empty),
-			// so observe the just-written on-disk version as complete; the accepted
-			// save then publishes through the guard's version check. Unlike the
-			// modify branch above, this is recorded even when the task already has
-			// an observation for the path: that observation describes a file that
-			// no longer exists, and keeping it would make the accept-time CAS
-			// (the placeholder token on disk vs. the vanished file's token) fail
-			// every time, so recreating the file would always fail and the
-			// placeholder would leak. The placeholder token is the correct baseline
-			// for the new file: an external change to the placeholder before the
-			// accept still moves the on-disk token and fails the CAS.
-			const displayTask = this.taskRef.deref()
-			if (displayTask) {
-				const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-				if (placeholderStats) {
-					const placeholderVersion = versionTokenOfStat(placeholderStats)
-					displayTask.observationRegistry.observe(absolutePath, placeholderVersion, true)
+			// S4b follow-up (#44 / epic #1375): the empty placeholder is fully
+			// known (empty), but verify it with the same S2 stat-matched contract
+			// as the modify branch above: a stat-mismatched or non-empty read
+			// means another writer touched the placeholder in the window after
+			// open() wrote it, and that writer's token must not be observed as
+			// complete (observing it would claim we saw content we never read, and
+			// the token-guarded cleanup would unlink their file) - nothing is
+			// recorded and the save fails closed instead. When the placeholder is
+			// verified empty, its token replaces any prior observation for the
+			// path: a prior observation describes a file that no longer exists, and
+			// keeping it would make the accept-time CAS (the placeholder token on
+			// disk vs. the vanished file's token) fail every time, so recreating
+			// the file would always fail. The placeholder token is the correct
+			// baseline for the new file: an external change to the placeholder
+			// before the accept moves the on-disk token and fails the CAS. The
+			// cleanup token is captured whether or not the task is still live:
+			// a rejected save must not leave the placeholder behind even when the
+			// owning task has been collected.
+			const placeholderPreStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (placeholderPreStats) {
+				const placeholderContent = await fs.readFile(absolutePath, "utf-8").catch(() => undefined)
+				const placeholderPostStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const placeholderToken = versionTokenOfStat(placeholderPreStats)
+				// Stat-matched (S2): the read is trusted only while the bracketing
+				// stats agree and the content is exactly the empty placeholder.
+				if (
+					placeholderPostStats &&
+					placeholderToken === versionTokenOfStat(placeholderPostStats) &&
+					placeholderContent === ""
+				) {
 					// Remember the placeholder token so a rejected save can remove
-					// the placeholder only while it is still the exact file we wrote.
-					this.placeholderVersion = placeholderVersion
+					// the placeholder only while it is still the exact file open()
+					// wrote.
+					this.placeholderVersion = placeholderToken
+					const displayTask = this.taskRef.deref()
+					if (displayTask) {
+						displayTask.observationRegistry.observe(absolutePath, placeholderToken, true)
+					}
 				}
 			}
 		}
@@ -401,18 +419,21 @@ export class DiffViewProvider {
 		// changed after the preview or the target was never observed, with the
 		// standard re-read-then-retry remediation.
 		const saveTask = this.taskRef.deref()
-		if (!saveTask) {
-			// Fail closed: without the owning task the observation registry is
-			// unreachable and the save cannot be guarded.
-			throw new Error("Cannot guard the write: the owning task is no longer available")
-		}
 		try {
+			if (!saveTask) {
+				// Fail closed: without the owning task the observation registry is
+				// unreachable and the save cannot be guarded. The rejection flows
+				// through the same discard-only cleanup as a guard verdict, so a
+				// dead task cannot leave the empty placeholder behind either.
+				throw new Error("Cannot guard the write: the owning task is no longer available")
+			}
 			// Stryker disable next-line StringLiteral: "" is semantically identical to "update" in guardedWrite (only "edit" and "create" take distinct branches), so the StringLiteral mutant is equivalent at this sole production call site.
 			await guardedWrite(saveTask, this.relPath, editedContent, "update")
 		} catch (error) {
-			// Discard-only failure cleanup. The guard rejected the publish
-			// (stale version, unobserved target, or a partial-read observation),
-			// so the on-disk content is the newer source of truth. Reload it
+			// Discard-only failure cleanup. The publish was rejected (stale
+			// version, unobserved target, a partial-read observation, or an
+			// unavailable task), so the on-disk content is the newer source of
+			// truth. Reload it
 			// into the buffer (discarding the rejected edit), remove the empty
 			// new-file placeholder while it is still exactly the file open()
 			// wrote, and close the diff views. Never use revertChanges() here:
