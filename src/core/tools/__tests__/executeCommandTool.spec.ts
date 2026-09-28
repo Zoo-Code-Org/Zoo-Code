@@ -1242,6 +1242,91 @@ describe("executeCommandTool", () => {
 			}
 		})
 
+		it("skips the background-completion drain when the task was abandoned but still publishes the result", async () => {
+			vitest.useFakeTimers()
+			mockCline.processQueuedMessages.mockResolvedValue(true)
+			mockCline.abandoned = true
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("npm run dev", 2)
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("server starting...\n", proc)
+
+			// The agent timeout moves the command to the background; the tool
+			// returns its "still running" result and runs the post-result drain.
+			await vitest.advanceTimersByTimeAsync(2_000)
+			await handlePromise
+
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+
+			// When the background command later completes, the
+			// background-completion drain is skipped on the abandoned task.
+			await callbacks.onCompleted!("server exited\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			await vitest.advanceTimersByTimeAsync(100)
+
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("settles the background drain chain when terminal execution fails after output", async () => {
+			vitest.useFakeTimers()
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let rejectProcess!: (error: Error) => void
+				const processPromise = new Promise<void>((_resolve, reject) => {
+					rejectProcess = reject
+				})
+				const failingProcess = Object.assign(processPromise, {
+					continue: vitest.fn(),
+					abort: vitest.fn(),
+				}) as unknown as RooTerminalProcess
+				let capturedCallbacks: RooTerminalCallbacks | undefined
+				vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValue({
+					runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+						capturedCallbacks = callbacks
+						return failingProcess
+					}),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+
+				const handlePromise = handleCommand("npm test")
+
+				await vitest.waitFor(() => expect(capturedCallbacks).toBeDefined())
+				const callbacks = capturedCallbacks!
+				callbacks.onShellExecutionStarted!(1234, failingProcess)
+				await callbacks.onLine!("partial output\n", failingProcess)
+				// Completion creates the background-completion drain chain, which
+				// awaits the per-invocation publication signal.
+				await callbacks.onCompleted!("partial output\n", failingProcess)
+				callbacks.onShellExecutionComplete!({ exitCode: 0 }, failingProcess)
+
+				// The terminal then fails with a generic (non-shell-integration)
+				// error. The publication signal must settle so the awaiting drain
+				// chain cannot hang, and the error must surface through the tool
+				// error path.
+				const failure = new Error("terminal process crashed")
+				rejectProcess(failure)
+
+				await vitest.advanceTimersByTimeAsync(100)
+				await handlePromise
+				await vitest.advanceTimersByTimeAsync(0)
+
+				expect(mockHandleError).toHaveBeenCalledWith("executing command", failure)
+				expect(mockPushToolResult).not.toHaveBeenCalled()
+				expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
 		it("returns the persisted output format when the interceptor reports truncated output", async () => {
 			vitest.useFakeTimers()
 			mockCline.providerRef.deref.mockResolvedValue({

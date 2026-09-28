@@ -255,6 +255,11 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					// not a shell-integration failure, so it must not emit the
 					// shell-integration warning; surface it through the tool's
 					// error path instead.
+					// Settle the publication signal before the error bubbles: the
+					// background-completion drain chain captured toolResultPublished
+					// and awaits it, so an unresolved promise would hang that chain
+					// (and hold task references) forever. Resolving is idempotent.
+					resolveToolResultPublished?.()
 					throw error
 				}
 			}
