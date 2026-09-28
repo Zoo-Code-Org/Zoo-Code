@@ -1826,11 +1826,16 @@ describe("AwsBedrockHandler", () => {
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
 			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
-			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+			// additionalModelRequestFields is typed as a recursive DocumentType union;
+			// narrow to the adaptive-thinking shape the handler sends.
+			const requestFields = commandArg.additionalModelRequestFields as
+				| { thinking?: unknown; output_config?: unknown }
+				| undefined
+			expect(requestFields?.thinking).toEqual({
 				type: "adaptive",
 				display: "summarized",
 			})
-			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" })
+			expect(requestFields?.output_config).toEqual({ effort: "xhigh" })
 			// Sonnet 5.5 rejects sampling parameters: temperature must be omitted entirely.
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
