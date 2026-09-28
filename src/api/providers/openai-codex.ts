@@ -333,8 +333,15 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				// the service has accepted the request, so a refreshed-token retry would replay it
 				// and append a second generation to output the caller already has.
 				if (attempt === 0 && isAuthFailure && !this.sawSdkEventInCurrentResponse) {
-					// Force refresh the token for retry
-					const refreshed = await openAiCodexOAuthManager.forceRefreshAccessToken()
+					// Force refresh the token for retry. Race the refresh against the caller's
+					// signal: an abort landing while the OAuth operation is pending must settle
+					// the request with the shared abort contract instead of leaving createMessage
+					// suspended until the refresh settles and then surfacing the authentication
+					// failure of a request that no longer exists.
+					const refreshPromise = openAiCodexOAuthManager.forceRefreshAccessToken()
+					const refreshed = abortSignal
+						? await rejectOnAbort(refreshPromise, abortSignal, this.providerName)
+						: await refreshPromise
 					if (!refreshed) {
 						throw new Error(
 							t("common:errors.openAiCodex.notAuthenticated", {

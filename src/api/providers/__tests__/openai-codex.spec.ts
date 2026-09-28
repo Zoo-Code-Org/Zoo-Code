@@ -1054,6 +1054,48 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 		})
 	})
 
+	it("settles with the abort contract when cancellation lands during the auth retry refresh", async () => {
+		// The first request fails authentication and the forced token refresh is in flight
+		// when the caller aborts. The refresh must be raced against the signal: without the
+		// race the handler stays suspended until the refresh settles and then surfaces the
+		// authentication failure of a request that no longer exists instead of the abort.
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("expired-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		// Object.assign sidesteps the SDK client's structural type so the double stays cast-free.
+		Object.assign(handler, {
+			client: { responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) } },
+		})
+		// The OAuth operation settles (with no token) after the test aborts, mirroring a
+		// slow refresh that loses the race.
+		const refresh = vitest
+			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+			.mockImplementation(() => new Promise<string | null>((resolve) => setTimeout(() => resolve(null), 50)))
+		const mockFetch = vitest.fn().mockResolvedValueOnce({
+			ok: false,
+			status: 401,
+			text: vitest.fn().mockResolvedValue('{"error":{"message":"Codex API invalid token"}}'),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const abortController = new AbortController()
+		const result = collectStream(
+			handler.createMessage("Instructions", [{ role: "user", content: "Abort during refresh" }], {
+				taskId: "task-abort-refresh",
+				tools: [],
+				abortSignal: abortController.signal,
+			}),
+		)
+		// Let the first request fail and the refresh start, then cancel the caller.
+		await new Promise((resolve) => setTimeout(resolve, 10))
+		abortController.abort()
+
+		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+		expect(refresh).toHaveBeenCalledTimes(1)
+		// No retry request goes out for a request that was aborted mid-refresh.
+		expect(mockFetch).toHaveBeenCalledTimes(1)
+	})
+
 	it.each(["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna-alias"])(
 		"does not apply Luna behavior to %s",
 		async (apiModelId) => {
