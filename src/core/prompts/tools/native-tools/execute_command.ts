@@ -25,6 +25,8 @@ const CWD_PARAMETER_DESCRIPTION = `Optional working directory for the command, r
 
 const TIMEOUT_PARAMETER_DESCRIPTION = `Timeout in seconds. When exceeded, the command continues running in the background and output collected so far is returned. Use this for long-running processes like dev servers, file watchers, or any command that may not exit on its own`
 
+const REQUIRED_COMMAND_PARAMETERS = ["command"] as const
+
 const executeCommand = {
 	type: "function",
 	function: {
@@ -47,7 +49,7 @@ const executeCommand = {
 					description: TIMEOUT_PARAMETER_DESCRIPTION,
 				},
 			},
-			required: ["command", "cwd", "timeout"],
+			required: [...REQUIRED_COMMAND_PARAMETERS, "cwd", "timeout"],
 			additionalProperties: false,
 		},
 	},
@@ -64,7 +66,7 @@ export function createExecuteCommandTool({
 			parameters: {
 				...executeCommand.function.parameters,
 				// Strict generation requires all fields; the executor only requires command.
-				required: strict ? [...executeCommand.function.parameters.required] : ["command"],
+				required: strict ? [...executeCommand.function.parameters.required] : [...REQUIRED_COMMAND_PARAMETERS],
 			},
 		},
 	}

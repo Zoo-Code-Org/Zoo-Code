@@ -65,9 +65,9 @@ describe("executeCommandTool", () => {
 	let mockHandleError: any
 	let mockPushToolResult: any
 	let mockToolUse: ToolUse<"execute_command">
-	const originalCliRuntime = process.env.ROO_CLI_RUNTIME
 
 	beforeEach(() => {
+		vitest.stubEnv("ROO_CLI_RUNTIME", undefined)
 		// Reset mocks
 		vitest.clearAllMocks()
 		vitest.useRealTimers()
@@ -134,7 +134,7 @@ describe("executeCommandTool", () => {
 	})
 
 	afterEach(() => {
-		process.env.ROO_CLI_RUNTIME = originalCliRuntime
+		vitest.unstubAllEnvs()
 		vitest.useRealTimers()
 	})
 
@@ -499,7 +499,7 @@ describe("executeCommandTool", () => {
 
 	describe("Command execution timeout configuration", () => {
 		it.each([undefined, null])("uses the same default wait for timeout %s", (timeout) => {
-			delete process.env.ROO_CLI_RUNTIME
+			vitest.stubEnv("ROO_CLI_RUNTIME", undefined)
 			expect(executeCommandModule.resolveAgentTimeoutMs(timeout)).toBe(0)
 		})
 
@@ -538,12 +538,12 @@ describe("executeCommandTool", () => {
 		})
 
 		it("should ignore model timeout in CLI runtime", () => {
-			process.env.ROO_CLI_RUNTIME = "1"
+			vitest.stubEnv("ROO_CLI_RUNTIME", "1")
 			expect(executeCommandModule.resolveAgentTimeoutMs(30)).toBe(0)
 		})
 
 		it("should honor model timeout outside CLI runtime", () => {
-			delete process.env.ROO_CLI_RUNTIME
+			vitest.stubEnv("ROO_CLI_RUNTIME", undefined)
 			expect(executeCommandModule.resolveAgentTimeoutMs(30)).toBe(30_000)
 		})
 	})
