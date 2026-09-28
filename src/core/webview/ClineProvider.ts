@@ -2582,10 +2582,10 @@ export class ClineProvider
 		}
 
 		// This view pins an unrelated profile, which must survive the deletion. The shared
-		// list was already staged above the secret deletion (see the staging block at the
-		// top of this method), so only the replacement wiring remains here: resolve the
-		// surviving profile's settings so the shared provider keys and any other live
-		// view still pinned to the deleted profile can be updated with a matching
+		// list was already pruned above, after deleteConfig completed (see the prune guarded
+		// by !viewPinsDeletedProfile), so only the replacement wiring remains here:
+		// resolve the surviving profile's settings so the shared provider keys and any other
+		// live view still pinned to the deleted profile can be updated with a matching
 		// configuration.
 
 		let survivingSettings: ProviderSettings | undefined
