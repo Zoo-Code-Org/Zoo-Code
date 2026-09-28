@@ -70,6 +70,27 @@ export const bedrockModels = {
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
 	},
+	"anthropic.claude-sonnet-5-5": {
+		// Undated model ID exactly as documented for Bedrock; no date-suffix
+		// variant has been published yet.
+		maxTokens: 128_000,
+		supportsMaxTokens: true,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		inputPrice: 2.0, // $2 per million input tokens
+		outputPrice: 10.0, // $10 per million output tokens
+		cacheWritesPrice: 2.5, // $2.50 per million tokens (5m cache write)
+		cacheReadsPrice: 0.2, // $0.20 per million tokens
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description:
+			"Claude Sonnet 5.5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
+	},
 	"amazon.nova-pro-v1:0": {
 		maxTokens: 5000,
 		contextWindow: 300_000,
@@ -680,7 +701,11 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // intentionally absent.
 // https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html
 // https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5.html
-export const BEDROCK_THINKING_DISABLE_MODEL_IDS = ["anthropic.claude-sonnet-5", "anthropic.claude-opus-5"] as const
+export const BEDROCK_THINKING_DISABLE_MODEL_IDS = [
+	"anthropic.claude-sonnet-5",
+	"anthropic.claude-sonnet-5-5",
+	"anthropic.claude-opus-5",
+] as const
 
 // Amazon Bedrock models that support Global Inference profiles
 // As of Nov 2025, AWS supports Global Inference for:
@@ -688,6 +713,7 @@ export const BEDROCK_THINKING_DISABLE_MODEL_IDS = ["anthropic.claude-sonnet-5", 
 // - Claude Sonnet 4.5
 // - Claude Sonnet 4.6
 // - Claude Sonnet 5
+// - Claude Sonnet 5.5
 // - Claude Haiku 4.5
 // - Claude Opus 4.5
 // - Claude Opus 4.6
@@ -700,6 +726,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"anthropic.claude-sonnet-4-6",
 	"anthropic.claude-sonnet-5",
+	"anthropic.claude-sonnet-5-5",
 	"anthropic.claude-haiku-4-5-20251001-v1:0",
 	"anthropic.claude-opus-4-5-20251101-v1:0",
 	"anthropic.claude-opus-4-6-v1",

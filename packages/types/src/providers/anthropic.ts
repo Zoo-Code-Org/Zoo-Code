@@ -48,6 +48,24 @@ export const anthropicModels = {
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
 	},
+	"claude-sonnet-5-5": {
+		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 2.0, // $2 per million input tokens
+		outputPrice: 10.0, // $10 per million output tokens
+		cacheWritesPrice: 2.5, // $2.50 per million tokens (5m cache write)
+		cacheReadsPrice: 0.2, // $0.20 per million tokens
+		// Sonnet 5.5 keeps the Sonnet 5 adaptive-thinking / binary-toggle
+		// convention on the direct Anthropic provider path: manual budget_tokens
+		// and non-default sampling parameters return a 400.
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Sonnet 5.5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
+	},
 	"claude-sonnet-4-5": {
 		maxTokens: 64_000, // Overridden to 8k if `enableReasoningEffort` is false.
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
