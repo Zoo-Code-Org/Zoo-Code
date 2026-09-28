@@ -615,6 +615,10 @@ describe("openClineInNewTab", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// clearAllMocks() keeps mock implementations: reset the instance-lookup
+		// return value so a preceding test's tab double cannot leak into the
+		// reuse-path assertions below.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
 
 		mockOutputChannel = {
 			appendLine: vi.fn(),
