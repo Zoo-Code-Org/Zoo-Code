@@ -56,6 +56,7 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
+	PROVIDER_SETTINGS_KEYS,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -2375,6 +2376,11 @@ export class ClineProvider
 					// I left the original implementation in just to be safe.
 					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 
+					// Same sibling protection as the activation path: the shared write
+					// below replaces the shared store, so pin other profiles' settings
+					// into the views that reference them first.
+					await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
+
 					await Promise.all([
 						this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
 						// Route through setValue so the in-memory viewLocalState buffer tracks the
@@ -2472,6 +2478,31 @@ export class ClineProvider
 			// refreshed; a name-only update would leave the deleted profile's settings
 			// behind in both.
 			await this.activateProviderProfile({ name: profileToActivate })
+
+			// The return below would otherwise skip the sibling re-pin further down:
+			// the activation's pinned-name refresh only selects siblings pinned to
+			// the replacement, so live views still buffered on the deleted profile
+			// must be re-pointed here as well, with the replacement's settings when
+			// they can be resolved (a name-only re-pin is still better than leaving
+			// the deleted name behind).
+			let replacementSettings: ProviderSettings | undefined
+			try {
+				const { name: _replacementName, ...settings } = await this.providerSettingsManager.getProfile({
+					name: profileToActivate,
+				})
+				replacementSettings = settings as ProviderSettings
+			} catch (error) {
+				this.log(
+					`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+			await this.rePinViewLocalStateForDeletedProfile(
+				profileToDelete.name,
+				profileToActivate,
+				replacementSettings,
+			)
 			return
 		}
 
@@ -2577,6 +2608,55 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Snapshot the settings of sibling views pinned to a different profile into
+	 * their view-local overlays before an activation or upsert overwrites the
+	 * shared provider-settings store. `getState()` merges the overlay over the
+	 * shared store, so a sibling pinned to another profile with no overlay would
+	 * otherwise start reporting its pin's name together with the newly activated
+	 * profile's settings - and a task created from that view would run against
+	 * the wrong provider, model, and credentials. Siblings pinned to the
+	 * activated profile are refreshed by `refreshViewLocalStateForUpdatedProfile`;
+	 * unpinned siblings follow the shared slot, where name and settings move
+	 * together.
+	 */
+	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName: string): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter(
+			(instance) =>
+				instance !== this &&
+				instance.pinnedProfileName !== undefined &&
+				instance.pinnedProfileName !== activatedProfileName &&
+				instance.viewLocalState.apiConfiguration === undefined,
+		)
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				const pinName = instance.pinnedProfileName
+				if (pinName === undefined) {
+					return
+				}
+
+				try {
+					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
+						name: pinName,
+					})
+					// Direct private access: compile-time safe across sibling instances.
+					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
+					await instance.postStateToWebview()
+				} catch (error) {
+					// If the pinned profile cannot be resolved, leave the overlay as is:
+					// the deletion path re-points such views, and a wrong snapshot is
+					// worse than the pre-write shared values.
+					this.log(
+						`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Unable to resolve profile '${pinName}': ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+			}),
+		)
+	}
+
 	async activateProviderProfile(
 		args: { name: string } | { id: string },
 		options?: {
@@ -2610,6 +2690,11 @@ export class ClineProvider
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
 			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+
+			// Siblings pinned to other profiles must keep their own settings: the
+			// shared write below replaces the shared store, so pin their profile's
+			// settings into their overlays first.
+			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
 
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
@@ -3927,7 +4012,13 @@ export class ClineProvider
 		// Flat provider-settings keys (PROVIDER_SETTINGS_KEYS) are shared settings:
 		// they are written through the ContextProxy above and must NOT be merged
 		// into viewLocalState.apiConfiguration, which would turn them into a
-		// per-view override masking later shared updates from other views.
+		// per-view override masking later shared updates from other views. If the
+		// mutation carries such a key, drop this view's overlay instead so it cannot
+		// mask the just-written shared values in getState() (the overlay, seeded by
+		// a persisted pin or a sibling refresh, is older than this shared write).
+		if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
+			delete this.viewLocalState.apiConfiguration
+		}
 	}
 
 	/**

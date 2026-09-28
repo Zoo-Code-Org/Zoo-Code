@@ -1833,6 +1833,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					try {
 						await this.waitForModeInitialization()
 						await provider.handleModeSwitch(mode, this)
+						// handleModeSwitch resolves without applying the switch for an
+						// unknown slug or an aborted/timed-out mutation; the task keeps
+						// its previous mode while the message below is delivered in the
+						// old mode, so leave a trace when the requested mode is not the
+						// task's mode after the call.
+						if (this._taskMode !== mode) {
+							console.warn(
+								`[Task#submitUserMessage] Mode switch to ${mode} was not applied (taskId=${this.taskId})`,
+							)
+						}
 					} catch (error) {
 						console.error(
 							`[Task#submitUserMessage] Mode switch to ${mode} failed (taskId=${this.taskId}):`,
