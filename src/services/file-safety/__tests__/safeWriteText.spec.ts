@@ -139,11 +139,19 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
-			// options is undefined: the self-staged check must not dereference it
+			// options is undefined: the self-staged check and the optional-chained
+			// DACL runner lookup must not dereference it
 			await expect(safeWriteText(targetPath, "hello")).resolves.toBeUndefined()
 
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+			if (process.platform === "win32") {
+				// default platform is win32: the DACL save + restore still ran
+				// through the default icacls path (options?.execFileRunner must
+				// not throw when options is undefined)
+				expect(vi.mocked(execFile)).toHaveBeenCalledTimes(2)
+				expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			}
 		})
 
 		it("does not remove the staging directory when the caller supplies its own tempPath", async () => {
