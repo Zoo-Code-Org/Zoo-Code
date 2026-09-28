@@ -577,6 +577,21 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Approval context"])
 	})
 
+	it.each(["finishTask", "newTask"])(
+		"auto-approves a %s tool ask when the queue is empty (resolution stays inert)",
+		async (tool) => {
+			const task = await createTask({
+				getState: async () => ({ autoApprovalEnabled: true, alwaysAllowSubtasks: true }),
+			})
+			// No queued message: the ask resolution must not force a manual ask,
+			// or auto-approval would be bypassed and delegation flows would hang.
+			const result = await task.ask("tool", JSON.stringify({ tool }), false)
+
+			expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		},
+	)
+
 	it("never lets a drained queued message approve a later command ask", async () => {
 		const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
 		const submitSpy = vi.spyOn(task, "submitUserMessage")

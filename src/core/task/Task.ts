@@ -1561,10 +1561,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const state = provider ? await provider.getState() : undefined
 		// Resolve before claiming: approval-gating ask types never consume a
 		// queued conversational message, and claiming without a resolution
-		// would leak the claim.
-		const queuedAskResolution =
+		// would leak the claim. The resolution is only actionable when a
+		// message was actually claimed: otherwise it must not force a manual
+		// ask (that would bypass auto-approval for empty-queue lifecycle asks).
+		const claimableResolution =
 			partial === true || type === "command_output" ? undefined : queuedResponseForAsk(type, text)
-		const queuedMessage = queuedAskResolution ? this.messageQueueService.claimNextMessage() : undefined
+		const queuedMessage = claimableResolution ? this.messageQueueService.claimNextMessage() : undefined
+		const queuedAskResolution = queuedMessage ? claimableResolution : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
