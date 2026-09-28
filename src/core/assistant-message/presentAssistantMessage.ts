@@ -36,6 +36,7 @@ import { skillTool } from "../tools/SkillTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
+import { buildToolRequirements } from "../prompts/tools/effective-tool-policy"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
@@ -342,9 +343,12 @@ export async function presentAssistantMessage(cline: Task) {
 				break
 			}
 
-			// Fetch state early so it's available for toolDescription and validation
+			// Shared provider state supplies global settings; mode is owned by the task.
 			const state = await cline.providerRef.deref()?.getState()
-			const { mode, customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			// Read the task-local mode, not the shared provider mode.
+			// A delegated child task may run in a different mode than its parent.
+			const taskMode = await cline.getTaskMode()
 
 			const toolDescription = (): string => {
 				switch (block.name) {
@@ -604,20 +608,15 @@ export async function presentAssistantMessage(cline: Task) {
 				const isCustomTool = Boolean(stateExperiments?.customTools && customToolRegistry.has(block.name))
 
 				try {
-					const toolRequirements =
-						disabledTools?.reduce(
-							(acc: Record<string, boolean>, tool: string) => {
-								acc[tool] = false
-								const resolvedToolName = resolveToolAlias(tool)
-								acc[resolvedToolName] = false
-								return acc
-							},
-							{} as Record<string, boolean>,
-						) ?? {}
+					// Build requirements through the shared policy module so every suppressed
+					// entry — disabled tools, and an excluded or disabled protocol tool — reaches
+					// the validator, which checks them before the always-available class. See
+					// `buildToolRequirements` in effective-tool-policy.ts.
+					const toolRequirements = buildToolRequirements(disabledTools, modelInfo?.info)
 
 					validateToolUse(
 						block.name as ToolName,
-						mode ?? defaultModeSlug,
+						taskMode,
 						customModes ?? [],
 						toolRequirements,
 						block.params,
@@ -924,7 +923,7 @@ export async function presentAssistantMessage(cline: Task) {
 							}
 
 							const result = await customTool.execute(customToolArgs, {
-								mode: mode ?? defaultModeSlug,
+								mode: taskMode,
 								task: cline,
 							})
 

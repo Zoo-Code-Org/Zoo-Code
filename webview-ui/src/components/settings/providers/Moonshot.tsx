@@ -101,7 +101,11 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifyS
 
 		vscode.postMessage({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { moonshotApiKey: key, moonshotBaseUrl: apiConfiguration.moonshotBaseUrl },
+			values: {
+				provider: providerIdentifiers.moonshot,
+				moonshotApiKey: key,
+				moonshotBaseUrl: apiConfiguration.moonshotBaseUrl,
+			},
 		})
 	}, [apiConfiguration, t])
 
