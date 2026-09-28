@@ -216,6 +216,13 @@ type AssistantMessagePersistenceCancellation = {
 	resolve: () => void
 }
 
+export class PendingActionSettlementError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
+		this.name = "PendingActionSettlementError"
+	}
+}
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -1008,18 +1015,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const provider = this.providerRef.deref()
 		if (!provider) {
-			throw new Error(
+			throw new PendingActionSettlementError(
 				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
 			)
 		}
 
-		const authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(this.taskId, action.actionId)
+		let authoritative: HistoryItem
+		try {
+			authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(this.taskId, action.actionId)
+		} catch (error) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
+				{ cause: error },
+			)
+		}
 		if (this.pendingAction?.actionId === action.actionId) {
 			this.pendingAction = authoritative.pendingAction
 		}
 
 		if (this.pendingAction?.kind === "create_subtask") {
-			throw new Error(
+			throw new PendingActionSettlementError(
 				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} still has a rejected create-subtask action`,
 			)
 		}

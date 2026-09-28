@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, type MockedFunction } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
-import { type Task } from "../core/task/Task"
+import { PendingActionSettlementError, type Task } from "../core/task/Task"
 import { makeProviderStub } from "./helpers/provider-stub"
 
 type MockTask = Pick<Task, "taskId" | "instanceId"> &
@@ -14,7 +14,7 @@ type MockTask = Pick<Task, "taskId" | "instanceId"> &
 
 type PrivateClineProviderMethods = {
 	removeClineFromStack: (this: ClineProvider) => ReturnType<ClineProvider["removeClineFromStack"]>
-	cleanupFailedHistoryTask: (this: ClineProvider, task: Task) => Promise<void>
+	cleanupFailedHistoryTask: (this: ClineProvider, task: Task, error: unknown) => Promise<void>
 	markDelegatedChildInterrupted: (
 		this: ClineProvider,
 		...args: Parameters<ClineProvider["markDelegatedChildInterrupted"]>
@@ -195,13 +195,43 @@ describe("ClineProvider failed history restoration cleanup", () => {
 			log: vi.fn(),
 		} as unknown as ClineProvider
 
-		await privateClineProvider.cleanupFailedHistoryTask.call(provider, task)
+		await privateClineProvider.cleanupFailedHistoryTask.call(
+			provider,
+			task,
+			new PendingActionSettlementError("settlement failed"),
+		)
 
 		expect(taskRegistry.getById(task.taskId)).toBeUndefined()
 		expect(taskRegistry.current).toBeUndefined()
 		expect(cleanupListener).toHaveBeenCalledOnce()
 		expect(taskEventListeners.has(task)).toBe(false)
 		expect(task.dispose).toHaveBeenCalledOnce()
+	})
+
+	it("keeps the task active after an unrelated history resume failure", async () => {
+		const cleanupListener = vi.fn()
+		const task = {
+			taskId: "failed-history-task",
+			instanceId: "inst-1",
+			emit: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		} as unknown as Task
+		const taskRegistry = new TaskRegistry()
+		taskRegistry.push(task)
+		const taskEventListeners = new Map([[task, [cleanupListener]]])
+		const provider = {
+			taskRegistry,
+			taskEventListeners,
+			log: vi.fn(),
+		} as unknown as ClineProvider
+
+		await privateClineProvider.cleanupFailedHistoryTask.call(provider, task, new Error("history read failed"))
+
+		expect(taskRegistry.getById(task.taskId)).toBe(task)
+		expect(taskRegistry.current).toBe(task)
+		expect(cleanupListener).not.toHaveBeenCalled()
+		expect(taskEventListeners.has(task)).toBe(true)
+		expect(task.dispose).not.toHaveBeenCalled()
 	})
 })
 

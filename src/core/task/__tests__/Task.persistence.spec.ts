@@ -14,7 +14,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
-import { Task } from "../Task"
+import { PendingActionSettlementError, Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -1486,7 +1486,15 @@ describe("Task persistence", () => {
 			const ask = vi.spyOn(task, "ask")
 			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
 
-			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow(settlementError)
+			const resumeError = await getTaskPersistenceAccess(task)
+				.resumeTaskFromHistory()
+				.catch((error: unknown) => error)
+
+			expect(resumeError).toMatchObject({
+				name: "PendingActionSettlementError",
+				cause: settlementError,
+			})
+			expect(resumeError).toBeInstanceOf(PendingActionSettlementError)
 
 			expect(replay).not.toHaveBeenCalled()
 			expect(ask).not.toHaveBeenCalled()

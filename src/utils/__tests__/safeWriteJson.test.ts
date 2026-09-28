@@ -10,6 +10,7 @@ import { safeWriteJson } from "../safeWriteJson"
 // test mockImplementation callbacks delegate to the real implementation.
 const fsPromisesActuals = vi.hoisted(() => ({
 	rename: undefined as (typeof import("fs/promises"))["rename"] | undefined,
+	copyFile: undefined as (typeof import("fs/promises"))["copyFile"] | undefined,
 	unlink: undefined as (typeof import("fs/promises"))["unlink"] | undefined,
 	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
 }))
@@ -17,6 +18,7 @@ const fsPromisesActuals = vi.hoisted(() => ({
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
 	fsPromisesActuals.rename = actual.rename
+	fsPromisesActuals.copyFile = actual.copyFile
 	fsPromisesActuals.unlink = actual.unlink
 	fsPromisesActuals.writeFile = actual.writeFile
 	// Start with all actual implementations.
@@ -28,6 +30,7 @@ vi.mock("fs/promises", async () => {
 	mockedFs.writeFile = vi.fn(actual.writeFile) as any
 	mockedFs.readFile = vi.fn(actual.readFile) as any
 	mockedFs.rename = vi.fn(actual.rename) as any
+	mockedFs.copyFile = vi.fn(actual.copyFile) as typeof actual.copyFile
 	mockedFs.unlink = vi.fn(actual.unlink) as any
 	mockedFs.access = vi.fn(actual.access) as any
 	mockedFs.mkdtemp = vi.fn(actual.mkdtemp) as any
@@ -220,7 +223,25 @@ describe("safeWriteJson", () => {
 		await safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })
 
 		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(1)
 		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+	})
+
+	test("should restore the copied backup when atomic replacement fails", async () => {
+		const initialData = { message: "Initial content, should be restored" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+		vi.mocked(fs.copyFile).mockClear()
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.rename).mockRejectedValueOnce(new Error("Atomic replacement failed"))
+
+		await expect(safeWriteJson(currentTestFilePath, newData, { atomicReplace: true })).rejects.toThrow(
+			"Atomic replacement failed",
+		)
+
+		expect(vi.mocked(fs.copyFile)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(1)
+		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
 	})
 
 	// Tests for directory creation functionality

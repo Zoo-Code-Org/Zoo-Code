@@ -112,7 +112,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { Task } from "../task/Task"
+import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
@@ -656,7 +656,11 @@ export class ClineProvider
 		}
 	}
 
-	private async cleanupFailedHistoryTask(task: Task): Promise<void> {
+	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
+		if (!(error instanceof PendingActionSettlementError)) {
+			return
+		}
+
 		if (this.taskRegistry.getById(task.taskId) !== task) {
 			return
 		}
@@ -1444,8 +1448,8 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, () =>
-					this.cleanupFailedHistoryTask(task),
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, (error) =>
+					this.cleanupFailedHistoryTask(task, error),
 				)
 			}
 		} else {
@@ -1456,8 +1460,8 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, () =>
-					this.cleanupFailedHistoryTask(task),
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, (error) =>
+					this.cleanupFailedHistoryTask(task, error),
 				)
 			}
 		}
