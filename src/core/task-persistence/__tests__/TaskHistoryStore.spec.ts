@@ -393,7 +393,15 @@ describe("TaskHistoryStore", () => {
 
 			// The deletion failure is the primary error and must not be masked
 			// by the failed write-through.
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 			await expect(store.deleteMany([first.id, failed.id, later.id])).rejects.toBe(unlinkError)
+			expect(onWrite).toHaveBeenCalledTimes(4)
+			expect(onWrite.mock.calls[3][0].map((item: HistoryItem) => item.id)).not.toContain(first.id)
+			expect(consoleError).toHaveBeenCalledWith(
+				"[TaskHistoryStore] deleteMany write-through after partial deletion failed:",
+				expect.objectContaining({ message: "write-through failed" }),
+			)
+			consoleError.mockRestore()
 
 			vi.mocked(fs.unlink).mockImplementation(async (filePath) => actualFs.unlink(filePath))
 		})

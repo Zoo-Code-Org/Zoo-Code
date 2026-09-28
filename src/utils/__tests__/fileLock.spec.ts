@@ -95,7 +95,8 @@ describe("fileLock", () => {
 	})
 
 	it("keeps reporting success when an unrelated release error occurs", async () => {
-		underlyingRelease.mockRejectedValue(new Error("unlock failed"))
+		const unlockError = new Error("unlock failed")
+		underlyingRelease.mockRejectedValue(unlockError)
 
 		await expect(
 			withFileLock(
@@ -103,6 +104,6 @@ describe("fileLock", () => {
 				vi.fn(async () => "done"),
 			),
 		).resolves.toBe("done")
-		expect(consoleError).toHaveBeenCalled()
+		expect(consoleError).toHaveBeenCalledWith(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 	})
 })
