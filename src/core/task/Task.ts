@@ -992,6 +992,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Persist the user feedback carried by an ask result. When the ask consumed
+	 * a queued message (intercepted its drain submission), the queue entry is
+	 * removed only after the feedback's history write succeeds; a failed write
+	 * re-queues it. Consumers that surface returned feedback as user_feedback
+	 * must call this instead of say("user_feedback", ...) so a consumed queued
+	 * message is acked exactly once instead of being redelivered by a later
+	 * drain or claim.
+	 */
+	public async sayUserFeedbackAndAckQueued(
+		text: string | undefined,
+		images: string[] | undefined,
+		queuedMessageId: string | undefined,
+	): Promise<void> {
+		if (queuedMessageId) {
+			const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+			if (!persisted) {
+				throw new Error(`[Task] Failed to persist queued feedback ${queuedMessageId}`)
+			}
+			return
+		}
+		if (text || images?.length) {
+			await this.say("user_feedback", text ?? "", images)
+		}
+	}
+
+	/**
+	 * Drop a queued message whose response this ask consumed without persisting
+	 * feedback (the consumer only inspected the button response, e.g. retry and
+	 * approval gates). Removes the entry without inventing a history write.
+	 */
+	public discardConsumedQueuedMessage(queuedMessageId: string | undefined): void {
+		if (queuedMessageId) {
+			this.messageQueueService.removeMessage(queuedMessageId)
+		}
+	}
+
+	/**
 	 * Clears the pending action metadata after its durable result is saved.
 	 * Reconciles in-memory state with the task history store to avoid clearing a newer action.
 	 */
@@ -3107,7 +3144,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					),
 				)
 
-				const { response, text, images } = await this.ask(
+				const { response, text, images, queuedMessageId } = await this.ask(
 					"mistake_limit_reached",
 					t("common:errors.mistake_limit_guidance"),
 				)
@@ -3120,7 +3157,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						],
 					)
 
-					await this.say("user_feedback", text, images)
+					await this.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				}
 
 				this.consecutiveMistakeCount = 0
@@ -4253,10 +4290,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						continue
 					} else {
 						// Prompt the user for retry decision
-						const { response } = await this.ask(
+						const { response, queuedMessageId } = await this.ask(
 							"api_req_failed",
 							"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
 						)
+						// Only the button response is inspected; a consumed queued
+						// message is dropped without inventing a history write.
+						this.discardConsumedQueuedMessage(queuedMessageId)
 
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
@@ -4912,7 +4952,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const approvalResult = await this.autoApprovalHandler.checkAutoApprovalLimits(
 			state,
 			this.combineMessages(this.clineMessages.slice(1)),
-			async (type, data) => this.ask(type, data),
+			async (type, data) => {
+				const result = await this.ask(type, data)
+				// The handler only inspects the button response; a consumed
+				// queued message is dropped without inventing a history write.
+				this.discardConsumedQueuedMessage(result.queuedMessageId)
+				return result
+			},
 		)
 
 		if (!approvalResult.shouldProceed) {
@@ -5067,10 +5113,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				return
 			} else {
-				const { response } = await this.ask(
+				const { response, queuedMessageId } = await this.ask(
 					"api_req_failed",
 					error.message ?? JSON.stringify(serializeError(error), null, 2),
 				)
+				// Only the button response is inspected; a consumed queued
+				// message is dropped without inventing a history write.
+				this.discardConsumedQueuedMessage(queuedMessageId)
 
 				if (response !== "yesButtonClicked") {
 					// This will never happen since if noButtonClicked, we will
@@ -5525,7 +5574,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * rejected drain does not block later drains.
 	 *
 	 * @returns Promise resolving to true when a queued message was submitted
-	 * (and remains queued until consumed); false when the queue was empty.
+	 * (and remains queued until consumed) or was already pending submission and
+	 * left queued; false when the queue was empty.
 	 */
 	public processQueuedMessages(): Promise<boolean> {
 		const run = this.queuedMessageDrainChain.then(() => this.claimAndSubmitNextQueuedMessage())

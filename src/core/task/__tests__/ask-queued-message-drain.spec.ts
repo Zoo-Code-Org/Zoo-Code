@@ -271,6 +271,61 @@ describe("Task.ask queued message drain", () => {
 		}
 	})
 
+	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		// ReadFileTool-style blocked approval ask: the queue is empty at ask
+		// start, so a drain that posts mid-block intercepts the ask.
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("user correction")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "user correction" })
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		// The consumer persists the feedback through the acking helper, which
+		// removes the queue entry only after the history write succeeds.
+		getQueueTaskTestAccess(task).saveClineMessages = vi.fn(async () => true)
+		await task.sayUserFeedbackAndAckQueued(result.text, result.images, result.queuedMessageId)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+
+		// No later drain or claim may redeliver the consumed message.
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("drops an intercepted message consumed without persisting feedback", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		// api_req_failed-style gate: the consumer only inspects the button
+		// response, so the intercepted queued message is discarded, not acked.
+		const askPromise = task.ask("api_req_failed", "The model returned no assistant messages.", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("queued note")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "queued note" })
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		task.discardConsumedQueuedMessage(result.queuedMessageId)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+
+		// No redelivery: the next drain finds an empty queue.
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+	})
+
 	it("does not consume queued messages for command_output asks", async () => {
 		const task = await createTask()
 

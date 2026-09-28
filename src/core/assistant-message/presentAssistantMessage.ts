@@ -215,7 +215,7 @@ export async function presentAssistantMessage(cline: Task) {
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
 			) => {
-				const { response, text, images } = await cline.ask(
+				const { response, text, images, queuedMessageId } = await cline.ask(
 					type,
 					partialMessage,
 					false,
@@ -224,8 +224,8 @@ export async function presentAssistantMessage(cline: Task) {
 				)
 
 				if (response !== "yesButtonClicked") {
+					await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 					if (text) {
-						await cline.say("user_feedback", text, images)
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
 					} else {
 						pushToolResult(formatResponse.toolDenied())
@@ -237,8 +237,8 @@ export async function presentAssistantMessage(cline: Task) {
 				// Store approval feedback to be merged into tool result (GitHub #10465)
 				// Don't push it as a separate tool_result here - that would create duplicates.
 				// The tool will call pushToolResult, which will merge the feedback into the actual result.
+				await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				if (text) {
-					await cline.say("user_feedback", text, images)
 					approvalFeedback = { text, images }
 				}
 
@@ -674,7 +674,7 @@ export async function presentAssistantMessage(cline: Task) {
 				// If execution is not allowed, notify user and break.
 				if (!repetitionCheck.allowExecution && repetitionCheck.askUser) {
 					// Handle repetition similar to mistake_limit_reached pattern.
-					const { response, text, images } = await cline.ask(
+					const { response, text, images, queuedMessageId } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,
 						repetitionCheck.askUser.messageDetail.replace("{toolName}", block.name),
 					)
@@ -690,7 +690,7 @@ export async function presentAssistantMessage(cline: Task) {
 						)
 
 						// Add user feedback to chat.
-						await cline.say("user_feedback", text, images)
+						await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 					}
 
 					// Track tool repetition in telemetry via PostHog exception tracking and event.

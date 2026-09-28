@@ -147,6 +147,7 @@ describe("editFileTool", () => {
 		}
 		mockTask.say = vi.fn().mockResolvedValue(undefined)
 		mockTask.ask = vi.fn().mockResolvedValue(undefined)
+		mockTask.discardConsumedQueuedMessage = vi.fn()
 		mockTask.recordToolError = vi.fn()
 		mockTask.recordToolUsage = vi.fn()
 		mockTask.processQueuedMessages = vi.fn().mockResolvedValue(undefined)
