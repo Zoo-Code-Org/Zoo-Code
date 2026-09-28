@@ -1263,15 +1263,62 @@ describe("ClineProvider", () => {
 			await provider1["setViewStateId"]("stable-sidebar-view")
 			await provider2["setViewStateId"]("stable-editor-view")
 
-			await Promise.all([
-				provider1.saveViewState("mode", "architect"),
-				provider2.saveViewState("currentApiConfigName", "editor-profile"),
-			])
+			// The stock mock commits globalState.update synchronously, so a broken
+			// serialization queue can still pass: the second read sees the first
+			// entry before it is "in flight". Replace it with an async update that
+			// holds the first durable write pending until the test releases it.
+			const originalUpdate = mockContext.globalState.update.bind(mockContext.globalState)
+			const viewStatesUpdates: unknown[] = []
+			let releaseFirstWrite: (() => void) | undefined
+			mockContext.globalState.update = (key: string, value: unknown) => {
+				if (key !== "viewStates") {
+					return originalUpdate(key, value)
+				}
+				viewStatesUpdates.push(value)
+				if (!releaseFirstWrite) {
+					// First durable write: hold the commit until the test releases it, so the
+					// serialized queue must wait for it before the next write reads a fresh copy.
+					return new Promise<void>((resolve) => {
+						releaseFirstWrite = () => {
+							originalUpdate(key, value)
+							resolve()
+						}
+					})
+				}
 
-			expect(mockContext.globalState.get("viewStates")).toMatchObject({
-				"stable-sidebar-view": { mode: "architect" },
-				"stable-editor-view": { currentApiConfigName: "editor-profile" },
-			})
+				// Subsequent durable writes commit immediately.
+				originalUpdate(key, value)
+				return Promise.resolve()
+			}
+
+			try {
+				const saving = Promise.all([
+					provider1.saveViewState("mode", "architect"),
+					provider2.saveViewState("currentApiConfigName", "editor-profile"),
+				])
+
+				// The first durable write is in flight. The serialized queue must
+				// hold the second write until it settles; a broken queue issues it
+				// in parallel (a second update call while the first is still
+				// pending) and the final map loses the first entry.
+				await vi.waitFor(() => {
+					expect(viewStatesUpdates).toHaveLength(1)
+				})
+				const release = releaseFirstWrite
+				if (!release) {
+					throw new Error("Expected the first durable viewStates write to be in flight")
+				}
+
+				release()
+				await saving
+
+				expect(mockContext.globalState.get("viewStates")).toMatchObject({
+					"stable-sidebar-view": { mode: "architect" },
+					"stable-editor-view": { currentApiConfigName: "editor-profile" },
+				})
+			} finally {
+				mockContext.globalState.update = originalUpdate
+			}
 
 			await provider1.dispose()
 			await provider2.dispose()
@@ -1310,6 +1357,90 @@ describe("ClineProvider", () => {
 
 			expect(provider["viewLocalState"].mode).toBe("architect")
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Error loading state"))
+
+			await provider.dispose()
+		})
+
+		it("does not resurrect a field cleared mid-load from the stale persisted value the load read", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider["setViewStateId"]("clear-view")
+
+			// A previous session pinned a profile for this view. Write through the
+			// context proxy so the cache the load reads from sees the entry (a raw
+			// globalState write bypasses it).
+			await provider.contextProxy.setValue("viewStates", {
+				"clear-view": { currentApiConfigName: "stale-profile", updatedAt: 1 },
+			})
+
+			// Stall the load's profile lookup so a view-local mutation can complete
+			// while the load is in flight.
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+
+			const loading = provider["loadViewState"]()
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+
+			// The user clears the view's profile selection while the load is stalled;
+			// the clear is a durable write and must win over the stale value.
+			await provider.saveViewState("currentApiConfigName", undefined)
+
+			// The same view also clears its pinned configuration while the load is stalled.
+			await provider.saveViewState("apiConfiguration", undefined)
+
+			resolveProfile({
+				name: "stale-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			await loading
+
+			// The load resolved the stale profile it read before the clear: without the
+			// mutation tracking it would re-pin the cleared selection. The cleared field
+			// must stay absent so the view keeps following the shared selection.
+			expect(provider["viewLocalState"]).not.toHaveProperty("currentApiConfigName")
+			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+			// The cleared configuration must not be re-applied from the resolved profile
+			// either: without the guard the load would restore the profile's config.
+			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+
+			await provider.dispose()
+		})
+
+		it("keeps a mid-load flat provider-settings write shared instead of overlaying the pinned profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider["setViewStateId"]("midload-settings-view")
+
+			// A previous session pinned a profile for this view (written through the
+			// context proxy so the load's cache read sees the entry).
+			await provider.contextProxy.setValue("viewStates", {
+				"midload-settings-view": { currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+
+			const loading = provider["loadViewState"]()
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+
+			// A flat provider-settings change (not a full apiConfiguration write)
+			// completes while the load is stalled: it is a SHARED write and must land in
+			// the ContextProxy, but it is not a view-local mutation, so the settling
+			// load still applies the pinned profile's resolved configuration to this
+			// view's buffer (A semantics: flat keys never overlay viewLocalState).
+			await provider.setValue("openRouterModelId", "model-z")
+
+			resolveProfile({
+				name: "profile-a",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			await loading
+
+			// The shared write landed in the ContextProxy ...
+			expect(provider.contextProxy.getValue("openRouterModelId")).toBe("model-z")
+
+			// ... but the view-local buffer keeps the pinned profile's resolved
+			// configuration: merging the flat key into viewLocalState.apiConfiguration
+			// would turn it into a per-view override masking later shared updates.
+			expect(provider["viewLocalState"].apiConfiguration?.openRouterModelId).toBe("model-x")
 
 			await provider.dispose()
 		})

@@ -9,6 +9,7 @@ import { MdmService } from "../../services/mdm/MdmService"
 import {
 	__getLiveTabPanelCountForTests,
 	__resetLiveTabPanelsForTests,
+	createClineTabPanel,
 	getPanel,
 	getVisibleProviderOrLog,
 	openClineInNewTab,
@@ -615,6 +616,10 @@ describe("openClineInNewTab", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// clearAllMocks() keeps mock implementations: reset the instance-lookup
+		// return value so a preceding test's tab double cannot leak into the
+		// reuse-path assertions below.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
 
 		mockOutputChannel = {
 			appendLine: vi.fn(),
@@ -907,6 +912,70 @@ describe("openClineInNewTab", () => {
 		const disposeHandler = panel.onDidDispose.mock.calls[0][0] as () => void
 		disposeHandler()
 		expect(getPanel()).toBeUndefined()
+	})
+
+	it("tracks the activated older tab so tab commands target its provider", async () => {
+		// Capture each created panel: panel A is created first, panel B second,
+		// so B (the newest) is the tracked tab after creation.
+		const createdPanels: Array<{
+			webview: { postMessage: Mock }
+			onDidChangeViewState: Mock
+			onDidDispose: Mock
+			active?: boolean
+			visible?: boolean
+		}> = []
+		;(vscode.window.createWebviewPanel as Mock).mockImplementation(() => {
+			const panel = {
+				webview: { postMessage: vi.fn() },
+				onDidChangeViewState: vi.fn(),
+				onDidDispose: vi.fn(),
+			}
+			createdPanels.push(panel)
+			return panel
+		})
+
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		expect(getPanel()).toBe(createdPanels[1])
+
+		// Activating the older panel A must re-track the tab to A. VS Code passes
+		// the panel whose view state changed, so the event carries panel A itself.
+		const stateHandlerA = createdPanels[0].onDidChangeViewState.mock.calls[0][0] as (event: {
+			webviewPanel: (typeof createdPanels)[number]
+		}) => void
+		Object.assign(createdPanels[0], { active: true, visible: true })
+		stateHandlerA({ webviewPanel: createdPanels[0] })
+		expect(getPanel()).toBe(createdPanels[0])
+
+		// A tab command now resolves the provider through panel A, not B.
+		const makeProvider = () => ({
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+		})
+		const providerA = makeProvider()
+		const providerB = makeProvider()
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((panel: unknown) =>
+			panel === createdPanels[0] ? providerA : providerB,
+		)
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, callback: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = callback
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({ context: mockContext, outputChannel: mockOutputChannel, provider: {} as ClineProvider })
+
+		await commandHandlers["zoo-code.plusButtonClickedInTab"]()
+
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(createdPanels[0])
+		expect((providerA as { postMessageToWebview: Mock }).postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "chatButtonClicked",
+		})
+		expect((providerB as { postMessageToWebview: Mock }).postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	it("re-points the tracked tab ref at the remaining live panel when the tracked panel closes", async () => {
@@ -1222,6 +1291,81 @@ describe("openClineInNewTab initialization failure", () => {
 		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockResolvedValue(undefined)
 
 		await expect(openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })).rejects.toThrow(
+			"init failed",
+		)
+
+		// The half-registered panel must not stay tracked: the live registry
+		// drops it, the tracked tab ref is cleared (identity-guarded), and the
+		// provider is disposed so the failed surface leaves no listeners or
+		// state behind.
+		expect(__getLiveTabPanelCountForTests()).toBe(0)
+		expect(getPanel()).toBeUndefined()
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
+})
+
+describe("createClineTabPanel", () => {
+	let mockOutputChannel: vscode.OutputChannel
+	let mockContext: vscode.ExtensionContext
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+
+		mockOutputChannel = {
+			appendLine: vi.fn(),
+			append: vi.fn(),
+			clear: vi.fn(),
+			hide: vi.fn(),
+			name: "mock",
+			replace: vi.fn(),
+			show: vi.fn(),
+			dispose: vi.fn(),
+		}
+
+		mockContext = {
+			subscriptions: [],
+			extensionUri: { path: "/mock/ext" },
+		} as unknown as vscode.ExtensionContext
+
+		const mockPanel = {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		}
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(mockPanel)
+
+		// Reset module-level panel state.
+		setPanel(undefined, "sidebar")
+		setPanel(undefined, "tab")
+		__resetLiveTabPanelsForTests()
+	})
+
+	it("always creates a fresh panel even when a tab is already tracked", async () => {
+		const mockTrackedPanel = {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			reveal: vi.fn().mockResolvedValue(undefined),
+		} as unknown as vscode.WebviewPanel
+		setPanel(mockTrackedPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue({ postMessageToWebview: vi.fn() })
+
+		await createClineTabPanel({ context: mockContext, outputChannel: mockOutputChannel })
+
+		expect(mockTrackedPanel.reveal).not.toHaveBeenCalled()
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("cleans up the tracked refs and disposes the provider when initialization fails", async () => {
+		const resolveSpy = vi
+			.spyOn(ClineProvider.prototype, "resolveWebviewView")
+			.mockRejectedValue(new Error("init failed"))
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockResolvedValue(undefined)
+
+		await expect(createClineTabPanel({ context: mockContext, outputChannel: mockOutputChannel })).rejects.toThrow(
 			"init failed",
 		)
 

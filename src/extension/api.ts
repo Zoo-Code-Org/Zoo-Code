@@ -33,7 +33,7 @@ import { ClineProvider } from "../core/webview/ClineProvider"
 import type { Task } from "../core/task/Task"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
-import { openClineInNewTab } from "../activate/registerCommands"
+import { createClineTabPanel } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
@@ -210,7 +210,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				await vscode.commands.executeCommand("workbench.action.closeAllEditors")
 			}
 
-			provider = await openClineInNewTab({ context: this.context, outputChannel: this.outputChannel })
+			// A fresh tab: reusing the tracked tab would evict the task it is already serving.
+			provider = await createClineTabPanel({ context: this.context, outputChannel: this.outputChannel })
 			this.registerListeners(provider)
 		} else {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)

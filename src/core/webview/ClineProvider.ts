@@ -349,6 +349,12 @@ export class ClineProvider
 	private viewLocalState: Partial<ExtensionState> = {}
 
 	/**
+	 * Fields mutated after loadViewState cleared the set: a completed mutation (including a
+	 * clear) wins over the persisted values an in-flight load read, so a stale load can never
+	 * re-apply a value the user changed while the load was in flight.
+	 */
+	private viewLocalStateMutatedFields = new Set<"mode" | "currentApiConfigName" | "apiConfiguration">()
+	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
 	 * is private and must not be reached through bracket access.
@@ -825,14 +831,12 @@ export class ClineProvider
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
+		// Clear the mutation marker before the async section: only mutations that
+		// complete while this load is in flight may supersede the values it read.
+		this.viewLocalStateMutatedFields.clear()
 		try {
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
-
-			// Snapshot the in-memory buffer before the async profile lookup. The
-			// mutation paths update viewLocalState in place, so a shallow copy is
-			// what makes fields mutated during the load window observable below.
-			const preLoadBuffer = { ...this.viewLocalState }
 
 			if (persisted?.mode) {
 				// A persisted mode may reference a custom mode that was deleted after it was
@@ -866,37 +870,33 @@ export class ClineProvider
 				return
 			}
 
-			// Reapply the buffer fields that changed while the load was in flight,
-			// tracking the change instead of testing against undefined: a field cleared
-			// during the load window must stay cleared (the loaded value must not
-			// resurrect it), and a field written to a new value must win over it.
-			// Untouched fields keep the persisted values authoritative, and the
-			// pre-load buffer is never merged wholesale so stale temporary-id state
-			// cannot override the stable persisted state.
+			// Reapply only the fields mutated while the load was in flight: untouched
+			// fields keep the persisted values authoritative, and a field cleared during
+			// the load cannot be resurrected by the stale persisted values this load read.
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
-			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
-				if (postLoadBuffer.mode === undefined) {
-					delete mergedState.mode
-				} else {
+			if (this.viewLocalStateMutatedFields.has("mode")) {
+				if (postLoadBuffer.mode !== undefined) {
 					mergedState.mode = postLoadBuffer.mode
+				} else {
+					delete mergedState.mode
 				}
 			}
 
-			if (!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName)) {
-				if (postLoadBuffer.currentApiConfigName === undefined) {
-					delete mergedState.currentApiConfigName
-				} else {
+			if (this.viewLocalStateMutatedFields.has("currentApiConfigName")) {
+				if (postLoadBuffer.currentApiConfigName !== undefined) {
 					mergedState.currentApiConfigName = postLoadBuffer.currentApiConfigName
+				} else {
+					delete mergedState.currentApiConfigName
 				}
 			}
 
-			if (!Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)) {
-				if (postLoadBuffer.apiConfiguration === undefined) {
-					delete mergedState.apiConfiguration
-				} else {
+			if (this.viewLocalStateMutatedFields.has("apiConfiguration")) {
+				if (postLoadBuffer.apiConfiguration !== undefined) {
 					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
+				} else {
+					delete mergedState.apiConfiguration
 				}
 			}
 
@@ -4082,6 +4082,7 @@ export class ClineProvider
 	 */
 	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
 		if ("mode" in values) {
+			this.viewLocalStateMutatedFields.add("mode")
 			const val = values.mode
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.mode
@@ -4091,6 +4092,7 @@ export class ClineProvider
 		}
 
 		if ("currentApiConfigName" in values) {
+			this.viewLocalStateMutatedFields.add("currentApiConfigName")
 			const val = values.currentApiConfigName
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.currentApiConfigName
@@ -4100,6 +4102,7 @@ export class ClineProvider
 		}
 
 		if ("apiConfiguration" in values) {
+			this.viewLocalStateMutatedFields.add("apiConfiguration")
 			const val = values.apiConfiguration
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.apiConfiguration

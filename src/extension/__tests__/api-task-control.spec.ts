@@ -8,8 +8,8 @@ import { RooCodeEventName, type ModeConfig, type RooCodeSettings } from "@roo-co
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 
-const { openClineInNewTabMock } = vi.hoisted(() => ({
-	openClineInNewTabMock: vi.fn(),
+const { createClineTabPanelMock } = vi.hoisted(() => ({
+	createClineTabPanelMock: vi.fn(),
 }))
 
 vi.mock("vscode", () => ({
@@ -29,7 +29,7 @@ vi.mock("@roo-code/ipc", () => ({
 }))
 
 vi.mock("../../activate/registerCommands", () => ({
-	openClineInNewTab: openClineInNewTabMock,
+	createClineTabPanel: createClineTabPanelMock,
 }))
 
 vi.mock("../../integrations/terminal/Terminal", () => ({
@@ -132,14 +132,14 @@ describe("API task controls", () => {
 	describe("startNewTask", () => {
 		it("reverts and closes existing editors before opening a new tab unless preserveOpenTabs is true", async () => {
 			const newTabProvider = createProvider("new-tab-task")
-			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
 
 			const taskId = await api.startNewTask({ configuration, text: "new task", newTab: true })
 
 			expect(taskId).toBe("new-tab-task")
 			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(1, "workbench.action.files.revert")
 			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(2, "workbench.action.closeAllEditors")
-			expect(openClineInNewTabMock).toHaveBeenCalledWith({
+			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
 			})
@@ -155,7 +155,7 @@ describe("API task controls", () => {
 
 		it("opens a new tab without revert or close commands when preserveOpenTabs is true", async () => {
 			const newTabProvider = createProvider("preserved-tab-task")
-			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
 
 			const taskId = await api.startNewTask({
 				configuration,
@@ -166,7 +166,7 @@ describe("API task controls", () => {
 
 			expect(taskId).toBe("preserved-tab-task")
 			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
-			expect(openClineInNewTabMock).toHaveBeenCalledWith({
+			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
 			})
@@ -447,6 +447,29 @@ describe("API task controls - per-view review fixes", () => {
 		)
 	})
 
+	it("wires a provider's task events exactly once when the same provider is reused for a new tab", async () => {
+		// A second new-tab task resolving the SAME provider (an existing tab panel returns
+		// its live provider) must not re-register its listeners: a duplicate copy would
+		// re-emit every task event once per registered handler.
+		const newTabProvider = createProvider("reused-tab-task")
+		createClineTabPanelMock.mockResolvedValue(newTabProvider)
+
+		await api.startNewTask({ configuration, text: "first", newTab: true })
+		await api.startNewTask({ configuration, text: "second", newTab: true })
+
+		const seen: string[] = []
+		api.on(RooCodeEventName.TaskCompleted, (taskId: string) => {
+			seen.push(taskId)
+		})
+
+		newTabProvider.emit(RooCodeEventName.TaskCompleted, "reused-tab-task", {}, {})
+		// The provider-side handler is async (file logging after the re-emit); let it settle
+		// before asserting on the emission count.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(seen).toEqual(["reused-tab-task"])
+	})
+
 	describe("test-only API production guard", () => {
 		function withProductionContext() {
 			return {
@@ -496,7 +519,7 @@ describe("API task controls - per-view review fixes", () => {
 			})
 			const newTabProvider = createProvider("new-tab-task")
 			newTabProvider.viewStateReadiness = readiness
-			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
 
 			const started = api.startNewTask({ configuration, text: "wait for view state", newTab: true })
 
@@ -514,7 +537,7 @@ describe("API task controls - per-view review fixes", () => {
 	describe("startNewTask listener idempotency", () => {
 		it("registers provider listeners once when the same provider is reused", async () => {
 			const sharedProvider = createProvider("shared-task")
-			openClineInNewTabMock.mockResolvedValue(sharedProvider)
+			createClineTabPanelMock.mockResolvedValue(sharedProvider)
 
 			await api.startNewTask({ configuration, text: "one", newTab: true })
 			await api.startNewTask({ configuration, text: "two", newTab: true })
