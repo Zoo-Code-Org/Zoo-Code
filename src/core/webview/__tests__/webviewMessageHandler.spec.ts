@@ -288,7 +288,10 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 			listConfig: () => Promise<unknown[]>
 			hasConfig: (name: string) => Promise<boolean>
 		}
-		activateProviderProfile: (options: { name: string }) => Promise<void>
+		activateProviderProfile: (
+			options: { name: string },
+			activateOptions?: { persistModeConfig?: boolean; persistTaskHistory?: boolean },
+		) => Promise<void>
 		getMcpHub: () => unknown
 		getStateToPostToWebview: () => Promise<{ telemetrySetting: string }>
 	}
@@ -372,9 +375,14 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await new Promise((resolve) => setImmediate(resolve))
 		// The re-pin goes through the activation path so the view adopts the shared
 		// choice's provider settings, not the invalid profile's stale settings; the
-		// handler itself performs no global write.
+		// handler itself performs no global write. The launch-time repair must skip
+		// both persistence steps so it cannot rewrite the current mode's saved
+		// profile or the task's sticky profile.
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
-		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith(
+			{ name: "shared-profile" },
+			{ persistModeConfig: false, persistTaskHistory: false },
+		)
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
 			"currentApiConfigName",
 			"shared-profile",
@@ -395,7 +403,10 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		// The view pin follows the still-valid shared global selection, not the first
 		// profile in the list; the global selection is left untouched.
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
-		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith(
+			{ name: "shared-profile" },
+			{ persistModeConfig: false, persistTaskHistory: false },
+		)
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalledWith({ name: "first-listed" })
 		expect(mockClineProvider.saveViewState).not.toHaveBeenCalled()
 	})
@@ -414,7 +425,10 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await new Promise((resolve) => setImmediate(resolve))
 
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
-		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith(
+			{ name: "shared-profile" },
+			{ persistModeConfig: false, persistTaskHistory: false },
+		)
 		// The repair branch would have cleared the selection with undefined.
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("currentApiConfigName", undefined)
 	})
