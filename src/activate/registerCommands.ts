@@ -437,9 +437,16 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 				// when nothing remains. The identity guard above keeps a late
 				// disposal of an already-replaced panel from clobbering the
 				// replacement's ref.
+				// Re-point the tracked ref at the best remaining live tab: an active
+				// panel first, then a visible one, then any remaining panel — a panel
+				// can be open but hidden behind another editor group (neither active
+				// nor visible), and clearing the tracked ref here would let the next
+				// open create a second panel instead of revealing the one already
+				// serving a task.
 				const remaining =
-					[...liveTabPanels].find((panel) => panel.active) ??
-					[...liveTabPanels].find((panel) => panel.visible)
+					[...liveTabPanels].find((panel) => panel.active) ||
+					[...liveTabPanels].find((panel) => panel.visible) ||
+					[...liveTabPanels][0]
 				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
 				setPanel(remaining, "tab")
 			}

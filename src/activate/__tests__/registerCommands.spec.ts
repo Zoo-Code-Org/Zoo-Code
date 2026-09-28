@@ -946,6 +946,70 @@ describe("openClineInNewTab", () => {
 		expect(getPanel()).toBeUndefined()
 	})
 
+	it("re-points the tracked tab at the best remaining live panel on close", async () => {
+		const makePanel = (marker: string) =>
+			Object.assign({} as vscode.WebviewPanel, {
+				marker,
+				webview: { postMessage: vi.fn() },
+				onDidChangeViewState: vi.fn(),
+				onDidDispose: vi.fn(),
+			})
+		const openThree = async (p1: vscode.WebviewPanel, p2: vscode.WebviewPanel, p3: vscode.WebviewPanel) => {
+			;(vscode.window.createWebviewPanel as Mock)
+				.mockReturnValueOnce(p1)
+				.mockReturnValueOnce(p2)
+				.mockReturnValueOnce(p3)
+			await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+			await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+			await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+			// The last created panel becomes the tracked tab.
+			;(p3.onDidChangeViewState as Mock).mock.calls[0]![0]!({ webviewPanel: p3 })
+			expect(getPanel()).toBe(p3)
+			return p3
+		}
+		const disposeTracked = (p: vscode.WebviewPanel) => {
+			const handler = (p.onDidDispose as Mock).mock.calls[0]![0] as () => void
+			handler()
+		}
+
+		// Phase 1 — an active remaining panel wins over a visible one.
+		const panelA = makePanel("phase-1-A")
+		const panelD = makePanel("phase-1-D")
+		const panelC = makePanel("phase-1-C")
+		await openThree(panelA, panelD, panelC)
+		Object.assign(panelA, { active: true, visible: true })
+		Object.assign(panelD, { active: false, visible: true })
+		disposeTracked(panelC)
+		expect(getPanel()).toBe(panelA)
+
+		// Phase 2 — a visible remaining panel wins over a hidden one.
+		__resetLiveTabPanelsForTests()
+		setPanel(undefined, "tab")
+		const panelE = makePanel("phase-2-E")
+		const panelV = makePanel("phase-2-V")
+		const panelC2 = makePanel("phase-2-C")
+		await openThree(panelE, panelV, panelC2)
+		Object.assign(panelE, { active: false, visible: false })
+		Object.assign(panelV, { active: false, visible: true })
+		disposeTracked(panelC2)
+		expect(getPanel()).toBe(panelV)
+
+		// Phase 3 — with no active or visible remaining panel, the first remaining
+		// panel keeps the tracked ref: a panel can be open but hidden behind another
+		// editor group (neither active nor visible), and dropping the ref here would
+		// let the next open create a second panel instead of revealing it.
+		__resetLiveTabPanelsForTests()
+		setPanel(undefined, "tab")
+		const panelH1 = makePanel("phase-3-H1")
+		const panelH2 = makePanel("phase-3-H2")
+		const panelC3 = makePanel("phase-3-C")
+		await openThree(panelH1, panelH2, panelC3)
+		Object.assign(panelH1, { active: false, visible: false })
+		Object.assign(panelH2, { active: false, visible: false })
+		disposeTracked(panelC3)
+		expect(getPanel()).toBe(panelH1)
+	})
+
 	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {
 		const [first, second] = await Promise.all([
 			openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel }),
