@@ -1568,6 +1568,34 @@ describe("OpenAiNativeHandler", () => {
 			})
 		})
 
+		it("completePrompt should normalize SDK APIUserAbortError to the contract AbortError without telemetry", async () => {
+			// The locked OpenAI SDK raises APIUserAbortError (message
+			// "Request was aborted.") instead of a native AbortError when the
+			// request signal aborts. Cancellations must surface as the contract
+			// AbortError and must never be captured as provider telemetry.
+			mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+				return new Promise((_resolve, reject) => {
+					const error = new Error("Request was aborted.")
+					error.name = "APIUserAbortError"
+					if (options?.signal?.aborted) {
+						reject(error)
+						return
+					}
+					options?.signal?.addEventListener("abort", () => reject(error), { once: true })
+				})
+			})
+
+			const controller = new AbortController()
+			const pending = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			controller.abort()
+
+			await expect(pending).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The OpenAI Native request was aborted",
+			})
+			expect(mockCaptureException).not.toHaveBeenCalled()
+		})
 		it("completePrompt should rethrow non-Error failures after telemetry", async () => {
 			mockResponsesCreate.mockRejectedValue("string failure")
 

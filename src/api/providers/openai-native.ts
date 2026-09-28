@@ -33,6 +33,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { createAbortError, isRequestAborted } from "./utils/abort-signal"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -1655,8 +1656,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * The request signal is built request-locally from the caller's abort
 	 * signal and optional timeout (RequestConfigBuilder.mergeAbortSignalAndTimeout),
 	 * so cancellations never touch this.abortController, which streaming
-	 * requests own. Abort errors are rethrown as-is so callers can identify
-	 * cancellations.
+	 * requests own. Cancellations are normalized to the contract AbortError via
+	 * isRequestAborted/createAbortError (the SDK's own APIUserAbortError does
+	 * not satisfy the contract) so callers can identify them and they are never
+	 * captured as provider errors.
 	 *
 	 * @param prompt - The user prompt to complete
 	 * @param options - Optional abortSignal/timeoutMs controlling the request
@@ -1751,9 +1754,14 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			return ""
 		} catch (error) {
-			// Re-throw abort errors as-is so callers can identify cancellations
-			if (error instanceof Error && error.name === "AbortError") {
-				throw error
+			// Normalize cancellations to the contract AbortError before anything
+			// else: the locked OpenAI SDK raises APIUserAbortError (or its
+			// "Request was aborted." message) instead of a native AbortError when
+			// requestSignal aborts, and the raw SDK error does not satisfy the
+			// Task's abort contract — rethrowing it would surface a cancellation
+			// as a wrapped provider error and capture it as telemetry.
+			if (isRequestAborted(error, requestSignal)) {
+				throw createAbortError(this.providerName)
 			}
 
 			const errorModel = this.getModel()
