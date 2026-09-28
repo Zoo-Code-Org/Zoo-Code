@@ -74,6 +74,7 @@ import {
 	extractLeakedToolCalls,
 	trailingPartialToolMarkerLength,
 	middleOutTruncate,
+	estimateMessagesChars,
 	truncateToolResultsToFitWindow,
 } from "../vscode-lm"
 import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
@@ -2809,9 +2810,115 @@ describe("context-window tool_result truncation", () => {
 			]
 			const before = JSON.parse(JSON.stringify(messages))
 
-			expect(truncateToolResultsToFitWindow(messages, 0)).toBe(messages)
-			expect(truncateToolResultsToFitWindow(messages, Number.NaN)).toBe(messages)
+			expect(truncateToolResultsToFitWindow(messages, 0).messages).toBe(messages)
+			expect(truncateToolResultsToFitWindow(messages, Number.NaN).messages).toBe(messages)
 			expect(messages).toEqual(before)
+		})
+
+		it("returns a remainingChars equal to a fresh scan on every path", () => {
+			// The caller trusts remainingChars instead of re-scanning, so incremental bookkeeping
+			// that drifts from estimateMessagesChars would silently admit an over-window request.
+			const scenarios: Array<{ name: string; messages: Anthropic.Messages.MessageParam[]; budget: number }> = [
+				{
+					name: "unusable budget",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "Y".repeat(50_000))],
+					budget: 0,
+				},
+				{
+					name: "already fits",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "small result")],
+					budget: 100_000,
+				},
+				{
+					name: "single oversized result",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "X".repeat(50_000))],
+					budget: 10_000,
+				},
+				{
+					name: "several results, largest first",
+					messages: [
+						toolUseMessage("t1"),
+						toolResultMessage("t1", "B".repeat(40_000)),
+						toolUseMessage("t2"),
+						toolResultMessage("t2", "C".repeat(20_000)),
+						toolUseMessage("t3"),
+						toolResultMessage("t3", "small but real result"),
+					],
+					budget: 12_000,
+				},
+				{
+					name: "floor reached, budget unreachable",
+					messages: [
+						toolUseMessage("t1"),
+						toolResultMessage("t1", "D".repeat(30_000)),
+						toolUseMessage("t2"),
+						toolResultMessage("t2", "E".repeat(30_000)),
+					],
+					budget: 100,
+				},
+				{
+					name: "array-form content with an image part",
+					messages: [
+						toolUseMessage("t1"),
+						{
+							role: "user",
+							content: [
+								{
+									type: "tool_result",
+									tool_use_id: "t1",
+									content: [
+										{ type: "text", text: "Z".repeat(50_000) },
+										{
+											type: "image",
+											source: { type: "base64", media_type: "image/png", data: "abc" },
+										},
+									],
+								},
+							],
+						} as unknown as Anthropic.Messages.MessageParam,
+					],
+					budget: 9_000,
+				},
+				{
+					name: "plain string turn and a non-string non-array tool_result",
+					messages: [
+						{ role: "user", content: "a plain string turn" },
+						toolUseMessage("t1"),
+						toolResultMessage("t1", "F".repeat(50_000)),
+						{
+							role: "user",
+							content: [{ type: "tool_result", tool_use_id: "t2", content: undefined }],
+						} as unknown as Anthropic.Messages.MessageParam,
+					],
+					budget: 10_000,
+				},
+				{
+					name: "astral characters that truncation may trim by a surrogate",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "😀".repeat(20_000))],
+					budget: 7_000,
+				},
+			]
+
+			for (const scenario of scenarios) {
+				const { messages, remainingChars } = truncateToolResultsToFitWindow(scenario.messages, scenario.budget)
+				expect(`${scenario.name}:${remainingChars}`).toBe(`${scenario.name}:${estimateMessagesChars(messages)}`)
+			}
+		})
+
+		it("truncates the largest tool_result first, sparing a smaller one above the floor", () => {
+			// Both results sit above MIN_TOOL_RESULT_CHARS, so descending order is what spares the
+			// smaller one; ascending order would shrink it before reaching the larger result.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "B".repeat(30_000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", "C".repeat(5_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 20_000)
+
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+			expect(findBlock(messages[3], "tool_result").content).toBe("C".repeat(5_000))
 		})
 
 		it("truncates array-form tool_result content and preserves non-text parts", () => {

@@ -1,5 +1,11 @@
 import { APIError } from "openai"
 
+/**
+ * Status a provider must attach to an error for it to be routed to the condense path. Exported so
+ * providers raising a context-window failure locally stay coupled to the predicate below.
+ */
+export const CONTEXT_WINDOW_EXCEEDED_STATUS = 400
+
 export function checkContextWindowExceededError(error: unknown): boolean {
 	return (
 		checkIsOpenAIContextWindowError(error) ||
@@ -27,7 +33,10 @@ function checkIsOpenRouterContextWindowError(error: unknown): boolean {
 			/\btoo\s*many\s*tokens?\b/i,
 		] as const
 
-		return String(status) === "400" && CONTEXT_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+		return (
+			String(status) === String(CONTEXT_WINDOW_EXCEEDED_STATUS) &&
+			CONTEXT_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+		)
 	} catch {
 		return false
 	}
@@ -46,7 +55,7 @@ function checkIsOpenAIContextWindowError(error: unknown): boolean {
 		return (
 			Boolean(error) &&
 			error instanceof APIError &&
-			error.code?.toString() === "400" &&
+			error.code?.toString() === String(CONTEXT_WINDOW_EXCEEDED_STATUS) &&
 			KNOWN_CONTEXT_ERROR_SUBSTRINGS.some((substring) => error.message.includes(substring))
 		)
 	} catch {

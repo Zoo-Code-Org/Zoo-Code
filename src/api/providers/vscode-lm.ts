@@ -24,6 +24,8 @@ import {
 	sanitizeToolNameSurrogates,
 } from "../transform/vscode-lm-format"
 
+import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-management/context-error-handling"
+
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
@@ -507,40 +509,45 @@ function estimateContentChars(content: Anthropic.Messages.MessageParam["content"
  * Shrinks oversized `tool_result` payloads (largest first, middle-out) until the conversation fits
  * `budgetChars`. Mutates the tool_result blocks of the supplied messages in place — callers pass a
  * cloned array (see `createMessage`) so stored history is never mutated. A no-op when the
- * conversation already fits.
+ * conversation already fits. `remainingChars` is the post-truncation cost, equal to
+ * `estimateMessagesChars(messages)`, so callers need not re-scan.
  */
 export function truncateToolResultsToFitWindow(
 	messages: Anthropic.Messages.MessageParam[],
 	budgetChars: number,
-): Anthropic.Messages.MessageParam[] {
+): { messages: Anthropic.Messages.MessageParam[]; remainingChars: number } {
+	const initialTotal = () => messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
 	if (!Number.isFinite(budgetChars) || budgetChars <= 0) {
-		return messages
+		return { messages, remainingChars: initialTotal() }
 	}
 
-	let total = messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
+	let total = initialTotal()
 	if (total <= budgetChars) {
-		return messages
+		return { messages, remainingChars: total }
 	}
 
-	// Collect every truncatable tool_result block, largest first.
-	const toolResultBlocks: Anthropic.Messages.ContentBlockParam[] = []
+	// Collect every truncatable tool_result block, largest first. The text is derived once per
+	// block here because the comparator and the truncation loop below would otherwise re-derive it.
+	const blockText = new Map<Anthropic.Messages.ContentBlockParam, string>()
 	for (const message of messages) {
 		if (!Array.isArray(message.content)) {
 			continue
 		}
 		for (const block of message.content) {
-			if (readToolResultText(block) !== undefined) {
-				toolResultBlocks.push(block)
+			const text = readToolResultText(block)
+			if (text !== undefined) {
+				blockText.set(block, text)
 			}
 		}
 	}
-	toolResultBlocks.sort((a, b) => (readToolResultText(b)?.length ?? 0) - (readToolResultText(a)?.length ?? 0))
+	const toolResultBlocks = [...blockText.keys()]
+	toolResultBlocks.sort((a, b) => (blockText.get(b)?.length ?? 0) - (blockText.get(a)?.length ?? 0))
 
 	for (const block of toolResultBlocks) {
 		if (total <= budgetChars) {
 			break
 		}
-		const text = readToolResultText(block)
+		const text = blockText.get(block)
 		if (text === undefined || text.length <= MIN_TOOL_RESULT_CHARS) {
 			continue
 		}
@@ -553,7 +560,7 @@ export function truncateToolResultsToFitWindow(
 		writeToolResultText(block, truncated)
 	}
 
-	return messages
+	return { messages, remainingChars: total }
 }
 
 /**
@@ -1055,7 +1062,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// A system prompt or tool schema large enough to consume the whole budget would leave a
 			// non-positive budget, which disables trimming exactly when the request is most oversized.
 			const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
-			truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+			const { remainingChars } = truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
 
 			// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
 			// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
@@ -1065,7 +1072,6 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Admission is judged against the RAW budget, not the clamped one: the clamp exists only
 			// to keep trimming productive, so accepting up to it would send a request the window
 			// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
-			const remainingChars = estimateMessagesChars(cleanedMessages)
 			if (remainingChars > rawBudgetChars) {
 				// `status` is what makes checkContextWindowExceededError recognise this as a context
 				// -window failure; without it the task takes its generic retry path and re-sends the
@@ -1077,7 +1083,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 							`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
 							"breaking tool-call pairing. Condense the conversation or start a new task.",
 					),
-					{ status: 400 },
+					{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
 				)
 			}
 		}
