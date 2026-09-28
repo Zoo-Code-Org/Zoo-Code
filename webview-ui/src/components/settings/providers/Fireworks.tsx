@@ -4,12 +4,12 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useDebounce } from "react-use"
 
 import {
+	type ModelRecord,
 	type OrganizationAllowList,
 	type ProviderSettings,
 	type ExtensionMessage,
 	type RouterModels,
 	fireworksDefaultModelId,
-	fireworksModels,
 	providerIdentifiers,
 	allRouterModelsProvider,
 	RouterModelsMessageType,
@@ -68,6 +68,12 @@ export const nextFireworksRouterModelsRequestId = () => {
 	return `fireworks-router-models-${fireworksRequestPageToken}-${fireworksRouterModelsRequestCount}`
 }
 
+/** A catalog known for one API key, used when a failed refresh would empty the picker. */
+type RetainedCatalog = {
+	apiKey?: string
+	models: ModelRecord
+}
+
 export const Fireworks = ({
 	apiConfiguration,
 	setApiConfigurationField,
@@ -85,9 +91,46 @@ export const Fireworks = ({
 	// Identifies the Fireworks request this component is waiting on. Responses echo it so an
 	// older request that finishes last cannot overwrite the catalog of the newer key.
 	const currentRequestId = useRef<string | undefined>(undefined)
-	// The key the last accepted catalog was fetched with. A failed refresh may keep that
-	// catalog only while the key is unchanged; a different key must clear it.
-	const catalogApiKey = useRef<string | undefined>(undefined)
+	// The last catalog known for a key. The picker renders extension state, which a failed
+	// same-key refresh replaces with an empty catalog, so this is the fallback that keeps the
+	// list populated. A failed refresh may keep it only while the key is unchanged; a
+	// different key must clear it.
+	const retainedCatalogRef = useRef<RetainedCatalog | undefined>(undefined)
+	const [retainedCatalog, setRetainedCatalog] = useState<RetainedCatalog | undefined>(undefined)
+
+	const rememberCatalog = useCallback((apiKey: string | undefined, models: ModelRecord) => {
+		const current = retainedCatalogRef.current
+		if (current && current.apiKey === apiKey && current.models === models) {
+			return
+		}
+
+		const retained = { apiKey, models }
+		retainedCatalogRef.current = retained
+		setRetainedCatalog(retained)
+	}, [])
+
+	// Extension state is the picker's source, so remember what it holds for the current key.
+	// A later failure can then restore the list even when the backend has no cache entry.
+	// Extension state still describes the saved key right after an edit, so a catalog that
+	// was already there cannot be attributed to the newly typed key: only a catalog that
+	// arrives while the key is stable belongs to that key.
+	const observedExtensionCatalog = useRef<{ apiKey?: string; models?: ModelRecord }>({
+		apiKey: fireworksApiKey,
+	})
+
+	useEffect(() => {
+		const models = routerModels?.[providerIdentifiers.fireworks]
+		const previous = observedExtensionCatalog.current
+		const keyChanged = previous.apiKey !== fireworksApiKey
+		const modelsArrived = previous.models !== models
+		observedExtensionCatalog.current = { apiKey: fireworksApiKey, models }
+
+		if (keyChanged || !modelsArrived || !models || Object.keys(models).length === 0) {
+			return
+		}
+
+		rememberCatalog(fireworksApiKey, models)
+	}, [routerModels, fireworksApiKey, rememberCatalog])
 
 	const nextRequestId = useCallback(() => {
 		const requestId = nextFireworksRouterModelsRequestId()
@@ -134,12 +177,12 @@ export const Fireworks = ({
 					// loaded with the same key, so a transient failure does not empty the picker.
 					// A different key must clear it: the previous account's models may not be
 					// usable with the edited key.
-					const sameKeyCatalog = catalogApiKey.current === fireworksApiKey
+					const sameKeyCatalog = retainedCatalogRef.current?.apiKey === fireworksApiKey
 					const models = incoming[providerIdentifiers.fireworks]
 					const catalog = models && Object.keys(models).length > 0 ? models : sameKeyCatalog ? undefined : {}
 
 					if (catalog) {
-						catalogApiKey.current = fireworksApiKey
+						rememberCatalog(fireworksApiKey, catalog)
 						// Write the explicit-key catalog straight into the query cache. Invalidating
 						// these keys would refetch with the saved key and could replace the catalog
 						// of the account the user just refreshed.
@@ -168,7 +211,7 @@ export const Fireworks = ({
 		return () => {
 			window.removeEventListener("message", handleMessage)
 		}
-	}, [refreshStatus, queryClient, fireworksApiKey])
+	}, [refreshStatus, queryClient, fireworksApiKey, rememberCatalog])
 
 	// A profile switch leaves the previous key's catalog in extension state. Request the
 	// catalog with the new key so the picker cannot show or persist models that key cannot
@@ -238,10 +281,18 @@ export const Fireworks = ({
 		})
 	}, [apiConfiguration, nextRequestId, t])
 
-	// Until the API list has been fetched (e.g. no key yet, or fetch failed), fall
-	// back to the curated static list so the picker is never empty.
-	const fetchedModels = routerModels?.[providerIdentifiers.fireworks]
-	const models = fetchedModels && Object.keys(fetchedModels).length > 0 ? fetchedModels : fireworksModels
+	// The picker renders extension state, not the query cache. A failed same-key refresh
+	// publishes an empty catalog there, so fall back to the last catalog known for the
+	// current key. Without a key nothing can be fetched, so show nothing: the previous
+	// account's models must not stay selectable.
+	const extensionModels = routerModels?.[providerIdentifiers.fireworks]
+	const retainedModels =
+		retainedCatalog && retainedCatalog.apiKey === fireworksApiKey ? retainedCatalog.models : undefined
+	const models = !fireworksApiKey
+		? {}
+		: extensionModels && Object.keys(extensionModels).length > 0
+			? extensionModels
+			: (retainedModels ?? {})
 
 	return (
 		<>

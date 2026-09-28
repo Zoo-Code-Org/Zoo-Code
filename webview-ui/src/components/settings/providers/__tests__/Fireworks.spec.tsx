@@ -13,7 +13,6 @@ import {
 import {
 	allRouterModelsProvider,
 	fireworksDefaultModelId,
-	fireworksModels,
 	providerIdentifiers,
 	type ModelInfo,
 	type ProviderSettings,
@@ -163,7 +162,7 @@ describe("Fireworks Component", () => {
 		expect(screen.getByTestId("model-picker-default")).toHaveTextContent(fireworksDefaultModelId)
 	})
 
-	it("falls back to the static model list when nothing has been fetched", () => {
+	it("shows no models when nothing has been fetched from the API", () => {
 		render(
 			<Fireworks
 				apiConfiguration={createApiConfiguration()}
@@ -171,7 +170,7 @@ describe("Fireworks Component", () => {
 			/>,
 		)
 
-		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent(Object.keys(fireworksModels).join(","))
+		expect(screen.getByTestId("model-picker-ids")).toBeEmptyDOMElement()
 	})
 
 	it("disables refresh without an API key and shows the get-key link", () => {
@@ -482,7 +481,7 @@ describe("Fireworks Component", () => {
 		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
 	})
 
-	it("keeps the last catalog when a refresh fails for the same key", async () => {
+	it("keeps the last catalog in the picker when a refresh fails for the same key", async () => {
 		const queryClient = createTestQueryClient()
 		const setQueryData = vi.spyOn(queryClient, "setQueryData")
 		const cachedModels = {
@@ -512,6 +511,7 @@ describe("Fireworks Component", () => {
 			)
 		})
 		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument())
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
 
 		// A later refresh with the same key fails and publishes an empty catalog.
 		setQueryData.mockClear()
@@ -531,6 +531,58 @@ describe("Fireworks Component", () => {
 
 		// The cached catalog stays in place instead of being replaced with an empty one.
 		expect(setQueryData).not.toHaveBeenCalled()
+		// The picker renders extension state, so the retained catalog must feed it directly.
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
+	})
+
+	it("keeps a catalog that extension state already held when a same-key refresh fails", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+		const extensionModels = {
+			"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+		}
+
+		// Extension state already holds a catalog for the saved key.
+		mockUseExtensionState.mockReturnValue({
+			routerModels: { [providerIdentifiers.fireworks]: extensionModels },
+		})
+
+		const { rerender } = renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		// A same-key refresh fails and the backend has no cache entry, so it publishes an
+		// empty Fireworks catalog into extension state.
+		fireEvent.click(getRefreshButton())
+		mockUseExtensionState.mockReturnValue({
+			routerModels: { [providerIdentifiers.fireworks]: {} },
+		})
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: getLastRequestId(),
+						routerModels: { [providerIdentifiers.fireworks]: {} },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		// The picker keeps the catalog instead of going empty.
+		expect(setQueryData).not.toHaveBeenCalled()
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
 	})
 
 	it("clears the catalog when a refresh fails for a different key", async () => {
@@ -666,6 +718,15 @@ describe("Fireworks Component", () => {
 	})
 
 	it("does not request the catalog on mount or when the key is cleared", async () => {
+		// Extension state still holds the previous account's catalog.
+		mockUseExtensionState.mockReturnValue({
+			routerModels: {
+				[providerIdentifiers.fireworks]: {
+					"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576 },
+				},
+			},
+		})
+
 		const { rerender } = render(
 			<Fireworks
 				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
@@ -683,6 +744,28 @@ describe("Fireworks Component", () => {
 		await new Promise((resolve) => setTimeout(resolve, 300))
 
 		expect(vscode.postMessage).not.toHaveBeenCalled()
+		// Nothing can be fetched without a key, so the previous catalog must not stay selectable.
+		expect(screen.getByTestId("model-picker-ids")).toBeEmptyDOMElement()
+	})
+
+	it("uses a request identifier that is unique to the page load", async () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(getRefreshButton())
+		const firstPageRequestId = getLastRequestId()
+		expect(firstPageRequestId).toBeTruthy()
+
+		// A webview reload re-evaluates the module, which restarts the module-scoped counter.
+		// The identifier must still differ, or the extension would treat the new page's
+		// request as the one still in flight from the previous page.
+		vi.resetModules()
+		const { nextFireworksRouterModelsRequestId } = await import("../Fireworks")
+		expect(nextFireworksRouterModelsRequestId()).not.toBe(firstPageRequestId)
 	})
 
 	it("threads the organization allow list and validation error into the picker", () => {
@@ -711,25 +794,5 @@ describe("Fireworks Component", () => {
 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
-	})
-
-	it("uses a request identifier that is unique to the page load", async () => {
-		render(
-			<Fireworks
-				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
-				setApiConfigurationField={mockSetApiConfigurationField}
-			/>,
-		)
-
-		fireEvent.click(getRefreshButton())
-		const firstPageRequestId = getLastRequestId()
-		expect(firstPageRequestId).toBeTruthy()
-
-		// A webview reload re-evaluates the module, which restarts the module-scoped counter.
-		// The identifier must still differ, or the extension would treat the new page's
-		// request as the one still in flight from the previous page.
-		vi.resetModules()
-		const { nextFireworksRouterModelsRequestId } = await import("../Fireworks")
-		expect(nextFireworksRouterModelsRequestId()).not.toBe(firstPageRequestId)
 	})
 })
