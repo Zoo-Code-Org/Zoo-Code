@@ -4,7 +4,12 @@ import type { ModelInfo } from "@roo-code/types"
 
 import { parseApiPrice } from "../../../shared/cost"
 
-export async function getUnboundModels(apiKey?: string | null): Promise<Record<string, ModelInfo>> {
+import { throwIfAborted } from "../utils/abort-signal"
+
+export async function getUnboundModels(
+	apiKey?: string | null,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
 	try {
@@ -14,7 +19,7 @@ export async function getUnboundModels(apiKey?: string | null): Promise<Record<s
 			headers["Authorization"] = `Bearer ${apiKey}`
 		}
 
-		const response = await axios.get("https://api.getunbound.ai/models", { headers })
+		const response = await axios.get("https://api.getunbound.ai/models", { headers, signal: opts?.signal })
 		const rawModels = response.data?.data ?? response.data
 
 		for (const rawModel of rawModels) {
@@ -33,6 +38,10 @@ export async function getUnboundModels(apiKey?: string | null): Promise<Record<s
 			models[rawModel.id] = modelInfo
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching Unbound models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 	}
 

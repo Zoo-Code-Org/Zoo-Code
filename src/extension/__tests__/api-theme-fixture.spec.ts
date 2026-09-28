@@ -27,4 +27,16 @@ describe("API - theme fixture probe", () => {
 		await expect(api.captureWebviewThemeFixture()).resolves.toEqual(fixture)
 		expect(requestWebviewThemeFixture).toHaveBeenCalledOnce()
 	})
+
+	it("exposes the current announcement id for deterministic test setup", () => {
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			latestAnnouncementId: "current-announcement",
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider)
+
+		expect(api.getLatestAnnouncementId()).toBe("current-announcement")
+	})
 })

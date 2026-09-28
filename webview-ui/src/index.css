@@ -558,7 +558,7 @@ input[cmdk-input]:focus {
 	background-color: color-mix(in srgb, var(--vscode-diffEditor-removedTextBackground) 70%, transparent);
 }
 .diff-content-context {
-	background-color: color-mix(in srgb, var(--vscode-editorGroup-border) 100%, transparent);
+	background-color: var(--vscode-diffEditor-unchangedCodeBackground, var(--vscode-editor-background));
 }
 
 @keyframes ground-slide {

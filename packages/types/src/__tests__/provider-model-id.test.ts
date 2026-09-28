@@ -1,3 +1,4 @@
+import { retiredProviderIdentifiers } from "../provider-identifiers.js"
 import { getModelId, modelIdKeys, providerIdentifiers, type ProviderSettings } from "../index.js"
 
 const expectedModelIdKeys = [
@@ -75,7 +76,7 @@ describe("getModelId", () => {
 
 	it("preserves legacy model ID precedence for retired providers", () => {
 		const settings: ProviderSettings = {
-			apiProvider: "groq",
+			apiProvider: retiredProviderIdentifiers.groq,
 			lmStudioDraftModelId: "draft-model",
 			requestyModelId: "requesty-model",
 		}

@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Veiligere bestandstoegang — gebruik afzonderlijke toelatingslijsten voor lezen en schrijven om te bepalen tot welke paden Zoo Code toegang heeft.",
-			"highlight2": "Meer modelkeuze — GLM 5.3 is nu beschikbaar via Z.ai en Gemini 3.5 Flash Lite en Gemini 3.1 Flash Lite zijn toegevoegd aan de Gemini-provider.",
-			"highlight3": "Betrouwbaardere dagelijkse workflows — verbeteringen versterken taakherstel en -geschiedenis, streaming en toolgebruik van providers, het importeren van instellingen en de leesbaarheid in verschillende IDE-thema's."
+			"highlight1": "✨ Nieuwe SOTA-modellen toegevoegd: Gebruik GPT-6 Sol, GPT-6 Luna en Claude Opus 5.5 bij ondersteunde providers.",
+			"highlight2": "🧭 Betrouwbaardere taken en subtaken: Houd gedelegeerde modi geïsoleerd, behoud links naar subtaken na herhaald stoppen en bescherm orchestrator-instellingen wanneer slash-opdrachten van modus wisselen.",
+			"highlight3": "🛠️ Betrouwbaarder gedrag van terminal, providers en codezoekfunctie: Verbeter de terminal op Windows en in niet-Engelstalige omgevingen, versterk providerreacties en annulering en laat de codezoekfunctie consistenter de juiste workspace gebruiken."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
