@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "ZooCodeOrganization",
-	"version": "3.82.2",
+	"version": "3.84.0",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -459,6 +459,8 @@
 		"test:coverage:services": "vitest run --config vitest.services.config.ts --coverage",
 		"test:coverage:misc": "vitest run --config vitest.misc.config.ts --coverage",
 		"test:coverage:tree-sitter": "vitest run --config vitest.tree-sitter.config.ts --coverage",
+		"test:workflow": "vitest run --config vitest.workflow.config.ts",
+		"test:coverage:workflow": "vitest run --config vitest.workflow.config.ts --coverage",
 		"format": "prettier --write .",
 		"bundle": "node esbuild.mjs",
 		"vscode:prepublish": "pnpm bundle --production",
