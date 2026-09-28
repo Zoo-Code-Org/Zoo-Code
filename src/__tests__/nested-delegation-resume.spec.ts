@@ -65,6 +65,16 @@ describe("Nested delegation resume (A → B → C)", () => {
 	it("C completes → reopens B; then B completes → reopens A; emits correct events; no resume_task asks", async () => {
 		// Track which task is "current" to satisfy provider.reopenParentFromDelegation() child-close logic
 		let currentActiveId: string | undefined = "C"
+		let currentTask:
+			| {
+					taskId: string
+					resumeAfterDelegation?: ReturnType<typeof vi.fn>
+					overwriteClineMessages?: ReturnType<typeof vi.fn>
+					overwriteApiConversationHistory?: ReturnType<typeof vi.fn>
+			  }
+			| undefined = {
+			taskId: "C",
+		}
 
 		// History index: A is parent of B, B is parent of C
 		const historyIndex: Record<string, any> = {
@@ -116,6 +126,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 		const removeClineFromStack = vi.fn().mockImplementation(async () => {
 			// Simulate closing current child
 			currentActiveId = undefined
+			currentTask = undefined
 		})
 		const createTaskWithHistoryItem = vi
 			.fn()
@@ -125,12 +136,13 @@ describe("Nested delegation resume (A → B → C)", () => {
 				// Reopen the parent
 				currentActiveId = historyItem.id
 				// Return minimal parent instance with resumeAfterDelegation
-				return {
+				currentTask = {
 					taskId: historyItem.id,
 					resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
 					overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
 					overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 				}
+				return currentTask
 			})
 
 		const getTaskWithId = vi.fn(async (id: string) => {
@@ -167,13 +179,14 @@ describe("Nested delegation resume (A → B → C)", () => {
 				},
 			),
 			get: vi.fn((id: string) => historyIndex[id]),
+			invalidate: vi.fn().mockResolvedValue(undefined),
 		}
 
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId,
 			emit: emitSpy,
-			getCurrentTask: vi.fn(() => (currentActiveId ? ({ taskId: currentActiveId } as any) : undefined)),
+			getCurrentTask: vi.fn(() => currentTask as unknown as Task | undefined),
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			updateTaskHistory,
@@ -231,6 +244,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 			askFinishSubTaskApproval,
 			toolDescription: () => "desc",
 		} as any)
+		await vi.waitFor(() => expect(currentTask?.resumeAfterDelegation).toHaveBeenCalledTimes(1))
 
 		// After C completes, B must be current
 		expect(currentActiveId).toBe("B")
@@ -274,6 +288,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 			askFinishSubTaskApproval,
 			toolDescription: () => "desc",
 		} as any)
+		await vi.waitFor(() => expect(currentTask?.resumeAfterDelegation).toHaveBeenCalledTimes(1))
 
 		// After B completes, A should become current
 		// Note: delegation resume may fall back to a non-tool_result user message when the parent history

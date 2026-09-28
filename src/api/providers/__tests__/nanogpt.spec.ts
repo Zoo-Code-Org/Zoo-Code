@@ -9,6 +9,7 @@ import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { createReadFileTool } from "../../../core/prompts/tools/native-tools/read_file"
 import { NanoGptHandler } from "../nanogpt"
 import { getModels } from "../fetchers/modelCache"
 
@@ -169,6 +170,101 @@ describe("NanoGptHandler", () => {
 			{ signal },
 		)
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("max_completion_tokens")
+	})
+
+	it.each(["auto", "tools"] as const)("preserves read_file optionality with %s routing", async (routing) => {
+		const tool = createReadFileTool()
+		if (tool.type !== "function") throw new Error("read_file must be a function tool")
+		const original = structuredClone(tool)
+		const handler = new NanoGptHandler({ nanoGptModelId: "model:thinking", nanoGptRoutingPreference: routing })
+
+		await collectStream(
+			handler.createMessage("sys", messages, { taskId: "task", tools: [tool], tool_choice: "auto" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: "auto",
+				tools: [{ ...original, function: { ...original.function, strict: false } }],
+			}),
+			expect.anything(),
+		)
+		expect(tool).toEqual(original)
+		expect(tool.function.parameters?.required).toEqual(["path"])
+	})
+
+	it.each(["custom_read", "mcp--files--read"])(
+		"preserves nested, nullable, and required fields for %s",
+		async (name) => {
+			const tool: OpenAI.Chat.ChatCompletionTool = {
+				type: "function",
+				function: {
+					name,
+					strict: true,
+					parameters: {
+						type: "object",
+						required: ["path"],
+						additionalProperties: false,
+						properties: {
+							path: { type: "string" },
+							label: { type: ["string", "null"] },
+							options: {
+								type: "object",
+								required: ["offset"],
+								properties: { offset: { type: "integer", minimum: 1 }, limit: { type: "integer" } },
+							},
+							ranges: {
+								type: "array",
+								items: {
+									type: "object",
+									required: ["start"],
+									properties: { start: { type: "integer" }, end: { type: "integer" } },
+								},
+							},
+						},
+					},
+				},
+			}
+			const original = structuredClone(tool)
+			await collectStream(
+				new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages, {
+					taskId: "task",
+					tools: [tool],
+					tool_choice: { type: "function", function: { name } },
+				}),
+			)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					tools: [{ ...original, function: { ...original.function, strict: false } }],
+					tool_choice: { type: "function", function: { name } },
+				}),
+				expect.anything(),
+			)
+			expect(tool).toEqual(original)
+		},
+	)
+
+	it.each([undefined, []])("preserves an absent or empty tool catalog (%j)", async (tools) => {
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages, {
+				taskId: "task",
+				tools,
+			}),
+		)
+		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ tools }), expect.anything())
+	})
+
+	it("passes non-function tools through unchanged", async () => {
+		const tools: OpenAI.Chat.ChatCompletionTool[] = [
+			{ type: "custom", custom: { name: "custom_tool", format: { type: "text" } } },
+		]
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages, {
+				taskId: "task",
+				tools,
+			}),
+		)
+		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ tools }), expect.anything())
 	})
 
 	it.each([

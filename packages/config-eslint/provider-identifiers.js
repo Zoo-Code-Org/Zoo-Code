@@ -80,7 +80,7 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 		return undefined
 	}
 
-	function getProviderExpressionBranches(node) {
+	function getProviderExpressionChildren(node) {
 		node = unwrapExpression(node)
 
 		if (node?.type === "LogicalExpression") {
@@ -93,6 +93,18 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 
 		if (node?.type === "AssignmentPattern") {
 			return [node.right]
+		}
+
+		if (node?.type === "CallExpression") {
+			return node.arguments
+		}
+
+		if (node?.type === "ArrayExpression") {
+			return node.elements.filter((element) => element !== null)
+		}
+
+		if (node?.type === "SpreadElement") {
+			return [node.argument]
 		}
 
 		return []
@@ -118,9 +130,18 @@ export function createProviderIdentifierConfig({ providerIdentifiers, retiredPro
 			},
 		},
 		create(context) {
+			// Parent provider contexts and call visitors can reach the same expression.
+			const visitedExpressions = new WeakSet()
+
 			function reportIfRawProvider(node) {
-				for (const branch of getProviderExpressionBranches(node)) {
-					reportIfRawProvider(branch)
+				node = unwrapExpression(node)
+				if (!node || visitedExpressions.has(node)) {
+					return
+				}
+				visitedExpressions.add(node)
+
+				for (const child of getProviderExpressionChildren(node)) {
+					reportIfRawProvider(child)
 				}
 
 				const provider = getRawProvider(node)

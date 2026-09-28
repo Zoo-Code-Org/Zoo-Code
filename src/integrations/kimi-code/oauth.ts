@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "vscode"
 import { z } from "zod"
+import { providerIdentifiers } from "@roo-code/types"
 
 export const KIMI_CODE_OAUTH_CONFIG = {
 	authHost: "https://auth.kimi.com",
@@ -16,7 +17,7 @@ const TOKEN_EXPIRY_BUFFER_MS = 60_000
 const OAUTH_REQUEST_TIMEOUT_MS = 30_000
 
 const credentialsSchema = z.object({
-	type: z.literal("kimi-code"),
+	type: z.literal(providerIdentifiers.kimiCode),
 	accessToken: z.string().min(1),
 	refreshToken: z.string().min(1),
 	expiresAt: z.number(),
@@ -130,7 +131,7 @@ async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Pro
 	const tokens = tokenResponseSchema.parse(await response.json())
 	if (!tokens.refresh_token) throw new Error("Kimi Code OAuth did not return a refresh token")
 	return {
-		type: "kimi-code",
+		type: providerIdentifiers.kimiCode,
 		accessToken: tokens.access_token,
 		refreshToken: tokens.refresh_token,
 		expiresAt: Date.now() + tokens.expires_in * 1000,
@@ -147,7 +148,7 @@ export async function refreshKimiCodeAccessToken(credentials: KimiCodeCredential
 	if (!response.ok) throw await readOAuthError(response)
 	const tokens = tokenResponseSchema.parse(await response.json())
 	return {
-		type: "kimi-code",
+		type: providerIdentifiers.kimiCode,
 		accessToken: tokens.access_token,
 		refreshToken: tokens.refresh_token ?? credentials.refreshToken,
 		expiresAt: Date.now() + tokens.expires_in * 1000,

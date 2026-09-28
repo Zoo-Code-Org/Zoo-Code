@@ -10,6 +10,13 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js"
 
 import { TOKEN_EXPIRY_BUFFER_MS } from "./constants"
+import {
+	AUTHORIZATION_CODE_GRANT_TYPE,
+	buildMcpOAuthClientMetadata,
+	REFRESH_TOKEN_GRANT_TYPE,
+	selectMcpOAuthGrantTypes,
+	type McpOAuthGrantType,
+} from "./oauthMetadata"
 import { SecretStorageService } from "./SecretStorageService"
 import { startCallbackServer, stopCallbackServer } from "./utils/callbackServer"
 import { fetchOAuthAuthServerMetadata } from "./utils/oauth"
@@ -80,7 +87,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		private _authCodePromise: Promise<string> | null,
 		private _cancelCallbackServer: (() => void) | null,
 		private readonly _tokenEndpointAuthMethod: string,
-		private readonly _grantTypes: string[],
+		private readonly _grantTypes: McpOAuthGrantType[],
 		private readonly _scopes: string[],
 		private readonly _state: string,
 		private readonly _authServerMeta: Record<string, any> | null,
@@ -126,7 +133,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// Only pick methods we actually implement: "none" or "client_secret_post".
 		const authMethods: string[] = authServerMeta?.token_endpoint_auth_methods_supported ?? []
 		const tokenEndpointAuthMethod = authMethods.includes("none") ? "none" : "client_secret_post"
-		const grantTypes: string[] = authServerMeta?.grant_types_supported ?? ["authorization_code", "refresh_token"]
+		const grantTypes = selectMcpOAuthGrantTypes(authServerMeta?.grant_types_supported)
 		const scopes: string[] = authServerMeta?.scopes_supported ?? []
 
 		// Generate a CSRF state token for the OAuth flow.
@@ -196,13 +203,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	}
 
 	get clientMetadata(): OAuthClientMetadata {
-		return {
-			client_name: this._clientName,
-			redirect_uris: [this.redirectUrl],
-			grant_types: this._grantTypes,
-			response_types: ["code"],
-			token_endpoint_auth_method: this._tokenEndpointAuthMethod,
-		}
+		return buildMcpOAuthClientMetadata({
+			clientName: this._clientName,
+			redirectUrl: this.redirectUrl,
+			grantTypes: this._grantTypes,
+			tokenEndpointAuthMethod: this._tokenEndpointAuthMethod,
+		})
 	}
 
 	async clientInformation(): Promise<OAuthClientInformation | undefined> {
@@ -438,7 +444,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		// Build the token request body per RFC 6749 §4.1.3 + RFC 7636 §4.5.
 		const params: Record<string, string> = {
-			grant_type: "authorization_code",
+			grant_type: AUTHORIZATION_CODE_GRANT_TYPE,
 			code: authorizationCode,
 			redirect_uri: this.redirectUrl,
 			client_id: this._clientInfo.client_id,
@@ -493,7 +499,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		}
 
 		const params: Record<string, string> = {
-			grant_type: "refresh_token",
+			grant_type: REFRESH_TOKEN_GRANT_TYPE,
 			refresh_token: refreshToken,
 			client_id: clientId,
 		}
