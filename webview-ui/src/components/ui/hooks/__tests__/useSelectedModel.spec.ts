@@ -18,6 +18,8 @@ import {
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
+	openAiNativeDefaultModelId,
+	openAiNativeModels,
 	minimaxDefaultModelId,
 	minimaxModels,
 	friendliDefaultModelId,
@@ -108,6 +110,35 @@ describe("useSelectedModel", () => {
 		[providerIdentifiers.zooGateway, "zooGatewayModelId"],
 	] as const
 	const configuredModelInfo: ModelInfo = { contextWindow: 1, supportsPromptCache: false }
+
+	describe("OpenAI Native model selection", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it.each([false, true])("uses the canonical default with router loading=%s", (isLoading) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(isLoading ? undefined : {}, { isLoading }))
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(openAiNativeDefaultModelId)
+			expect(result.current.info).toEqual(openAiNativeModels[openAiNativeDefaultModelId])
+			expect(result.current.isLoading).toBe(false)
+		})
+
+		it("preserves an explicitly configured model even when it is the former fallback", () => {
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative, apiModelId: "gpt-4o" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("gpt-4o")
+			expect(result.current.info).toEqual(openAiNativeModels["gpt-4o"])
+		})
+	})
 
 	it.each(dynamicProviderCases)("uses router data for %s", (provider, modelIdKey) => {
 		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }

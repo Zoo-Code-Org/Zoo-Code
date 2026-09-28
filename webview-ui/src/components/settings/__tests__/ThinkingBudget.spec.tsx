@@ -1,4 +1,4 @@
-import { providerIdentifiers } from "@roo-code/types"
+import { bedrockModels, providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ThinkingBudget.spec.tsx
 
 import React from "react"
@@ -77,6 +77,26 @@ describe("ThinkingBudget", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	it.each([
+		["anthropic.claude-sonnet-4-5-20250929-v1:0", 64_000],
+		["anthropic.claude-opus-4-8", 128_000],
+		["anthropic.claude-sonnet-5", 128_000],
+		["anthropic.claude-opus-5", 128_000],
+	] as const)("allows selecting the documented Bedrock output ceiling for %s", (apiModelId, ceiling) => {
+		render(
+			<ThinkingBudget
+				{...defaultProps}
+				apiConfiguration={{ apiProvider: providerIdentifiers.bedrock, apiModelId, enableReasoningEffort: true }}
+				modelInfo={bedrockModels[apiModelId]}
+			/>,
+		)
+		const outputSlider = screen.getAllByTestId("slider")[0]
+		expect(outputSlider).toHaveAttribute("max", String(ceiling))
+		expect(outputSlider).toHaveValue("16384")
+		fireEvent.change(outputSlider, { target: { value: String(ceiling) } })
+		expect(defaultProps.setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", ceiling)
 	})
 
 	it("should render nothing when model information is unavailable", () => {

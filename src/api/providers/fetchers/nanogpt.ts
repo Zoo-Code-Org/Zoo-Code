@@ -3,6 +3,8 @@ import { z } from "zod"
 
 import { NANOGPT_BASE_URL, nanoGptDefaultModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 const nanoGptReasoningEfforts: NonNullable<ModelInfo["supportsReasoningEffort"]> = ["low", "medium", "high"]
 const nanoGptReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
 const nanoGptAstraModelIds = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
@@ -75,11 +77,11 @@ export const parseNanoGptModel = (model: NanoGptModel): ModelInfo => ({
 })
 
 /** Fetches NanoGPT's public detailed catalog, optionally scoped by a Bearer key. */
-export async function getNanoGptModels(apiKey?: string): Promise<ModelRecord> {
+export async function getNanoGptModels(apiKey?: string, opts?: { signal?: AbortSignal }): Promise<ModelRecord> {
 	try {
 		const response = await axios.get(`${NANOGPT_BASE_URL}/models?detailed=true`, {
 			headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-			timeout: 10_000,
+			signal: opts?.signal,
 		})
 		const responseResult = nanoGptModelsResponseSchema.safeParse(response.data)
 		if (!responseResult.success) {
@@ -106,6 +108,10 @@ export async function getNanoGptModels(apiKey?: string): Promise<ModelRecord> {
 
 		return models
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (empty) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching NanoGPT models: ${getSafeErrorMessage(error, apiKey)}`)
 		return {}
 	}
