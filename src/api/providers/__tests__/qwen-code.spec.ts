@@ -168,9 +168,12 @@ describe("QwenCodeHandler abort wiring", () => {
 
 		it("does not retry after 401 once the signal aborts during the refresh", async () => {
 			const external = new AbortController()
-			const fetchMock = vi.fn().mockImplementation(async () => {
+			// The token endpoint never responds: the wait must be cut by the
+			// abort, not by the refresh settling (a post-hoc aborted check
+			// alone would hang here forever).
+			const fetchMock = vi.fn().mockImplementation(() => {
 				external.abort() // simulate Stop pressed while the token refresh is in flight
-				return tokenResponse()
+				return new Promise<never>(() => {})
 			})
 			vi.stubGlobal("fetch", fetchMock)
 			mockCreate.mockRejectedValueOnce(unauthorizedError())

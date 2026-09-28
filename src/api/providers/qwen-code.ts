@@ -220,12 +220,19 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 				// captured request options, so it carries the same abort signal.
 				// (An already-aborted request is normalized above and never
 				// reaches this branch.)
-				this.credentials = await this.refreshAccessToken(this.credentials!)
-				// A stop can land while the refresh await is in flight — re-check
-				// before the retried request goes out so it is not sent.
-				if (externalSignal?.aborted) {
-					throw createAbortError("Qwen Code")
-				}
+				// Race the refresh wait against the caller’s signal so a stop
+				// settles promptly instead of blocking on the token endpoint.
+				// The shared refresh keeps running; only this wait is cut (same
+				// semantics as the ensureAuthenticated wait in
+				// createMessage/completePrompt). An abort landing after the refresh
+				// settles is caught by the retried request’s own abort
+				// normalization below (the request carries the already-aborted
+				// signal, so the SDK rejects it as an abort error).
+				this.credentials = await settleOnAbort(
+					this.refreshAccessToken(this.credentials!),
+					externalSignal,
+					"Qwen Code",
+				)
 				const client = this.ensureClient()
 				client.apiKey = this.credentials.access_token
 				client.baseURL = this.getBaseUrl(this.credentials)

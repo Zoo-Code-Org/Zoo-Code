@@ -259,7 +259,9 @@ describe("abort-signal utilities", () => {
 
 			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 			expect(removeSpy).toHaveBeenCalledTimes(1)
-			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// The exact registered listener must be removed — removing a
+			// different function would leave the real one attached.
+			expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
 		})
 
 		it("removes the abort listener when the pending promise settles after an abort", async () => {
@@ -286,6 +288,9 @@ describe("abort-signal utilities", () => {
 			expect((caught as Error).name).toBe("AbortError")
 			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 			expect(removeSpy).toHaveBeenCalledTimes(1)
+			// The exact registered listener must be removed — removing a
+			// different function would leave the real one attached.
+			expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
 		})
 
 		it("propagates a pending promise rejection unchanged and detaches the abort listener", async () => {
