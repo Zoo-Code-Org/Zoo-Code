@@ -2,6 +2,7 @@
 
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest"
+import { providerIdentifiers } from "@roo-code/types"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import { getModeBySlug } from "../../../shared/modes"
@@ -39,6 +40,7 @@ vi.mock("@roo-code/telemetry", () => ({
 		instance: {
 			captureToolUsage: vi.fn(),
 			captureConsecutiveMistakeError: vi.fn(),
+			captureException: vi.fn(),
 			captureEvent: vi.fn(),
 		},
 	},
@@ -64,6 +66,7 @@ interface MockTask {
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
 	recordToolUsage: ReturnType<typeof vi.fn>
 	recordToolError: ReturnType<typeof vi.fn>
+	apiConfiguration?: { apiProvider: string }
 	toolRepetitionDetector: { check: ReturnType<typeof vi.fn> }
 	providerRef: {
 		deref: () =>
@@ -74,6 +77,7 @@ interface MockTask {
 			| undefined
 	}
 	say: ReturnType<typeof vi.fn>
+	sayUserFeedbackAndAckQueued: ReturnType<typeof vi.fn>
 	ask: ReturnType<typeof vi.fn>
 	pushToolResultToUserContent: ReturnType<typeof vi.fn>
 }
@@ -117,6 +121,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				}),
 			},
 			say: vi.fn().mockResolvedValue(undefined),
+			sayUserFeedbackAndAckQueued: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 			pushToolResultToUserContent: vi.fn(),
 		}
@@ -347,6 +352,84 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			// no success attempt is recorded for a call that was never permitted to execute.
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+		})
+
+		it("routes MCP approval feedback through the queued-ack wrapper", async () => {
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [
+							{
+								name: "my_server",
+								tools: [{ name: "do_thing", enabledForPrompt: true }],
+							},
+						],
+					}),
+				}),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_feedback",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+			mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "Careful with this server" })
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"Careful with this server",
+				undefined,
+				undefined,
+			)
+			expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+		})
+
+		it("routes tool-repetition feedback through the queued-ack wrapper", async () => {
+			mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+				allowExecution: false,
+				askUser: {
+					messageKey: "mistake_limit_reached",
+					messageDetail: "The tool {toolName} was called consecutively without progress.",
+				},
+			})
+			mockTask.apiConfiguration = { apiProvider: providerIdentifiers.anthropic }
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_repetition_feedback",
+					name: "read_file",
+					params: { path: "a.txt" },
+					nativeArgs: { path: "a.txt" },
+					partial: false,
+				},
+			]
+			mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: "Try another approach" })
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"Try another approach",
+				undefined,
+				undefined,
+			)
+			expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+			expect(mockTask.userMessageContent).toContainEqual(
+				expect.objectContaining({
+					type: "text",
+					text: expect.stringContaining("Try another approach"),
+				}),
+			)
 		})
 	})
 
