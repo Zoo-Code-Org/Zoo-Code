@@ -934,6 +934,55 @@ describe("openClineInNewTab", () => {
 		expect(getPanel()).toBeUndefined()
 	})
 
+	it("prefers the active panel over a merely visible one when re-pointing the tracked tab ref", async () => {
+		// Panel A is created and tracked first and stays merely visible...
+		const panelA = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-A",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelA)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		// ...then panel B opens and becomes the active (tracked) panel.
+		const panelB = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-B",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelB)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		Object.assign(panelB, { active: true, visible: true })
+		;(panelB.onDidChangeViewState as Mock).mock.calls[0]![0]!({ webviewPanel: panelB })
+		expect(getPanel()).toBe(panelB)
+
+		// A third panel activates and becomes the tracked one...
+		const panelC = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-C",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelC)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		Object.assign(panelC, { active: true, visible: true })
+		Object.assign(panelA, { visible: true })
+		;(panelC.onDidChangeViewState as Mock).mock.calls[0]![0]!({ webviewPanel: panelC })
+		expect(getPanel()).toBe(panelC)
+
+		// ...so when it closes, the re-point must pick the active panel (B) over the
+		// merely visible one (A): the active tab is the current tab.
+		const disposeC = (panelC.onDidDispose as Mock).mock.calls[0]![0] as () => void
+		disposeC()
+		expect(getPanel()).toBe(panelB)
+
+		// Tidy up the still-live panels so module state does not leak into other tests.
+		;(panelA.onDidDispose as Mock).mock.calls[0]![0]!()
+		;(panelB.onDidDispose as Mock).mock.calls[0]![0]!()
+	})
+
 	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {
 		const [first, second] = await Promise.all([
 			openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel }),

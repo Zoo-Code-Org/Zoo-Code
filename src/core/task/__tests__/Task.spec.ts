@@ -2692,6 +2692,9 @@ describe("Cline", () => {
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
+				// The switch applies (the mock below writes _taskMode), so the success
+				// path must not log a not-applied warning.
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 				vi.spyOn(mockProvider, "getState").mockResolvedValue(
 					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),
 				)
@@ -2715,6 +2718,7 @@ describe("Cline", () => {
 				await task.getTaskMode()
 
 				await task.submitUserMessage("switch modes", undefined, "code")
+				expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("was not applied"))
 				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 				const stream = (async function* () {
 					yield { type: "text", text: "response" } as ApiStreamChunk
@@ -2728,6 +2732,7 @@ describe("Cline", () => {
 
 				expect(mockProvider.handleModeSwitch).toHaveBeenCalledWith("code", task)
 				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
+				warnSpy.mockRestore()
 			})
 
 			it("still delivers the user message when the mode switch fails", async () => {

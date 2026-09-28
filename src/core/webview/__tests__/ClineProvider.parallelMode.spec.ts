@@ -1123,15 +1123,19 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// The pre-return re-pin resolves the replacement's settings through the manager.
+			// The pre-return re-pin resolves the replacement's settings through the
+			// manager: name the lookup so a wrong or empty argument cannot be served
+			// the replacement's settings.
 			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
-				async (_args: { name?: string; id?: string }) =>
-					({
-						name: "replacement-profile",
-						id: "replacement-id",
-						apiProvider: providerIdentifiers.openrouter,
-						openRouterBaseUrl: "repl-url",
-					}) as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>,
+				async (args: { name?: string; id?: string }) =>
+					args.name === "replacement-profile"
+						? ({
+								name: "replacement-profile",
+								id: "replacement-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterBaseUrl: "repl-url",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+						: Promise.reject(new Error(`profile ${String(args.name)} not found`)),
 			)
 
 			await providerA.deleteProviderProfile({
@@ -1148,6 +1152,58 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				openRouterBaseUrl: "repl-url",
 			})
 			expect((await providerB.getState()).currentApiConfigName).toBe("replacement-profile")
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("should re-pin siblings by name only and log when the replacement profile cannot be resolved", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const logSpy = vi.spyOn(providerA, "log")
+
+			// B pins the doomed profile without an overlay (a fresh pin via setValue).
+			await providerB.setValue("currentApiConfigName", "doomed-profile")
+
+			// A has no profile pin of its own; the shared selection names the doomed profile.
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await providerA.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.openrouter,
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// The resolution rejects: the re-pin must fall back to the replacement name
+			// alone and log the miss.
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("profile store unavailable"),
+			)
+
+			await providerA.deleteProviderProfile({
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			// B is re-pointed at the replacement by name, without settings it cannot
+			// resolve, and the miss is logged for diagnosis.
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("replacement-profile")
+			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Unable to resolve API profile 'replacement-profile'"),
+			)
 
 			await providerA.dispose()
 			await providerB.dispose()
@@ -1257,6 +1313,208 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "y-key",
 			})
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("should leave a sibling's pre-existing overlay untouched when a different profile activates", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			// B pins profile-y and already carries a custom overlay on top of the pin:
+			// the overlay is newer than any shared write, so the snapshot must not
+			// replace it with the pin's stock settings.
+			await providerB.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "custom-model",
+				openRouterApiKey: "custom-key",
+			})
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) =>
+					args.name === "profile-y"
+						? ({
+								name: "profile-y",
+								id: "y-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "y-key",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+						: ({
+								name: "profile-x",
+								id: "x-id",
+								apiProvider: providerIdentifiers.anthropic,
+								anthropicBaseUrl: "x-url",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>),
+			)
+
+			await providerA.activateProviderProfile({ name: "profile-x" })
+
+			// B keeps its own pin and its custom overlay: the snapshot excludes views
+			// that already buffer an overlay, so the activation never replaces the
+			// customization with the pin's stock settings.
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("profile-y")
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "custom-model",
+				openRouterApiKey: "custom-key",
+			})
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("should not snapshot the activating view's own overlay during its activation", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+
+			// A pins profile-y without an overlay and activates profile-x. A self
+			// snapshot would write y's stock settings into A's buffer and post A's
+			// state before the activation's own overlay clear and post: A must end
+			// the activation with a cleared buffer and exactly its own single post.
+			await providerA.setValue("currentApiConfigName", "profile-y")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) =>
+					args.name === "profile-y"
+						? ({
+								name: "profile-y",
+								id: "y-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "y-key",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+						: ({
+								name: "profile-x",
+								id: "x-id",
+								apiProvider: providerIdentifiers.anthropic,
+								anthropicBaseUrl: "x-url",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>),
+			)
+
+			const postSpy = vi.spyOn(providerA, "postStateToWebview").mockResolvedValue(undefined)
+
+			await providerA.activateProviderProfile({ name: "profile-x" })
+
+			expect(providerA["viewLocalState"].currentApiConfigName).toBe("profile-x")
+			expect(providerA["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(postSpy).toHaveBeenCalledTimes(1)
+
+			postSpy.mockRestore()
+			await providerA.dispose()
+		})
+
+		it("should serve a sibling pinned to the activated profile through the refresh, not the snapshot", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			// B is pinned to the very profile A activates, with no overlay. The
+			// refresh path (after the shared write), not the pre-write snapshot,
+			// must bring B's buffer up to date: B receives exactly one state post.
+			await providerB.setValue("currentApiConfigName", "profile-x")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+
+			const postB = vi.spyOn(providerB, "postStateToWebview").mockResolvedValue(undefined)
+
+			await providerA.activateProviderProfile({ name: "profile-x" })
+
+			// B's buffer holds the activated profile's settings...
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			})
+			// ...and the refresh is the sole writer: exactly one post, not a snapshot
+			// plus refresh double write.
+			expect(postB).toHaveBeenCalledTimes(1)
+
+			postB.mockRestore()
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("should leave the sibling overlay untouched and log when the pinned profile cannot be resolved", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const logSpy = vi.spyOn(providerA, "log")
+
+			// B pins profile-y without an overlay; the profile cannot be resolved
+			// through A's manager. A wrong snapshot is worse than the pre-write
+			// shared values, so the miss must leave B's buffer as is and be logged.
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("profile store unavailable"),
+			)
+
+			await providerA.activateProviderProfile({ name: "profile-x" })
+
+			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Unable to resolve profile 'profile-y'"))
 
 			await providerA.dispose()
 			await providerB.dispose()

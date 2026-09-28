@@ -2620,6 +2620,7 @@ export class ClineProvider
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) =>
 				instance !== this &&
+				// Stryker disable next-line ConditionalExpression: dropping this term admits only undefined-pin instances, which the callback's pin guard absorbs (returns before any write); the filter-to-guard chain is synchronous (equivalent mutant)
 				instance.pinnedProfileName !== undefined &&
 				instance.pinnedProfileName !== activatedProfileName &&
 				instance.viewLocalState.apiConfiguration === undefined,
@@ -2628,6 +2629,10 @@ export class ClineProvider
 		await Promise.all(
 			affected.map(async (instance) => {
 				const pinName = instance.pinnedProfileName
+				// The guard below is a safety net only: the filter predicate above guarantees a
+				// defined pin for every instance reaching this callback, and the filter-to-guard
+				// chain is synchronous (no await), so no reachable state trips it.
+				// Stryker disable next-line ConditionalExpression,BlockStatement: guard body unreachable - the filter predicate guarantees a defined pin and the filter-to-guard chain is synchronous (equivalent mutant)
 				if (pinName === undefined) {
 					return
 				}
