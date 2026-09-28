@@ -1288,6 +1288,12 @@ describe("executeCommandTool", () => {
 			expect(result).toContain("Output (195.3KB) persisted. Artifact ID: exec-1.txt")
 			expect(result).toContain(persisted.preview)
 			expect(result).toContain("Use read_command_output tool to view full output if needed.")
+			// Truncated persisted output reports commandSubmitted: true, so the
+			// post-result drain runs exactly once, after the tool result.
+			expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.processQueuedMessages.mock.invocationCallOrder[0],
+			)
 		})
 	})
 })
