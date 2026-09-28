@@ -47,12 +47,23 @@ export class ContextProxy {
 	private stateCache: GlobalState
 	private secretCache: SecretState
 
-	// Per-key write tokens: a failed durable write rolls its cache value back only if it is
-	// still the current write for that key. Value comparison alone would let an older
-	// failed write restore its stale previous value after a newer same-value write
-	// succeeded; refresh/reset replace the caches, so their pending writes are dropped.
+	// Per-key write tokens: a failed durable write rolls its cache value back only if it
+	// is still the current write for that key. The rollback target is always the durable
+	// record (see below), so the guard exists for one interleaving: a newer write that
+	// has already moved the cache but whose success is not confirmed yet, whose failure
+	// would otherwise be clobbered by the older write's rollback before the newer
+	// write's success record lands.
 	private stateWriteTokens = new Map<GlobalStateKey, symbol>()
 	private secretWriteTokens = new Map<SecretStateKey, symbol>()
+
+	// Tracks the last value confirmed to be in durable storage per key (seeded by
+	// initialize, refreshed by each confirmed write and refresh load, cleared by
+	// resetAllState), so a failed write rolls the cache back to the durable value
+	// instead of the cache value at call time — a superseded in-flight write may have
+	// already overwritten that value, and restoring it would leave the cache ahead of
+	// storage when the superseding write also fails.
+	private durableState = new Map<GlobalStateKey, unknown>()
+	private durableSecrets = new Map<SecretStateKey, unknown>()
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -71,6 +82,8 @@ export class ContextProxy {
 			try {
 				// Revert to original assignment
 				this.stateCache[key] = this.originalContext.globalState.get(key)
+				// This load is a confirmed storage read: seed the rollback record.
+				this.durableState.set(key, this.stateCache[key])
 			} catch (error) {
 				logger.error(`Error loading global ${key}: ${error instanceof Error ? error.message : String(error)}`)
 			}
@@ -80,6 +93,8 @@ export class ContextProxy {
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
 					this.secretCache[key] = await this.originalContext.secrets.get(key)
+					// This load is a confirmed storage read: seed the rollback record.
+					this.durableSecrets.set(key, this.secretCache[key])
 				} catch (error) {
 					logger.error(
 						`Error loading secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -89,6 +104,8 @@ export class ContextProxy {
 			...GLOBAL_SECRET_KEYS.map(async (key) => {
 				try {
 					this.secretCache[key] = await this.originalContext.secrets.get(key)
+					// This load is a confirmed storage read: seed the rollback record.
+					this.durableSecrets.set(key, this.secretCache[key])
 				} catch (error) {
 					logger.error(
 						`Error loading global secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -293,7 +310,12 @@ export class ContextProxy {
 	private async migrateImageGenerationSettings() {
 		try {
 			// Check if there's an old nested structure
-			const oldNestedSettings = this.originalContext.globalState.get<any>("openRouterImageGenerationSettings")
+			// The pre-typed nested layout only ever carried these two fields (the
+			// migration below reads nothing else).
+			const oldNestedSettings = this.originalContext.globalState.get<{
+				openRouterApiKey?: string
+				selectedModel?: string
+			}>("openRouterImageGenerationSettings")
 
 			if (oldNestedSettings && typeof oldNestedSettings === "object") {
 				logger.info("Migrating old nested image generation settings to flattened structure")
@@ -376,20 +398,30 @@ export class ContextProxy {
 		}
 
 		// Update the cache first so reads reflect the new value immediately, but restore
-		// the previous value if the durable write fails so the cache cannot diverge from
-		// storage.
-		const previous = this.stateCache[key]
+		// the last durable value if the durable write fails so the cache cannot diverge
+		// from storage. The rollback uses the durable record (not the cache value at
+		// call time) because a superseded in-flight write may have overwritten that
+		// value since this write started; restoring it after its own failure would
+		// leave the cache ahead of storage. A key with no durable record yet can only
+		// hold undefined in its cache (no successful write or initialize has landed
+		// for it), so reading the record is exact in every reachable state.
 		const token = Symbol()
 		this.stateWriteTokens.set(key, token)
 		this.stateCache[key] = value
-		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error) => {
-			// Only the write that is still current for this key may roll back: a newer
-			// write (or a refresh/reset that dropped the token) already superseded it.
-			if (this.stateWriteTokens.get(key) === token) {
-				this.stateCache[key] = previous
-			}
-			throw error
-		})
+		return Promise.resolve(this.originalContext.globalState.update(key, value))
+			.then(() => {
+				// The durable write landed: the cache value is now the durable value.
+				this.durableState.set(key, value)
+			})
+			.catch((error) => {
+				// Only the write that is still current for this key may roll back: a newer
+				// write may have moved the cache and its success record is not in yet (see
+				// the field comment), so rolling back over it would lose that value.
+				if (this.stateWriteTokens.get(key) === token) {
+					this.stateCache[key] = this.durableState.get(key) as GlobalState[K]
+				}
+				throw error
+			})
 	}
 
 	private getAllGlobalState(): GlobalState {
@@ -407,9 +439,9 @@ export class ContextProxy {
 
 	storeSecret(key: SecretStateKey, value?: string) {
 		// Update the cache first so reads reflect the new value immediately, but restore
-		// the previous value if the durable write fails so the cache cannot diverge from
-		// storage.
-		const previous = this.secretCache[key]
+		// the last durable value if the durable write fails so the cache cannot diverge
+		// from storage (the durable record is exact in every reachable state: see
+		// updateGlobalState).
 		const token = Symbol()
 		this.secretWriteTokens.set(key, token)
 		this.secretCache[key] = value
@@ -419,14 +451,20 @@ export class ContextProxy {
 			value === undefined
 				? this.originalContext.secrets.delete(key)
 				: this.originalContext.secrets.store(key, value),
-		).catch((error) => {
-			// Only the write that is still current for this key may roll back (see
-			// updateGlobalState): a newer write or a secrets refresh superseded it.
-			if (this.secretWriteTokens.get(key) === token) {
-				this.secretCache[key] = previous
-			}
-			throw error
-		})
+		)
+			.then(() => {
+				// The durable write (or delete) landed: the cache value is now the durable value.
+				this.durableSecrets.set(key, value)
+			})
+			.catch((error) => {
+				// Only the write that is still current for this key may roll back (see
+				// updateGlobalState): a newer write may have moved the cache and its
+				// success record is not in yet.
+				if (this.secretWriteTokens.get(key) === token) {
+					this.secretCache[key] = this.durableSecrets.get(key) as string | undefined
+				}
+				throw error
+			})
 	}
 
 	/**
@@ -434,13 +472,17 @@ export class ContextProxy {
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
 	async refreshSecrets(): Promise<void> {
-		// The refresh re-syncs the whole secret cache from storage: pending pre-refresh
-		// writes must not roll back over the freshly loaded values.
-		this.secretWriteTokens.clear()
+		// The refresh re-syncs the whole secret cache from storage and re-seeds the
+		// durable records with the loaded values, so a later rollback of a pending
+		// pre-refresh write restores the freshly loaded value (the in-write token
+		// guard still protects the interleaving where a newer write has moved the
+		// cache but its success is not confirmed yet).
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
 					this.secretCache[key] = await this.originalContext.secrets.get(key)
+					// Freshly loaded value is the durable value: re-seed the rollback record.
+					this.durableSecrets.set(key, this.secretCache[key])
 				} catch (error) {
 					logger.error(
 						`Error refreshing secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -450,6 +492,8 @@ export class ContextProxy {
 			...GLOBAL_SECRET_KEYS.map(async (key) => {
 				try {
 					this.secretCache[key] = await this.originalContext.secrets.get(key)
+					// Freshly loaded value is the durable value: re-seed the rollback record.
+					this.durableSecrets.set(key, this.secretCache[key])
 				} catch (error) {
 					logger.error(
 						`Error refreshing global secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -627,11 +671,18 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
-		// Clear in-memory caches
+		// Clear in-memory caches. The write tokens are left in place: the durable
+		// records below carry the rollback protection (see the in-write token guard,
+		// which still covers the interleaving where a newer write has moved the cache
+		// but its success is not confirmed yet).
 		this.stateCache = {}
 		this.secretCache = {}
-		this.stateWriteTokens.clear()
-		this.secretWriteTokens.clear()
+		// The durable records are rebuilt by the initialize() at the end of this reset
+		// (the storage delete above is awaited first), so they are cleared now: a write
+		// failing while the re-initialization has not re-seeded them must roll back to
+		// nothing, not to the pre-reset durable value storage no longer holds.
+		this.durableState.clear()
+		this.durableSecrets.clear()
 
 		await Promise.all([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),

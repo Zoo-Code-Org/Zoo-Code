@@ -191,21 +191,24 @@ describe("API task controls", () => {
 		})
 
 		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
-			const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+			vi.useFakeTimers()
 			let resolveReady!: () => void
 			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
 				resolveReady = resolve
 			})
 
 			const started = api.startNewTask({ configuration, text: "ready task" })
-			await new Promise((resolve) => setTimeout(resolve, 50))
+			await vi.advanceTimersByTimeAsync(50)
 			resolveReady()
 
 			await expect(started).resolves.toBe("sidebar-task")
-			// The bound's timer must be cancelled once readiness wins: a live timer would
-			// later reject an unawaited promise and surface as an unhandled rejection.
-			expect(clearSpy).toHaveBeenCalled()
-			clearSpy.mockRestore()
+			// The readiness bound's timer must be gone once readiness wins: a live timer
+			// would later reject an unawaited promise and surface as an unhandled
+			// rejection.
+			expect(vi.getTimerCount()).toBe(0)
+			// No late rejection can fire after the bound either.
+			await vi.advanceTimersByTimeAsync(3000)
+			vi.useRealTimers()
 		})
 
 		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {

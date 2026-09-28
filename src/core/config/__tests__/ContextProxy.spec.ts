@@ -168,6 +168,20 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
 		})
 
+		it("restores the initialize-loaded value when the first write for a key fails", async () => {
+			// A key whose load seeded the durable record and whose first write fails:
+			// the rollback must restore the loaded value, not undefined.
+			mockGlobalState.get.mockImplementation((key: string) =>
+				key === "apiProvider" ? "seeded-value" : undefined,
+			)
+			await proxy.initialize()
+			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "anthropic")).rejects.toThrow("storage failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("seeded-value")
+		})
+
 		it("does not roll back over a newer same-value write when the older write fails", async () => {
 			// Seed the cache so two overlapping writes carry the same new value: the
 			// stale-previous restore is only visible when value comparison matches.
@@ -186,6 +200,44 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
 
+		it("restores the last durable value when a superseded in-flight write also fails", async () => {
+			// Write A (prev=X, value=Y) is superseded by write B (prev=Y, value=Z) and
+			// both durable writes fail. A's rollback is skipped (superseded token), and
+			// B's rollback must restore the durable value X, not the cache value it
+			// captured at call time (Y): Y was only ever in the cache, never in storage,
+			// so restoring it would leave the cache ahead of storage.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let failA!: (error: Error) => void
+			let failB!: (error: Error) => void
+			mockGlobalState.update
+				.mockImplementationOnce(
+					() =>
+						new Promise((_resolve, reject) => {
+							failA = reject
+						}),
+				)
+				.mockImplementationOnce(
+					() =>
+						new Promise((_resolve, reject) => {
+							failB = reject
+						}),
+				)
+			const writeA = proxy.updateGlobalState("apiProvider", "anthropic")
+			const writeB = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// A fails first: superseded by B, so it cannot roll back.
+			failA(new Error("storage failed"))
+			await expect(writeA).rejects.toThrow("storage failed")
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+
+			// B fails second: it is the current write, so it rolls back — to the durable
+			// value (storage never accepted anthropic or openrouter).
+			failB(new Error("storage failed"))
+			await expect(writeB).rejects.toThrow("storage failed")
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+		})
+
 		it("does not roll back a secret over a newer same-value write when the older write fails", async () => {
 			await proxy.storeSecret("apiKey", "old-key")
 
@@ -199,6 +251,39 @@ describe("ContextProxy", () => {
 			expect(proxy.getSecret("apiKey")).toBe("new-key")
 		})
 
+		it("restores the last durable secret when a superseded in-flight write also fails", async () => {
+			// Same double-failure scenario as the state case for storeSecret: the
+			// superseding write's rollback must restore the durable value, not the
+			// cache value it captured at call time.
+			await proxy.storeSecret("apiKey", "old-key")
+
+			let failA!: (error: Error) => void
+			let failB!: (error: Error) => void
+			mockSecrets.store
+				.mockImplementationOnce(
+					() =>
+						new Promise((_resolve, reject) => {
+							failA = reject
+						}),
+				)
+				.mockImplementationOnce(
+					() =>
+						new Promise((_resolve, reject) => {
+							failB = reject
+						}),
+				)
+			const writeA = proxy.storeSecret("apiKey", "mid-key")
+			const writeB = proxy.storeSecret("apiKey", "new-key")
+
+			failA(new Error("secrets failed"))
+			await expect(writeA).rejects.toThrow("secrets failed")
+			expect(proxy.getSecret("apiKey")).toBe("new-key")
+
+			failB(new Error("secrets failed"))
+			await expect(writeB).rejects.toThrow("secrets failed")
+			expect(proxy.getSecret("apiKey")).toBe("old-key")
+		})
+
 		it("restores the previous secret when the durable write fails", async () => {
 			await proxy.storeSecret("apiKey", "old-key")
 			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
@@ -206,6 +291,58 @@ describe("ContextProxy", () => {
 			await expect(proxy.storeSecret("apiKey", "new-key")).rejects.toThrow("secrets failed")
 
 			expect(proxy.getSecret("apiKey")).toBe("old-key")
+		})
+
+		it("restores the initialize-loaded secret when the first write for a key fails", async () => {
+			// Same as the state case, for the SECRET_STATE_KEYS load loop's seed.
+			mockSecrets.get.mockImplementation((key: string) => (key === "apiKey" ? "seeded-secret" : undefined))
+			await proxy.initialize()
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+
+			await expect(proxy.storeSecret("apiKey", "new-key")).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("apiKey")).toBe("seeded-secret")
+		})
+
+		it("restores the initialize-loaded global secret when the first write for a key fails", async () => {
+			// Same as the state case, for the GLOBAL_SECRET_KEYS load loop's seed.
+			mockSecrets.get.mockImplementation((key: string) =>
+				key === "openRouterImageApiKey" ? "seeded-global-secret" : undefined,
+			)
+			await proxy.initialize()
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+
+			await expect(proxy.storeSecret("openRouterImageApiKey", "new-key")).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("openRouterImageApiKey")).toBe("seeded-global-secret")
+		})
+
+		it("restores the refreshed secret when a post-refresh write fails", async () => {
+			// The refresh re-seeds the durable record with the loaded value; a write
+			// failing after the refresh must roll back to that value, not the
+			// pre-refresh one the record held before the re-sync.
+			await proxy.storeSecret("apiKey", "old-key")
+			mockSecrets.get.mockImplementation((key: string) => (key === "apiKey" ? "refreshed-value" : undefined))
+			await proxy.refreshSecrets()
+
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+			await expect(proxy.storeSecret("apiKey", "new-key")).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("apiKey")).toBe("refreshed-value")
+		})
+
+		it("restores the refreshed global secret when a post-refresh write fails", async () => {
+			// Same as the refresh case, for the GLOBAL_SECRET_KEYS re-sync loop.
+			await proxy.storeSecret("openRouterImageApiKey", "old-key")
+			mockSecrets.get.mockImplementation((key: string) =>
+				key === "openRouterImageApiKey" ? "refreshed-global" : undefined,
+			)
+			await proxy.refreshSecrets()
+
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+			await expect(proxy.storeSecret("openRouterImageApiKey", "new-key")).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("openRouterImageApiKey")).toBe("refreshed-global")
 		})
 
 		it("does not roll a pre-refresh secret write back over refreshed values", async () => {
@@ -222,8 +359,9 @@ describe("ContextProxy", () => {
 			)
 			const pending = proxy.storeSecret("apiKey", "stale-write")
 
-			// The refresh re-syncs the cache from storage and drops the pending write's
-			// token: its later failure must not restore its previous value.
+			// The refresh re-syncs the cache from storage and re-seeds the durable
+			// records with the loaded values: the pending write's later failure rolls
+			// back to the refreshed durable value, not its previous value.
 			mockSecrets.get.mockResolvedValueOnce("refreshed-value")
 			await proxy.refreshSecrets()
 
@@ -233,10 +371,11 @@ describe("ContextProxy", () => {
 		})
 
 		it("does not restore a pending write into a reset cache", async () => {
-			// The pending write fails after resetAllState cleared the token: without the
-			// token guard its stale previous value would resurrect in a cache the reset
-			// just wiped. The failure is deferred (see the pre-refresh case) so the
-			// rollback cannot be masked by the re-initialization's own cache writes.
+			// The pending write fails after resetAllState cleared the caches and the
+			// durable records: its rollback must restore the (re-seeded) durable value,
+			// which is nothing — not its previous value, which storage no longer holds.
+			// The failure is deferred (see the pre-refresh case) so the rollback
+			// cannot be masked by the re-initialization's own cache writes.
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 			let failUpdate!: (error: Error) => void
 			mockGlobalState.update.mockImplementationOnce(
@@ -279,6 +418,70 @@ describe("ContextProxy", () => {
 			await expect(pending).rejects.toThrow("secrets failed")
 
 			expect(proxy.getSecret("apiKey")).toBeUndefined()
+		})
+
+		it("does not roll a post-reset write back over the pre-reset durable value", async () => {
+			// resetAllState clears the durable records before the storage deletes: a
+			// write issued into the cleared window and failing before the
+			// re-initialization re-seeds must roll back to nothing (storage is
+			// already cleared), not to the pre-reset durable value.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let failDelete!: (error: Error) => void
+			mockGlobalState.update.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failDelete = reject
+					}),
+			)
+			const resetPromise = proxy.resetAllState()
+			// The synchronous clears ran; the reset is now awaiting the storage deletes.
+
+			let failWrite!: (error: Error) => void
+			mockGlobalState.update.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failWrite = reject
+					}),
+			)
+			const pending = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			failWrite(new Error("storage failed"))
+			await expect(pending).rejects.toThrow("storage failed")
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+
+			failDelete(new Error("reset failed"))
+			await expect(resetPromise).rejects.toThrow("reset failed")
+		})
+
+		it("does not roll a post-reset secret write back over the pre-reset durable value", async () => {
+			// Same window as the state case, for the secret durable record.
+			await proxy.storeSecret("apiKey", "old-key")
+
+			let failDelete!: (error: Error) => void
+			mockSecrets.delete.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failDelete = reject
+					}),
+			)
+			const resetPromise = proxy.resetAllState()
+
+			let failWrite!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failWrite = reject
+					}),
+			)
+			const pending = proxy.storeSecret("apiKey", "post-reset-key")
+
+			failWrite(new Error("secrets failed"))
+			await expect(pending).rejects.toThrow("secrets failed")
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+
+			failDelete(new Error("reset failed"))
+			await expect(resetPromise).rejects.toThrow("reset failed")
 		})
 
 		it("should update state directly in original context", async () => {
