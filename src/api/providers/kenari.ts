@@ -82,15 +82,15 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 		for await (const chunk of completion) {
 			const delta = chunk.choices[0]?.delta
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
-
 			// Several Kenari models (GLM, DeepSeek) stream reasoning via reasoning_content,
 			// with an OpenRouter-style `reasoning` fallback; the shared helper handles both.
 			const reasoningText = extractReasoningFromDelta(delta)
 			if (reasoningText) {
 				yield { type: "reasoning", text: reasoningText }
+			}
+
+			if (delta?.content) {
+				yield { type: "text", text: delta.content }
 			}
 
 			// Emit raw tool call chunks - NativeToolCallParser handles state management.

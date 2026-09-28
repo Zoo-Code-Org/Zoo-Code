@@ -9,6 +9,7 @@ import {
 	type ExtensionMessage,
 	type ModelRecord,
 	LmStudioModelsMessageType,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -27,7 +28,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 	const { t } = useAppTranslation()
 
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
-	const routerModels = useRouterModels()
+	const routerModels = useRouterModels({ provider: providerIdentifiers.lmstudio })
 	const initialBaseUrlRef = useRef(apiConfiguration?.lmStudioBaseUrl)
 
 	const handleInputChange = useCallback(

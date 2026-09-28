@@ -1,7 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-usage-attribution.spec.ts
 
 import type { Anthropic } from "@anthropic-ai/sdk"
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import { getModeBySlug } from "../../../shared/modes"
@@ -60,15 +60,18 @@ interface MockTask {
 	didAlreadyUseTool: boolean
 	consecutiveMistakeCount: number
 	clineMessages: unknown[]
+	getTaskMode: Mock<() => Promise<string>>
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
 	recordToolUsage: ReturnType<typeof vi.fn>
 	recordToolError: ReturnType<typeof vi.fn>
 	toolRepetitionDetector: { check: ReturnType<typeof vi.fn> }
 	providerRef: {
-		deref: () => {
-			getState: ReturnType<typeof vi.fn>
-			getMcpHub?: () => { findServerNameBySanitizedName: (name: string) => string | undefined }
-		}
+		deref: () =>
+			| {
+					getState: ReturnType<typeof vi.fn>
+					getMcpHub?: () => { findServerNameBySanitizedName: (name: string) => string | undefined }
+			  }
+			| undefined
 	}
 	say: ReturnType<typeof vi.fn>
 	ask: ReturnType<typeof vi.fn>
@@ -96,6 +99,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			didAlreadyUseTool: false,
 			consecutiveMistakeCount: 0,
 			clineMessages: [],
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			api: {
 				getModel: () => ({ id: "test-model", info: {} }),
 			},
@@ -185,6 +189,35 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 
 		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
 		expect(mockTask.recordToolUsage).not.toHaveBeenCalledWith("mcp_")
+	})
+
+	it("validates tools against the task-local mode when provider state differs", async () => {
+		mockTask.getTaskMode.mockResolvedValue("code")
+		mockTask.providerRef.deref = () => ({
+			getState: vi.fn().mockResolvedValue({ mode: "orchestrator", customModes: [] }),
+		})
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_task_mode",
+				name: "read_file",
+				params: { path: "test.txt" },
+				nativeArgs: { path: "test.txt" },
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		expect(validateToolUse).toHaveBeenCalledWith(
+			"read_file",
+			"code",
+			[],
+			{},
+			{ path: "test.txt" },
+			undefined,
+			undefined,
+		)
 	})
 
 	it("records a safe failure key without leaking the raw tool name when validation fails", async () => {
@@ -314,6 +347,73 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			// no success attempt is recorded for a call that was never permitted to execute.
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("undefined provider state", () => {
+		// Covers the `state ?? {}` fallback branch (line 347 of presentAssistantMessage.ts).
+		// When providerRef.deref() returns undefined, state is undefined and the
+		// destructure falls back to {}, so customModes / experiments / disabledTools
+		// are all undefined. Tool validation must still use the task-local mode.
+		it("falls back to empty state when provider is unavailable", async () => {
+			mockTask.providerRef = { deref: () => undefined }
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_no_state",
+					name: "read_file",
+					params: { path: "test.ts" },
+					nativeArgs: { path: "test.ts" },
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			// validateToolUse must still be called with the task-local mode.
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[0][1]).toBe("code")
+			// customModes falls back to [] (from the ?? {} path).
+			expect(calls[0][2]).toEqual([])
+		})
+	})
+
+	describe("mode delegation regression", () => {
+		// Regression for issue #1623.
+		// Before the fix, validateToolUse received the shared provider mode instead
+		// of the task-local mode, so a child delegated to "architect" mode would have
+		// its tools validated against "orchestrator".
+		it("passes the task-local mode to validateToolUse, not the provider mode", async () => {
+			// Provider says "orchestrator"; task was delegated to "architect".
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "orchestrator",
+						customModes: [],
+					}),
+				}),
+			}
+			mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_delegation",
+					name: "read_file",
+					params: { path: "test.ts" },
+					nativeArgs: { path: "test.ts" },
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			// The key assertion: task-local mode "architect" was passed, not "orchestrator".
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[0][0]).toBe("read_file")
+			expect(calls[0][1]).toBe("architect")
 		})
 	})
 })

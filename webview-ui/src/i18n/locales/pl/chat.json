@@ -362,9 +362,9 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "Bezpieczniejszy dostęp do plików — używaj oddzielnych list dozwolonych ścieżek odczytu i zapisu, aby kontrolować, do których ścieżek Zoo Code ma dostęp.",
-			"highlight2": "Większy wybór modeli — GLM 5.3 jest teraz dostępny przez Z.ai, a Gemini 3.5 Flash Lite i Gemini 3.1 Flash Lite dodano do providera Gemini.",
-			"highlight3": "Bardziej niezawodne codzienne workflow — ulepszenia wzmacniają odzyskiwanie zadań i historię, streaming i użycie narzędzi przez providerów, import ustawień oraz czytelność w różnych motywach IDE."
+			"highlight1": "✨ Dodano nowe modele SOTA: Korzystaj z GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 u obsługiwanych providerów.",
+			"highlight2": "🧭 Bardziej niezawodne zadania i podzadania: Zachowaj izolację delegowanych trybów, utrzymuj linki do podzadań po wielokrotnym zatrzymaniu i chroń ustawienia orchestratora, gdy polecenia slash zmieniają tryb.",
+			"highlight3": "🛠️ Bardziej niezawodne działanie terminala, providerów i wyszukiwania kodu: Usprawnij terminal w Windows i środowiskach innych niż angielskie, popraw odpowiedzi oraz anulowanie u providerów i spraw, aby wyszukiwanie kodu bardziej konsekwentnie korzystało z właściwego workspace."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

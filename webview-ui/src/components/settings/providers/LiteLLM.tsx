@@ -115,7 +115,7 @@ export const LiteLLM = ({
 
 		vscode.postMessage({
 			type: RouterModelsMessageType.requestRouterModels,
-			values: { litellmApiKey: key, litellmBaseUrl: url },
+			values: { provider: providerIdentifiers.litellm, litellmApiKey: key, litellmBaseUrl: url },
 		})
 	}, [apiConfiguration, setRefreshStatus, setRefreshError, t])
 
@@ -190,7 +190,7 @@ export const LiteLLM = ({
 			{(() => {
 				const selectedModelId = apiConfiguration.litellmModelId || litellmDefaultModelId
 				const selectedModel = routerModels?.litellm?.[selectedModelId]
-				if (selectedModel?.supportsPromptCache) {
+				if (selectedModel?.supportsPromptCache && !selectedModel.requiresResponsesApi) {
 					return (
 						<div className="mt-4">
 							<VSCodeCheckbox

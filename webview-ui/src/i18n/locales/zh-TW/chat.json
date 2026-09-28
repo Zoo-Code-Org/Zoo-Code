@@ -384,9 +384,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更安全的檔案存取 — 使用獨立的讀取與寫入允許清單，控制 Zoo Code 可以存取的路徑。",
-			"highlight2": "更多模型選擇 — GLM 5.3 現已透過 Z.ai 提供，Gemini provider 也新增了 Gemini 3.5 Flash Lite 和 Gemini 3.1 Flash Lite。",
-			"highlight3": "更可靠的日常工作流程 — 改善強化了任務復原與歷史記錄、provider 串流與工具使用、設定匯入，以及不同 IDE 主題下的可讀性。"
+			"highlight1": "✨ 新增 SOTA 模型：在支援的供應商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。",
+			"highlight2": "🧭 更可靠的工作與子工作：隔離委派模式，在重複停止後保留子工作連結，並在斜線命令切換模式時保護協調器設定。",
+			"highlight3": "🛠️ 更可靠的終端機、供應商和程式碼搜尋行為：改善 Windows 和非英語環境中的終端機行為，強化供應商回應與取消處理，並讓程式碼搜尋更穩定地使用正確的工作區。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

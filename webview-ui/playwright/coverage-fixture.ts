@@ -1,4 +1,4 @@
-import { test as base, expect } from "@playwright/experimental-ct-react"
+import { test as base, expect } from "@playwright/test"
 import { addCoverageReport } from "monocart-reporter"
 
 // Auto-fixture that collects V8 JS + CSS coverage per test and hands it to the

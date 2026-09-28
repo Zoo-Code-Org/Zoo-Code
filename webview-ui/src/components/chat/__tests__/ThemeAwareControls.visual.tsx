@@ -1,8 +1,5 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import UpdateTodoListToolBlock from "../UpdateTodoListToolBlock"
-import { SelectDropdown } from "@/components/ui/select-dropdown"
+import { mountedStory } from "../../../../playwright/mounted-story"
 
 const themes = [
 	{
@@ -37,21 +34,12 @@ const themes = [
 
 for (const theme of themes) {
 	test(`renders selectors and confirmation dialogs in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("theme-aware-controls"))
 		await page.evaluate(({ bodyClass, themeId }) => {
 			document.documentElement.className = bodyClass
 			document.body.className = bodyClass
 			document.body.dataset.vscodeThemeId = themeId
 		}, theme)
-
-		const component = await mount(
-			<div className="flex flex-col gap-4 w-96">
-				<SelectDropdown value="code" options={[{ value: "code", label: "Code" }]} onChange={() => undefined} />
-				<UpdateTodoListToolBlock
-					todos={[{ id: "todo-1", content: "Ship the follow-up", status: "in_progress" }]}
-					onChange={() => undefined}
-				/>
-			</div>,
-		)
 
 		await component.evaluate(async () => {
 			await document.fonts.ready

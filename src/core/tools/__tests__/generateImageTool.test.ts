@@ -6,6 +6,7 @@ import * as fs from "fs/promises"
 import * as pathUtils from "../../../utils/pathUtils"
 import * as fileUtils from "../../../utils/fs"
 import { formatResponse } from "../../prompts/responses"
+import { t } from "../../../i18n"
 import { EXPERIMENT_IDS } from "../../../shared/experiments"
 import { OpenRouterHandler } from "../../../api/providers/openrouter"
 
@@ -367,6 +368,45 @@ describe("generateImageTool", () => {
 
 			expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("Unsupported image format"))
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Unsupported image format"))
+		})
+	})
+
+	describe("openrouter api key validation", () => {
+		it("should error when the OpenRouter API key is not configured", async () => {
+			// An OpenRouter image model is selected but no API key is configured
+			mockCline.providerRef.deref().getState.mockResolvedValue({
+				experiments: {
+					[EXPERIMENT_IDS.IMAGE_GENERATION]: true,
+				},
+				openRouterImageGenerationSelectedModel: "google/gemini-2.5-flash-image",
+			})
+
+			const block: ToolUse = {
+				type: "tool_use",
+				name: "generate_image",
+				params: {
+					prompt: "Generate a test image",
+					path: "test-image.png",
+				},
+				nativeArgs: {
+					prompt: "Generate a test image",
+					path: "test-image.png",
+				},
+				partial: false,
+			}
+
+			await generateImageTool.handle(mockCline as Task, block as ToolUse<"generate_image">, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			const expectedMessage = t("tools:generateImage.openRouterApiKeyRequired")
+			expect(mockCline.say).toHaveBeenCalledWith("error", expectedMessage)
+			expect(mockPushToolResult).toHaveBeenCalledWith(formatResponse.toolError(expectedMessage))
+			// The tool must stop before asking for approval or generating anything
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(OpenRouterHandler).not.toHaveBeenCalled()
 		})
 	})
 })
