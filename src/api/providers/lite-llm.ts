@@ -412,36 +412,66 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		}
 	}
 
+	/**
+	 * Fresh error for the per-request timeout elapsing during model discovery.
+	 * Distinct from the abort contract error on purpose: a timeout is not a
+	 * user cancellation, and callers treat the two differently.
+	 */
+	private createDiscoveryTimeoutError(providerName: string): Error {
+		const timeoutError = new Error(`The ${providerName} model discovery timed out`)
+		timeoutError.name = "TimeoutError"
+		return timeoutError
+	}
+
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		// Fast-fail if the request was already aborted before building, so an
 		// already-aborted request fails with AbortError before provider model
 		// discovery (getModels/refreshModels) begins.
-		throwIfAborted(options?.abortSignal)
+		const callerAbortSignal = options?.abortSignal
+		throwIfAborted(callerAbortSignal)
+
+		// A single deadline spans model discovery and the completion request:
+		// discovery consumes part of the configured timeout, so the SDK call
+		// must receive only the remaining budget, not the full timeoutMs.
+		// timeoutMs <= 0 means no per-request timeout and no deadline.
+		const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+		const deadline = timeoutMs !== undefined ? Date.now() + timeoutMs : undefined
 
 		// Per the abort-signal series contract, the merged signal (external
 		// abort + per-request timeout, timeoutMs <= 0 disabling the timeout)
 		// also bounds model discovery: a stalled cold-cache fetch must settle
-		// with AbortError when the caller cancels or the timeout elapses.
-		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		// promptly when the caller cancels or the timeout elapses.
+		const discoverySignal = mergeAbortSignalAndTimeout(options?.abortSignal, timeoutMs)
 
 		// Model discovery is shared single-flight (RouterProvider.fetchModel):
 		// concurrent callers join one in-flight fetch, so the fetch itself
 		// carries no request signal — one caller's abort would reject other
 		// requests' shared discovery. Cancellation during discovery is a
-		// rejectOnAbort race: this request settles promptly with AbortError
-		// while the shared fetch keeps running.
+		// rejectOnAbort race: this request settles promptly while the shared
+		// fetch keeps running.
 		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
 		try {
-			if (requestAbortSignal) {
-				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes abort errors via createAbortError("LiteLLM"), so no observable outcome can depend on the parameter value.
-				model = await rejectOnAbort(this.fetchModel(), requestAbortSignal, "LiteLLM")
+			if (discoverySignal) {
+				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes via createAbortError("LiteLLM") or createDiscoveryTimeoutError("LiteLLM"), so no observable outcome can depend on the parameter value.
+				model = await rejectOnAbort(this.fetchModel(), discoverySignal, "LiteLLM")
 			} else {
 				model = await this.fetchModel()
 			}
 		} catch (error) {
 			// An abort landing while discovery fails must still surface as the
 			// standard AbortError, not the fetcher's generic model-fetch error.
-			if (isRequestAborted(error, requestAbortSignal)) {
+			if (isRequestAborted(error, discoverySignal)) {
+				if (discoverySignal?.aborted) {
+					// Our merged signal fired: a caller stop surfaces as the
+					// standard AbortError, while the per-request timeout
+					// elapsing during discovery is a timeout — it must not be
+					// misreported as a user cancellation.
+					throw callerAbortSignal?.aborted
+						? createAbortError("LiteLLM")
+						: this.createDiscoveryTimeoutError("LiteLLM")
+				}
+				// The signal never aborted: the fetcher itself failed with an
+				// AbortError-shaped error; normalize to the standard AbortError.
 				throw createAbortError("LiteLLM")
 			}
 			throw error
@@ -480,9 +510,10 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			if (options?.abortSignal) {
 				createOptions.signal = options.abortSignal
 			}
-			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
-			if (timeoutMs !== undefined) {
-				createOptions.timeout = timeoutMs
+			if (deadline !== undefined) {
+				// Only the remaining budget reaches the SDK: model discovery has
+				// already consumed part of the configured timeout.
+				createOptions.timeout = Math.max(1, deadline - Date.now())
 			}
 
 			const response = await this.client.chat.completions.create(

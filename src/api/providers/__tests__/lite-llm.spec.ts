@@ -1827,6 +1827,11 @@ describe("LiteLLMHandler", () => {
 			void sibling.then(() => {
 				siblingSettled = true
 			})
+			// Drain the microtask queue (and one macrotask) before asserting:
+			// an erroneous early settlement (e.g. the abort leaking into the
+			// sibling) settles `sibling` in a microtask, so an assertion
+			// right after attaching the callback could never observe it.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
 			expect(siblingSettled).toBe(false)
 
 			// ...and settles normally once the shared discovery resolves.
@@ -1868,9 +1873,11 @@ describe("LiteLLMHandler", () => {
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
 		})
 
-		it("settles completePrompt with AbortError when timeoutMs elapses during model discovery", async () => {
+		it("settles completePrompt with a timeout error when timeoutMs elapses during model discovery", async () => {
 			// A per-request timeout bounds discovery as well: a stalled cold-cache
-			// fetch must not outlive the requested timeout.
+			// fetch must not outlive the requested timeout. A timeout is not a
+			// user cancellation, so it surfaces as a timeout-specific error
+			// instead of the abort contract error.
 			vi.mocked(getModels).mockImplementationOnce(() => new Promise<ModelRecord>(() => {}))
 
 			const error = await new Promise<unknown>((resolve) => {
@@ -1887,8 +1894,27 @@ describe("LiteLLMHandler", () => {
 				)
 			})
 			expect(error).toBeInstanceOf(Error)
-			expect((error as Error).name).toBe("AbortError")
-			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+			expect((error as Error).name).toBe("TimeoutError")
+			expect((error as Error).message).toBe("The LiteLLM model discovery timed out")
+		})
+
+		it("passes only the remaining timeout budget to the SDK after discovery", async () => {
+			// Discovery consumes part of the configured timeout: the SDK call
+			// must receive the remaining budget, not the full timeoutMs.
+			vi.mocked(getModels).mockImplementationOnce(
+				() =>
+					new Promise<ModelRecord>((resolve) => {
+						setTimeout(() => resolve({ [litellmDefaultModelId]: litellmDefaultModelInfo }), 50)
+					}),
+			)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+
+			const result = await handler.completePrompt("test prompt", { timeoutMs: 500 })
+
+			expect(result).toBe("ok")
+			const createOptions = mockCreate.mock.calls[0]?.[1] as { timeout?: number } | undefined
+			expect(createOptions?.timeout).toBeGreaterThan(400)
+			expect(createOptions?.timeout).toBeLessThan(500)
 		})
 
 		it("preserves the model-fetch error when completePrompt's discovery fails without a signal", async () => {
