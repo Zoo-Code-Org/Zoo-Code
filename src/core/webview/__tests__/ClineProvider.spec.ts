@@ -2488,13 +2488,45 @@ describe("ClineProvider", () => {
 			// Flat provider-settings keys are shared settings: they must flow through
 			// the ContextProxy only and must not be merged into the view-local buffer,
 			// which would turn them into a per-view override masking later shared
-			// updates from other views. The explicit view-local override survives.
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			// updates from other views. The pre-existing overlay is older than this
+			// shared write, so the flat write drops it instead of being masked by it.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.bedrock)
+			expect(provider.contextProxy.getValue("awsBedrockEndpoint")).toBe("http://127.0.0.1:4567")
+
+			await provider.dispose()
+		})
+
+		it("drops the view-local apiConfiguration overlay when setValues receives flat provider settings", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/old-model",
 			})
-			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.bedrock)
-			expect(provider.contextProxy.getValue("awsBedrockEndpoint")).toBe("http://127.0.0.1:4567")
+
+			await provider.setValues({
+				apiProvider: providerIdentifiers.bedrock,
+				awsUseApiKey: true,
+				awsApiKey: "mock-key",
+				awsRegion: "us-east-1",
+				apiModelId: "anthropic.claude-opus-4-8-20261215-v1:0",
+				awsBedrockEndpoint: "http://127.0.0.1:4567",
+				awsBedrockEndpointEnabled: true,
+			})
+
+			const state = await provider.getState()
+
+			// Flat provider-settings keys are shared settings: they reach the shared store,
+			// where other views and new tasks read them ...
+			const shared = provider.contextProxy.getValues()
+			expect(shared.apiProvider).toBe("bedrock")
+			expect(shared.awsBedrockEndpoint).toBe("http://127.0.0.1:4567")
+			// ... and they take effect in this view as well: the pinned profile's
+			// overlay is older than the shared write, so the flat write drops it and
+			// getState() serves the new shared values instead of the stale pin.
+			expect(state.apiConfiguration.apiProvider).toBe("bedrock")
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
 		})
