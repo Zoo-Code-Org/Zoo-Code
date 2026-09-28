@@ -395,31 +395,11 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
 	}
 
-	await tabProvider.resolveWebviewView(newPanel)
-
-	// Add listener for visibility changes to notify webview
-	newPanel.onDidChangeViewState(
-		(e) => {
-			const panel = e.webviewPanel
-			// Re-point the tracked tab ref at the panel the user is actually
-			// looking at: several tab panels can stay visible at once, but
-			// only the active one is the current tab, and the title-bar
-			// commands must resolve that instance, not the last created one.
-			if (panel.active) {
-				// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
-				setPanel(panel, "tab")
-			}
-			if (panel.visible) {
-				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
-			}
-		},
-		null, // First null is for `thisArgs`
-		context.subscriptions, // Register listener for disposal
-	)
-
 	// Handle panel closing events: clear the tracked ref only if this panel
 	// is still the tracked one, so a late disposal of an already-replaced
-	// panel cannot clobber the replacement's ref.
+	// panel cannot clobber the replacement's ref. The handler is registered
+	// before the webview is resolved because a rejected resolve must not skip
+	// it — it is the only path that removes the panel from liveTabPanels.
 	newPanel.onDidDispose(
 		() => {
 			liveTabPanels.delete(newPanel)
@@ -439,6 +419,37 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 		},
 		null,
 		context.subscriptions, // Also register dispose listener
+	)
+
+	// A rejected resolve leaves a panel whose webview never came up: dispose
+	// it so the handler above removes it from liveTabPanels and re-points or
+	// clears the tracked ref, then rethrow so the command handler observes
+	// the same failure as before the guard existed.
+	try {
+		await tabProvider.resolveWebviewView(newPanel)
+	} catch (error) {
+		newPanel.dispose()
+		throw error
+	}
+
+	// Add listener for visibility changes to notify webview
+	newPanel.onDidChangeViewState(
+		(e) => {
+			const panel = e.webviewPanel
+			// Re-point the tracked tab ref at the panel the user is actually
+			// looking at: several tab panels can stay visible at once, but
+			// only the active one is the current tab, and the title-bar
+			// commands must resolve that instance, not the last created one.
+			if (panel.active) {
+				// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
+				setPanel(panel, "tab")
+			}
+			if (panel.visible) {
+				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
+			}
+		},
+		null, // First null is for `thisArgs`
+		context.subscriptions, // Register listener for disposal
 	)
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.

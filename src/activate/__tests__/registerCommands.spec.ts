@@ -983,6 +983,38 @@ describe("openClineInNewTab", () => {
 		;(panelB.onDidDispose as Mock).mock.calls[0]![0]!()
 	})
 
+	it("disposes a tab panel whose webview resolution rejects so it cannot linger as a stale tracked tab", async () => {
+		// The disposal handler is registered before the webview is resolved,
+		// so a rejected resolve cannot skip it and leave the panel in the
+		// live set with no path to remove it.
+		const broken = Object.assign({} as vscode.WebviewPanel, {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			dispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(broken)
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView")
+		resolveSpy.mockRejectedValue(new Error("resolve failed"))
+
+		// The command surfaces the same failure as before the guard existed...
+		await expect(openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })).rejects.toThrow(
+			"resolve failed",
+		)
+		resolveSpy.mockRestore()
+
+		// ...the failed panel is disposed...
+		expect(broken.dispose).toHaveBeenCalledTimes(1)
+		// ...and its disposal handler was registered despite the failure. The
+		// mock panel does not wire dispose to the handler, so fire it manually
+		// to prove the cleanup it performs: the tracked ref is cleared with no
+		// live tab panels remaining.
+		expect(broken.onDidDispose).toHaveBeenCalledTimes(1)
+		const disposeHandler = (broken.onDidDispose as Mock).mock.calls[0]![0] as () => void
+		disposeHandler()
+		expect(getPanel()).toBeUndefined()
+	})
+
 	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {
 		const [first, second] = await Promise.all([
 			openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel }),
