@@ -23,6 +23,7 @@ import {
 	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
+import { CloudService } from "@roo-code/cloud"
 
 import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
@@ -1133,11 +1134,115 @@ describe("ClineProvider", () => {
 
 			await expect(provider.dispose()).rejects.toThrow("task history store dispose failed")
 
+			// The catch branch reports the failure with the original message.
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				"Provider cleanup failed: task history store dispose failed",
+			)
+
 			expect(ClineProvider.getAllInstances()).not.toContain(provider)
 			// The idempotency guard still holds: a second dispose is a no-op.
 			await provider.dispose()
 
 			taskHistoryDispose.mockRestore()
+		})
+
+		it("runs every cleanup branch when the provider is fully wired", async () => {
+			// Exercises the cleanup branches dispose() skips in the default unit harness: a
+			// task on the stack, a live view, registered disposables, and an initialized
+			// CloudService. Spies and exact log strings pin the cleanup sequence so a
+			// removed or reordered step fails the test.
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			// A task on the stack forces the eviction branch (evictCurrentTask). drain
+			// calls task.dispose(), so a task double with a spied dispose() proves the
+			// drain ran without spying the private method itself.
+			const fakeTask = {
+				taskId: "dispose-test-task",
+				dispose: vi.fn().mockResolvedValue(undefined),
+			} as unknown as Task
+			provider["taskRegistry"].push(fakeTask)
+			const evictCurrentTask = vi.spyOn(provider, "evictCurrentTask").mockImplementation(async () => {
+				provider["taskRegistry"].pop()
+			})
+			// Defensive pop: if the eviction branch is mutated away, the stack-drain while
+			// loop still terminates instead of spinning on a task that is never removed.
+			const removeClineFromStack = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
+				provider["taskRegistry"].pop()
+			})
+			const clearAllPendingEditOperations = vi.spyOn(provider["pendingEditOperations"], "clearAll")
+
+			// A live view and registered disposables exercise the webview teardown branches.
+			const viewDispose = vi.fn()
+			// @ts-ignore - accessing private property for testing
+			provider.view = { dispose: viewDispose, visible: true }
+			const webviewDisposableDispose = vi.fn()
+			provider["webviewDisposables"].push({ dispose: webviewDisposableDispose })
+			const disposableDispose = vi.fn()
+			provider["disposables"].push({ dispose: disposableDispose })
+
+			// An initialized CloudService instance exercises the listener-detach branch.
+			// The @roo-code/cloud mock above reports hasInstance() === true by default,
+			// so only the static instance getter needs swapping. It uses the same
+			// defineProperty style the getTelemetryProperties tests use (and restores
+			// the original descriptor exactly) so no mock getter leaks into later tests.
+			// Spying on the mock's hasInstance instead would restore a cleared
+			// implementation and break those tests.
+			const cloudOff = vi.fn()
+			const originalInstanceDescriptor = Object.getOwnPropertyDescriptor(CloudService, "instance")!
+			// Minimal EventEmitter stand-in: only off() is observed.
+			Object.defineProperty(CloudService, "instance", {
+				get: () => ({ off: cloudOff }) as unknown as CloudService,
+				configurable: true,
+			})
+
+			try {
+				await provider.dispose()
+
+				// The eviction branch ran, and only the eviction branch (not the stack drain);
+				// drainTaskDisposal() completed through the task's own dispose().
+				expect(evictCurrentTask).toHaveBeenCalledTimes(1)
+				expect(fakeTask.dispose).toHaveBeenCalledTimes(1)
+				expect(removeClineFromStack).not.toHaveBeenCalled()
+				// Webview teardown and registered disposables ran.
+				expect(viewDispose).toHaveBeenCalledTimes(1)
+				expect(webviewDisposableDispose).toHaveBeenCalledTimes(1)
+				expect(disposableDispose).toHaveBeenCalledTimes(1)
+				expect(clearAllPendingEditOperations).toHaveBeenCalledTimes(1)
+				// The cloud service listener was detached with the exact event and handler.
+				expect(cloudOff).toHaveBeenCalledWith("settings-updated", provider["handleCloudSettingsUpdate"])
+				// The exact log strings pin the cleanup sequence.
+				for (const line of [
+					"Cleared all tasks",
+					"Cleared pending operations",
+					"Disposed webview",
+					"Disposed all disposables",
+				]) {
+					expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(line)
+				}
+			} finally {
+				Object.defineProperty(CloudService, "instance", originalInstanceDescriptor)
+			}
+
+			evictCurrentTask.mockRestore()
+			removeClineFromStack.mockRestore()
+			clearAllPendingEditOperations.mockRestore()
+		})
+
+		it("completes disposal when the optional manager instances are absent", async () => {
+			// The constructor always initializes the manager instances, so the skip branches
+			// of the optional call sites in dispose() are unreachable otherwise: null them
+			// to prove disposal completes when they are absent instead of throwing on the
+			// de-referenced call.
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			Object.assign(provider, {
+				_workspaceTracker: undefined,
+				skillsManager: undefined,
+				marketplaceManager: undefined,
+				customModesManager: undefined,
+			})
+
+			await expect(provider.dispose()).resolves.toBeUndefined()
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
 		})
 	})
 
