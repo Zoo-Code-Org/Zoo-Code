@@ -294,15 +294,13 @@ vi.mock("../../config/ContextProxy", () => {
 			}
 		}
 
+		// Mirrors the real ContextProxy contract: every key in the state cache is
+		// served as-is, so values written via setValue round-trip — including the
+		// durable viewStates map that ClineProvider rewrites directly (a canned key
+		// list here would let a stale-snapshot regression hide from every test).
 		getValues = vi.fn().mockImplementation(() => ({
 			...defaultState,
-			mode: this.stateCache.mode ?? defaultState.mode,
-			currentApiConfigName: this.stateCache.currentApiConfigName ?? defaultState.currentApiConfigName,
-			apiConfiguration: this.stateCache.apiConfiguration ?? defaultState.apiConfiguration,
-			customModePrompts: this.stateCache.customModePrompts ?? defaultState.customModePrompts,
-			modeApiConfigs: this.stateCache.modeApiConfigs ?? defaultState.modeApiConfigs,
-			listApiConfigMeta: this.stateCache.listApiConfigMeta ?? defaultState.listApiConfigMeta,
-			pinnedApiConfigs: this.stateCache.pinnedApiConfigs ?? defaultState.pinnedApiConfigs,
+			...this.stateCache,
 		}))
 		getValue = vi.fn().mockImplementation((key: string) => this.stateCache[key])
 		// Mirrors the real ContextProxy contract: the flat provider-settings keys are served
@@ -904,6 +902,43 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				"view-keeps": { mode: "code", currentApiConfigName: "keeper-profile" },
 				"view-deleted": { mode: "architect", currentApiConfigName: "keeper-profile" },
 			})
+
+			await provider.dispose()
+		})
+
+		it("should keep the re-pointed viewStates entry when the deleting view pins a surviving profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// This view pins a surviving profile (unrelated pin: the fallback branch),
+			// while the shared selection names the profile about to be deleted.
+			provider["viewLocalState"] = {
+				currentApiConfigName: "keeper-profile",
+			}
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// A sibling's durable pin names the deleted profile: the re-point pass runs
+			// before the fallback's shared writes, and a stale full-snapshot replay would
+			// undo it by rewriting the pre-re-point map back into the store.
+			await mockContext.globalState.update("viewStates", {
+				"view-deleted": { mode: "architect", currentApiConfigName: "doomed-profile", updatedAt: 2 },
+			})
+
+			await provider.deleteProviderProfile({
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			// The re-pointed sibling entry survives the fallback's targeted writes ...
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"view-deleted": { mode: "architect", currentApiConfigName: "keeper-profile" },
+			})
+			// ... the shared selection moves to the replacement ...
+			expect(mockContext.globalState.get("currentApiConfigName")).toBe("keeper-profile")
+			// ... and this view's own pin is left untouched.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
 
 			await provider.dispose()
 		})

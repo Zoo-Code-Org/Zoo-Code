@@ -2536,38 +2536,24 @@ export class ClineProvider
 			)
 		}
 
-		// Capture this view's pin before any rewrite: a view pinned to the
-		// deleted profile while the global selection points elsewhere must still be
-		// reconfigured, or getState() would keep the deleted profile's settings under
-		// the surviving profile's name.
-		const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+		// This view does not pin the deleted profile here (that case returned
+		// above), so only the shared selection can dangle: when the deleted profile
+		// was the globally selected one, the shared slot and the shared provider
+		// settings still carry its configuration.
 		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
-		if (viewWasPinnedToDeleted) {
-			// This view's pin now dangles: re-point it. setValue also persists the
-			// survivor to the shared store, which covers the deleted-was-global case
-			// for every other view as well as this one.
-			await this.setValue("currentApiConfigName", profileToActivate)
-		} else if (deletedWasGlobal) {
-			// The shared selection changed, but this view's own pin still names a
-			// surviving profile: update the shared store only, leaving the
+		if (deletedWasGlobal) {
+			// The shared selection changed, but this view's own pin (if any) still
+			// names a surviving profile: update the shared store only, leaving the
 			// view-local pin untouched.
 			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
 		}
 
-		if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
-			// The deleted profile was the active one (globally, or for this view), so
-			// the shared provider keys still carry its settings; replace them so
-			// getState() reports the surviving profile's configuration.
+		if (deletedWasGlobal && survivingSettings) {
+			// The deleted profile was the globally active one, so the shared
+			// provider keys still carry its settings; replace them so getState()
+			// reports the surviving profile's configuration.
 			await this.contextProxy.setProviderSettings(survivingSettings)
-
-			if (viewWasPinnedToDeleted) {
-				// This view's nested overlay (viewLocalState.apiConfiguration, seeded
-				// by loadViewState) still serves the deleted profile's configuration:
-				// replace it with the survivor's so the re-pointed pin serves matching
-				// settings. A view pinned to another profile keeps its own overlay.
-				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
-			}
 		}
 
 		// Re-pin other live views still buffered on the deleted profile: their
@@ -4065,7 +4051,9 @@ export class ClineProvider
 				// A sibling's post can throw mid-reset (state generation reaches the
 				// settings file through customModesManager.getCustomModes): the failure
 				// must not stop the reset from reaching the remaining instances, whose
-				// buffers are already cleared above.
+				// buffers are already cleared above. The originator is deliberately not
+				// posted here: resetState posts its own state immediately after the
+				// broadcast, and a second post would refresh its webview twice.
 				try {
 					await instance.postStateToWebview()
 				} catch (error) {
