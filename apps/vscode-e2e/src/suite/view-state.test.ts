@@ -378,27 +378,27 @@ suite("Roo Code View State", function () {
 		// mode 'build' through the test-only global-state write. The sidebar provider's
 		// in-memory mode is still 'ask' at this point, so the two assertions below each
 		// pin a value only one failure mode can break: (a) passes only if the hide/show
-		// cycle did not wipe, prune, or re-key the durable entry the marker was written
-		// to (an unrelated surviving entry cannot satisfy a 'some entry is build'
-		// assertion because no other test in this suite uses the build mode), and (b)
+		// cycle did not wipe, prune, or re-key the durable entries the marker was written
+		// to — the assertion requires every marked view-state id to retain the build
+		// mode, so an unrelated surviving entry cannot satisfy it — and (b)
 		// passes only if the cycle did not wipe the provider's in-memory view state.
 		// Asserting the marker through getConfiguration() instead would not work: the
 		// sidebar provider is a per-extension singleton that does not re-read durable
 		// viewStates when its webview is re-shown, so its in-memory value is the one
 		// getConfiguration() reports after the reload.
+		const markedIds: string[] = []
 		{
 			const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
 			assert.ok(persisted, "Expected persisted viewStates before writing the rehydration marker")
 
 			const marked: NonNullable<GlobalState["viewStates"]> = { ...persisted }
-			let markedAny = false
 			for (const [viewStateId, entry] of Object.entries(marked)) {
 				if (entry.mode === "ask") {
 					marked[viewStateId] = { ...entry, mode: "build" }
-					markedAny = true
+					markedIds.push(viewStateId)
 				}
 			}
-			assert.ok(markedAny, "Expected a persisted 'ask' entry to mark before the reload")
+			assert.ok(markedIds.length > 0, "Expected a persisted 'ask' entry to mark before the reload")
 			await globalThis.api.setGlobalState("viewStates", marked)
 		}
 
@@ -411,11 +411,11 @@ suite("Roo Code View State", function () {
 		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
 		await sleep(2_000)
 
-		// (a) The durable entry the marker was written to still exists after the reload.
-		// A wipe, prune, or re-key of the durable map during the cycle would drop the
-		// marker even though a looser 'some entry is ask' assertion could still be
-		// satisfied by an unrelated entry. Poll in case the just-written memento value
-		// lags a synchronous read.
+		// (a) Every durable entry the marker was written to still holds the build mode
+		// after the reload. A wipe, prune, or re-key of the durable map during the
+		// cycle would drop or rename the marked entries, and no unrelated entry can
+		// substitute for them. Poll in case the just-written memento value lags a
+		// synchronous read.
 		await waitFor(
 			() => {
 				const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
@@ -423,15 +423,15 @@ suite("Roo Code View State", function () {
 					return false
 				}
 
-				return Object.entries(persisted).some(([, entry]) => entry.mode === "build")
+				return markedIds.every((id) => persisted[id]?.mode === "build")
 			},
 			{ timeout: 30_000 },
 		)
 		const viewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
 		assert.ok(viewStates, "Expected persisted viewStates to exist after the sidebar webview reload")
 		assert.ok(
-			Object.entries(viewStates).some(([, entry]) => entry.mode === "build"),
-			"Expected the persisted view states to still contain the rehydration marker after the reload",
+			markedIds.every((id) => viewStates[id]?.mode === "build"),
+			"Expected every marked view-state id to still hold the rehydration marker after the reload",
 		)
 
 		// (b) The reloaded sidebar view still reports the pre-reload in-memory mode.
