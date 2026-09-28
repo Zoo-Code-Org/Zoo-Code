@@ -472,6 +472,7 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 		liveTabPanels.delete(newPanel)
 		// Stryker disable next-line ConditionalExpression: at the catch, this call's own state-change handler only ever re-points the tracked ref at newPanel itself, so tabPanel === newPanel is the only reachable state here; a concurrent re-pointing race is not representable in this spec.
 		if (tabPanel === newPanel) {
+			// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
 			setPanel(undefined, "tab")
 		}
 		await tabProvider.dispose()
