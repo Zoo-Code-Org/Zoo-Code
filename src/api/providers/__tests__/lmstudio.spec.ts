@@ -239,7 +239,7 @@ describe("LmStudioHandler", () => {
 			const modelInfo = handler.getModel()
 			expect(modelInfo.id).toBe(mockOptions.lmStudioModelId)
 			expect(modelInfo.info).toBeDefined()
-			expect(modelInfo.info.maxTokens).toBe(-1)
+			expect(modelInfo.info.maxTokens).toBeUndefined()
 			expect(modelInfo.info.contextWindow).toBe(128_000)
 		})
 	})

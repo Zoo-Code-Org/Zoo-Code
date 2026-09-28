@@ -930,8 +930,9 @@ export const openAiNativeModels = {
 	},
 } as const satisfies Record<string, ModelInfo>
 
+// `maxTokens` is intentionally omitted so that no max output token limit is sent to the
+// provider by default.
 export const openAiModelInfoSaneDefaults: ModelInfo = {
-	maxTokens: -1,
 	contextWindow: 128_000,
 	supportsImages: true,
 	supportsPromptCache: false,
