@@ -429,6 +429,18 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 		await tabProvider.resolveWebviewView(newPanel)
 	} catch (error) {
 		newPanel.dispose()
+		// Dispose the provider too. Its own onDidDispose handler (the one
+		// resolveWebviewView registers that calls this.dispose()) is only
+		// registered after that method's awaited getHtmlContent/getState
+		// calls, so a rejection before that point would otherwise strand the
+		// provider in ClineProvider.activeInstances with its constructor-time
+		// resources alive. The second dispose of the panel is a no-op, and a
+		// failing provider dispose must not mask the original resolve error.
+		await tabProvider
+			.dispose()
+			.catch((disposeError) =>
+				outputChannel.appendLine(`[openClineInNewTab] provider dispose failed: ${disposeError}`),
+			)
 		throw error
 	}
 
