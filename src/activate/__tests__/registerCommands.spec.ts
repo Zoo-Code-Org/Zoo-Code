@@ -6,7 +6,14 @@ import { ContextProxy } from "../../core/config/ContextProxy"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
-import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import {
+	__resetLiveTabPanelsForTests,
+	getPanel,
+	getVisibleProviderOrLog,
+	openClineInNewTab,
+	registerCommands,
+	setPanel,
+} from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -622,6 +629,7 @@ describe("openClineInNewTab", () => {
 		// Reset module-level panel state.
 		setPanel(undefined, "sidebar")
 		setPanel(undefined, "tab")
+		__resetLiveTabPanelsForTests()
 	})
 
 	it("creates a webview panel with title 'Zoo Code'", async () => {
@@ -885,6 +893,44 @@ describe("openClineInNewTab", () => {
 
 		const disposeHandler = panel.onDidDispose.mock.calls[0][0] as () => void
 		disposeHandler()
+		expect(getPanel()).toBeUndefined()
+	})
+
+	it("re-points the tracked tab ref at the remaining live panel when the tracked panel closes", async () => {
+		// Panel A is created and tracked first...
+		const panelA = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-A",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelA)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		// ...then panel B opens in a different group: B becomes active, so the
+		// state-change handler re-points the tracked ref at B.
+		const panelB = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-B",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelB)
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		Object.assign(panelB, { active: true, visible: true })
+		;(panelB.onDidChangeViewState as Mock).mock.calls[0]![0]!({ webviewPanel: panelB })
+		expect(getPanel()).toBe(panelB)
+
+		// Closing the tracked panel (B) emits no state change for A, so the dispose
+		// handler alone must re-point the tracked ref at the remaining live panel.
+		Object.assign(panelA, { visible: true })
+		const disposeB = (panelB.onDidDispose as Mock).mock.calls[0]![0] as () => void
+		disposeB()
+		expect(getPanel()).toBe(panelA)
+
+		// Closing the last live tab clears the ref again.
+		const disposeA = (panelA.onDidDispose as Mock).mock.calls[0]![0] as () => void
+		disposeA()
 		expect(getPanel()).toBeUndefined()
 	})
 
