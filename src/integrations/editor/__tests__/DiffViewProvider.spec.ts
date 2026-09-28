@@ -1037,6 +1037,7 @@ describe("DiffViewProvider", () => {
 			expect(obs).toBeDefined()
 			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
 			expect(obs!.complete).toBe(true)
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledWith(`${mockCwd}/observed.ts`, { bigint: true })
 		})
 
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
@@ -1058,6 +1059,7 @@ describe("DiffViewProvider", () => {
 			expect(obs).toBeDefined()
 			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
 			expect(obs!.complete).toBe(true)
+			expect(vi.mocked(fs.stat)).toHaveBeenCalledWith(`${mockCwd}/brand-new.ts`, { bigint: true })
 		})
 
 		it("open() leaves the target unobserved when the pre/post stat mismatch (mid-preview mutation)", async () => {
@@ -1084,6 +1086,48 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider.open("mutated.ts")
 
 			expect(mockTask.observationRegistry.get(`${mockCwd}/mutated.ts`)).toBeUndefined()
+			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(1, `${mockCwd}/mutated.ts`, { bigint: true })
+		})
+
+		it("open() leaves the target unobserved when the pre-read stat fails (stat gap)", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/gap.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/gap.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			// The pre-read stat fails and only the post-read stat resolves: the
+			// on-disk version the preview is built on is unproven, so open() must
+			// leave the target unobserved even though a post stat is available.
+			vi.mocked(fs.stat)
+				.mockRejectedValueOnce(new Error("EPERM: operation not permitted"))
+				.mockResolvedValueOnce(previewStats)
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("gap.ts")
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/gap.ts`)).toBeUndefined()
+		})
+
+		it("open() leaves a new file unobserved when the placeholder stat fails", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/gap-create.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/gap-create.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockRejectedValue(new Error("EPERM: operation not permitted"))
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("gap-create.ts")
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/gap-create.ts`)).toBeUndefined()
 		})
 
 		it("publishes the accepted content through the guarded write (safeWriteText)", async () => {
@@ -1111,6 +1155,20 @@ describe("DiffViewProvider", () => {
 
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
 				"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
+			)
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rejects the accepted save when the observation was only a partial read", async () => {
+			// A partial observation (slice/range/truncated/indentation read) must not
+			// authorize the full-file replacement the accept path performs, even when
+			// the version is current.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "v1", false)
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
 			)
 			expect(safeWriteText).not.toHaveBeenCalled()
 		})

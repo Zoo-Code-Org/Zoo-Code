@@ -354,9 +354,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			output = "Note: File is empty"
 		}
 
-		// Complete only when the slice starts at line 1, returns every line, and
-		// nothing was truncated: then the model saw the whole file.
-		const complete = !result.wasTruncated && offset0 === 0 && result.returnedLines === result.totalLines
+		// Complete only when the slice starts at line 1 and is not truncated:
+		// readWithSlice then runs to the end of the file and returns every line
+		// (returnedLines === totalLines follows from those two conditions), so the
+		// model saw the whole file; a partial start or a truncated tail does not.
+		const complete = offset0 === 0 && !result.wasTruncated
 
 		return { content: output, complete }
 	}
