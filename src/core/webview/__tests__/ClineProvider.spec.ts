@@ -1629,7 +1629,10 @@ describe("ClineProvider", () => {
 	})
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
-		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+		// Mock globalState.get to return undefined for the fallback settings
+		// (typed reassignment — Memento.get has no mock type, same pattern as the
+		// writeDelayMs default test above)
+		mockContext.globalState.get = vi.fn((key: string) => {
 			if (
 				[
 					"writeDelayMs",
