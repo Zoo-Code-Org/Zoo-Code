@@ -2755,6 +2755,33 @@ describe("Cline", () => {
 				consoleErrorSpy.mockRestore()
 			})
 
+			it("warns when the mode switch resolves without applying the requested mode", async () => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),
+				)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				// Unknown slug / aborted mutation: the handler resolves without writing
+				// the task's mode (ClineProvider leaves _taskMode untouched in both cases).
+				vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+				await task.submitUserMessage("delivered in old mode", undefined, "architect")
+
+				// The message is still delivered in the previous mode...
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "delivered in old mode", [])
+				// ...and the dropped selection leaves a trace.
+				expect(warnSpy).toHaveBeenCalledWith(
+					`[Task#submitUserMessage] Mode switch to architect was not applied (taskId=${task.taskId})`,
+				)
+				warnSpy.mockRestore()
+			})
+
 			it("keeps the selected mode when the deferred mode initialization settles after the submission", async () => {
 				// The constructor-started initializeTaskMode() is still awaiting the
 				// provider state. submitUserMessage must let that initialization settle

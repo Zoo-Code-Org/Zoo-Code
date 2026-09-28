@@ -364,10 +364,10 @@ describe("SwitchModeTool", () => {
 		)
 	})
 
-	// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
-	// when the provider was already disposed the deref is undefined, so the optional chain
-	// must swallow the call and the tool still reports success instead of erroring out.
-	it("should report a successful switch when the provider reference is already released", async () => {
+	// SwitchModeTool routes the switch through task.providerRef.deref(): when the
+	// provider was already disposed the deref is undefined, and the tool must report
+	// the failure instead of a false success (the provider cannot execute the switch).
+	it("should report an error when the provider reference is already released", async () => {
 		const toolTask = {
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
@@ -395,6 +395,15 @@ describe("SwitchModeTool", () => {
 		await switchModeTool.handle(toolTask, block, callbacks)
 
 		expect(callbacks.handleError).not.toHaveBeenCalled()
-		expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
+		expect(toolTask.recordToolError).toHaveBeenCalledWith("switch_mode")
+		expect(toolTask.didToolFailInCurrentTurn).toBe(true)
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+			JSON.stringify({
+				status: "error",
+				message: "The tool execution failed",
+				error: "Cannot switch mode: the provider is no longer available.",
+			}),
+		)
+		expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
 	})
 })

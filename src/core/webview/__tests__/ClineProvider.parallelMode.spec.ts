@@ -297,15 +297,13 @@ vi.mock("../../config/ContextProxy", () => {
 			}
 		}
 
+		// Mirrors the real ContextProxy contract: every key in the state cache is
+		// served as-is, so values written via setValue round-trip — including the
+		// durable viewStates map that ClineProvider rewrites directly (a canned key
+		// list here would let a stale-snapshot regression hide from every test).
 		getValues = vi.fn().mockImplementation(() => ({
 			...defaultState,
-			mode: this.stateCache.mode ?? defaultState.mode,
-			currentApiConfigName: this.stateCache.currentApiConfigName ?? defaultState.currentApiConfigName,
-			apiConfiguration: this.stateCache.apiConfiguration ?? defaultState.apiConfiguration,
-			customModePrompts: this.stateCache.customModePrompts ?? defaultState.customModePrompts,
-			modeApiConfigs: this.stateCache.modeApiConfigs ?? defaultState.modeApiConfigs,
-			listApiConfigMeta: this.stateCache.listApiConfigMeta ?? defaultState.listApiConfigMeta,
-			pinnedApiConfigs: this.stateCache.pinnedApiConfigs ?? defaultState.pinnedApiConfigs,
+			...this.stateCache,
 		}))
 		getValue = vi.fn().mockImplementation((key: string) => this.stateCache[key])
 		// Mirrors the real ContextProxy contract: the flat provider-settings keys are served
@@ -960,6 +958,64 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		it("should keep the re-pointed viewStates entry when the deleting view pins a surviving profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// This view pins a surviving profile (unrelated pin: the fallback branch),
+			// while the shared selection names the profile about to be deleted.
+			provider["viewLocalState"] = {
+				currentApiConfigName: "keeper-profile",
+			}
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// A sibling's durable pin names the deleted profile: the re-point pass runs
+			// before the fallback's shared writes, and a stale full-snapshot replay would
+			// undo it by rewriting the pre-re-point map back into the store.
+			await mockContext.globalState.update("viewStates", {
+				"view-deleted": { mode: "architect", currentApiConfigName: "doomed-profile", updatedAt: 2 },
+			})
+			// Pin the branch itself: a view following a shared selection that names the
+			// deleted profile would take the activation path, so a pinned view must take
+			// the fallback. The fallback resolves the survivor's settings through the
+			// profile manager and writes them to the shared provider settings.
+			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				async (_args: { name?: string; id?: string }) =>
+					({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterApiKey: "keeper-key",
+					}) as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+			)
+
+			await provider.deleteProviderProfile({
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			// The re-pointed sibling entry survives the fallback's targeted writes ...
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"view-deleted": { mode: "architect", currentApiConfigName: "keeper-profile" },
+			})
+			// ... the shared selection moves to the replacement ...
+			expect(mockContext.globalState.get("currentApiConfigName")).toBe("keeper-profile")
+			// ... and this view's own pin is left untouched.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			// The view took the fallback, not the activation path ...
+			expect(activateSpy).not.toHaveBeenCalled()
+			// ... and the shared provider settings carry the survivor's configuration
+			// instead of the deleted profile's.
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				openRouterApiKey: "keeper-key",
+			})
+
+			await provider.dispose()
+		})
+
 		it("should not write viewStates when re-pointing skips a corrupt stored entry", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
@@ -1144,9 +1200,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				currentApiConfigName: "deleted-profile",
 				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			}
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
-			])
+			const listConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "listConfig")
+				.mockResolvedValue([
+					{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+				])
 			// Structural cast: the env mock shapes activateProfile results as getProfile results.
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
@@ -1155,7 +1213,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				openRouterApiKey: "replacement-key",
 			} as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>)
 			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
-			const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
 
 			await provider.deleteProviderProfile({
 				id: "deleted-id",
@@ -1172,12 +1229,71 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				openRouterApiKey: "replacement-key",
 			})
 			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
-			// ...never the unrelated-pin fallback, which rewrites the shared list via setValues.
-			expect(setValuesSpy).not.toHaveBeenCalledWith(
-				expect.objectContaining({ listApiConfigMeta: expect.anything() }),
-			)
+			// ...and the unrelated-pin fallback is ruled out by the activation list
+			// lookup: the fallback reads the surviving entries from the store instead
+			// of resolving the activation list.
+			expect(listConfigSpy).toHaveBeenCalled()
 
 			await provider.dispose()
+		})
+
+		it("should re-pin a live sibling view that pins the deleted profile when the deleting view has no pin", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			// B pins the doomed profile without an overlay (a fresh pin via setValue).
+			await providerB.setValue("currentApiConfigName", "doomed-profile")
+
+			// A has no profile pin of its own; the shared selection names the doomed profile.
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await providerA.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+
+			// Structural cast: the env mock shapes activateProfile/getProfile results uniformly.
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "repl-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// The pre-return re-pin resolves the replacement's settings through the manager.
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (_args: { name?: string; id?: string }) =>
+					({
+						name: "replacement-profile",
+						id: "replacement-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterBaseUrl: "repl-url",
+					}) as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>,
+			)
+
+			await providerA.deleteProviderProfile({
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			// B must be re-pointed at the replacement with the replacement's settings,
+			// not left buffered on the deleted profile's name and configuration.
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("replacement-profile")
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "repl-url",
+			})
+			expect((await providerB.getState()).currentApiConfigName).toBe("replacement-profile")
+
+			await providerA.dispose()
+			await providerB.dispose()
 		})
 	})
 
@@ -1210,6 +1326,95 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// The upsert/activation path clears the view-local overlay rather than
 			// snapshotting the activated settings into it, so the shared store remains
 			// the single source getState() serves.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("should keep a sibling pinned to another profile on its own settings after a different profile activates", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			// B pins profile-y without an overlay (a fresh pin via setValue).
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			// A activates profile-x: the shared store takes x's settings.
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			// The snapshot resolves each sibling's pinned profile through A's manager.
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) =>
+					args.name === "profile-y"
+						? ({
+								name: "profile-y",
+								id: "y-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "y-key",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+						: ({
+								name: "profile-x",
+								id: "x-id",
+								apiProvider: providerIdentifiers.anthropic,
+								anthropicBaseUrl: "x-url",
+							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>),
+			)
+
+			await providerA.activateProviderProfile({ name: "profile-x" })
+
+			// A serves x's settings under its own pin...
+			const aState = await providerA.getState()
+			expect(aState.currentApiConfigName).toBe("profile-x")
+			// anthropicBaseUrl is a non-secret PROVIDER_SETTINGS_KEYS key, so the mock shared store serves
+			// it back through getProviderSettings(); the api key itself is a SECRET_STATE_KEYS entry and
+			// would not round-trip through the mock, so the fixture avoids it.
+			expect(aState.apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			})
+
+			// ...and B keeps its own pin on its own profile's settings: the snapshot
+			// written before the shared write must shield B from A's activation.
+			const bState = await providerB.getState()
+			expect(bState.currentApiConfigName).toBe("profile-y")
+			expect(bState.apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "y-key",
+			})
+			expect(providerB["viewLocalState"].apiConfiguration).toBeDefined()
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("should drop the view-local overlay when flat provider settings are written through setValues", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// Seed a pinned overlay (as loadViewState would after a reload).
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "stale-key",
+			})
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({ openRouterApiKey: "stale-key" })
+
+			// A flat provider-settings write reaches the shared store and must not be
+			// masked by the pinned overlay in getState().
+			await provider.setValues({ apiProvider: providerIdentifiers.zai })
+
+			const state = await provider.getState()
+			expect(state.apiConfiguration.apiProvider).toBe("zai")
+			expect(state.apiConfiguration).not.toHaveProperty("openRouterApiKey")
 			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 
 			await provider.dispose()
@@ -1513,42 +1718,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining('Failed to persist mode "ask"'))
 
 			await provider.dispose()
-		})
-	})
-
-	describe("SwitchModeTool routing", () => {
-		// SwitchModeTool routes the switch through task.providerRef.deref()?.handleModeSwitch:
-		// when the provider was already disposed the deref is undefined, so the optional chain
-		// must swallow the call and the tool still reports success instead of erroring out.
-		it("should report a successful switch when the provider reference is already released", async () => {
-			const toolTask = {
-				consecutiveMistakeCount: 0,
-				recordToolError: vi.fn(),
-				didToolFailInCurrentTurn: false,
-				sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
-				ask: vi.fn().mockResolvedValue({}),
-				getTaskMode: vi.fn().mockResolvedValue("code"),
-				providerRef: {
-					deref: vi.fn().mockReturnValue(undefined),
-				},
-			} as unknown as Task // structural double: the tool only reads the fields above
-			const callbacks: ToolCallbacks = {
-				askApproval: vi.fn().mockResolvedValue(true),
-				handleError: vi.fn(),
-				pushToolResult: vi.fn(),
-			}
-			const block = {
-				type: "tool_use" as const,
-				name: "switch_mode" as const,
-				params: { mode_slug: "architect", reason: "test" },
-				partial: false,
-				nativeArgs: { mode_slug: "architect", reason: "test" },
-			} as unknown as ToolUse<"switch_mode"> // mirrors createBlock in switchModeTool.spec.ts
-
-			await switchModeTool.handle(toolTask, block, callbacks)
-
-			expect(callbacks.handleError).not.toHaveBeenCalled()
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully switched"))
 		})
 	})
 

@@ -31,6 +31,21 @@ export function getVisibleProviderOrLog(outputChannel: vscode.OutputChannel): Cl
 let sidebarPanel: vscode.WebviewView | undefined = undefined
 let tabPanel: vscode.WebviewPanel | undefined = undefined
 
+// Tab panels that are still open. When the tracked panel closes, its dispose
+// handler re-points the tracked ref at one of these: the remaining panel may
+// not emit onDidChangeViewState (its own visibility did not change), so
+// without this the tab-scoped title-bar commands and focusInput would be left
+// without a target.
+const liveTabPanels = new Set<vscode.WebviewPanel>()
+
+/**
+ * Test-only: clears the module-level registry so tab panels created by one
+ * spec cannot leak into another's tracked-panel re-pointing.
+ */
+export function __resetLiveTabPanelsForTests(): void {
+	liveTabPanels.clear()
+}
+
 // In-flight "open in editor" creation shared by overlapping calls: a
 // double-click starts before the first call tracks its new panel, so
 // concurrent callers must share one creation instead of racing to create
@@ -241,6 +256,13 @@ const getCommandsMap = ({
 				const tabProvider = getTabProvider()
 				if (tabProvider) {
 					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				} else {
+					// The tracked tab panel has no live provider (its instance was
+					// disposed while the panel ref survived). focusPanel already
+					// revealed the tab surface, so posting to the sidebar would
+					// focus a surface that is not on screen: log the drop instead
+					// of swallowing it silently.
+					outputChannel.appendLine("focusInput: no live provider for the tracked tab panel; action dropped")
 				}
 			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
@@ -384,6 +406,7 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 	// Save as tab type panel.
 	// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
 	setPanel(newPanel, "tab")
+	liveTabPanels.add(newPanel)
 
 	// TODO: Use better svg icon with light and dark variants (see
 	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
@@ -419,9 +442,19 @@ export const createClineTabPanel = async ({ context, outputChannel }: Omit<Regis
 	// panel cannot clobber the replacement's ref.
 	newPanel.onDidDispose(
 		() => {
+			liveTabPanels.delete(newPanel)
 			if (tabPanel === newPanel) {
+				// Re-point the tracked ref at a remaining live tab (active first,
+				// then visible) so the tab-scoped title-bar commands and
+				// focusInput keep resolving an instance; clear the ref as before
+				// when nothing remains. The identity guard above keeps a late
+				// disposal of an already-replaced panel from clobbering the
+				// replacement's ref.
+				const remaining =
+					[...liveTabPanels].find((panel) => panel.active) ??
+					[...liveTabPanels].find((panel) => panel.visible)
 				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
-				setPanel(undefined, "tab")
+				setPanel(remaining, "tab")
 			}
 		},
 		null,

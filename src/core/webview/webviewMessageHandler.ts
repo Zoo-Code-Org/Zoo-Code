@@ -664,7 +664,14 @@ export const webviewMessageHandler = async (
 								// writes the shared slot back with the same value, so the global
 								// selection itself is left untouched, and the first listed profile's
 								// name (absent on legacy shapes) is irrelevant to this branch.
-								await provider.activateProviderProfile({ name: globalConfigName })
+								// Skip both persistence steps: this is a launch-time repair of this
+								// view's own selection, and persisting would silently rewrite the
+								// current mode's saved profile (setModeConfig) and the task's sticky
+								// profile, which every other view reads.
+								await provider.activateProviderProfile(
+									{ name: globalConfigName },
+									{ persistModeConfig: false, persistTaskHistory: false },
+								)
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
