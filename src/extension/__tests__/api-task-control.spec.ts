@@ -437,12 +437,14 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 			sidebarProvider.context = withProductionContext()
 			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
-			await expect(api.approveTaskAsk("task-1")).rejects.toThrow("test-only API")
-			await expect(api.denyTaskAsk("task-1")).rejects.toThrow("test-only API")
+			// Pin the method name in each message: the guard builds the error from the
+			// method argument, and a partial match would leave the argument untested.
+			await expect(api.approveTaskAsk("task-1")).rejects.toThrow("approveTaskAsk is a test-only API")
+			await expect(api.denyTaskAsk("task-1")).rejects.toThrow("denyTaskAsk is a test-only API")
 			await expect(api.selectTaskFollowupSuggestion({ taskId: "task-1", answer: "yes" })).rejects.toThrow(
-				"test-only API",
+				"selectTaskFollowupSuggestion is a test-only API",
 			)
-			expect(() => api.getGlobalState("mode")).toThrow("test-only API")
+			expect(() => api.getGlobalState("mode")).toThrow("getGlobalState is a test-only API")
 		})
 
 		it("keeps the task ask and global-state surface available outside production mode", async () => {

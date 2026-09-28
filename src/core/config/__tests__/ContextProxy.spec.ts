@@ -210,7 +210,16 @@ describe("ContextProxy", () => {
 
 		it("does not roll a pre-refresh secret write back over refreshed values", async () => {
 			await proxy.storeSecret("apiKey", "old-key")
-			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+			// Defer the durable failure until after the refresh completes: a failure that
+			// lands before the re-sync runs its rollback microtask first, so the re-sync
+			// would mask the stale restore regardless of the token guard.
+			let failStore!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failStore = reject
+					}),
+			)
 			const pending = proxy.storeSecret("apiKey", "stale-write")
 
 			// The refresh re-syncs the cache from storage and drops the pending write's
@@ -218,6 +227,7 @@ describe("ContextProxy", () => {
 			mockSecrets.get.mockResolvedValueOnce("refreshed-value")
 			await proxy.refreshSecrets()
 
+			failStore(new Error("secrets failed"))
 			await expect(pending).rejects.toThrow("secrets failed")
 			expect(proxy.getSecret("apiKey")).toBe("refreshed-value")
 		})
@@ -225,15 +235,50 @@ describe("ContextProxy", () => {
 		it("does not restore a pending write into a reset cache", async () => {
 			// The pending write fails after resetAllState cleared the token: without the
 			// token guard its stale previous value would resurrect in a cache the reset
-			// just wiped.
+			// just wiped. The failure is deferred (see the pre-refresh case) so the
+			// rollback cannot be masked by the re-initialization's own cache writes.
 			await proxy.updateGlobalState("apiProvider", "deepseek")
-			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+			let failUpdate!: (error: Error) => void
+			mockGlobalState.update.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failUpdate = reject
+					}),
+			)
 			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
 
 			await proxy.resetAllState()
+
+			failUpdate(new Error("storage failed"))
 			await expect(pending).rejects.toThrow("storage failed")
 
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
+		it("does not restore a pending secret write into a reset cache", async () => {
+			// Same deferred-failure discipline as the state case: the pending secret write
+			// fails after resetAllState cleared the secret token, so without that clear its
+			// stale previous value would resurrect in the re-seeded secret cache.
+			await proxy.storeSecret("apiKey", "old-key")
+			let failStore!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failStore = reject
+					}),
+			)
+			const pending = proxy.storeSecret("apiKey", "stale-write")
+
+			// Reset re-initialization reads through secrets.get: seed it with undefined so
+			// the re-seeded cache holds nothing for the assertion to distinguish from the
+			// stale restore.
+			mockSecrets.get.mockResolvedValue(undefined)
+			await proxy.resetAllState()
+
+			failStore(new Error("secrets failed"))
+			await expect(pending).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
 		})
 
 		it("should update state directly in original context", async () => {
