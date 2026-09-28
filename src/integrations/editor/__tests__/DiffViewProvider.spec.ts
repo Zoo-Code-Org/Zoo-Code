@@ -7,7 +7,8 @@ import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../t
 
 import * as fs from "fs/promises"
 
-import { computeVersionToken } from "../../../utils/versionToken"
+import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionToken"
+import type { BigIntStats } from "fs"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
 import type { Task } from "../../../core/task/Task"
@@ -22,6 +23,9 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	// The S4b follow-up (#44) preview observation stats the target before and
+	// after reading it; undefined stats leave the target unobserved (fail closed).
+	stat: vi.fn().mockResolvedValue(undefined),
 	mkdir: vi.fn().mockResolvedValue(undefined),
 	rename: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
@@ -34,9 +38,15 @@ vi.mock("../../../services/file-safety/safeWriteText", () => ({
 
 // Mock the S1 version token (used by the S4 guarded write); the real
 // computeVersionToken needs fs.stat, which is not part of the fs/promises mock above.
-vi.mock("../../../utils/versionToken", () => ({
-	computeVersionToken: vi.fn(),
-}))
+// Keep the real versionTokenOfStat: DiffViewProvider.open() (S4b follow-up #44)
+// derives the preview token from its synthetic stat mock with that pure function.
+vi.mock("../../../utils/versionToken", async () => {
+	const actual = await vi.importActual<typeof import("../../../utils/versionToken")>("../../../utils/versionToken")
+	return {
+		computeVersionToken: vi.fn(),
+		versionTokenOfStat: actual.versionTokenOfStat,
+	}
+})
 
 // Mock utils
 vi.mock("../../../utils/fs", () => ({
@@ -215,6 +225,15 @@ describe("DiffViewProvider", () => {
 			addLines: vi.fn(),
 			clear: vi.fn(),
 		}
+
+		// S4b follow-up (#44): saveChanges publishes the accepted diff through the
+		// guarded write, which requires the target to be observed at the previewed
+		// on-disk version. Seed the preconditions for the relPaths the suites below
+		// use; the guarded-write suites override or clear as needed.
+		mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "v1")
+		mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "v1")
+		mockTask.observationRegistry.observe(`${mockCwd}/mock-target-file.ts`, "v1")
+		vi.mocked(computeVersionToken).mockResolvedValue("v1")
 	})
 
 	describe("update method", () => {
@@ -953,6 +972,157 @@ describe("DiffViewProvider", () => {
 				)
 				expect(safeWriteText).not.toHaveBeenCalled()
 			})
+		})
+	})
+
+	describe("saveChanges guarded publish (S4b follow-up #44)", () => {
+		// Synthetic stat the preview observation tokenizes with the real (unmocked)
+		// versionTokenOfStat. Cast: the mock only implements the members the tool
+		// and versionToken read.
+		const previewStats = {
+			isDirectory: () => false,
+			dev: BigInt(1),
+			ino: BigInt(2),
+			size: BigInt(300),
+			mtimeNs: BigInt(4_000_000_000n),
+			ctimeNs: BigInt(5_000_000_000n),
+		} as unknown as BigIntStats
+
+		// Structural TextEditor double for the open()/saveChanges flow: only the
+		// members they touch. One documented unknown cast stands in for the full
+		// vscode.TextEditor type (avoids any casts; see AGENTS.md).
+		const mockTextEditor = (fsPath: string, text = ""): vscode.TextEditor =>
+			({
+				document: {
+					uri: { fsPath, scheme: "file" },
+					getText: vi.fn().mockReturnValue(text),
+					lineCount: 0,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			}) as unknown as vscode.TextEditor
+
+		// Structural TextDocument double for the onDidOpenTextDocument callback.
+		const mockTextDocument = (fsPath: string): vscode.TextDocument =>
+			({ uri: { fsPath, scheme: "file" } }) as unknown as vscode.TextDocument
+
+		beforeEach(() => {
+			// Private members are set via bracket notation (spec convention).
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider["newContent"] = "new content"
+			diffViewProvider["activeDiffEditor"] = mockTextEditor(`${mockCwd}/test.ts`, "new content")
+			diffViewProvider["preDiagnostics"] = []
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockTextEditor(`${mockCwd}/test.ts`))
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+		})
+
+		it("open() observes the previewed on-disk version of an existing file as a complete read", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/observed.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/observed.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("observed.ts")
+
+			const obs = mockTask.observationRegistry.get(`${mockCwd}/observed.ts`)
+			expect(obs).toBeDefined()
+			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
+			expect(obs!.complete).toBe(true)
+		})
+
+		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/brand-new.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/brand-new.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("brand-new.ts")
+
+			const obs = mockTask.observationRegistry.get(`${mockCwd}/brand-new.ts`)
+			expect(obs).toBeDefined()
+			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
+			expect(obs!.complete).toBe(true)
+		})
+
+		it("open() leaves the target unobserved when the pre/post stat mismatch (mid-preview mutation)", async () => {
+			const mutatedStats = {
+				isDirectory: () => false,
+				dev: BigInt(1),
+				ino: BigInt(2),
+				size: BigInt(301),
+				mtimeNs: BigInt(4_000_000_001n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/mutated.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			const mockEditor = mockTextEditor(`${mockCwd}/mutated.ts`)
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValueOnce(previewStats).mockResolvedValueOnce(mutatedStats)
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("mutated.ts")
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/mutated.ts`)).toBeUndefined()
+		})
+
+		it("publishes the accepted content through the guarded write (safeWriteText)", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			const result = await diffViewProvider.saveChanges(false)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("rejects the accepted save when the file changed after the preview (stale version)", async () => {
+			vi.mocked(computeVersionToken).mockResolvedValue("v2")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rejects the accepted save when the target was never observed (fail closed)", async () => {
+			mockTask.observationRegistry.clear()
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
+				"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
+			)
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("fails closed when the owning task has been collected", async () => {
+			// A real WeakRef cannot be forced to deref to undefined deterministically
+			// (GC timing), so a structural stub stands in for the collected reference.
+			diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
+				"Cannot guard the write: the owning task is no longer available",
+			)
 		})
 	})
 
@@ -1760,6 +1930,11 @@ describe("DiffViewProvider", () => {
 
 		const setupProvider = (stateOverrides: Record<string, unknown> = {}) => {
 			const task = {
+				cwd: mockCwd,
+				// S4b follow-up (#44): saveChanges publishes through the guarded write,
+				// which resolves the path against task.cwd and consults the task's
+				// observation registry — both must be present on this suite's mock task.
+				observationRegistry: new ObservationRegistry(),
 				providerRef: {
 					deref: vi.fn().mockReturnValue({
 						getState: vi.fn().mockResolvedValue({
@@ -1771,6 +1946,10 @@ describe("DiffViewProvider", () => {
 				},
 			}
 			const provider = new DiffViewProvider(mockCwd, task as any)
+			// The preview observation + matching version token let the guarded save
+			// proceed so these tests stay focused on the auto-close decision table.
+			task.observationRegistry.observe(`${mockTargetPath}`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
 			;(provider as any).relPath = "auto-close-test.ts"
 			;(provider as any).newContent = "content"
 			;(provider as any).activeDiffEditor = buildActiveDiffEditor()

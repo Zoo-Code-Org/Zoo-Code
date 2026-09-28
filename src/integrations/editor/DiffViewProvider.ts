@@ -18,6 +18,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
@@ -121,7 +122,21 @@ export class DiffViewProvider {
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
 		if (fileExists) {
+			// S4b follow-up (#44 / epic #1375): the preview is a full read of the
+			// on-disk original. Observe it with the S2 stat-matched contract so the
+			// accepted save (a full-file replacement) publishes through the guard's
+			// version check instead of bypassing it; a stat mismatch (or failure)
+			// leaves the target unobserved and the save fails closed.
+			const preStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			this.originalContent = await fs.readFile(absolutePath, "utf-8")
+			const postStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			const displayTask = this.taskRef.deref()
+			if (displayTask && preStats && postStats) {
+				const displayToken = versionTokenOfStat(preStats)
+				if (displayToken === versionTokenOfStat(postStats)) {
+					displayTask.observationRegistry.observe(absolutePath, displayToken, true)
+				}
+			}
 		} else {
 			this.originalContent = ""
 		}
@@ -133,6 +148,14 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+			// S4b follow-up (#44): the empty placeholder is fully known (empty),
+			// so observe the just-written on-disk version as complete; the accepted
+			// save then publishes through the guard's version check.
+			const displayTask = this.taskRef.deref()
+			const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (displayTask && placeholderStats) {
+				displayTask.observationRegistry.observe(absolutePath, versionTokenOfStat(placeholderStats), true)
+			}
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -340,9 +363,19 @@ export class DiffViewProvider {
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
-		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+		// S4b follow-up (#44 / epic #1375): the accepted diff is a full-file
+		// replacement, so publish it through the guarded-write API instead of
+		// saving the document raw. open() observed the on-disk version the
+		// preview was built on; replaceIfVersion rejects the save when the file
+		// changed after the preview or the target was never observed, with the
+		// standard re-read-then-retry remediation.
+		const saveTask = this.taskRef.deref()
+		if (!saveTask) {
+			// Fail closed: without the owning task the observation registry is
+			// unreachable and the save cannot be guarded.
+			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
+		await guardedWrite(saveTask, this.relPath, editedContent, "update")
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -352,8 +385,8 @@ export class DiffViewProvider {
 		await this.closeAllDiffViews()
 
 		// Read auto-close preferences from state; fall back to defaults that
-		// preserve the existing behavior when unset.
-		const saveTask = this.taskRef.deref()
+		// preserve the existing behavior when unset (saveTask was resolved above
+		// for the guarded publish).
 		const saveState = await saveTask?.providerRef.deref()?.getState()
 
 		await this.keepOrCloseEditedFile(

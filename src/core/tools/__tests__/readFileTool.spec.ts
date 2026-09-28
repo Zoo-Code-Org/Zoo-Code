@@ -1811,5 +1811,232 @@ describe("ReadFileTool", () => {
 				expect(regB.get("/shared.ts")!.version).toBe("v2")
 			})
 		})
+
+		describe("read completeness scope (S4b follow-up #46)", () => {
+			// The stat mock only implements the members the tool and versionToken read.
+			const bigintStats = (): Stats =>
+				({
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+				}) as unknown as Stats
+
+			it("native: a full, untruncated slice read from line 1 records a complete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					includedRanges: [[1, 2]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute({ path: "full.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, calledVersion, calledComplete] = observeSpy.mock.calls[0]
+				expect(calledPath).toContain("full.ts")
+				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				expect(calledComplete).toBe(true)
+				expect(reg.get(calledPath)!.complete).toBe(true)
+			})
+
+			it("native: a truncated slice read records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\nc\nd\ne"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a",
+					returnedLines: 1,
+					totalLines: 5,
+					wasTruncated: true,
+					includedRanges: [[1, 1]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute(
+					{ path: "trunc.ts", offset: 1, limit: 1 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+				expect(reg.get(calledPath)!.complete).toBe(false)
+			})
+
+			it("native: an offset read that is not truncated still records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\nc\nd\ne"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "4 | d\n5 | e",
+					returnedLines: 2,
+					totalLines: 5,
+					wasTruncated: false,
+					includedRanges: [[4, 5]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute(
+					{ path: "offset.ts", offset: 4, limit: 2 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+			})
+
+			it("native: an indentation-mode block read records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("function f() { return 1 }"))
+				mockedReadWithIndentation.mockReturnValue({
+					content: "10 | function f() {",
+					wasTruncated: false,
+					includedRanges: [[10, 20]],
+					totalLines: 100,
+					returnedLines: 11,
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute(
+					{ path: "indent.ts", mode: "indentation" },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+			})
+
+			it("legacy: a line-range read records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue("a\nb\nc\nd\ne")
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "ranges.ts", lineRanges: [{ start: 2, end: 4 }] }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledPath).toContain("ranges.ts")
+				expect(calledComplete).toBe(false)
+			})
+
+			it("legacy: a full, untruncated slice read records a complete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue("a\nb")
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					includedRanges: [[1, 2]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy-full.ts" }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(true)
+			})
+
+			it("legacy: a slice truncated to the default limit records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue("a\nb\nc")
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a",
+					returnedLines: 1,
+					totalLines: 5000,
+					wasTruncated: true,
+					includedRanges: [[1, 1]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy-trunc.ts" }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+			})
+		})
 	})
 })

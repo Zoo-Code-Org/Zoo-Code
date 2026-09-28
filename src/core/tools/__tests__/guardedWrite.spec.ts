@@ -230,6 +230,57 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 
+	describe("observed update (read completeness, S4b follow-up #46)", () => {
+		it("rejects a full-file update when only a partial read observed the file - no I/O, nothing published", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+		})
+
+		it("publishes a full-file update when the observation is complete and the version matches", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", true)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "new content", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content")
+		})
+
+		it("leaves edit-kind publishes unaffected by a partial observation - the model saw the edited region", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+		})
+
+		it("leaves create-kind publishes unaffected by a partial observation", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "created", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created")
+		})
+	})
+
 	describe("edit", () => {
 		it("fails read-first when the file was never observed - nothing published, no I/O", async () => {
 			const task = createMockTask()

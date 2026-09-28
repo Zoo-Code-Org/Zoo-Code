@@ -14,6 +14,13 @@ export interface FileObservation {
 	version: string
 	/** Millisecond timestamp when the observation was recorded. */
 	observedAt: number
+	/**
+	 * Whether the read that produced this observation returned the complete
+	 * file. A slice, line-range, truncated, or indentation-block read returns
+	 * only a view of the file; such an observation authorizes targeted edits
+	 * on the view the model saw, but never a full-file replacement.
+	 */
+	complete: boolean
 }
 
 export class ObservationRegistry {
@@ -22,11 +29,14 @@ export class ObservationRegistry {
 	/**
 	 * Record an observation for a file at its absolute path.
 	 *
-	 * Re-observing replaces the entry with a fresh observedAt timestamp and
-	 * the new version token.
+	 * Re-observing replaces the entry with a fresh observedAt timestamp, the
+	 * new version token, and the read's completeness. `complete` defaults to
+	 * true: the existing callers (ApplyPatchTool, spec doubles) all observe
+	 * after reading the full file buffer, so a partial read must opt in
+	 * explicitly.
 	 */
-	observe(absolutePath: string, version: string): void {
-		this.entries.set(absolutePath, { version, observedAt: Date.now() })
+	observe(absolutePath: string, version: string, complete: boolean = true): void {
+		this.entries.set(absolutePath, { version, observedAt: Date.now(), complete })
 	}
 
 	get(absolutePath: string): FileObservation | undefined {

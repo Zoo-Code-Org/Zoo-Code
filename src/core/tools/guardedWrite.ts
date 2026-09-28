@@ -225,6 +225,20 @@ export async function guardedWrite(
 	return enqueue(absolutePath, async () => {
 		const obs = task.observationRegistry.get(absolutePath)
 
+		// A full-file replacement (kind "update") requires the model to have
+		// seen the whole file: an observation recorded from a slice, range,
+		// truncated, or indentation-block read only authorizes the view the
+		// model saw. Publishing a full file built on a partial view would
+		// silently drop everything the model never read, so the guard fails
+		// closed with a re-read-the-whole-file remediation.
+		if (kind === "update" && obs !== undefined && obs.complete === false) {
+			throw new GuardRejectedError(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+				absolutePath,
+			)
+		}
+
 		if (obs === undefined) {
 			// Edit-style writes require a prior read: no observation, no write.
 			if (kind === "edit") {

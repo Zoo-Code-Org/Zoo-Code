@@ -220,7 +220,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
 					const buffer = await fs.readFile(fullPath)
 					const fileContent = buffer.toString("utf-8")
-					const result = this.processTextFile(fileContent, entry)
+					// S4b follow-up (#46 / epic #1375): processTextFile reports whether the
+					// returned content is the whole file; the observation below records that
+					// scope so the write guard can deny full-file updates built on a partial view.
+					const processed = this.processTextFile(fileContent, entry)
 
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
@@ -234,12 +237,12 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					if (preReadStats && postReadStats) {
 						const preReadToken = versionTokenOfStat(preReadStats)
 						if (preReadToken === versionTokenOfStat(postReadStats)) {
-							task.observationRegistry.observe(fullPath, preReadToken)
+							task.observationRegistry.observe(fullPath, preReadToken, processed.complete)
 						}
 					}
 
 					updateFileResult(relPath, {
-						nativeContent: `File: ${relPath}\n${result}`,
+						nativeContent: `File: ${relPath}\n${processed.content}`,
 					})
 				} catch (error) {
 					const errorMsg = error instanceof Error ? error.message : String(error)
@@ -283,8 +286,14 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 	/**
 	 * Process a text file according to the requested mode.
+	 *
+	 * Returns the content string plus whether that content is the complete
+	 * file (S4b follow-up #46 / epic #1375): slice mode is complete only
+	 * when it starts at line 1, returns every line, and was not truncated;
+	 * indentation mode is never complete because it returns semantic blocks
+	 * of the file, not the file itself.
 	 */
-	private processTextFile(content: string, entry: InternalFileEntry): string {
+	private processTextFile(content: string, entry: InternalFileEntry): { content: string; complete: boolean } {
 		const mode = entry.mode || "slice"
 
 		if (mode === "indentation") {
@@ -317,7 +326,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output += `\n\nIncluded ranges: ${rangeStr} (total: ${result.totalLines} lines)`
 			}
 
-			return output
+			// Indentation mode returns semantic blocks: never a complete file view.
+			return { content: output, complete: false }
 		}
 
 		// Slice mode (default): simple offset/limit reading
@@ -344,7 +354,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			output = "Note: File is empty"
 		}
 
-		return output
+		// Complete only when the slice starts at line 1, returns every line, and
+		// nothing was truncated: then the model saw the whole file.
+		const complete = !result.wasTruncated && offset0 === 0 && result.returnedLines === result.totalLines
+
+		return { content: output, complete }
 	}
 
 	/**
@@ -792,6 +806,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				const rawContent = await fs.readFile(fullPath, "utf8")
 
 				// Handle line ranges if specified
+				// S4b follow-up (#46 / epic #1375): a line-range read returns only the requested
+				// ranges, and a slice truncated to DEFAULT_LINE_LIMIT returns only the head of
+				// the file — record such observations as partial so the write guard denies a
+				// full-file update built on them.
+				let readComplete = false
 				let content: string
 				if (entry.lineRanges && entry.lineRanges.length > 0) {
 					const lines = rawContent.split("\n")
@@ -811,6 +830,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read with default limits using slice mode
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
+					readComplete = !result.wasTruncated
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
 					}
@@ -830,7 +850,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				if (preReadStats && postReadStats) {
 					const preReadToken = versionTokenOfStat(preReadStats)
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						task.observationRegistry.observe(fullPath, preReadToken)
+						task.observationRegistry.observe(fullPath, preReadToken, readComplete)
 					}
 				}
 			} catch (error) {
