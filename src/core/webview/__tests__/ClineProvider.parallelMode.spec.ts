@@ -16,9 +16,12 @@ import {
 import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
+import { switchModeTool } from "../../tools/SwitchModeTool"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { Task } from "../../task/Task"
+import type { ToolCallbacks } from "../../tools/BaseTool"
+import type { ToolUse } from "../../../shared/tools"
 
 // Mock p-wait-for
 vi.mock("p-wait-for", () => ({
@@ -722,10 +725,63 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const pruned = provider["prunePersistedViewStates"](states)
 
 			expect(Object.keys(pruned)).toHaveLength(50)
+			// Surviving entries must retain their complete persisted state, not just
+			// exist: a prune that mutates a surviving entry must fail the test.
 			expect(pruned["view-0"]).toEqual({ mode: "mode-0", updatedAt: 1 })
 			expect(pruned["view-49"]).toEqual({ mode: "mode-49", updatedAt: 1 })
 			expect(pruned["view-50"]).toBeUndefined()
 
+			await provider.dispose()
+		})
+
+		it("should drop corrupt viewStates entries on read so subsequent writes do not reject", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const logSpy = vi.spyOn(provider, "log")
+			// Corrupt entries (null, or a torn non-object value) can land in the durable map:
+			// they must be dropped at the read boundary, not throw in the prune sort when a
+			// mode/profile write re-reads the map fresh.
+			await mockContext.globalState.update("viewStates", {
+				"view-null": null,
+				"view-valid": { mode: "code", updatedAt: 1 },
+			})
+
+			await provider["setViewStateId"]("view-writer")
+			await provider.saveViewState("mode", "architect")
+
+			// One drop: the exact singular message (a substring assertion cannot tell
+			// "entry" from "entries"), so the wording is pinned verbatim.
+			expect(logSpy).toHaveBeenCalledWith("[getPersistedViewStates] dropped 1 invalid viewStates entry")
+
+			// The first fresh read already removed the null entry, so seed two new corrupt
+			// entries (a torn non-object value and a null) for the next fresh read.
+			const states = mockContext.globalState.get("viewStates") as Record<string, unknown>
+			// Write through the proxy so the provider's cache and the durable map stay
+			// in step for the next fresh read.
+			// Simulate a torn/corrupt durable write: the map type forbids such entries,
+			// which is exactly what a torn write can leave behind (double assertion).
+			await provider.contextProxy.setValue("viewStates", {
+				...states,
+				"view-torn": "torn-write",
+				"view-null2": null,
+			} as unknown as RooCodeSettings["viewStates"])
+			await provider.saveViewState("mode", "build")
+
+			// Two drops: the exact plural message must survive the second fresh read.
+			expect(logSpy).toHaveBeenCalledWith("[getPersistedViewStates] dropped 2 invalid viewStates entries")
+
+			const statesAfter = mockContext.globalState.get("viewStates") as Record<string, unknown>
+			expect(statesAfter["view-null"]).toBeUndefined()
+			expect(statesAfter["view-torn"]).toBeUndefined()
+			expect(statesAfter["view-null2"]).toBeUndefined()
+			expect(statesAfter["view-valid"]).toEqual({ mode: "code", updatedAt: 1 })
+			expect(statesAfter["view-writer"]).toEqual({ mode: "build", updatedAt: expect.any(Number) })
+
+			// A clean re-read must not log a drop: the log must stay tied to dropped > 0.
+			await provider.saveViewState("mode", "debugger")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("dropped 0"))
+
+			// Release the provider from the static instance registry so later tests' cross-
+			// instance broadcasts do not iterate a provider bound to this test's context.
 			await provider.dispose()
 		})
 
@@ -1018,8 +1074,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 			})
 
-			// The empty viewLocalState takes the activate branch, which may persist an extra
-			// temporary view entry, so assert on the re-pointed entry rather than the whole map.
+			// The empty viewLocalState takes the unrelated-pin branch (the shared selection
+			// does not reference the deleted profile), so assert on the re-pointed entry
+			// rather than the whole map.
 			expect(mockContext.globalState.get("viewStates")).toEqual(
 				expect.objectContaining({
 					"view-legacy": { currentApiConfigName: "keeper-profile", updatedAt: expect.any(Number) },
@@ -1766,6 +1823,96 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await caller.dispose()
 			await failingSibling.dispose()
 			await laterSibling.dispose()
+		})
+
+		it("should order the broadcast clear after an in-flight view-state save", async () => {
+			const caller = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const saver = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await caller.resolveWebviewView(createMockWebviewView())
+			await saver.resolveWebviewView(createMockWebviewView())
+
+			// Stall the saver's durable write so the broadcast's clear lands while it is
+			// still in the serialized write queue: a direct (un-queued) clear would let
+			// the save run after the clear and re-create its captured per-view pin. The
+			// stalled write still reaches storage once the gate opens, so the storage
+			// assertion below only passes if the clear actually ran after the save.
+			let resolveWrite: (value: undefined) => void = () => {}
+			const writeGate = new Promise<undefined>((resolve) => (resolveWrite = resolve))
+			// The proxy's setValue is already a vi.fn: vi.spyOn on it would return the same
+			// function, so a delegating spy would recurse into itself. Wrap the mock's
+			// existing implementation instead: gate the non-clear write, then delegate to
+			// the original store write so the stalled save still reaches storage.
+			const setValueMock = vi.mocked(saver.contextProxy.setValue)
+			const originalSetValueImplementation = setValueMock.getMockImplementation()
+			setValueMock.mockImplementation(async (key, value): Promise<void> => {
+				if (key === "viewStates" && value !== undefined) {
+					await writeGate
+				}
+				await originalSetValueImplementation?.(key, value)
+			})
+			const setValueSpy = setValueMock
+
+			const save = saver.saveViewState("mode", "architect")
+			await vi.waitFor(() => expect(setValueSpy).toHaveBeenCalledWith("viewStates", expect.anything()))
+
+			const broadcast = caller.broadcastResetToAllInstances()
+
+			// The clear is queued behind the in-flight save, so the broadcast only settles
+			// once the stalled write completes.
+			resolveWrite(undefined)
+			await save
+			await broadcast
+
+			// The clear won: the save's captured pin was not resurrected after the reset.
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+			expect(saver["viewLocalState"]).toEqual({})
+
+			await caller.dispose()
+			await saver.dispose()
+		})
+
+		it("clears the buffer of a first-constructed saving provider after a queued reset", async () => {
+			// The saver is constructed first so the broadcast reaches its buffer before the
+			// caller does: with the clear queued behind the in-flight save, the buffer must
+			// still end empty and the durable map cleared even though the save writes its
+			// captured pin back into the buffer when its durable write completes.
+			const saver = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const caller = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await saver.resolveWebviewView(createMockWebviewView())
+			await caller.resolveWebviewView(createMockWebviewView())
+
+			let resolveWrite: (value: undefined) => void = () => {}
+			const writeGate = new Promise<undefined>((resolve) => (resolveWrite = resolve))
+			// The proxy's setValue is already a vi.fn: vi.spyOn on it would return the same
+			// function, so a delegating spy would recurse into itself. Wrap the mock's
+			// existing implementation instead: gate the non-clear write, then delegate to
+			// the original store write so the stalled save still reaches storage.
+			const setValueMock = vi.mocked(saver.contextProxy.setValue)
+			const originalSetValueImplementation = setValueMock.getMockImplementation()
+			setValueMock.mockImplementation(async (key, value): Promise<void> => {
+				if (key === "viewStates" && value !== undefined) {
+					await writeGate
+				}
+				await originalSetValueImplementation?.(key, value)
+			})
+			const setValueSpy = setValueMock
+
+			const save = saver.saveViewState("mode", "architect")
+			await vi.waitFor(() => expect(setValueSpy).toHaveBeenCalledWith("viewStates", expect.anything()))
+
+			const broadcast = caller.broadcastResetToAllInstances()
+
+			resolveWrite(undefined)
+			await save
+			await broadcast
+
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+			expect(saver["viewLocalState"]).toEqual({})
+
+			await caller.dispose()
+			await saver.dispose()
 		})
 	})
 

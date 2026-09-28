@@ -354,9 +354,14 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(double.setViewStateId).toHaveBeenCalledWith("view-1")
 
 		// The merged (view-local) name is validated first; the shared global is only
-		// consulted when the view-local name is invalid.
+		// consulted when the view-local name is invalid. toHaveBeenCalledWith proves both
+		// lookups happened in any order; the call order below proves the order itself.
 		expect(double.providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
 		expect(mockClineProvider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("shared-profile")
+		const hasConfigCalls = vi
+			.mocked(mockClineProvider.providerSettingsManager.hasConfig)
+			.mock.calls.map((call) => call[0])
+		expect(hasConfigCalls.indexOf("view-local-profile")).toBeLessThan(hasConfigCalls.indexOf("shared-profile"))
 		// Both names are invalid in this setup, so the shared global is repaired.
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
@@ -1448,6 +1453,9 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).toHaveBeenCalledWith("/mock/global/storage")
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
+		// The updateSettings flow must route through the provider-level mutation path so the
+		// durable view pin write stays ordered with the shared write.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 

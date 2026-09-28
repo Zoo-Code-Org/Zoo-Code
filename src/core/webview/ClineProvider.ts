@@ -560,9 +560,13 @@ export class ClineProvider
 	}
 
 	/**
-	 * Reads the registered viewStates map, returning a defensive copy.
+	 * Reads the registered viewStates map, returning a defensive copy with corrupt
+	 * entries dropped.
 	 * When fresh is set, the map is read directly from globalState (bypassing the
 	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
+	 * A corrupt entry (null or a non-object) is dropped here rather than reaching the
+	 * prune sort (which dereferences updatedAt) or the repoint destructuring, both of
+	 * which would throw and reject the surrounding mutation.
 	 */
 	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
 		const viewStates = options.fresh
@@ -573,7 +577,24 @@ export class ClineProvider
 			return {}
 		}
 
-		return { ...viewStates }
+		const states: Record<string, PersistedViewState> = {}
+		let dropped = 0
+
+		for (const [viewId, entry] of Object.entries(viewStates)) {
+			if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+				states[viewId] = entry
+			} else {
+				dropped++
+			}
+		}
+
+		if (dropped > 0) {
+			this.log(
+				`[getPersistedViewStates] dropped ${dropped} invalid viewStates ${dropped === 1 ? "entry" : "entries"}`,
+			)
+		}
+
+		return states
 	}
 
 	/**
@@ -724,6 +745,31 @@ export class ClineProvider
 	}
 
 	/**
+	 * Resolves once this view's stable state id has been registered (setViewStateId) and
+	 * its persisted view state loaded, or when the provider disposes. API-driven task
+	 * creation awaits this (bounded by a timeout) so a task cannot consume shared
+	 * default mode/profile state before the view's own persisted selections are loaded.
+	 */
+	private viewStateReadinessResolve!: () => void
+
+	// Created eagerly in the field initializer rather than lazily in a getter: the
+	// resolver is consumed by the first setViewStateId registration or by dispose,
+	// so a promise created after that point would never settle and startNewTask's
+	// readiness race would fall through to its timeout every time.
+	public readonly viewStateReadiness: Promise<void> = new Promise<void>((resolve) => {
+		this.viewStateReadinessResolve = resolve
+	})
+
+	/**
+	 * True once dispose has started. Dispose resolves viewStateReadiness to release
+	 * waiters, so API-driven flows awaiting readiness must consult this flag to tell a real
+	 * readiness apart from a teardown: a disposed provider must never create a task.
+	 */
+	public get isDisposed(): boolean {
+		return this._disposed
+	}
+
+	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */
@@ -737,6 +783,11 @@ export class ClineProvider
 			// Object.prototype setter and be silently dropped by the later spread.
 			normalizedViewStateId === "__proto__"
 		) {
+			// No stable id will be registered for this view (no usable id in the launch
+			// message, or this exact id was already registered): the view falls back to
+			// shared state, and API-driven task creation must not time out waiting on a
+			// view state that never registers. Resolve now; the promise is idempotent.
+			this.viewStateReadinessResolve()
 			return
 		}
 
@@ -757,6 +808,10 @@ export class ClineProvider
 			// the failed id.
 			this.viewStateId = previousViewStateId
 			throw error
+		} finally {
+			// The stable id is now registered (or restored): API-driven task creation
+			// can proceed against this view's loaded state.
+			this.viewStateReadinessResolve()
 		}
 	}
 
@@ -1188,6 +1243,10 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+
+		// A disposed provider will never register a stable view state id: release
+		// any API-driven task creation that is awaiting viewStateReadiness.
+		this.viewStateReadinessResolve()
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
@@ -2441,14 +2500,18 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
-		// Remove the profile from the settings store (context.secrets) so it cannot be
-		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
-		// the secret was already gone (e.g. pruned by an earlier run): branch on the
-		// typed ProviderSettingsNotFoundError so the stale list entry below is still
-		// pruned as an idempotent success, while any other failure (e.g. refusing to
-		// delete the last remaining configuration) propagates. Matching message text
-		// instead would let a profile whose name contains "not found" swallow an
-		// unrelated failure.
+		// Commit the secret deletion before the compensating writes. If the deletion
+		// fails, nothing else runs: the durable pins still reference the profile that
+		// still exists and the shared list still contains it. Staging the re-point or
+		// the list prune before the deletion would let a failed deleteConfig leave a
+		// shared list missing a profile that is still stored, with the pins already
+		// moved to the replacement.
+		// A not-found rejection means the secret was already gone (e.g. pruned by an
+		// earlier run): branch on the typed ProviderSettingsNotFoundError so the stale
+		// list entry is still pruned as an idempotent success, while any other failure
+		// (e.g. refusing to delete the last remaining configuration) propagates before
+		// the compensating writes run. Matching message text instead would let a
+		// profile whose name contains "not found" swallow an unrelated failure.
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
@@ -2460,8 +2523,10 @@ export class ClineProvider
 			)
 		}
 
-		// Re-point any persisted view pin that referenced the deleted profile so views
-		// do not rehydrate a missing profile name after a reload.
+		// Only after the deletion has committed: re-point the durable view pins. A
+		// re-point failure now leaves at most a dangling pin naming a profile whose
+		// entry no longer exists, which the view load tolerates, instead of corrupting
+		// the shared list when the deletion itself failed.
 		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 		const viewPinsDeletedProfile =
@@ -2471,6 +2536,16 @@ export class ClineProvider
 			// an unrelated deletion must not rebuild this view's task handler.
 			(this.viewLocalState.currentApiConfigName === undefined &&
 				globalSettings.currentApiConfigName === profileToDelete.name)
+
+		// Prune the profile from the shared list after the deletion has committed when
+		// this view keeps an unrelated pin: the activation path below writes the list
+		// itself, because it re-reads the profile entries from the settings store.
+		if (!viewPinsDeletedProfile) {
+			const survivingEntries = this.getProviderProfileEntries().filter(
+				({ name }) => name !== profileToDelete.name,
+			)
+			await this.contextProxy.setValue("listApiConfigMeta", survivingEntries)
+		}
 
 		if (viewPinsDeletedProfile) {
 			// Apply the replacement through the activation path so this view's
@@ -2506,22 +2581,13 @@ export class ClineProvider
 			return
 		}
 
-		// This view pins an unrelated profile, which must survive the deletion: sync the
-		// shared profile list and post the updated state only. The buffer already holds
-		// the surviving pin, so the current-profile slot is left untouched here: a
-		// setValue would only trigger a viewStates prune write and could clobber the pin
-		// with the shared slot's value.
-		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
+		// This view pins an unrelated profile, which must survive the deletion. The shared
+		// list was already staged above the secret deletion (see the staging block at the
+		// top of this method), so only the replacement wiring remains here: resolve the
+		// surviving profile's settings so the shared provider keys and any other live
+		// view still pinned to the deleted profile can be updated with a matching
+		// configuration.
 
-		// Write only the profile list back: replaying the full settings snapshot
-		// captured above would also rewrite unrelated keys (including viewStates,
-		// which ClineProvider mutates directly in storage for concurrent views)
-		// with this view's stale cached copy.
-		await this.contextProxy.setValue("listApiConfigMeta", entries)
-
-		// Resolve the surviving profile's settings so the shared provider keys
-		// and any other live view still pinned to the deleted profile can be
-		// updated with a matching configuration.
 		let survivingSettings: ProviderSettings | undefined
 		try {
 			const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
@@ -3923,8 +3989,36 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		// Mirror the setValues guard for the single-key write path: the updateSettings
+		// webview handler routes every key through setValue, so an unknown mode must not
+		// bypass the shared validation and reach persistence via the viewStates write.
+		if (key === "mode" && value !== undefined) {
+			// The generic signature keeps the nominal RooCodeSettings[K] even after K is
+			// narrowed to "mode" (runtime type string | undefined); one assertion to the
+			// narrowed shape lets the shared guard type-check, mirroring setValues.
+			const modeValue = value as string | undefined
+			if (
+				typeof modeValue !== "string" ||
+				!getModeBySlug(modeValue, await this.customModesManager.getCustomModes())
+			) {
+				this.log(`[ClineProvider#setValue] Ignoring invalid mode "${String(value)}"`)
+				return
+			}
+		}
+
+		// Capture the previous shared value before the ContextProxy write so a failed
+		// durable viewStates write can roll it back: otherwise the shared mode/profile
+		// would remain persisted without this view's pin.
+		const previousValue = this.contextProxy.getValue(key)
+
 		await this.contextProxy.setValue(key, value)
-		await this._saveViewLocalStateFromMutation({ [key]: value })
+
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error) {
+			await this.contextProxy.setValue(key, previousValue)
+			throw error
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3950,8 +4044,23 @@ export class ClineProvider
 			}
 		}
 
+		// Capture the previous shared value for every key being written — including keys
+		// being cleared (value undefined) — so a failed durable viewStates write can roll
+		// the ContextProxy mutation back, restoring cleared values as well.
+		const previousValues = Object.fromEntries(
+			(Object.keys(sanitizedValues) as (keyof RooCodeSettings)[]).map(
+				(key) => [key, this.contextProxy.getValue(key)] as [string, unknown],
+			),
+		) as Partial<RooCodeSettings>
+
 		await this.contextProxy.setValues(sanitizedValues)
-		await this._saveViewLocalStateFromMutation(sanitizedValues)
+
+		try {
+			await this._saveViewLocalStateFromMutation(sanitizedValues)
+		} catch (error) {
+			await this.contextProxy.setValues(previousValues as RooCodeSettings)
+			throw error
+		}
 	}
 
 	/**
@@ -4044,6 +4153,13 @@ export class ClineProvider
 	 * Broadcast a reset/import invalidation to all live ClineProvider instances, clearing
 	 * both in-memory view-local caches and durable per-view selections so stale view state
 	 * cannot mask imported/reset shared state after reload.
+	 *
+	 * The durable clear runs on the serialized viewStates write queue so it is ordered
+	 * against every in-flight savePersistedViewState: a queued save that ran after a
+	 * direct clear would re-read the emptied map and re-create its captured per-view pin,
+	 * leaving a stale selection that rehydrates after a reload. The in-memory buffer is
+	 * cleared only after the queued clear has run, because a save enqueued before it
+	 * writes its captured value back into the buffer when its durable write completes.
 	 */
 	async broadcastResetToAllInstances(): Promise<void> {
 		const allInstances = ClineProvider.getAllInstances()
@@ -4060,6 +4176,10 @@ export class ClineProvider
 		await clearWrite
 
 		for (const instance of allInstances) {
+			// Clear the in-memory buffer only after the queued durable clear has run:
+			// a save enqueued before the clear writes its captured value back into the
+			// buffer when its durable write completes, so an immediate clear would let
+			// that stale pin survive in the live state.
 			instance._clearViewLocalState()
 
 			if (instance !== this) {
