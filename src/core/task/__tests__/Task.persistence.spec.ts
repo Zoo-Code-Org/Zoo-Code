@@ -923,6 +923,7 @@ describe("Task persistence", () => {
 				task: "test task",
 				startTask: false,
 			})
+			task.assistantMessageSavedToHistory = false
 			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
 			vi.spyOn(task, "waitForCurrentAssistantMessagePersistence").mockResolvedValue(false)
 
@@ -955,6 +956,81 @@ describe("Task persistence", () => {
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(4)
 				expect(task.assistantMessageSavedToHistory).toBe(false)
 				expect(task.userMessageContent).toHaveLength(1)
+				expect(consoleWarn).toHaveBeenCalledWith(
+					expect.stringContaining("failed to persist assistant message"),
+					expect.any(Error),
+				)
+			} finally {
+				consoleWarn.mockRestore()
+				mockSaveApiMessages.mockResolvedValue(undefined)
+				vi.useRealTimers()
+			}
+		})
+
+		it("waits for current assistant persistence before an empty-result flush", async () => {
+			vi.useFakeTimers()
+			const assistantSave = createDeferred<void>()
+			mockSaveApiMessages.mockReturnValueOnce(assistantSave.promise)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				const saving = getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "text", text: "turn still being written" }],
+				})
+				expect(task.assistantMessageSavedToHistory).toBe(false)
+
+				let settled = false
+				const flushing = task.flushPendingToolResultsToHistory().then((value) => {
+					settled = true
+					return value
+				})
+
+				await vi.advanceTimersByTimeAsync(0)
+				expect(settled).toBe(false)
+
+				assistantSave.resolve(undefined)
+				await vi.runAllTimersAsync()
+				await expect(flushing).resolves.toBe(true)
+				await saving
+
+				expect(task.assistantMessageSavedToHistory).toBe(true)
+				expect(task.userMessageContent).toEqual([])
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+			} finally {
+				assistantSave.resolve(undefined)
+				mockSaveApiMessages.mockResolvedValue(undefined)
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not report success for an empty-result flush when assistant persistence fails", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages.mockRejectedValue(new Error("assistant write failed"))
+			const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "text", text: "turn still being written" }],
+				})
+
+				const flushing = task.flushPendingToolResultsToHistory()
+				await vi.runAllTimersAsync()
+
+				await expect(flushing).resolves.toBe(false)
+				expect(task.assistantMessageSavedToHistory).toBe(false)
 				expect(consoleWarn).toHaveBeenCalledWith(
 					expect.stringContaining("failed to persist assistant message"),
 					expect.any(Error),

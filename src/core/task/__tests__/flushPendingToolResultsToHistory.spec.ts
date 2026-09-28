@@ -238,7 +238,7 @@ describe("flushPendingToolResultsToHistory", () => {
 		const initialHistoryLength = task.apiConversationHistory.length
 
 		// Call flush
-		await task.flushPendingToolResultsToHistory()
+		await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
 
 		// History should not have changed since userMessageContent was empty
 		expect(task.apiConversationHistory.length).toBe(initialHistoryLength)
@@ -399,7 +399,8 @@ describe("flushPendingToolResultsToHistory", () => {
 			startTask: false,
 		})
 
-		// Flag is false by default - assistant message not yet saved
+		// Model an assistant write that has started but has not settled.
+		task.assistantMessageSavedToHistory = false
 		expect(task.assistantMessageSavedToHistory).toBe(false)
 
 		// Set up pending tool result

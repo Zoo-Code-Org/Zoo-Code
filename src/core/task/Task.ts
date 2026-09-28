@@ -437,7 +437,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Reset to `false` at the start of each API request.
 	 * Set to `true` only after the assistant message is durably saved.
 	 */
-	assistantMessageSavedToHistory = false
+	assistantMessageSavedToHistory = true
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
@@ -1074,6 +1074,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
 	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+		if (message.role === "assistant") {
+			this.assistantMessageSavedToHistory = false
+		}
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1191,17 +1194,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * So we usually only need to flush the pending user message with tool_results.
 	 */
 	public async flushPendingToolResultsToHistory(): Promise<boolean> {
-		// Only flush if there's actually pending content to save
-		if (this.userMessageContent.length === 0) {
-			return true
-		}
 		if (this.abort) {
 			return false
 		}
 
-		// CRITICAL: Wait for the assistant message to be saved to API history first.
-		// Without this, tool_result blocks would appear BEFORE tool_use blocks in the
-		// conversation history, causing API errors like:
+		// CRITICAL: Wait for the assistant message to be saved to API history before
+		// any early return, including the empty-content case below. Delegation relies
+		// on this barrier: an auto-approved new_task can execute while the parent
+		// assistant turn still awaits persistence, and disposing the parent at that
+		// point would leave its tool_use turn out of the durable history.
+		//
+		// Without the wait, tool_result blocks would also appear BEFORE tool_use blocks
+		// in the conversation history, causing API errors like:
 		// "unexpected `tool_use_id` found in `tool_result` blocks"
 		//
 		// This can happen when parallel tools are called (e.g., update_todo_list + new_task).
@@ -1224,6 +1228,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 				return false
 			}
+		}
+
+		// Only flush if there's actually pending content to save
+		if (this.userMessageContent.length === 0) {
+			return true
 		}
 
 		// If task was aborted while waiting, don't flush
