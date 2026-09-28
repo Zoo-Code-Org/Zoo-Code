@@ -1082,8 +1082,14 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
 			// ...and the unrelated-pin fallback is ruled out by the activation list
 			// lookup: the fallback reads the surviving entries from the store instead
-			// of resolving the activation list.
+			// of resolving the activation list. The activation route refreshes the
+			// durable shared list from the settings store (listConfig), so the
+			// replacement-only durable value is the observable pin: a path that never
+			// resolved the activation list would leave the pre-deletion entries in place.
 			expect(listConfigSpy).toHaveBeenCalled()
+			expect(mockContext.globalState.get("listApiConfigMeta")).toEqual([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
 
 			await provider.dispose()
 		})
@@ -1244,7 +1250,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "y-key",
 			})
-			expect(providerB["viewLocalState"].apiConfiguration).toBeDefined()
+			// The snapshot is the profile-y settings resolved through A's manager:
+			// pin the known values, not just the presence of an overlay.
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject({
+				id: "y-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "y-key",
+			})
 
 			await providerA.dispose()
 			await providerB.dispose()
