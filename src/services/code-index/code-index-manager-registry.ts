@@ -1,9 +1,10 @@
 import * as vscode from "vscode"
-import { CodeIndexManager } from "./manager"
+import type { CodeIndexManager } from "./manager"
+import { CodeIndexWorkspaceScope } from "./code-index-workspace-scope"
 
-/** Resolves workspaces and owns their cached CodeIndexManager instances. */
+/** Owns workspace scopes while preserving the manager-facing API. */
 export class CodeIndexManagerRegistry {
-	private static instances = new Map<string, CodeIndexManager>()
+	private static codeIndexWorkspaceScopes = new Map<string, CodeIndexWorkspaceScope>()
 
 	public static getOrCreate(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexManager | undefined {
 		const folder = this.resolveWorkspaceFolder(workspacePath)
@@ -12,27 +13,35 @@ export class CodeIndexManagerRegistry {
 			return undefined
 		}
 
-		const existing = this.instances.get(resolvedPath)
+		const existing = this.codeIndexWorkspaceScopes.get(resolvedPath)
 		if (existing) {
-			return existing
+			return existing.codeIndexManager
 		}
 
 		// Preserve real workspace URIs, including remote schemes and authorities.
 		const folderUri = folder?.uri ?? vscode.Uri.file(resolvedPath)
-		const manager = new CodeIndexManager(resolvedPath, folderUri, context)
-		this.instances.set(resolvedPath, manager)
-		return manager
+		const codeIndexWorkspaceScope = new CodeIndexWorkspaceScope(resolvedPath, folderUri, context)
+		codeIndexWorkspaceScope.init()
+		this.codeIndexWorkspaceScopes.set(resolvedPath, codeIndexWorkspaceScope)
+		return codeIndexWorkspaceScope.codeIndexManager
 	}
 
 	public static getAllInstances(): CodeIndexManager[] {
-		return Array.from(this.instances.values())
+		return Array.from(this.codeIndexWorkspaceScopes.values(), (scope) => scope.codeIndexManager)
 	}
 
 	public static disposeAll(): void {
-		for (const instance of this.instances.values()) {
-			instance.dispose()
+		for (const [workspacePath, codeIndexWorkspaceScope] of this.codeIndexWorkspaceScopes) {
+			try {
+				codeIndexWorkspaceScope.dispose()
+			} catch (error) {
+				console.error(
+					`[CodeIndexManagerRegistry] Failed to dispose workspace scope for ${workspacePath}:`,
+					error,
+				)
+			}
 		}
-		this.instances.clear()
+		this.codeIndexWorkspaceScopes.clear()
 	}
 
 	private static resolveWorkspaceFolder(workspacePath?: string): vscode.WorkspaceFolder | undefined {
