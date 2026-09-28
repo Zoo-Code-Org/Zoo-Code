@@ -1244,6 +1244,22 @@ describe("ClineProvider", () => {
 			await expect(provider.dispose()).resolves.toBeUndefined()
 			expect(ClineProvider.getAllInstances()).not.toContain(provider)
 		})
+
+		it("skips falsy disposable entries instead of calling dispose on them", async () => {
+			// The disposal loop guards each popped entry with a falsy check: a falsy
+			// entry must be skipped so disposal still resolves. Calling dispose() on it
+			// would throw and make dispose() reject instead.
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const realDispose = vi.fn()
+			provider["disposables"].push({ dispose: realDispose })
+			// @ts-ignore - push a falsy entry to exercise the falsy guard
+			provider["disposables"].push(undefined)
+
+			await expect(provider.dispose()).resolves.toBeUndefined()
+			// The real entry was still disposed; the falsy one was skipped.
+			expect(realDispose).toHaveBeenCalledTimes(1)
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		})
 	})
 
 	describe("saveViewState", () => {
