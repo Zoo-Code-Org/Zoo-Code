@@ -403,13 +403,13 @@ suite("Roo Code View State", function () {
 		}
 
 		// Hide the primary sidebar and let the dispose settle, show it again and let
-		// the webview recreation settle, then wait for the reloaded webview to report
-		// the provider's state.
+		// the webview recreation settle; the waitFor below then polls for the
+		// reloaded webview to report the provider's state (no extra fixed wait is
+		// needed once polling starts).
 		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
 		await sleep(2_000)
 		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
 		await sleep(2_000)
-		await sleep(5_000)
 
 		// (a) The durable entry the marker was written to still exists after the reload.
 		// A wipe, prune, or re-key of the durable map during the cycle would drop the
