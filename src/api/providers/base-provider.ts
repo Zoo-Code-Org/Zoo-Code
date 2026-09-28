@@ -98,19 +98,28 @@ export abstract class BaseProvider implements ApiHandler {
 			for (const key of allKeys) {
 				const prop = newProps[key]
 
-				// Handle nullable types by removing null
-				if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
-					const nonNullTypes = prop.type.filter((t: string) => t !== "null")
-					prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
-				}
+				// Clone each property before normalizing so strict conversion never
+				// mutates caller-owned tool metadata: a later request with strict
+				// disabled must still send the declared (nullable) schema.
+				if (prop && typeof prop === "object" && !Array.isArray(prop)) {
+					const normalizedProp = { ...prop }
 
-				// Recursively process nested objects
-				if (prop && prop.type === "object") {
-					newProps[key] = this.convertToolSchemaForOpenAI(prop)
-				} else if (prop && prop.type === "array" && prop.items?.type === "object") {
-					newProps[key] = {
-						...prop,
-						items: this.convertToolSchemaForOpenAI(prop.items),
+					// Handle nullable types by removing null
+					if (Array.isArray(normalizedProp.type) && normalizedProp.type.includes("null")) {
+						const nonNullTypes = normalizedProp.type.filter((t: string) => t !== "null")
+						normalizedProp.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+					}
+
+					// Recursively process nested objects
+					if (normalizedProp.type === "object") {
+						newProps[key] = this.convertToolSchemaForOpenAI(normalizedProp)
+					} else if (normalizedProp.type === "array" && normalizedProp.items?.type === "object") {
+						newProps[key] = {
+							...normalizedProp,
+							items: this.convertToolSchemaForOpenAI(normalizedProp.items),
+						}
+					} else {
+						newProps[key] = normalizedProp
 					}
 				}
 			}

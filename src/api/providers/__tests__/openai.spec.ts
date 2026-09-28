@@ -1823,6 +1823,62 @@ describe("OpenAiHandler - strict tool schemas", () => {
 		const request = mockCreate.mock.calls[0][0]
 		expect(request.tools).toBeUndefined()
 	})
+
+	it("sends strict: false for non-streaming requests when openAiStrictToolSchemas is false", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiStreamingEnabled: false,
+			openAiStrictToolSchemas: false,
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
+	it("sends strict: true with normalized schemas for O3-family streaming requests by default", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiModelId: "o3-mini",
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				maxTokens: 65_536,
+				supportsPromptCache: false,
+				reasoningEffort: "medium" as "low" | "medium" | "high",
+			},
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.model).toBe("o3-mini")
+		expect(request.stream).toBe(true)
+		expect(request.tools[0].function.strict).toBe(true)
+		expect(request.tools[0].function.parameters.required).toEqual(["path", "offset"])
+	})
+
+	it("sends strict: false with the declared schema for O3-family non-streaming requests when disabled", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiModelId: "o3-mini",
+			openAiStreamingEnabled: false,
+			openAiStrictToolSchemas: false,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				maxTokens: 65_536,
+				supportsPromptCache: false,
+				reasoningEffort: "medium" as "low" | "medium" | "high",
+			},
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
 })
 
 describe("getOpenAiModels", () => {
