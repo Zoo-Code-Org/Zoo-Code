@@ -574,7 +574,7 @@ describe("VsCodeLmHandler", () => {
 				},
 				{
 					role: "user",
-					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1500) }],
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1999) }],
 				},
 			]
 
