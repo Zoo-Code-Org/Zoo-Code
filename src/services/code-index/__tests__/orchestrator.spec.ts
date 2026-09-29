@@ -107,6 +107,72 @@ describe("CodeIndexOrchestrator - error path cleanup gating", () => {
 		}
 	})
 
+	it.each([false, true])(
+		"keeps watcher startup and completion after scanning (incremental: %s)",
+		async (incremental) => {
+			const events: string[] = []
+			vectorStore.initialize.mockResolvedValue(false)
+			vectorStore.hasIndexedData.mockResolvedValue(incremental)
+			vectorStore.markIndexingIncomplete.mockImplementation(async () => {
+				events.push("incomplete")
+			})
+			scanner.scanDirectory.mockImplementation(async () => {
+				events.push("scan")
+				return { stats: { processed: 0, skipped: 0 }, totalBlockCount: 0 }
+			})
+			fileWatcher.initialize.mockImplementation(async () => {
+				events.push("watcher")
+			})
+			vectorStore.markIndexingComplete.mockImplementation(async () => {
+				events.push("complete")
+			})
+			const orchestrator = new CodeIndexOrchestrator(
+				configManager,
+				stateManager,
+				workspacePath,
+				cacheManager,
+				vectorStore,
+				scanner,
+				fileWatcher,
+			)
+			await orchestrator.startIndexing()
+			expect(events).toEqual(["incomplete", "scan", "watcher", "complete"])
+			expect(orchestrator.state).toBe("Indexed")
+			expect(cacheManager.clearCacheFile).not.toHaveBeenCalled()
+			expect(vectorStore.clearCollection).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each([false, true])(
+		"keeps returned cancellation cleanup in the owner (incremental: %s)",
+		async (incremental) => {
+			vectorStore.initialize.mockResolvedValue(false)
+			vectorStore.hasIndexedData.mockResolvedValue(incremental)
+			const orchestrator = new CodeIndexOrchestrator(
+				configManager,
+				stateManager,
+				workspacePath,
+				cacheManager,
+				vectorStore,
+				scanner,
+				fileWatcher,
+			)
+			scanner.scanDirectory.mockImplementation(async () => {
+				orchestrator.stopIndexing()
+				return { stats: { processed: 0, skipped: 0 }, totalBlockCount: 0 }
+			})
+			// Preserve the original normal-return path: a failed flush is retried by the catch handler.
+			cacheManager.flush.mockRejectedValueOnce(new Error("flush failed"))
+			await orchestrator.startIndexing()
+			expect(cacheManager.flush).toHaveBeenCalledTimes(2)
+			expect(orchestrator.state).toBe("Standby")
+			expect(fileWatcher.initialize).not.toHaveBeenCalled()
+			expect(vectorStore.markIndexingComplete).not.toHaveBeenCalled()
+			expect(vectorStore.clearCollection).not.toHaveBeenCalled()
+			expect(cacheManager.clearCacheFile).not.toHaveBeenCalled()
+		},
+	)
+
 	it("should not call clearCollection() or clear cache when initialize() fails (indexing not started)", async () => {
 		// Arrange: fail at initialize()
 		vectorStore.initialize.mockRejectedValue(new Error("Qdrant unreachable"))
