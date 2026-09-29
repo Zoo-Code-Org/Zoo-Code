@@ -16,8 +16,7 @@ import { useRooPortal } from "@/components/ui/hooks/useRooPortal"
 import { Popover, PopoverContent, PopoverTrigger, StandardTooltip } from "@/components/ui"
 
 import { IconButton } from "./IconButton"
-
-const SEARCH_THRESHOLD = 6
+import { SEARCH_THRESHOLD } from "./selectorConstants"
 
 interface ModeSelectorProps {
 	value: Mode
