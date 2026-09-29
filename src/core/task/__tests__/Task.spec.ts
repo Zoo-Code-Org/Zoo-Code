@@ -2050,7 +2050,7 @@ describe("Cline", () => {
 			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 		})
 
-		it("waits for a new partial message flush before a following message update", async () => {
+		it("keeps a new partial message on the throttled path without flushing", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2059,11 +2059,6 @@ describe("Cline", () => {
 			})
 			const taskAccess = getTaskTestAccess(task)
 			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
-			let releaseFlush!: () => void
-			const pendingFlush = new Promise<void>((resolve) => {
-				releaseFlush = resolve
-			})
-			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockReturnValueOnce(pendingFlush)
 			const updatePostSpy = vi.mocked(mockProvider.postMessageToWebview)
 			const partialMessage = {
 				ts: 1,
@@ -2072,22 +2067,15 @@ describe("Cline", () => {
 				text: "partial message",
 				partial: true,
 			}
-			let partialAddSettled = false
-			const addThenUpdate = taskAccess.addToClineMessages(partialMessage).then(async () => {
-				partialAddSettled = true
-				await taskAccess.updateClineMessage({ ...partialMessage, text: "updated partial" })
-			})
 
-			await Promise.resolve()
+			await taskAccess.addToClineMessages(partialMessage)
+			await taskAccess.updateClineMessage({ ...partialMessage, text: "updated partial" })
+
+			// Flushing here would cancel the debounce's trailing timer and send the *next*
+			// message straight through the leading edge, collapsing the throttle back to one
+			// full-state post per message.
 			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(flushSpy).toHaveBeenCalledWith()
-			expect(partialAddSettled).toBe(false)
-			expect(updatePostSpy).not.toHaveBeenCalled()
-
-			releaseFlush()
-			await addThenUpdate
-
-			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(updatePostSpy.mock.invocationCallOrder[0])
+			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(updatePostSpy).toHaveBeenCalledWith({
 				type: "messageUpdated",
 				clineMessage: {

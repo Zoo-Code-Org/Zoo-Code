@@ -1016,6 +1016,33 @@ describe("ClineProvider", () => {
 			expect(postStateSpy).toHaveBeenCalledTimes(2)
 		})
 
+		// Characterization test for the semantics that made #1078's throttle a no-op in practice:
+		// flushing right after a leading-edge post has no pending trailing invocation to run, so it
+		// only cancels the trailing timer — and the next call then hits the leading edge again.
+		// Callers on a hot path (see Task#addToClineMessages) must therefore not flush per message.
+		test("flushing after every post defeats coalescing entirely", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			for (let i = 0; i < 5; i++) {
+				await provider.postStateToWebviewThrottled()
+				await provider.flushPostStateToWebviewThrottled()
+				await vi.advanceTimersByTimeAsync(100)
+			}
+
+			// One full-state post per call: no coalescing at all.
+			expect(postStateSpy).toHaveBeenCalledTimes(5)
+
+			// The same burst without the interleaved flush coalesces into far fewer posts.
+			postStateSpy.mockClear()
+			for (let i = 0; i < 5; i++) {
+				await provider.postStateToWebviewThrottled()
+				await vi.advanceTimersByTimeAsync(100)
+			}
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(postStateSpy.mock.calls.length).toBeLessThan(5)
+		})
+
 		test("flushes a pending trailing post exactly once and waits for it", async () => {
 			let releasePost!: () => void
 			const pendingPost = new Promise<void>((resolve) => {
