@@ -109,6 +109,13 @@ const MESSAGE_BASED_PROVIDERS: ProviderName[] = [
 	providerIdentifiers.vscodeLm,
 ]
 
+/**
+ * Message channel for a message-based model list request. Each channel carries
+ * its own in-flight request identity so a reply can only be adopted by the
+ * request that most recently asked for it.
+ */
+type ModelRequestChannel = "openai" | "ollama" | "lmstudio" | "vscodeLm"
+
 export interface ChatModelSelectorData {
 	/** The provider key used to determine model source (undefined for retired providers). */
 	provider: ProviderName | undefined
@@ -159,61 +166,66 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
 	const [vsCodeLmModels, setVsCodeLmModels] = useState<LanguageModelChatSelector[]>([])
 
-	// Identity of the in-flight OpenAI-compatible model request. Responses that
-	// do not match the current request are ignored so a late reply from a
-	// previous provider/profile cannot overwrite the active list.
-	const openAiRequestIdRef = useRef<string | null>(null)
+	// Identity of the in-flight model request per channel. A reply is adopted only by the request
+	// most recently issued for its channel, so a late reply from a previous provider/profile cannot
+	// overwrite the active list. `null` means no request is in flight (nothing may be adopted).
+	const modelRequestIdsRef = useRef<Record<ModelRequestChannel, string | null>>({
+		openai: null,
+		ollama: null,
+		lmstudio: null,
+		vscodeLm: null,
+	})
 
-	// Drop any previously fetched message-based model list when the provider or
-	// API profile changes; the lists are provider/profile scoped and a stale
-	// entry would otherwise leak across the switch.
+	// Drop any previously fetched message-based model list when the provider or API profile
+	// changes; the lists are provider/profile scoped and a stale entry would leak across a switch.
 	useEffect(() => {
 		setOpenAiModels([])
 		setOllamaModels({})
 		setLmStudioModels({})
 		setVsCodeLmModels([])
-		openAiRequestIdRef.current = null
+		modelRequestIdsRef.current = { openai: null, ollama: null, lmstudio: null, vscodeLm: null }
 	}, [activeProvider, currentApiConfigName])
 
 	const onMessage = useCallback((event: MessageEvent) => {
 		const message: ExtensionMessage = event.data
+
+		// Only accept a response belonging to the request most recently issued for its channel.
+		// Replies without an identity come from other callers (e.g. the settings page) and are
+		// accepted; a superseded request id, or one arriving after a provider/profile switch
+		// invalidated the channel, is dropped.
+		const isCurrentRequest = (channel: ModelRequestChannel) =>
+			!message.requestId || message.requestId === modelRequestIdsRef.current[channel]
+
 		switch (message.type) {
 			case "openAiModels":
-				// Only accept a response that belongs to the request we most
-				// recently issued; ignore replies without an identity (other
-				// callers) or from a superseded request.
-				if (message.requestId && message.requestId !== openAiRequestIdRef.current) {
-					break
-				}
-				setOpenAiModels(message.openAiModels ?? [])
+				if (isCurrentRequest("openai")) setOpenAiModels(message.openAiModels ?? [])
 				break
 			case "ollamaModels":
-				setOllamaModels(message.ollamaModels ?? {})
+				if (isCurrentRequest("ollama")) setOllamaModels(message.ollamaModels ?? {})
 				break
 			case "lmStudioModels":
-				setLmStudioModels(message.lmStudioModels ?? {})
+				if (isCurrentRequest("lmstudio")) setLmStudioModels(message.lmStudioModels ?? {})
 				break
 			case "vsCodeLmModels":
-				setVsCodeLmModels(message.vsCodeLmModels ?? [])
+				if (isCurrentRequest("vscodeLm")) setVsCodeLmModels(message.vsCodeLmModels ?? [])
 				break
 		}
 	}, [])
 	useEvent("message", onMessage)
 
-	// Request models on mount when a message-based provider is active
-	// (mirrors Ollama.tsx / LMStudio.tsx / OpenAICompatible.tsx behaviors).
+	// Request models on mount when a message-based provider is active (mirrors the settings page).
 	useEffect(() => {
 		if (!activeProvider || !MESSAGE_BASED_PROVIDERS.includes(activeProvider)) {
 			return
 		}
 
+		// Tag each request with an identity token so the matching reply can be identified.
+		const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
 		switch (activeProvider) {
 			case providerIdentifiers.openai:
 				if (apiConfiguration?.openAiBaseUrl && apiConfiguration?.openAiApiKey) {
-					// Tag the request so the matching response can be identified
-					// and stale replies discarded (see `onMessage`).
-					const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-					openAiRequestIdRef.current = requestId
+					modelRequestIdsRef.current.openai = requestId
 					vscode.postMessage({
 						type: "requestOpenAiModels",
 						requestId,
@@ -227,19 +239,28 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 				}
 				break
 			case providerIdentifiers.ollama:
-				vscode.postMessage({ type: "requestOllamaModels" })
+				modelRequestIdsRef.current.ollama = requestId
+				vscode.postMessage({ type: "requestOllamaModels", requestId })
 				break
 			case providerIdentifiers.lmstudio:
-				vscode.postMessage({ type: "requestLmStudioModels" })
+				modelRequestIdsRef.current.lmstudio = requestId
+				vscode.postMessage({ type: "requestLmStudioModels", requestId })
 				break
 			case providerIdentifiers.vscodeLm:
-				vscode.postMessage({ type: "requestVsCodeLmModels" })
+				modelRequestIdsRef.current.vscodeLm = requestId
+				vscode.postMessage({ type: "requestVsCodeLmModels", requestId })
 				break
+		}
+
+		// Cancel the in-flight request when the provider/profile changes again or the hook unmounts:
+		// dropping the identity makes any reply still in flight fail the `isCurrentRequest` check
+		// instead of overwriting the newly requested list.
+		return () => {
+			modelRequestIdsRef.current = { openai: null, ollama: null, lmstudio: null, vscodeLm: null }
 		}
 	}, [
 		activeProvider,
-		// Re-request after a provider/profile switch so the list matches the
-		// newly active profile (the reset effect clears the previous list).
+		// Re-request after a provider/profile switch (the reset effect clears the previous list).
 		currentApiConfigName,
 		apiConfiguration?.openAiBaseUrl,
 		apiConfiguration?.openAiApiKey,
@@ -247,7 +268,7 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 	])
 
 	// Map provider -> config field key + model list + default id.
-	const result = useMemo<ChatModelSelectorData>(() => {
+	return useMemo<ChatModelSelectorData>(() => {
 		if (!activeProvider) {
 			return {
 				provider: undefined,
@@ -283,8 +304,7 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 				modelIdKey = "unboundModelId"
 				break
 			case providerIdentifiers.litellm:
-				// The settings page reads litellm models from the backend
-				// broadcast cache (stateRouterModels), not from react-query.
+				// The settings page reads litellm from the backend broadcast cache (stateRouterModels).
 				models = stateRouterModels?.litellm ?? null
 				modelIdKey = "litellmModelId"
 				break
@@ -319,8 +339,7 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 				modelIdKey = "apiModelId"
 				break
 			case providerIdentifiers.openai:
-				// OpenAI Compatible: the list is fetched from the baseUrl via
-				// `requestOpenAiModels` and delivered through `openAiModels`.
+				// OpenAI Compatible: fetched from the baseUrl via `requestOpenAiModels` → `openAiModels`.
 				models =
 					Object.keys(openAiModels).length > 0
 						? Object.fromEntries(openAiModels.map((item) => [item, openAiModelInfoSaneDefaults]))
@@ -336,18 +355,16 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 				modelIdKey = "lmStudioModelId"
 				break
 			case providerIdentifiers.vscodeLm:
-				models = vsCodeLmModels.reduce(
-					(acc, model) => {
-						const modelId = `${model.vendor}/${model.family}`
-						acc[modelId] = {
+				models = Object.fromEntries(
+					vsCodeLmModels.map((model) => [
+						`${model.vendor}/${model.family}`,
+						{
 							maxTokens: 0,
 							contextWindow: 0,
 							supportsPromptCache: false,
 							description: `${model.vendor} - ${model.family}`,
-						}
-						return acc
-					},
-					{} as Record<string, ModelInfo>,
+						},
+					]),
 				)
 				modelIdKey = "vsCodeLmModelSelector"
 				valueTransform = (modelId) => {
@@ -355,15 +372,13 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 					return { vendor, family }
 				}
 				displayTransform = (value) => {
-					if (!value) return ""
-					const selector = value as { vendor?: string; family?: string }
-					return selector.vendor && selector.family ? `${selector.vendor}/${selector.family}` : ""
+					const selector = value as { vendor?: string; family?: string } | undefined
+					return selector?.vendor && selector?.family ? `${selector.vendor}/${selector.family}` : ""
 				}
 				break
 			default:
-				// Static models providers (anthropic, bedrock, gemini, etc.).
-				// Pass the configuration so Z.ai resolves models for the same
-				// API line (China vs international) as `defaultModelId`.
+				// Static providers (anthropic, bedrock, gemini, …); pass the configuration so Z.ai
+				// resolves models for the same API line (China vs international) as `defaultModelId`.
 				models = MODELS_BY_PROVIDER[activeProvider]
 					? getStaticModelsForProvider(activeProvider, undefined, apiConfiguration)
 					: null
@@ -396,6 +411,4 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 		lmStudioModels,
 		vsCodeLmModels,
 	])
-
-	return result
 }

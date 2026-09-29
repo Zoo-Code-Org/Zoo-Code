@@ -24,7 +24,6 @@ import {
 	getCompletionCheckpoint,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
-	ORGANIZATION_ALLOW_ALL,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -58,7 +57,6 @@ import {
 	handleOpenRuleFile,
 	handleOpenRulesDirectory,
 } from "./rulesMessageHandler"
-import { ProfileValidator } from "../../shared/ProfileValidator"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -1382,6 +1380,11 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case OllamaModelsMessageType.requestOllamaModels: {
+			// Echo the caller's request id so the webview can correlate the
+			// response with the request it issued and drop stale replies that
+			// arrive after a provider/profile switch.
+			const requestId = message.requestId
+
 			// Specific handler for Ollama models only.
 			const { apiConfiguration: ollamaApiConfig } = await provider.getState()
 			// Prefer the baseUrl/apiKey from the message values (which reflect
@@ -1408,6 +1411,7 @@ export const webviewMessageHandler = async (
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
 					error: errorMsg,
+					requestId,
 				})
 				break
 			}
@@ -1417,7 +1421,11 @@ export const webviewMessageHandler = async (
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
-				await provider.postMessageToWebview({ type: OllamaModelsMessageType.ollamaModels, ollamaModels })
+				await provider.postMessageToWebview({
+					type: OllamaModelsMessageType.ollamaModels,
+					ollamaModels,
+					requestId,
+				})
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
@@ -1425,11 +1433,15 @@ export const webviewMessageHandler = async (
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
 					error: errorMsg,
+					requestId,
 				})
 			}
 			break
 		}
 		case LmStudioModelsMessageType.requestLmStudioModels: {
+			// Echo the caller's request id (see `requestOllamaModels` above).
+			const requestId = message.requestId
+
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
 			try {
@@ -1452,6 +1464,7 @@ export const webviewMessageHandler = async (
 					await provider.postMessageToWebview({
 						type: LmStudioModelsMessageType.lmStudioModels,
 						lmStudioModels: lmStudioModels,
+						requestId,
 					})
 				}
 			} catch (error) {
@@ -1491,7 +1504,12 @@ export const webviewMessageHandler = async (
 		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
 			const vsCodeLmModels = await getVsCodeLmModels()
 			// TODO: Cache like we do for OpenRouter, etc?
-			await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+			// Echo the caller's request id so stale replies can be discarded.
+			await provider.postMessageToWebview({
+				type: VsCodeLmModelsMessageType.vsCodeLmModels,
+				vsCodeLmModels,
+				requestId: message.requestId,
+			})
 			break
 		case "openImage":
 			await openImage(message.text!, { values: message.values })
@@ -2289,25 +2307,13 @@ export const webviewMessageHandler = async (
 			break
 		case "upsertApiConfiguration":
 			if (message.text && message.apiConfiguration) {
-				const { organizationAllowList } = await provider.getState()
-
-				// The webview is not a trusted boundary: re-validate the
-				// organization model allow-list before persisting and
-				// activating, so a forged custom model id cannot bypass the
-				// selector's UI gating.
-				if (
-					!ProfileValidator.isProfileAllowed(
-						message.apiConfiguration,
-						organizationAllowList ?? ORGANIZATION_ALLOW_ALL,
-					)
-				) {
-					provider.log(
-						`Blocked upsertApiConfiguration "${message.text}": model is not allowed by the organization allow-list`,
-					)
-					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
-					break
-				}
-
+				// Allow-list enforcement lives solely in
+				// `ClineProvider.upsertProviderProfile`: it is not a trusted
+				// boundary either way (the webview can forge a model id), and
+				// keeping a single enforcement point means direct callers
+				// (OAuth callbacks, sign-out) get the same user notification
+				// instead of failing silently. Validating here as well would
+				// duplicate the work (including an extra `getState()`).
 				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
 			}
 			break
@@ -3017,7 +3023,25 @@ export const webviewMessageHandler = async (
 							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
 
 							if (isThisProfileActive) {
-								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
+								// `bypassAllowList`: clearing a Zoo Gateway session token is an
+								// internal auth write, not a model selection. `ProfileValidator`
+								// cannot map zoo-gateway to a model id, so a restrictive
+								// allow-list would otherwise reject the cleanup and leave the
+								// stale token in the active handler.
+								const writeResult = await provider.upsertProviderProfile(
+									entry.name,
+									cleanedProfile,
+									true,
+									{ bypassAllowList: true },
+								)
+
+								// The write can still fail for other reasons (disk error,
+								// disabled profile enforcement). Never report a successful
+								// token cleanup in that case: surface it instead.
+								if (writeResult === undefined) {
+									throw new Error(t("common:errors.violated_organization_allowlist"))
+								}
+
 								provider.log(
 									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
 								)

@@ -185,6 +185,24 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/**
+ * Internal options for {@link ClineProvider.upsertProviderProfile}.
+ */
+type UpsertProviderProfileOptions = {
+	/**
+	 * Internal-only bypass of the organization model allow-list, used exclusively
+	 * for Zoo Gateway credential synchronization (token refresh) and sign-out
+	 * writes. `ProfileValidator` cannot map `zoo-gateway` to a model id, so a
+	 * restrictive allow-list would otherwise reject those writes and leave stale
+	 * credentials behind in the active profile.
+	 *
+	 * This flag must never be set from a webview-originated code path: the webview
+	 * is not a trusted boundary, so every user-driven profile write keeps the
+	 * allow-list enforcement.
+	 */
+	bypassAllowList?: boolean
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -1835,31 +1853,42 @@ export class ClineProvider
 		name: string,
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
+		options: UpsertProviderProfileOptions = {},
 	): Promise<string | undefined> {
 		// Enforce the organization model allow-list before persisting or
 		// activating a profile. The webview is not a trusted boundary, so the
 		// model selector's client-side gating cannot be the only check.
 		// Task creation validates too, but rejecting here prevents an
 		// unauthorized profile from being written or activated at all.
-		let organizationAllowList = ORGANIZATION_ALLOW_ALL
+		//
+		// `bypassAllowList` is reserved for internal Zoo Gateway credential
+		// writes (token refresh / sign-out); see `UpsertProviderProfileOptions`.
+		if (!options.bypassAllowList) {
+			let organizationAllowList = ORGANIZATION_ALLOW_ALL
 
-		try {
-			organizationAllowList = await CloudService.instance.getAllowList()
-		} catch (error) {
-			// No cloud instance / not authenticated: fall back to allow-all,
-			// matching `getState` and task-creation semantics.
-			this.log(
-				`[upsertProviderProfile] organization allow-list unavailable, using allow-all: ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			)
-		}
+			try {
+				organizationAllowList = await CloudService.instance.getAllowList()
+			} catch (error) {
+				// No cloud instance / not authenticated: fall back to allow-all,
+				// matching `getState` and task-creation semantics.
+				this.log(
+					`[upsertProviderProfile] organization allow-list unavailable, using allow-all: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
 
-		if (!ProfileValidator.isProfileAllowed(providerSettings, organizationAllowList)) {
-			this.log(
-				`[upsertProviderProfile] Blocked profile "${name}": model is not allowed by the organization allow-list`,
-			)
-			return undefined
+			if (!ProfileValidator.isProfileAllowed(providerSettings, organizationAllowList)) {
+				this.log(
+					`[upsertProviderProfile] Blocked profile "${name}": model is not allowed by the organization allow-list`,
+				)
+				// Surface the rejection to the user here rather than in the webview
+				// handler: direct callers (OAuth callbacks, sign-out) reach this
+				// method without the handler and would otherwise fail silently. No
+				// webview context is required, so non-webview callers are safe.
+				void vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+				return undefined
+			}
 		}
 
 		try {
@@ -2150,7 +2179,13 @@ export class ClineProvider
 				}
 				// Activate only if zoo-gateway was the active provider (shouldn't happen if
 				// no profiles exist, but defensive).
-				await this.upsertProviderProfile("Zoo Gateway", newConfiguration, isZooGatewayActive)
+				//
+				// `bypassAllowList`: internal auth credential write. `ProfileValidator`
+				// cannot map zoo-gateway to a model id, so a restrictive organization
+				// allow-list would reject this write and leave no credentials persisted.
+				await this.upsertProviderProfile("Zoo Gateway", newConfiguration, isZooGatewayActive, {
+					bypassAllowList: true,
+				})
 			} else {
 				// Update every existing zoo-gateway profile with the new token and the
 				// derived base URL so that environment-specific routing stays consistent.
@@ -2165,7 +2200,8 @@ export class ClineProvider
 					if (isActiveProfile) {
 						// Use upsertProviderProfile with activate: true so the in-memory handler
 						// picks up the new token immediately for the current task.
-						await this.upsertProviderProfile(entry.name, updated, true)
+						// `bypassAllowList`: internal auth credential write (see above).
+						await this.upsertProviderProfile(entry.name, updated, true, { bypassAllowList: true })
 					} else {
 						// Non-active profiles just need the token saved to disk.
 						await this.providerSettingsManager.saveConfig(entry.name, updated)
