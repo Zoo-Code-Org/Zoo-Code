@@ -28,21 +28,17 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 	const portalContainer = useRooPortal("roo-portal")
 
 	// Filter deprecated models but always keep the currently selected one visible.
-	const modelIds = useMemo(() => {
-		const filteredModels = filterModels(models, provider, organizationAllowList)
-		const available = Object.entries(filteredModels ?? {})
-			.filter(([modelId, modelInfo]) => {
-				if (modelId === selectedModelId) return true
-				return !modelInfo.deprecated
-			})
-			.map(([modelId]) => modelId)
-			.sort((a, b) => a.localeCompare(b))
-		return available
-	}, [models, provider, organizationAllowList, selectedModelId])
+	const modelIds = useMemo(
+		() =>
+			Object.entries(filterModels(models, provider, organizationAllowList) ?? {})
+				.filter(([modelId, modelInfo]) => modelId === selectedModelId || !modelInfo.deprecated)
+				.map(([modelId]) => modelId)
+				.sort((a, b) => a.localeCompare(b)),
+		[models, provider, organizationAllowList, selectedModelId],
+	)
 
-	// Gate arbitrary model ids against the organization allow-list. The webview
-	// is not a security boundary, but this keeps the UI from offering a custom
-	// model that the extension host would reject on save.
+	// Gate arbitrary model ids against the organization allow-list. The webview is not a security
+	// boundary, but this keeps the UI from offering a custom model the host would reject on save.
 	const isModelAllowed = useCallback(
 		(modelId: string): boolean => {
 			if (!organizationAllowList || organizationAllowList.allowAll) {
@@ -63,12 +59,8 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 		[organizationAllowList, provider],
 	)
 
-	// Only offer a custom (non-listed) model when the allow-list permits that
-	// exact model id for the active provider.
-	const customModelAllowed = useMemo(
-		() => (searchValue ? isModelAllowed(searchValue) : false),
-		[searchValue, isModelAllowed],
-	)
+	// Only offer a custom (non-listed) model when the allow-list permits that exact model id.
+	const customModelAllowed = !!searchValue && isModelAllowed(searchValue)
 
 	// Resolve the display value (custom transform for compound config values like VSCode LM).
 	const displayValue = useMemo(() => {
@@ -76,9 +68,7 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 			const storedValue = apiConfiguration?.[modelIdKey]
 			return storedValue ? displayTransform(storedValue) : undefined
 		}
-		// Only reflect the saved model in the trigger label (and the row
-		// highlight); fall back to undefined so the default/placeholder shows
-		// instead of the in-progress search text.
+		// Only the saved model is reflected; fall back to undefined so the placeholder shows.
 		return selectedModelId || undefined
 	}, [displayTransform, modelIdKey, apiConfiguration, selectedModelId])
 
@@ -90,40 +80,26 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 
 	const onSelect = useCallback(
 		(modelId: string) => {
-			if (!modelId || !modelIdKey || !apiConfiguration) {
-				return
-			}
-
-			// Defense in depth: never persist a model the allow-list forbids,
-			// even if a caller bypasses the rendered list (e.g. custom search).
-			if (!isModelAllowed(modelId)) {
-				return
-			}
+			// Defense in depth: never persist a model the allow-list forbids, even if a caller
+			// bypasses the rendered list (e.g. custom search); also require the lookup to be ready.
+			if (!modelId || !modelIdKey || !apiConfiguration || !isModelAllowed(modelId)) return
 
 			setOpen(false)
 			setSearchValue("")
-
 			// Transform the model id for storage if needed (e.g. VSCode LM selector object).
 			const valueToStore = valueTransform ? valueTransform(modelId) : modelId
-
-			// Persist the change to the current API configuration profile. The
-			// backend will save the profile, activate it and broadcast the
-			// updated apiConfiguration back to the webview.
+			// Persist to the current API configuration profile; the backend saves and activates
+			// it and broadcasts the updated apiConfiguration back to the webview.
 			vscode.postMessage({
 				type: "upsertApiConfiguration",
 				text: currentApiConfigName,
-				apiConfiguration: {
-					...apiConfiguration,
-					[modelIdKey]: valueToStore,
-				},
+				apiConfiguration: { ...apiConfiguration, [modelIdKey]: valueToStore },
 			})
 		},
 		[modelIdKey, apiConfiguration, valueTransform, currentApiConfigName, isModelAllowed],
 	)
 
-	const onClearSearch = useCallback(() => {
-		setSearchValue("")
-	}, [])
+	const onClearSearch = useCallback(() => setSearchValue(""), [])
 
 	return (
 		<Popover open={open} onOpenChange={setOpen} data-testid="chat-model-selector-root">
