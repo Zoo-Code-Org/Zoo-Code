@@ -16,6 +16,33 @@ import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./ta
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 export { DeltaRejectedError } from "./taskStoreConcurrency"
 
+/** True when an fs error reports that the target path does not exist. */
+function isEnoentError(error: unknown): boolean {
+	return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "ENOENT"
+}
+
+/**
+ * Reported by `deleteMany` when one or more history files could not be
+ * deleted. Items deleted before the failure stay deleted; the failed item
+ * and every unattempted item keep their cache entries. `cause` holds the
+ * first original deletion error.
+ */
+export class TaskHistoryPartialDeleteError extends Error {
+	public readonly failures: ReadonlyArray<{ readonly taskId: string; readonly reason: unknown }>
+
+	constructor(failures: ReadonlyArray<{ taskId: string; reason: unknown }>) {
+		const firstReason = failures[0]?.reason
+		const firstMessage =
+			firstReason instanceof Error ? firstReason.message : String(firstReason ?? "unknown deletion error")
+		super(
+			`Failed to delete ${failures.length} task history item${failures.length === 1 ? "" : "s"}: ${firstMessage}`,
+			{ cause: firstReason },
+		)
+		this.name = "TaskHistoryPartialDeleteError"
+		this.failures = failures
+	}
+}
+
 /**
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
  * current disk state, preserving fields written by another process.
@@ -264,32 +291,19 @@ export class TaskHistoryStore {
 
 	/**
 	 * Delete a single task's history item.
+	 *
+	 * The deletion fails closed: a lock acquisition failure or a non-ENOENT
+	 * unlink failure propagates to the caller and keeps the cache entry, so
+	 * the history item stays readable. Only a verified deletion (a locked
+	 * unlink success or a confirmed ENOENT) evicts in-memory state and runs
+	 * the `onWrite` write-through.
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
+			await this.removeHistoryFile(taskId)
+
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
-
-			// Remove per-task file (best-effort). The unlink runs under the
-			// same per-file advisory lock that `safeWriteJson` holds, so a
-			// deletion cannot interleave with another host's locked
-			// read-modify-write (for example the settlement in
-			// `clearPendingActionIfMatching`). Lock ordering stays store
-			// lock first, then one per-file lock, matching the write path.
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, async (absoluteFilePath) => {
-					try {
-						await fs.unlink(absoluteFilePath)
-					} catch {
-						// File may already be deleted
-					}
-				})
-			} catch {
-				// A missing task directory also proves the history file is
-				// absent, so remaining failures keep the base best-effort
-				// deletion semantics.
-			}
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -300,36 +314,94 @@ export class TaskHistoryStore {
 
 	/**
 	 * Delete multiple tasks' history items in a batch.
+	 *
+	 * The batch stops at the first item whose deletion fails. Items deleted
+	 * before the failure stay deleted and are written through; the failed
+	 * item and every unattempted item keep their cache entries. The original
+	 * deletion error is reported through `TaskHistoryPartialDeleteError`. A
+	 * write-through failure on the partial-failure path is logged and never
+	 * replaces the original deletion error; a write-through failure on a
+	 * fully successful batch propagates.
 	 */
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
+			const failures: Array<{ taskId: string; reason: unknown }> = []
+			let deletedCount = 0
+
 			for (const taskId of taskIds) {
+				try {
+					await this.removeHistoryFile(taskId)
+				} catch (reason) {
+					failures.push({ taskId, reason })
+					break
+				}
+
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
+				deletedCount++
+			}
 
-				// Serialize each unlink with `safeWriteJson` under the same
-				// per-file advisory lock. See `delete` for the lock order.
+			// Write through the deletions that completed, so persisted state
+			// matches the cache even when the batch fails partway.
+			if (deletedCount > 0 && this.onWrite) {
 				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, async (absoluteFilePath) => {
-						try {
-							await fs.unlink(absoluteFilePath)
-						} catch {
-							// File may already be deleted
-						}
-					})
-				} catch {
-					// A missing task directory also proves the history file
-					// is absent, so remaining failures keep the base
-					// best-effort deletion semantics.
+					await this.onWrite(this.getAll())
+				} catch (writeError) {
+					if (failures.length === 0) {
+						throw writeError
+					}
+					// The original deletion failure stays the reported error.
+					console.error("[TaskHistoryStore] Write-through after partial deleteMany failed:", writeError)
 				}
 			}
 
-			// Call onWrite callback inside the lock for serialized write-through
-			if (this.onWrite) {
-				await this.onWrite(this.getAll())
+			if (failures.length > 0) {
+				throw new TaskHistoryPartialDeleteError(failures)
 			}
 		})
+	}
+
+	/**
+	 * Remove one history file under the same per-file advisory lock that
+	 * `safeWriteJson` holds, so a deletion cannot interleave with another
+	 * host's locked read-modify-write (for example the settlement in
+	 * `clearPendingActionIfMatching`). Lock ordering stays store lock first,
+	 * then one per-file lock, matching the write path.
+	 *
+	 * A locked unlink success or a confirmed ENOENT completes the deletion.
+	 * Any other failure leaves the disk outcome unknown, so the file itself
+	 * decides: an absent file is a completed deletion, a present file fails
+	 * the deletion and its error propagates.
+	 */
+	private async removeHistoryFile(taskId: string): Promise<void> {
+		const filePath = await this.getTaskFilePath(taskId)
+		try {
+			await withFileLock(filePath, async (absoluteFilePath) => {
+				try {
+					await fs.unlink(absoluteFilePath)
+				} catch (error) {
+					if (!isEnoentError(error)) {
+						throw error
+					}
+				}
+			})
+		} catch (error) {
+			// Verify the disk state before deciding the semantics. A missing
+			// task directory also proves the history file is absent.
+			if (!(await this.isFileAbsent(filePath))) {
+				throw error
+			}
+		}
+	}
+
+	/** True when the path does not exist. Other stat errors stay errors. */
+	private async isFileAbsent(filePath: string): Promise<boolean> {
+		try {
+			await fs.stat(filePath)
+			return false
+		} catch (error) {
+			return isEnoentError(error)
+		}
 	}
 
 	// ────────────────────────────── Reconciliation ──────────────────────────────

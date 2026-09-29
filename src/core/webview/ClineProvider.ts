@@ -2412,7 +2412,10 @@ export class ClineProvider
 				}
 			}
 
-			// Delete all tasks from state in one batch
+			// Delete all tasks from state in one batch. A failed history
+			// deletion fails closed: the error leaves this method before any
+			// checkpoint or task directory removal below, so a directory is
+			// never removed while its history file could still exist.
 			await this.taskHistoryStore.deleteMany(allIdsToDelete)
 			this.recentTasksCache = undefined
 
