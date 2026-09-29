@@ -1,5 +1,45 @@
 # Zoo Code Changelog
 
+## [3.84.0]
+
+- ✨ **New SOTA models added:** Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.
+- 🧭 **More reliable tasks and subtasks:** Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.
+- 🛠️ **More dependable terminal, provider, and code-search behavior:** Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.
+
+### Minor Changes
+
+- Add GPT-6 Sol and GPT-6 Luna to OpenAI model catalogs (PR #1755 by @app/zoomote)
+- Add Claude Opus 5.5 across supported model providers (PR #1756 by @app/zoomote)
+- Correct the Vertex Claude Opus 5.5 maximum output limit to 128K tokens (PR #1777 by @wrsfmss)
+- Report Amazon Bedrock output truncation and expose model token limits (#1668 by @LouisClt, PR #1718 by @PierrunoYT)
+- Sanitize lone UTF-16 surrogates in VS Code LM text and tool input (PR #1605 by @simurg79)
+- Clear stale native tool-call arguments when finalization fails (#1221 by @canblmz1, PR #1634 by @canblmz1)
+- Preserve concurrent MCP settings when the settings file is first created (#1371 by @pajitosingh, PR #1380 by @easonLiangWorldedtech)
+- Use the canonical default model for the native OpenAI provider (#992 by @WebMad, PR #1627 by @JunyongParkDev)
+- Propagate caller cancellation into dynamic model-catalog fetches (#1615 by @DaubnerF, PR #1683 by @DaubnerF)
+- Inherit the host UTF-8 locale in terminals instead of forcing `en_US.UTF-8` (#1084 by @scottdk, PR #1713 by @hebulin)
+- Prevent Inline Terminal from falling back to `cmd.exe` incorrectly on Windows (#705 by @myk1yt, PR #1673 by @xcloudx01)
+- Report the shell that actually runs commands under Inline Terminal (#1568 by @DaubnerF, PR #1682 by @DaubnerF)
+- Search the task workspace instead of the active editor workspace in codebase search (PR #1629 by @WebMad)
+- Initialize external code-index task managers before search begins (#1722 by @WebMad, PR #1725 by @WebMad)
+- Align codebase-search readiness checks across mode filters (PR #1630 by @WebMad)
+- Keep delegated child modes isolated from their parent task (#1632 by @robert-shade, PR #1637 by @PierrunoYT)
+- Prevent slash-command mode frontmatter from overwriting the orchestrator task mode (#1776 by @edelauna, PR #1784 by @edelauna)
+- Preserve parent and child task links after repeated Stop actions (#1676 by @jaszhix, PR #1678 by @jaszhix)
+- Stop task-history updates from writing the entire history to global state (#1542 by @edelauna, PR #1664 by @PierrunoYT)
+- Add a guarded VS Code LM tool-call recovery parser and normalized schema conversion (PR #1188 by @simurg79)
+- Stabilize restart conversation-history E2E coverage with polling (#1641 by @DaubnerF, PR #1663 by @PierrunoYT)
+- Update Vitest to 4.1.11 for security fixes (PR #1582 by @app/renovate)
+- Reduce Windows CI cold-start time (PR #1654 by @app/zoomote)
+- Mask the context-token counter in Electron sidebar snapshots (#1679 by @edelauna, PR #1680 by @edelauna)
+- Add scope-boundary guidance to CodeRabbit global path instructions (PR #1757 by @app/zoomote)
+- Allow non-organization members to interact with CodeRabbit chat (PR #1775 by @app/zoomote)
+- Isolate workflow configuration tests from the Turbo cache (#1722 by @WebMad, PR #1782 by @edelauna)
+- Add the task-lifecycle verification gap report and remediation blocks (PR #1626 by @app/zoomote)
+- Add the stable release documentation PR step to the release workflow (PR #1786 by @taltas)
+- Update the weekly release-reminder rotation (#1698 by @app/zoomote, PR #1700 by @app/zoomote)
+- Merge the v3.82.2 release preparation state into `main` (PR #1677 by @edelauna)
+
 ## [3.82.2]
 
 ### Patch Changes

@@ -64,6 +64,7 @@ import { CloudService } from "@roo-code/cloud"
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
+import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
 import { findLastIndex } from "../../shared/array"
@@ -3138,7 +3139,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const state = await provider.getState()
 					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
 					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode)
+						await provider.handleModeSwitch(slashCommandMode, null)
 					}
 				}
 			}
@@ -3282,6 +3283,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.didFinishAbortingStream = false
 				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
@@ -3761,9 +3763,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// User cancelled - abort the entire task
-							this.abortReason = cancelReason
+							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
+							this.abortReason ??= "user_cancelled"
 							await this.abortTask()
+						} else if (error instanceof OutputTokenLimitError) {
+							// Truncation repeats on an identical request, so never auto-retry it
+							// (even with auto-approval); let the user decide once.
+							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+
+							if (response !== "yesButtonClicked") {
+								throw new Error("API request failed")
+							}
+
+							await this.say("api_req_retried")
+							stack.push({
+								userContent: currentUserContent,
+								includeFileDetails: false,
+								retryAttempt: 0,
+							})
+							continue
 						} else {
 							// Stream failed - log the error and retry with the same content
 							// The existing rate limiting will prevent rapid retries
@@ -3781,8 +3799,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
+									this.abortReason ??= "user_cancelled"
 									await this.abortTask()
 									break
 								}
@@ -3856,12 +3873,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 							this.presentAssistantMessageSafe()
 						} else if (toolUseIndex !== undefined) {
-							// finalizeStreamingToolCall returned null (malformed JSON or missing args)
-							// We still need to mark the tool as non-partial so it gets executed
-							// The tool's validation will catch any missing required parameters
+							// finalizeStreamingToolCall returned null (malformed JSON or missing args).
+							// existingToolUse is the same object the streaming phase was mutating in
+							// place, so it still carries nativeArgs AND params built from the incomplete
+							// partial parse (e.g. a truncated write_to_file `content` string) - both were
+							// only ever meant for live progress display, never for execution or for
+							// ending up in conversation history. Mark the tool as non-partial so it's
+							// presented as complete, and clear both so presentAssistantMessage's
+							// `!block.nativeArgs` guard short-circuits with a structured tool_result
+							// instead of executing the truncated value, and so the toolUse.nativeArgs ||
+							// toolUse.params fallback used when recording history doesn't fall through to
+							// the same truncated data under a different name.
 							const existingToolUse = this.assistantMessageContent[toolUseIndex]
 							if (existingToolUse && existingToolUse.type === "tool_use") {
 								existingToolUse.partial = false
+								existingToolUse.nativeArgs = undefined
+								existingToolUse.params = {}
 								// Ensure it has the ID for native protocol
 								;(existingToolUse as any).id = event.id
 							}
