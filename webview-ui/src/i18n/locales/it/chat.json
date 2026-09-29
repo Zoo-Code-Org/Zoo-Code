@@ -499,5 +499,5 @@
 	"searchModel": "Cerca modelli...",
 	"modelListEmpty": "Nessun modello disponibile per questo provider",
 	"useCustomModel": "Usa modello personalizzato: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Seleziona un modello"
 }

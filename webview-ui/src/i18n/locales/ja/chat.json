@@ -499,5 +499,5 @@
 	"searchModel": "モデルを検索...",
 	"modelListEmpty": "このプロバイダーで利用可能なモデルはありません",
 	"useCustomModel": "カスタムモデルを使用: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "モデルを選択"
 }

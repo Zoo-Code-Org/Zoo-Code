@@ -490,5 +490,5 @@
 	"searchModel": "搜尋模型...",
 	"modelListEmpty": "此提供者沒有可用的模型",
 	"useCustomModel": "使用自訂模型：{{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "選擇模型"
 }

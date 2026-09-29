@@ -500,5 +500,5 @@
 	"searchModel": "搜索模型...",
 	"modelListEmpty": "此提供商没有可用的模型",
 	"useCustomModel": "使用自定义模型：{{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "选择模型"
 }

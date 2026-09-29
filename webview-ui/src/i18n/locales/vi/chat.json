@@ -500,5 +500,5 @@
 	"searchModel": "Tìm kiếm mô hình...",
 	"modelListEmpty": "Không có mô hình nào khả dụng cho nhà cung cấp này",
 	"useCustomModel": "Sử dụng mô hình tùy chỉnh: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Chọn một mô hình"
 }

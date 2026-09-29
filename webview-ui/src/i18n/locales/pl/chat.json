@@ -499,5 +499,5 @@
 	"searchModel": "Szukaj modeli...",
 	"modelListEmpty": "Brak dostępnych modeli dla tego dostawcy",
 	"useCustomModel": "Użyj niestandardowego modelu: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Wybierz model"
 }

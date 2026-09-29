@@ -505,5 +505,5 @@
 	"searchModel": "Cari model...",
 	"modelListEmpty": "Tidak ada model yang tersedia untuk penyedia ini",
 	"useCustomModel": "Gunakan model kustom: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Pilih model"
 }

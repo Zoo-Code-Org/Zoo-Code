@@ -499,5 +499,5 @@
 	"searchModel": "Modellen zoeken...",
 	"modelListEmpty": "Geen modellen beschikbaar voor deze provider",
 	"useCustomModel": "Aangepast model gebruiken: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Selecteer een model"
 }

@@ -499,5 +499,5 @@
 	"searchModel": "मॉडल खोजें...",
 	"modelListEmpty": "इस प्रदाता के लिए कोई मॉडल उपलब्ध नहीं है",
 	"useCustomModel": "कस्टम मॉडल का उपयोग करें: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "एक मॉडल चुनें"
 }

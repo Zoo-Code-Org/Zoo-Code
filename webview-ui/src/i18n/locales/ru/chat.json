@@ -500,5 +500,5 @@
 	"searchModel": "Поиск моделей...",
 	"modelListEmpty": "Нет доступных моделей для этого провайдера",
 	"useCustomModel": "Использовать пользовательскую модель: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Выберите модель"
 }

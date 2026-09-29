@@ -499,5 +499,5 @@
 	"searchModel": "Cerca models...",
 	"modelListEmpty": "Aquest proveïdor no té models disponibles",
 	"useCustomModel": "Utilitza el model personalitzat: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Selecciona un model"
 }

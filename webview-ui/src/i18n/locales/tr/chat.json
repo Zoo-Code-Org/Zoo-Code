@@ -500,5 +500,5 @@
 	"searchModel": "Modelleri ara...",
 	"modelListEmpty": "Bu sağlayıcı için kullanılabilir model yok",
 	"useCustomModel": "Özel model kullan: {{modelId}}",
-	"selectModel": "Select a model"
+	"selectModel": "Bir model seçin"
 }
