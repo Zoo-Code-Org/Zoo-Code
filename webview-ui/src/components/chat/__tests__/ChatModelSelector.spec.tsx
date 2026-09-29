@@ -322,7 +322,7 @@ describe("ChatModelSelector", () => {
 			mockUseExtensionState.mockReturnValue({
 				apiConfiguration: {
 					apiProvider: providerIdentifiers.anthropic,
-					apiModelId: "claude-opus-4-20250514",
+					apiModelId: "test-model-not-real",
 				},
 				organizationAllowList: {
 					allowAll: false,
@@ -346,7 +346,7 @@ describe("ChatModelSelector", () => {
 			mockUseExtensionState.mockReturnValue({
 				apiConfiguration: {
 					apiProvider: providerIdentifiers.anthropic,
-					apiModelId: "claude-opus-4-20250514",
+					apiModelId: "test-model-not-real",
 				},
 				organizationAllowList: { allowAll: false, providers: {} },
 				currentApiConfigName: "default",
@@ -362,7 +362,7 @@ describe("ChatModelSelector", () => {
 			mockUseExtensionState.mockReturnValue({
 				apiConfiguration: {
 					apiProvider: providerIdentifiers.anthropic,
-					apiModelId: "claude-opus-4-20250514",
+					apiModelId: "test-model-not-real",
 				},
 				organizationAllowList: {
 					allowAll: false,
@@ -389,7 +389,7 @@ describe("ChatModelSelector", () => {
 			mockUseExtensionState.mockReturnValue({
 				apiConfiguration: {
 					apiProvider: providerIdentifiers.anthropic,
-					apiModelId: "claude-opus-4-20250514",
+					apiModelId: "test-model-not-real",
 				},
 				organizationAllowList: {
 					allowAll: false,

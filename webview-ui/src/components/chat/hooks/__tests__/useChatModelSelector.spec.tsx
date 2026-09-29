@@ -383,6 +383,91 @@ describe("useChatModelSelector", () => {
 			expect(result.current.modelIdKey).toBe("openAiModelId")
 		})
 
+		it("adopts a response whose requestId matches the issued request", async () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openai,
+					openAiBaseUrl: "https://api.example.com/v1",
+					openAiApiKey: "test-key",
+					openAiHeaders: {},
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			const requestId = mockPostMessage.mock.calls[0][0].requestId as string
+
+			act(() => {
+				emitMessage({ type: "openAiModels", openAiModels: ["fresh-model"], requestId })
+			})
+
+			await waitFor(() => {
+				expect(result.current.models).not.toBeNull()
+			})
+
+			expect(Object.keys(result.current.models!)).toEqual(["fresh-model"])
+		})
+
+		it("ignores a response whose requestId does not match the issued request", async () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openai,
+					openAiBaseUrl: "https://api.example.com/v1",
+					openAiApiKey: "test-key",
+					openAiHeaders: {},
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			act(() => {
+				// A stale reply from a superseded request must not be adopted.
+				emitMessage({ type: "openAiModels", openAiModels: ["stale-model"], requestId: "superseded-request" })
+			})
+
+			expect(result.current.models).toBeNull()
+		})
+
+		it("re-requests with a new identity when the API profile changes and ignores the old reply", async () => {
+			const openAiConfig = {
+				apiProvider: providerIdentifiers.openai,
+				openAiBaseUrl: "https://api.example.com/v1",
+				openAiApiKey: "test-key",
+				openAiHeaders: {},
+			}
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: openAiConfig,
+				currentApiConfigName: "profile-a",
+				routerModels: undefined,
+			})
+
+			const { result, rerender } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			const firstRequestId = mockPostMessage.mock.calls[0][0].requestId as string
+
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: openAiConfig,
+				currentApiConfigName: "profile-b",
+				routerModels: undefined,
+			})
+			rerender()
+
+			await waitFor(() => {
+				expect(mockPostMessage).toHaveBeenCalledTimes(2)
+			})
+			const secondRequestId = mockPostMessage.mock.calls[1][0].requestId as string
+			expect(secondRequestId).not.toBe(firstRequestId)
+
+			// The reply to the superseded profile's request arrives late and must
+			// be dropped instead of overwriting the new profile's (empty) list.
+			act(() => {
+				emitMessage({ type: "openAiModels", openAiModels: ["stale-model"], requestId: firstRequestId })
+			})
+			expect(result.current.models).toBeNull()
+		})
+
 		it("reports loading while the openAi request is in flight", () => {
 			mockUseExtensionState.mockReturnValue({
 				apiConfiguration: {
@@ -488,7 +573,11 @@ describe("useChatModelSelector", () => {
 
 			renderHook(() => useChatModelSelector(), { wrapper })
 
-			expect(mockPostMessage).toHaveBeenCalledWith({ type: "requestOllamaModels" })
+			// The request now carries an identity token so a late reply can be
+			// correlated with the request that issued it.
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "requestOllamaModels", requestId: expect.any(String) }),
+			)
 		})
 
 		it("uses models delivered through the ollamaModels message", async () => {
@@ -518,7 +607,9 @@ describe("useChatModelSelector", () => {
 
 			renderHook(() => useChatModelSelector(), { wrapper })
 
-			expect(mockPostMessage).toHaveBeenCalledWith({ type: "requestLmStudioModels" })
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "requestLmStudioModels", requestId: expect.any(String) }),
+			)
 		})
 
 		it("uses models delivered through the lmStudioModels message", async () => {
@@ -551,7 +642,9 @@ describe("useChatModelSelector", () => {
 
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
-			expect(mockPostMessage).toHaveBeenCalledWith({ type: "requestVsCodeLmModels" })
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "requestVsCodeLmModels", requestId: expect.any(String) }),
+			)
 
 			act(() => {
 				emitMessage({
@@ -596,6 +689,102 @@ describe("useChatModelSelector", () => {
 			// displayTransform returns "" for missing values
 			expect(result.current.displayTransform!(undefined)).toBe("")
 			expect(result.current.displayTransform!({ vendor: "copilot" })).toBe("")
+		})
+	})
+
+	describe("message-based request identity and cleanup", () => {
+		it("tags the ollama request with an identity and adopts only the matching response", async () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.ollama, ollamaModelId: "llama3" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			const requestId = mockPostMessage.mock.calls[0][0].requestId as string
+			expect(requestId).toEqual(expect.any(String))
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "requestOllamaModels", requestId })
+
+			act(() => {
+				emitMessage({
+					type: "ollamaModels",
+					ollamaModels: { llama3: { maxTokens: 1, contextWindow: 1 } },
+					requestId,
+				})
+			})
+
+			await waitFor(() => {
+				expect(result.current.models).not.toBeNull()
+			})
+			expect(Object.keys(result.current.models!)).toEqual(["llama3"])
+		})
+
+		it("ignores an ollama response carrying a superseded request id", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.ollama, ollamaModelId: "llama3" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			act(() => {
+				emitMessage({
+					type: "ollamaModels",
+					ollamaModels: { stale: { maxTokens: 1, contextWindow: 1 } },
+					requestId: "superseded-request",
+				})
+			})
+
+			expect(result.current.models).toBeNull()
+		})
+
+		it("ignores a late lmStudio response after the hook unmounts (cleanup invalidates the request)", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.lmstudio, lmStudioModelId: "local-model" },
+				routerModels: undefined,
+			})
+
+			const { result, unmount } = renderHook(() => useChatModelSelector(), { wrapper })
+			const requestId = mockPostMessage.mock.calls[0][0].requestId as string
+
+			unmount()
+
+			// The cleanup dropped the in-flight identity, so the reply can no
+			// longer be adopted by the unmounted hook.
+			act(() => {
+				emitMessage({
+					type: "lmStudioModels",
+					lmStudioModels: { "late-model": { maxTokens: 1, contextWindow: 1 } },
+					requestId,
+				})
+			})
+
+			expect(result.current.models).toBeNull()
+		})
+
+		it("tags the vsCodeLm request with an identity and adopts only the matching response", async () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.vscodeLm },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			const requestId = mockPostMessage.mock.calls[0][0].requestId as string
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "requestVsCodeLmModels", requestId })
+
+			act(() => {
+				emitMessage({
+					type: "vsCodeLmModels",
+					vsCodeLmModels: [{ vendor: "copilot", family: "gpt-4o" }],
+					requestId,
+				})
+			})
+
+			await waitFor(() => {
+				expect(result.current.models).not.toBeNull()
+			})
+			expect(Object.keys(result.current.models!)).toEqual(["copilot/gpt-4o"])
 		})
 	})
 

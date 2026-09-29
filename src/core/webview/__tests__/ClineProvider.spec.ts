@@ -5084,6 +5084,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
 					false,
+					{ bypassAllowList: true },
 				)
 			})
 
@@ -5128,6 +5129,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
 					true,
+					{ bypassAllowList: true },
 				)
 				expect(saveConfig).toHaveBeenCalledWith(
 					"Backup Zoo",

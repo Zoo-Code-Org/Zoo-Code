@@ -3,13 +3,20 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, ORGANIZATION_ALLOW_ALL, RooCodeEventName } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
 import { Task, TaskOptions } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+
+// Partial mock: other provider modules (e.g. `deepseek.ts`) import
+// `OpenAiHandler` from here, so the real exports must remain available.
+vi.mock("../../../api/providers/openai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../api/providers/openai")>()),
+	getOpenAiModels: vi.fn(),
+}))
 
 // Mock setup
 vi.mock("fs/promises", () => ({
@@ -130,12 +137,17 @@ vi.mock("../../task/Task", () => ({
 	}),
 }))
 
+// Hoisted so the `@roo-code/cloud` mock factory (which is hoisted above the
+// imports) can expose the same `getAllowList` spy the tests configure.
+const { mockGetAllowList } = vi.hoisted(() => ({ mockGetAllowList: vi.fn() }))
+
 vi.mock("@roo-code/cloud", () => ({
 	CloudService: {
 		hasInstance: vi.fn().mockReturnValue(true),
 		get instance() {
 			return {
 				isAuthenticated: vi.fn().mockReturnValue(false),
+				getAllowList: mockGetAllowList,
 			}
 		},
 	},
@@ -153,6 +165,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		// Default to allow-all; individual tests override with a restrictive list.
+		mockGetAllowList.mockResolvedValue(ORGANIZATION_ALLOW_ALL)
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -416,6 +430,113 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
+		})
+
+		test("persists and activates an allowed profile under a restrictive allow-list", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4" }),
+			)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("rejects a disallowed profile: not persisted, not activated, user notified", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+
+			const result = await provider.upsertProviderProfile("blocked-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/forbidden",
+			})
+
+			// No id means the write was rejected before any persistence/activation.
+			expect(result).toBeUndefined()
+			expect(saveConfig).not.toHaveBeenCalled()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("currentApiConfigName", "blocked-config")
+			// The notification lives in `upsertProviderProfile` so direct callers
+			// (OAuth callbacks, sign-out) do not fail silently.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("falls back to allow-all when the organization allow-list is unavailable", async () => {
+			mockGetAllowList.mockRejectedValue(new Error("cloud unavailable"))
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			// Allow-list fetch failures must not block the save (matches `getState`
+			// and task-creation fallback semantics).
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("bypassAllowList writes Zoo Gateway credentials even when the allow-list forbids the provider", async () => {
+			// A restrictive allow-list that does not mention zoo-gateway at all —
+			// `ProfileValidator` cannot map zoo-gateway to a model id, so this is
+			// exactly the case that used to strand a refreshed/cleared token.
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+
+			const result = await provider.upsertProviderProfile(
+				"Zoo Gateway",
+				{ apiProvider: providerIdentifiers.zooGateway, zooSessionToken: "zoo_ext_token" },
+				false,
+				{ bypassAllowList: true },
+			)
+
+			// The write succeeded even though the allow-list forbids zoo-gateway:
+			// without the bypass this exact profile is rejected (see the next test).
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"Zoo Gateway",
+				expect.objectContaining({ zooSessionToken: "zoo_ext_token" }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("the Zoo Gateway bypass does not leak to other providers", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+
+			// Same restrictive list, but without the internal bypass the write is
+			// still rejected — proving the escape hatch is opt-in per call.
+			const result = await provider.upsertProviderProfile("blocked-config", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "zoo_ext_token",
+			})
+
+			expect(result).toBeUndefined()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
 		})
 	})
 

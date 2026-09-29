@@ -10,6 +10,12 @@ vi.mock("../../../services/zoo-code-auth", () => ({
 vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
+// Partial mock: other provider modules import `OpenAiHandler` from here, so the
+// real exports must remain available.
+vi.mock("../../../api/providers/openai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../api/providers/openai")>()),
+	getOpenAiModels: vi.fn(),
+}))
 
 vi.mock("../../../integrations/theme/getTheme", () => ({
 	getTheme: vi.fn().mockResolvedValue({}),
@@ -75,6 +81,7 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
+import { getOpenAiModels } from "../../../api/providers/openai"
 import { getCommands } from "../../../services/command/commands"
 import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
 import {
@@ -90,6 +97,7 @@ const { fetchOpenAiCodexRateLimitInfo } = await import("../../../integrations/op
 const mockGetModels = getModels as Mock<typeof getModels>
 const mockFlushModels = flushModels as Mock<typeof flushModels>
 const mockGetLMStudioModels = getLMStudioModels as Mock<typeof getLMStudioModels>
+const mockGetOpenAiModels = getOpenAiModels as Mock<typeof getOpenAiModels>
 const mockGetCommands = vi.mocked(getCommands)
 const mockGetAccessToken = vi.mocked(openAiCodexOAuthManager.getAccessToken)
 const mockGetAccountId = vi.mocked(openAiCodexOAuthManager.getAccountId)
@@ -124,6 +132,23 @@ const mockClineProvider = {
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
+
+// Structural overrides for the auth/profile tests below. Declaring the shape keeps the
+// collaborator swaps type-checked (no `as any`) — the same pattern as `providerForLaunch`
+// used by the telemetry tests.
+type MockProviderOverrides = {
+	contextProxy: {
+		getProviderSettings: ReturnType<typeof vi.fn>
+		getValues: ReturnType<typeof vi.fn>
+	}
+	providerSettingsManager: {
+		listConfig: ReturnType<typeof vi.fn>
+		getProfile: ReturnType<typeof vi.fn>
+		saveConfig: ReturnType<typeof vi.fn>
+	}
+	upsertProviderProfile: ReturnType<typeof vi.fn>
+	getState: (typeof mockClineProvider)["getState"]
+}
 
 describe("webviewMessageHandler - theme fixture probes", () => {
 	const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
@@ -497,6 +522,35 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
 			ollamaModels: mockModels,
+		})
+	})
+})
+
+describe("webviewMessageHandler - requestOpenAiModels", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetOpenAiModels.mockReset()
+	})
+
+	it("echoes the caller's requestId on the openAiModels response", async () => {
+		mockGetOpenAiModels.mockResolvedValue(["gpt-4o", "gpt-4o-mini"])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOpenAiModels",
+			requestId: "req-123",
+			values: {
+				baseUrl: "https://api.example.com/v1",
+				apiKey: "test-api-key-not-real",
+				openAiHeaders: {},
+			},
+		})
+
+		// The request id must round-trip so the webview can correlate the
+		// response with the request it issued and drop stale replies.
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "openAiModels",
+			openAiModels: ["gpt-4o", "gpt-4o-mini"],
+			requestId: "req-123",
 		})
 	})
 })
@@ -1796,13 +1850,14 @@ describe("zooCodeSignOut", () => {
 		const { disconnectZooCode } = await import("../../../services/zoo-code-auth")
 		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue(undefined)
+		const authProvider = mockClineProvider as unknown as MockProviderOverrides
 
-		;(mockClineProvider as any).contextProxy = {
+		authProvider.contextProxy = {
 			...mockClineProvider.contextProxy,
 			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
-		;(mockClineProvider as any).providerSettingsManager = {
+		authProvider.providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([
 				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -1820,7 +1875,7 @@ describe("zooCodeSignOut", () => {
 				}),
 			saveConfig,
 		}
-		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+		authProvider.upsertProviderProfile = upsertProviderProfile
 
 		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
 
@@ -1829,6 +1884,9 @@ describe("zooCodeSignOut", () => {
 			"Zoo Gateway",
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
+			// Internal auth write: bypasses the model allow-list (zoo-gateway has
+			// no model-id mapping).
+			{ bypassAllowList: true },
 		)
 		expect(saveConfig).toHaveBeenCalledWith(
 			"Backup Zoo",
@@ -1837,15 +1895,51 @@ describe("zooCodeSignOut", () => {
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 
-	it("still clears the in-memory handler when the active profile token is already empty on disk", async () => {
+	it("reports a failure instead of clearing silently when the active profile write is rejected", async () => {
+		// `upsertProviderProfile` returns `undefined` when the write is rejected
+		// (e.g. the model-allow-list guard or a disk error). Sign-out must not
+		// log a successful cleanup in that case.
 		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		const authProvider = mockClineProvider as unknown as MockProviderOverrides
 
-		;(mockClineProvider as any).contextProxy = {
+		authProvider.contextProxy = {
 			...mockClineProvider.contextProxy,
 			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
-		;(mockClineProvider as any).providerSettingsManager = {
+		authProvider.providerSettingsManager = {
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
+			getProfile: vi.fn().mockResolvedValue({
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "token-active",
+			}),
+			saveConfig: vi.fn(),
+		}
+		authProvider.upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		// The rejected write must be surfaced, not reported as a successful cleanup.
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining('[zooCodeSignOut] Failed to clear profile token for "Zoo Gateway"'),
+		)
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
+			expect.stringContaining('[zooCodeSignOut] Cleared zooSessionToken from "Zoo Gateway"'),
+		)
+	})
+
+	it("still clears the in-memory handler when the active profile token is already empty on disk", async () => {
+		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		const authProvider = mockClineProvider as unknown as MockProviderOverrides
+
+		authProvider.contextProxy = {
+			...mockClineProvider.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		authProvider.providerSettingsManager = {
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -1855,7 +1949,7 @@ describe("zooCodeSignOut", () => {
 			}),
 			saveConfig: vi.fn(),
 		}
-		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+		authProvider.upsertProviderProfile = upsertProviderProfile
 
 		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
 
@@ -1863,7 +1957,39 @@ describe("zooCodeSignOut", () => {
 			"Zoo Gateway",
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
+			{ bypassAllowList: true },
 		)
+	})
+})
+
+describe("webviewMessageHandler - upsertApiConfiguration allow-list", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("delegates to upsertProviderProfile without pre-validating (single enforcement point)", async () => {
+		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
+		const detailProvider = mockClineProvider as unknown as MockProviderOverrides
+		detailProvider.upsertProviderProfile = upsertProviderProfile
+		const getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {},
+			organizationAllowList: { allowAll: false, providers: {} },
+		})
+		detailProvider.getState = getState
+
+		const apiConfiguration = { apiProvider: providerIdentifiers.anthropic, apiModelId: "not-allowed" }
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "upsertApiConfiguration",
+			text: "test-config",
+			apiConfiguration,
+		})
+
+		// The handler forwards the write and relies on `upsertProviderProfile` for
+		// enforcement; it does not call `getState()` or reject on its own.
+		expect(upsertProviderProfile).toHaveBeenCalledWith("test-config", apiConfiguration)
+		expect(getState).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 })
 
