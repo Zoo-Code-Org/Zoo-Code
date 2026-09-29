@@ -400,6 +400,9 @@ vi.mock("@roo-code/cloud", () => ({
 				login: vi.fn().mockResolvedValue(undefined),
 				logout: vi.fn().mockResolvedValue(undefined),
 				off: vi.fn(),
+				// A cloud instance is present, so the fail-closed allow-list guard reads
+				// this. Default to allow-all so profile writes behave as before.
+				getAllowList: vi.fn().mockReturnValue({ allowAll: true, providers: {} }),
 			}
 		},
 	},

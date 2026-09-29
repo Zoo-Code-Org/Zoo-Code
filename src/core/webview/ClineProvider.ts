@@ -1868,16 +1868,23 @@ export class ClineProvider
 		if (!options.bypassAllowList) {
 			let organizationAllowList = ORGANIZATION_ALLOW_ALL
 
-			try {
-				organizationAllowList = await CloudService.instance.getAllowList()
-			} catch (error) {
-				// No cloud instance / not authenticated: fall back to allow-all,
-				// matching `getState` and task-creation semantics.
-				this.log(
-					`[upsertProviderProfile] organization allow-list unavailable, using allow-all: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				)
+			if (CloudService.hasInstance()) {
+				// The webview is not a trusted boundary, so a profile write must not
+				// fail open. Allow-all is only legitimate when no cloud instance exists
+				// (positively no organization policy). If a cloud instance exists but its
+				// policy cannot be read, reject the write rather than persisting a
+				// possibly disallowed model during a transient cloud/allow-list failure.
+				try {
+					organizationAllowList = await CloudService.instance.getAllowList()
+				} catch (error) {
+					this.log(
+						`[upsertProviderProfile] Blocked profile "${name}": organization allow-list unavailable: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+					void vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return undefined
+				}
 			}
 
 			if (!ProfileValidator.isProfileAllowed(providerSettings, organizationAllowList)) {
@@ -1900,12 +1907,32 @@ export class ClineProvider
 				// we rely on the `ContextProxy`'s data store and in other cases
 				// we rely on the `ProviderSettingsManager`'s data store. It might
 				// be simpler to unify these two.
+				// Snapshot the pre-write state so a failure *after* `saveConfig`
+				// succeeds (during the activation writes below) can be rolled back
+				// instead of leaving the profile secret and the active/mode state
+				// divergent — the profile would carry the new model while the mode
+				// or current profile still pointed at the old one.
+				const priorCurrentApiConfigName = this.contextProxy.getValue("currentApiConfigName")
+				const priorProviderSettings = this.contextProxy.getProviderSettings()
+				let priorProfile: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
+				try {
+					priorProfile = await this.providerSettingsManager.getProfile({ name })
+				} catch {
+					// No existing profile with this name; rollback deletes the new one.
+				}
+
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
 				if (signal.aborted) return id
 
 				if (activate) {
 					const { mode } = await this.getState()
+					let priorModeConfigId: string | undefined
+					try {
+						priorModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
+					} catch {
+						// No prior mapping (or unavailable); nothing to restore for the mode.
+					}
 
 					// These promises do the following:
 					// 1. Adds or updates the list of provider profiles.
@@ -1917,19 +1944,53 @@ export class ClineProvider
 					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 					// We should probably switch to that and verify that it works.
 					// I left the original implementation in just to be safe.
-					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-						this.updateGlobalState("currentApiConfigName", name),
-						this.providerSettingsManager.setModeConfig(mode, id),
-						this.contextProxy.setProviderSettings(providerSettings),
-					])
+					try {
+						await Promise.all([
+							this.updateGlobalState(
+								"listApiConfigMeta",
+								await this.providerSettingsManager.listConfig(),
+							),
+							this.updateGlobalState("currentApiConfigName", name),
+							this.providerSettingsManager.setModeConfig(mode, id),
+							this.contextProxy.setProviderSettings(providerSettings),
+						])
 
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						// Change the provider for the current task.
+						// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
+						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+						await this.persistStickyProviderProfileToCurrentTask(name)
+					} catch (error) {
+						// Compensating rollback: restore the profile secret, the active
+						// profile name, the mode mapping and the in-memory provider
+						// settings to their pre-write values so a partial activation
+						// cannot report success while leaving inconsistent state.
+						try {
+							if (priorProfile) {
+								await this.providerSettingsManager.saveConfig(name, priorProfile)
+							} else {
+								await this.providerSettingsManager.deleteConfig(name)
+							}
+							// A pre-existing mode mapping is restored; a newly created one
+							// has no delete API, so it is left as a best-effort remainder.
+							if (priorModeConfigId) {
+								await this.providerSettingsManager.setModeConfig(mode, priorModeConfigId)
+							}
+							await this.contextProxy.setValue("currentApiConfigName", priorCurrentApiConfigName)
+							await this.contextProxy.setValues({
+								listApiConfigMeta: await this.providerSettingsManager.listConfig(),
+							})
+							await this.contextProxy.setProviderSettings(priorProviderSettings)
+						} catch (rollbackError) {
+							this.log(
+								`[upsertProviderProfile] rollback failed for "${name}": ${
+									rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+								}`,
+							)
+						}
+						throw error
+					}
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				}

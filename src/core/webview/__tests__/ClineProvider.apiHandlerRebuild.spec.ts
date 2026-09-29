@@ -138,12 +138,15 @@ vi.mock("../../task/Task", () => ({
 }))
 
 // Hoisted so the `@roo-code/cloud` mock factory (which is hoisted above the
-// imports) can expose the same `getAllowList` spy the tests configure.
-const { mockGetAllowList } = vi.hoisted(() => ({ mockGetAllowList: vi.fn() }))
+// imports) can expose the same `getAllowList`/`hasInstance` spies the tests configure.
+const { mockGetAllowList, mockHasInstance } = vi.hoisted(() => ({
+	mockGetAllowList: vi.fn(),
+	mockHasInstance: vi.fn(),
+}))
 
 vi.mock("@roo-code/cloud", () => ({
 	CloudService: {
-		hasInstance: vi.fn().mockReturnValue(true),
+		hasInstance: mockHasInstance,
 		get instance() {
 			return {
 				isAuthenticated: vi.fn().mockReturnValue(false),
@@ -167,6 +170,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		vi.clearAllMocks()
 		// Default to allow-all; individual tests override with a restrictive list.
 		mockGetAllowList.mockResolvedValue(ORGANIZATION_ALLOW_ALL)
+		// A cloud instance exists by default, which is the fail-closed case.
+		mockHasInstance.mockReturnValue(true)
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -477,16 +482,33 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
 		})
 
-		test("falls back to allow-all when the organization allow-list is unavailable", async () => {
+		test("rejects the write when a cloud instance exists but the allow-list is unavailable", async () => {
 			mockGetAllowList.mockRejectedValue(new Error("cloud unavailable"))
+
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			// Fail closed: a transient allow-list failure with a live cloud instance
+			// must not persist a possibly disallowed model.
+			expect(result).toBeUndefined()
+			expect(saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("allows the write when no cloud instance exists (positively no organization policy)", async () => {
+			mockHasInstance.mockReturnValue(false)
+			// Even a failing policy read must not matter: allow-all is legitimate
+			// when no organization policy positively applies.
+			mockGetAllowList.mockRejectedValue(new Error("should not be consulted for the gate"))
 
 			const result = await provider.upsertProviderProfile("test-config", {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			})
 
-			// Allow-list fetch failures must not block the save (matches `getState`
-			// and task-creation fallback semantics).
 			expect(result).toBe("test-id")
 			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
@@ -585,6 +607,44 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			expect(result).toBeUndefined()
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("rolls back the profile and active state when an activation write fails after saveConfig", async () => {
+			// Seed the previously active profile name so the rollback restores a known value.
+			await provider.contextProxy.setValue("currentApiConfigName", "test-config")
+			const priorProfile = {
+				name: "new-config",
+				id: "prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			}
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(priorProfile)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue(undefined)
+			// Fail an activation write that runs *after* saveConfig succeeded.
+			provider["providerSettingsManager"].setModeConfig = vi
+				.fn()
+				.mockRejectedValue(new Error("mode write failed"))
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+
+			const result = await provider.upsertProviderProfile("new-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4-turbo",
+			})
+
+			// The partial write is reported as a failure, never a success.
+			expect(result).toBeUndefined()
+			// The new model was written first, then the prior profile was restored so
+			// the secret cannot carry the new model while the active state is stale.
+			expect(saveConfig).toHaveBeenNthCalledWith(
+				1,
+				"new-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4-turbo" }),
+			)
+			expect(saveConfig).toHaveBeenNthCalledWith(2, "new-config", priorProfile)
+			// The previously active profile name ("test-config") is restored.
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
+			// No activation success state leaked to the webview.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 		})
 	})
 
