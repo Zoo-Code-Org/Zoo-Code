@@ -1084,15 +1084,31 @@ describe("NativeOllamaHandler", () => {
 
 		it("should forward the abort signal to model discovery so discovery is cancellable", async () => {
 			const controller = new AbortController()
-			mockGetOllamaModels.mockResolvedValue({})
+			// Keep discovery pending so the linkage between the forwarded
+			// signal and the caller's signal is observable while discovery is
+			// still in flight (a settled call detaches the linkage).
+			mockGetOllamaModels.mockImplementation(
+				() => new Promise<Awaited<ReturnType<typeof getOllamaModels>>>(() => {}),
+			)
 			mockChat.mockResolvedValue({ message: { content: "Response" } })
 
-			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			for (let i = 0; i < 10 && mockGetOllamaModels.mock.calls.length === 0; i++) {
+				await Promise.resolve()
+			}
 
-			// Discovery must be cancellable: the merged per-request/timeout
-			// signal is forwarded to the fetcher (not just raced against).
+			// Discovery must be cancellable: the per-request signal is forwarded
+			// to the fetcher (not just raced against). Aborting the caller's
+			// signal must abort the forwarded signal while discovery is pending.
 			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
-			expect(mockGetOllamaModels.mock.calls[0]?.[2]).toEqual({ signal: expect.any(AbortSignal) })
+			const forwarded = mockGetOllamaModels.mock.calls[0]?.[2]?.signal
+			expect(forwarded).toBeInstanceOf(AbortSignal)
+			expect(forwarded?.aborted).toBe(false)
+
+			controller.abort()
+			expect(forwarded?.aborted).toBe(true)
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
 
 		it("should clear timeoutId in finally block on success", async () => {
