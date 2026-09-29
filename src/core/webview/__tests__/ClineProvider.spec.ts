@@ -87,6 +87,9 @@ vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
+	// Deletion resolves the tasks directory before it removes a history
+	// file, so the harness must provide the passthrough base path.
+	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
 }))
 
 vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
