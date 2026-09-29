@@ -168,19 +168,28 @@ describe("QwenCodeHandler abort wiring", () => {
 
 		it("does not retry after 401 once the signal aborts during the refresh", async () => {
 			const external = new AbortController()
-			// The token endpoint never responds: the wait must be cut by the
-			// abort, not by the refresh settling (a post-hoc aborted check
-			// alone would hang here forever).
-			const fetchMock = vi.fn().mockImplementation(() => {
-				external.abort() // simulate Stop pressed while the token refresh is in flight
-				return new Promise<never>(() => {})
-			})
+			// The token endpoint never responds. The abort must fire only after
+			// the request has started and settleOnAbort has registered its
+			// listener on the established wait — aborting inside the fetch mock
+			// would land before the wait exists and only exercise the
+			// already-aborted fast path, not the in-flight cut.
+			const fetchMock = vi.fn().mockImplementation(() => new Promise<never>(() => {}))
 			vi.stubGlobal("fetch", fetchMock)
 			mockCreate.mockRejectedValueOnce(unauthorizedError())
 
+			const promise = handler.completePrompt("hi", { abortSignal: external.signal })
+			// Let the 401 attempt fail and the refresh fetch start, so the wait
+			// is established (listener registered) before the abort lands.
+			for (let i = 0; i < 20 && fetchMock.mock.calls.length === 0; i++) {
+				await Promise.resolve()
+			}
+			expect(fetchMock).toHaveBeenCalledTimes(1)
+
+			external.abort() // Stop pressed while the token refresh wait is established
+
 			let caught: unknown
 			try {
-				await handler.completePrompt("hi", { abortSignal: external.signal })
+				await promise
 			} catch (error) {
 				caught = error
 			}
@@ -190,6 +199,51 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
 			expect(mockCreate).toHaveBeenCalledTimes(1) // the retried request was never sent
 			expect(fetchMock).toHaveBeenCalledTimes(1)
+		})
+
+		it("keeps in-memory credentials current when the wait is cut before the refresh settles", async () => {
+			const external = new AbortController()
+			// The token endpoint stays pending until released: the abort cuts the
+			// established wait (skipping the caller's credentials assignment)
+			// while the shared refresh keeps running in the background.
+			let releaseToken: (() => void) | undefined
+			const fetchMock = vi.fn().mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						releaseToken = () => resolve(tokenResponse())
+					}),
+			)
+			vi.stubGlobal("fetch", fetchMock)
+			mockCreate.mockRejectedValueOnce(unauthorizedError())
+
+			const promise = handler.completePrompt("hi", { abortSignal: external.signal })
+			for (let i = 0; i < 20 && fetchMock.mock.calls.length === 0; i++) {
+				await Promise.resolve()
+			}
+			expect(fetchMock).toHaveBeenCalledTimes(1)
+
+			external.abort() // Stop pressed while the token refresh wait is established
+
+			let caught: unknown
+			try {
+				await promise
+			} catch (error) {
+				caught = error
+			}
+			expect((caught as Error).name).toBe("AbortError")
+
+			// The shared refresh settles in the background. The in-memory
+			// credentials must carry the refreshed token even though the
+			// waiting caller's assignment was skipped by the abort; a later
+			// request must not reuse the stale token and trigger a second 401
+			// refresh for a token we already hold.
+			releaseToken!() // assigned once the fetch mock was called (asserted above)
+			for (let i = 0; i < 20; i++) {
+				await Promise.resolve()
+			}
+			// credentials is loaded from the mocked file in the constructor; a null value would make the assertion fail (?. yields undefined, not the refreshed token)
+			expect(handler["credentials"]?.access_token).toBe("new-access-token")
+			expect(mockCreate).toHaveBeenCalledTimes(1) // the retried request was never sent
 		})
 
 		it("normalizes an abort error from the 401 retry", async () => {

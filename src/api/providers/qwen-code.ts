@@ -167,6 +167,12 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			// Continue with the refreshed token in memory even if file write fails
 		}
 
+		// Keep the in-memory credentials current even when the waiting caller's
+		// assignment is skipped: if its settleOnAbort wait rejects on abort
+		// before this shared refresh settles, the caller never assigns
+		// this.credentials, and a later request would reuse the stale token and
+		// trigger a second 401 refresh for a token we already hold.
+		this.credentials = newCredentials
 		return newCredentials
 	}
 
