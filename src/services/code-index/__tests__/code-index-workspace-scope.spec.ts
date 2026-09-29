@@ -1,6 +1,9 @@
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
+import { CodeIndexStateManager } from "../state-manager"
+
+vi.mock("../state-manager")
 
 vi.mock("../manager", () => ({
 	CodeIndexManager: vi.fn().mockImplementation(function () {
@@ -27,11 +30,20 @@ describe("CodeIndexWorkspaceScope", () => {
 		const scope = new CodeIndexWorkspaceScope(uri.fsPath, uri, context)
 
 		expect(CodeIndexManager).not.toHaveBeenCalled()
+		expect(CodeIndexStateManager).not.toHaveBeenCalled()
+		expect(scope["_stateManager"]).toBeUndefined()
 		expect(() => scope.codeIndexManager).toThrow("Code index workspace scope is not initialized")
 		expect(scope.init()).toBeUndefined()
 		const manager = scope.codeIndexManager
 
-		expect(CodeIndexManager).toHaveBeenCalledExactlyOnceWith(uri.fsPath, uri, context)
+		expect(CodeIndexStateManager).toHaveBeenCalledExactlyOnceWith()
+		expect(scope["_stateManager"]).toBe(vi.mocked(CodeIndexStateManager).mock.instances[0])
+		expect(CodeIndexManager).toHaveBeenCalledExactlyOnceWith(
+			uri.fsPath,
+			uri,
+			context,
+			vi.mocked(CodeIndexStateManager).mock.instances[0],
+		)
 		expect(scope.codeIndexManager).toBe(manager)
 		expect(() => scope.init()).toThrow("Code index workspace scope is already initialized")
 		expect(scope.codeIndexManager).toBe(manager)
@@ -45,6 +57,7 @@ describe("CodeIndexWorkspaceScope", () => {
 		const manager = scope.codeIndexManager
 
 		expect(scope.dispose()).toBeUndefined()
+		expect(scope["_stateManager"]).toBeUndefined()
 		expect(() => scope.codeIndexManager).toThrow("Code index workspace scope is not initialized")
 		scope.dispose()
 		expect(manager.dispose).toHaveBeenCalledExactlyOnceWith()
@@ -68,6 +81,24 @@ describe("CodeIndexWorkspaceScope", () => {
 		expect(scope.codeIndexManager).toBe(current)
 		expect(CodeIndexManager).toHaveBeenCalledTimes(2)
 		expect(current.dispose).not.toHaveBeenCalled()
+		const calls = vi.mocked(CodeIndexManager).mock.calls
+		expect(CodeIndexStateManager).toHaveBeenCalledTimes(2)
+		expect(calls[1][3]).not.toBe(calls[0][3])
+		expect(scope["_stateManager"]).toBe(calls[1][3])
+	})
+
+	it("creates separate state managers for different workspace scopes", () => {
+		const context = makeExtensionContext()
+		const first = new CodeIndexWorkspaceScope("/first", makeUri("/first"), context)
+		const second = new CodeIndexWorkspaceScope("/second", makeUri("/second"), context)
+		first.init()
+		second.init()
+
+		const calls = vi.mocked(CodeIndexManager).mock.calls
+		expect(CodeIndexStateManager).toHaveBeenCalledTimes(2)
+		expect(calls[0][3]).toBe(vi.mocked(CodeIndexStateManager).mock.instances[0])
+		expect(calls[1][3]).toBe(vi.mocked(CodeIndexStateManager).mock.instances[1])
+		expect(calls[1][3]).not.toBe(calls[0][3])
 	})
 
 	it("clears its reference even when manager disposal throws", () => {
@@ -79,6 +110,7 @@ describe("CodeIndexWorkspaceScope", () => {
 			throw error
 		})
 		expect(() => scope.dispose()).toThrow(error)
+		expect(scope["_stateManager"]).toBeUndefined()
 		expect(() => scope.codeIndexManager).toThrow("Code index workspace scope is not initialized")
 		scope.dispose()
 		expect(manager.dispose).toHaveBeenCalledTimes(1)

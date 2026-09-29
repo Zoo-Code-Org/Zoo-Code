@@ -1,10 +1,12 @@
 import type * as vscode from "vscode"
 
 import { CodeIndexManager } from "./manager"
+import { CodeIndexStateManager } from "./state-manager"
 
 /** Owns code-index services for one workspace; initialization remains with existing callers. */
 export class CodeIndexWorkspaceScope implements vscode.Disposable {
 	private _codeIndexManager?: CodeIndexManager
+	private _stateManager?: CodeIndexStateManager
 	private _isInitialized = false
 
 	public constructor(
@@ -29,13 +31,20 @@ export class CodeIndexWorkspaceScope implements vscode.Disposable {
 		if (this._isInitialized) {
 			throw new Error("Code index workspace scope is already initialized")
 		}
-		this._codeIndexManager = new CodeIndexManager(this.workspacePath, this.folderUri, this.context)
+		this._stateManager = new CodeIndexStateManager()
+		this._codeIndexManager = new CodeIndexManager(
+			this.workspacePath,
+			this.folderUri,
+			this.context,
+			this._stateManager,
+		)
 		this._isInitialized = true
 	}
 
 	public dispose(): void {
 		const manager = this._codeIndexManager
 		this._codeIndexManager = undefined
+		this._stateManager = undefined
 		this._isInitialized = false
 		manager?.dispose()
 	}
