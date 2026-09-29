@@ -3,6 +3,9 @@ import { makeExtensionContext, makeTextDocument, makeTextEditor, makeUri } from 
 import { CodeIndexManager } from "../manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
+import { CodeIndexStateManager } from "../state-manager"
+
+vi.mock("../state-manager")
 
 vi.mock("vscode", () => ({
 	workspace: { workspaceFolders: undefined, getWorkspaceFolder: vi.fn() },
@@ -45,7 +48,7 @@ describe("CodeIndexManagerRegistry", () => {
 
 	it("uses the first workspace when there is no active editor", () => {
 		CodeIndexManagerRegistry.getOrCreate(context)
-		expect(CodeIndexManager).toHaveBeenCalledWith("/first", first.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith("/first", first.uri, context, expect.any(CodeIndexStateManager))
 	})
 
 	it("prefers the active editor's workspace", () => {
@@ -53,20 +56,20 @@ describe("CodeIndexManagerRegistry", () => {
 		Object.defineProperty(vscode.window, "activeTextEditor", { configurable: true, value: editor })
 		vi.mocked(vscode.workspace.getWorkspaceFolder).mockReturnValue(second)
 		expect(CodeIndexManagerRegistry.getOrCreate(context)).toBeDefined()
-		expect(CodeIndexManager).toHaveBeenCalledWith("/second", second.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith("/second", second.uri, context, expect.any(CodeIndexStateManager))
 	})
 
 	it("falls back to the first workspace for an editor outside all folders", () => {
 		Object.defineProperty(vscode.window, "activeTextEditor", { configurable: true, value: makeTextEditor() })
 		CodeIndexManagerRegistry.getOrCreate(context)
-		expect(CodeIndexManager).toHaveBeenCalledWith("/first", first.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith("/first", first.uri, context, expect.any(CodeIndexStateManager))
 	})
 
 	it("gives an explicit path priority over the active editor", () => {
 		Object.defineProperty(vscode.window, "activeTextEditor", { configurable: true, value: makeTextEditor() })
 		vi.mocked(vscode.workspace.getWorkspaceFolder).mockReturnValue(first)
 		expect(CodeIndexManagerRegistry.getOrCreate(context, "/second")).toBeDefined()
-		expect(CodeIndexManager).toHaveBeenCalledWith("/second", second.uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith("/second", second.uri, context, expect.any(CodeIndexStateManager))
 	})
 
 	it("preserves the actual remote workspace URI", () => {
@@ -76,7 +79,7 @@ describe("CodeIndexManagerRegistry", () => {
 			value: [{ uri, name: "remote", index: 0 }],
 		})
 		CodeIndexManagerRegistry.getOrCreate(context, "/remote")
-		expect(CodeIndexManager).toHaveBeenCalledWith("/remote", uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith("/remote", uri, context, expect.any(CodeIndexStateManager))
 		expect(vi.mocked(CodeIndexManager).mock.calls[0][1]).toBe(uri)
 		expect(vscode.Uri.file).not.toHaveBeenCalled()
 	})
@@ -87,7 +90,7 @@ describe("CodeIndexManagerRegistry", () => {
 		vi.mocked(vscode.Uri.file).mockReturnValue(uri)
 		CodeIndexManagerRegistry.getOrCreate(context, uri.fsPath)
 		expect(vscode.Uri.file).toHaveBeenCalledWith(uri.fsPath)
-		expect(CodeIndexManager).toHaveBeenCalledWith(uri.fsPath, uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith(uri.fsPath, uri, context, expect.any(CodeIndexStateManager))
 	})
 
 	it("constructs a file URI for an explicit path not matching any open workspace folder", () => {
@@ -96,7 +99,12 @@ describe("CodeIndexManagerRegistry", () => {
 		vi.mocked(vscode.Uri.file).mockReturnValue(uri)
 		CodeIndexManagerRegistry.getOrCreate(context, "/outside/project")
 		expect(vscode.Uri.file).toHaveBeenCalledWith("/outside/project")
-		expect(CodeIndexManager).toHaveBeenCalledWith("/outside/project", uri, context)
+		expect(CodeIndexManager).toHaveBeenCalledWith(
+			"/outside/project",
+			uri,
+			context,
+			expect.any(CodeIndexStateManager),
+		)
 	})
 
 	it("reuses the same path and keeps different paths isolated", () => {
