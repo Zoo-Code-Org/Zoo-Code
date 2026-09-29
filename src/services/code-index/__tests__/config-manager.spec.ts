@@ -115,6 +115,67 @@ describe("CodeIndexConfigManager", () => {
 	})
 
 	describe("loadConfiguration", () => {
+		it("does not mark the synchronous constructor snapshot as loaded", () => {
+			expect(configManager.isConfigurationLoaded).toBe(false)
+		})
+
+		it("marks disabled configuration loaded only after secrets refresh completes", async () => {
+			let finishRefresh!: () => void
+			mockContextProxy.refreshSecrets.mockReturnValue(
+				new Promise<void>((resolve) => {
+					finishRefresh = resolve
+				}),
+			)
+
+			const loading = configManager.loadConfiguration()
+			expect(configManager.isConfigurationLoaded).toBe(false)
+			finishRefresh()
+			await loading
+			expect(configManager.isConfigurationLoaded).toBe(true)
+			expect(configManager.isFeatureEnabled).toBe(false)
+		})
+
+		it("marks enabled but unconfigured settings as loaded", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({ codebaseIndexEnabled: true })
+			await configManager.loadConfiguration()
+			expect(configManager.isConfigurationLoaded).toBe(true)
+			expect(configManager.isFeatureEnabled).toBe(true)
+			expect(configManager.isFeatureConfigured).toBe(false)
+		})
+
+		it.each(["secrets", "configuration", "restart", "payload"] as const)(
+			"retains the last successful load state when %s fails",
+			async (stage) => {
+				const error = new Error(`${stage} failed`)
+				const failNextLoad = () => {
+					if (stage === "secrets") {
+						mockContextProxy.refreshSecrets.mockRejectedValueOnce(error)
+					} else if (stage === "configuration") {
+						mockContextProxy.getGlobalState.mockImplementationOnce(() => {
+							throw error
+						})
+					} else if (stage === "restart") {
+						vi.spyOn(configManager, "doesConfigChangeRequireRestart").mockImplementationOnce(() => {
+							throw error
+						})
+					} else {
+						vi.spyOn(configManager, "currentSearchMinScore", "get").mockImplementationOnce(() => {
+							throw error
+						})
+					}
+				}
+
+				failNextLoad()
+				await expect(configManager.loadConfiguration()).rejects.toThrow(error)
+				expect(configManager.isConfigurationLoaded).toBe(false)
+				await configManager.loadConfiguration()
+				expect(configManager.isConfigurationLoaded).toBe(true)
+				failNextLoad()
+				await expect(configManager.loadConfiguration()).rejects.toThrow(error)
+				expect(configManager.isConfigurationLoaded).toBe(true)
+			},
+		)
+
 		it("should load default configuration when no state exists", async () => {
 			mockContextProxy.getGlobalState.mockReturnValue(undefined)
 			mockContextProxy.getSecret.mockReturnValue(undefined)
@@ -2053,6 +2114,192 @@ describe("CodeIndexConfigManager", () => {
 					expect(result.requiresRestart).toBe(true)
 				})
 			})
+		})
+	})
+
+	describe("mistral, vercel-ai-gateway, bedrock and openrouter provider configuration", () => {
+		it("should load Mistral provider configuration and mark it configured", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.mistral,
+			})
+			mockContextProxy.getSecret.mockImplementation((key: string) => {
+				if (key === "codebaseIndexMistralApiKey") return "test-mistral-key"
+				return undefined
+			})
+
+			const result = await configManager.loadConfiguration()
+
+			expect(result.currentConfig.embedderProvider).toBe(providerIdentifiers.mistral)
+			expect(result.currentConfig.mistralOptions).toEqual({ apiKey: "test-mistral-key" })
+			expect(result.currentConfig.isConfigured).toBe(true)
+			expect(configManager.currentEmbedderProvider).toBe("mistral")
+		})
+
+		it("should return false from isConfigured for Mistral when the API key is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.mistral,
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should return false from isConfigured for Mistral when the Qdrant URL is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: providerIdentifiers.mistral,
+			})
+			mockContextProxy.getSecret.mockImplementation((key: string) => {
+				if (key === "codebaseIndexMistralApiKey") return "test-mistral-key"
+				return undefined
+			})
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should load Vercel AI Gateway provider configuration and mark it configured", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.vercelAiGateway,
+			})
+			mockContextProxy.getSecret.mockImplementation((key: string) => {
+				if (key === "codebaseIndexVercelAiGatewayApiKey") return "test-vercel-key"
+				return undefined
+			})
+
+			const result = await configManager.loadConfiguration()
+
+			expect(result.currentConfig.embedderProvider).toBe(providerIdentifiers.vercelAiGateway)
+			expect(result.currentConfig.vercelAiGatewayOptions).toEqual({ apiKey: "test-vercel-key" })
+			expect(result.currentConfig.isConfigured).toBe(true)
+			expect(configManager.currentEmbedderProvider).toBe("vercel-ai-gateway")
+		})
+
+		it("should return false from isConfigured for Vercel AI Gateway when the API key is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.vercelAiGateway,
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should return false from isConfigured for Vercel AI Gateway when the Qdrant URL is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: providerIdentifiers.vercelAiGateway,
+			})
+			mockContextProxy.getSecret.mockImplementation((key: string) => {
+				if (key === "codebaseIndexVercelAiGatewayApiKey") return "test-vercel-key"
+				return undefined
+			})
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should load Bedrock provider configuration with region and profile and mark it configured", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.bedrock,
+				codebaseIndexBedrockRegion: "eu-west-1",
+				codebaseIndexBedrockProfile: "test-profile",
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			const result = await configManager.loadConfiguration()
+
+			expect(result.currentConfig.embedderProvider).toBe(providerIdentifiers.bedrock)
+			expect(result.currentConfig.bedrockOptions).toEqual({ region: "eu-west-1", profile: "test-profile" })
+			expect(result.currentConfig.isConfigured).toBe(true)
+			expect(configManager.currentEmbedderProvider).toBe("bedrock")
+		})
+
+		it("should default Bedrock region to us-east-1 when no region is configured", async () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.bedrock,
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			const result = await configManager.loadConfiguration()
+
+			expect(result.currentConfig.bedrockOptions).toEqual({ region: "us-east-1", profile: undefined })
+			expect(result.currentConfig.isConfigured).toBe(true)
+		})
+
+		it("should return false from isConfigured for Bedrock when the Qdrant URL is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: providerIdentifiers.bedrock,
+				codebaseIndexBedrockRegion: "us-east-1",
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should return false from isConfigured for OpenRouter when the Qdrant URL is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: providerIdentifiers.openrouter,
+			})
+			mockContextProxy.getSecret.mockImplementation((key: string) => {
+				if (key === "codebaseIndexOpenRouterApiKey") return "test-openrouter-key"
+				return undefined
+			})
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should return false from isConfigured for OpenRouter when the API key is missing", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexQdrantUrl: "http://qdrant.local",
+				codebaseIndexEmbedderProvider: providerIdentifiers.openrouter,
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(false)
+		})
+	})
+
+	describe("isConfigured defensive fallback", () => {
+		it("should return false when the provider is not a recognized embedder provider", () => {
+			// The isConfigured() switch lists every EmbedderProvider member explicitly and
+			// ends in a defensive `return false` ("Should not happen if embedderProvider is
+			// always set correctly"). That fallback is unreachable through the public API
+			// because EmbedderProvider is a closed union, so exercise it by forcing the
+			// private field to a value outside the union.
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			// The defensive `return false` is unreachable through the public API because
+			// EmbedderProvider is a closed union, so exercise it by forcing the private field
+			// to a value outside the union. `embedderProvider` is TypeScript `private`, not
+			// `#`-private, so a runtime property write reaches it. The double assertion is a
+			// last resort: the private field is not part of the public type surface, and
+			// `as any` is avoided to keep the file's no-explicit-any suppression budget flat.
+			;(configManager as unknown as Record<string, unknown>)["embedderProvider"] = "not-a-provider"
+			expect(configManager.isConfigured()).toBe(false)
 		})
 	})
 })

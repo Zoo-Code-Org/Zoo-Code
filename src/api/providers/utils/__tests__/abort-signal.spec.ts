@@ -1,4 +1,10 @@
-import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../abort-signal"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	mergeAbortSignals,
+	throwIfAborted,
+} from "../abort-signal"
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {
@@ -97,6 +103,87 @@ describe("abort-signal utilities", () => {
 			const result = mergeAbortSignals(primaryController.signal, secondaryController.signal)
 
 			expect(result.aborted).toBe(true)
+		})
+	})
+
+	describe("throwIfAborted", () => {
+		it("does not throw when signal is undefined", () => {
+			expect(() => throwIfAborted()).not.toThrow()
+		})
+
+		it("does not throw when signal is not aborted", () => {
+			const controller = new AbortController()
+
+			expect(() => throwIfAborted(controller.signal)).not.toThrow()
+		})
+
+		it("throws an AbortError when signal is already aborted", () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			let caught: unknown
+			try {
+				throwIfAborted(controller.signal)
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("This operation was aborted")
+		})
+	})
+
+	describe("isRequestAborted", () => {
+		it("returns true when the caller signal is aborted", () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			expect(isRequestAborted(new Error("boom"), controller.signal)).toBe(true)
+			expect(isRequestAborted(undefined, controller.signal)).toBe(true)
+		})
+
+		it("returns true for a native AbortError or the OpenAI SDK APIUserAbortError", () => {
+			const native = new Error("This operation was aborted")
+			native.name = "AbortError"
+			expect(isRequestAborted(native)).toBe(true)
+
+			const sdk = new Error("whatever")
+			sdk.name = "APIUserAbortError"
+			expect(isRequestAborted(sdk)).toBe(true)
+		})
+
+		it("matches the OpenAI SDK abort message exactly, not as a substring", () => {
+			expect(isRequestAborted(new Error("Request was aborted."))).toBe(true)
+			expect(isRequestAborted(new Error("Request was aborted"))).toBe(false)
+			expect(isRequestAborted(new Error("Request was aborted. Please retry"))).toBe(false)
+		})
+
+		it("returns false for unrelated errors, nullish errors, and live signals", () => {
+			expect(isRequestAborted(new Error("the abort failed"))).toBe(false)
+			expect(isRequestAborted(undefined)).toBe(false)
+			expect(isRequestAborted(null)).toBe(false)
+
+			const controller = new AbortController()
+			expect(isRequestAborted(new Error("boom"), controller.signal)).toBe(false)
+		})
+	})
+
+	describe("createAbortError", () => {
+		it("builds an error satisfying the Task.ts abort contract", () => {
+			const error = createAbortError("LM Studio")
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.name).toBe("AbortError")
+			expect(error.message).toBe("The LM Studio request was aborted")
+		})
+
+		it("interpolates the provider name", () => {
+			expect(createAbortError("Qwen Code").message).toBe("The Qwen Code request was aborted")
+		})
+
+		it("returns a fresh error on each call", () => {
+			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})
 	})
 })

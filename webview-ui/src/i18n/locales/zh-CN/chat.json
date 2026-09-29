@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "🤖 在全新的 Zoo Gateway 上，有余额的用户可在 2 周内以 5 折优惠试用 GLM-5.3-Flash 和 Gemini 3.7 Flash，并可完全免费使用 MiniMax M3：<modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "新模型 — GLM-5.3-Flash 现已通过 Z AI 提供。",
-			"highlight3": "可靠性修复 — 恢复了子任务批准，解决了 Vertex Gemini 3.7 工具输出为空、终端启动失败和后台服务错误问题，并提升了不同 IDE 主题下的可读性。"
+			"highlight1": "✨ 新增 SOTA 模型：在支持的提供商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。",
+			"highlight2": "🧭 更可靠的任务和子任务：隔离委派模式，在重复停止后保留子任务链接，并在斜杠命令切换模式时保护编排器设置。",
+			"highlight3": "🛠️ 更可靠的终端、提供商和代码搜索行为：改进 Windows 和非英语环境中的终端行为，增强提供商响应与取消处理，并让代码搜索更稳定地使用正确的工作区。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",
