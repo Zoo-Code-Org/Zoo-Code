@@ -2,7 +2,41 @@ import React from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	retiredProviderIdentifiers,
+	anthropicDefaultModelId,
+	bedrockDefaultModelId,
+	deepSeekDefaultModelId,
+	moonshotDefaultModelId,
+	geminiDefaultModelId,
+	mistralDefaultModelId,
+	openAiNativeDefaultModelId,
+	qwenCodeDefaultModelId,
+	vertexDefaultModelId,
+	xaiDefaultModelId,
+	sambaNovaDefaultModelId,
+	internationalZAiDefaultModelId,
+	internationalZAiModels,
+	mainlandZAiDefaultModelId,
+	mainlandZAiModels,
+	fireworksDefaultModelId,
+	friendliDefaultModelId,
+	minimaxDefaultModelId,
+	mimoDefaultModelId,
+	basetenDefaultModelId,
+	openRouterDefaultModelId,
+	requestyDefaultModelId,
+	unboundDefaultModelId,
+	litellmDefaultModelId,
+	vercelAiGatewayDefaultModelId,
+	zooGatewayDefaultModelId,
+	opencodeGoDefaultModelId,
+	kenariDefaultModelId,
+	nanoGptDefaultModelId,
+	kimiCodeDefaultModelId,
+	poeDefaultModelId,
+} from "@roo-code/types"
 
 import { useChatModelSelector } from "../useChatModelSelector"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -58,13 +92,52 @@ describe("useChatModelSelector", () => {
 			expect(result.current.modelIdKey).toBe("apiModelId")
 			expect(result.current.models).not.toBeNull()
 			expect(Object.keys(result.current.models!)).toContain("claude-opus-4-20250514")
-			expect(result.current.defaultModelId).toBeTruthy()
+			// Assert the exact default id, not just "some non-empty value", so a
+			// wrong/empty default is caught.
+			expect(result.current.defaultModelId).toBe(anthropicDefaultModelId)
 		})
 
 		it("does not request message-based models for static providers", () => {
 			renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("zai (static provider, API line aware)", () => {
+		it("uses international defaults and international model keys by default", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.zai },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.provider).toBe(providerIdentifiers.zai)
+			expect(result.current.defaultModelId).toBe(internationalZAiDefaultModelId)
+			expect(Object.keys(result.current.models!)).toEqual(
+				expect.arrayContaining(Object.keys(internationalZAiModels)),
+			)
+			// International pricing proves the international registry was read
+			// (the mainland registry uses different prices for the same model id).
+			expect(result.current.models!["glm-4.5"]?.inputPrice).toBe(internationalZAiModels["glm-4.5"].inputPrice)
+			expect(result.current.models!["glm-4.5"]?.inputPrice).not.toBe(mainlandZAiModels["glm-4.5"].inputPrice)
+		})
+
+		it("uses mainland defaults and mainland model keys when zaiApiLine is china_coding", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.zai, zaiApiLine: "china_coding" },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.defaultModelId).toBe(mainlandZAiDefaultModelId)
+			expect(Object.keys(result.current.models!)).toEqual(expect.arrayContaining(Object.keys(mainlandZAiModels)))
+			// The China Coding plan additionally exposes coding-plan-only models.
+			expect(Object.keys(result.current.models!)).toEqual(expect.arrayContaining(["glm-5.3", "glm-5.3-flash"]))
+			expect(result.current.models!["glm-4.5"]?.inputPrice).toBe(mainlandZAiModels["glm-4.5"].inputPrice)
+			expect(result.current.models!["glm-4.5"]?.inputPrice).not.toBe(internationalZAiModels["glm-4.5"].inputPrice)
 		})
 	})
 
@@ -90,8 +163,23 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("zooGatewayModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(zooGatewayDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["anthropic/claude-sonnet-4"])
+		})
+
+		it("reports loading while the router models request is in flight", () => {
+			mockUseRouterModels.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.zooGateway,
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.isLoading).toBe(true)
 		})
 	})
 
@@ -110,7 +198,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("opencodeGoModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(opencodeGoDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["glm-5.2"])
 		})
 	})
@@ -130,7 +218,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("kenariModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(kenariDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["glm-5-2"])
 		})
 	})
@@ -150,7 +238,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("nanoGptModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(nanoGptDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-5.6-sol"])
 		})
 	})
@@ -170,7 +258,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("requestyModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(requestyDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-5.1"])
 		})
 	})
@@ -190,7 +278,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("unboundModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(unboundDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-4o"])
 		})
 	})
@@ -215,7 +303,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("vercelAiGatewayModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(vercelAiGatewayDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-4o-mini"])
 		})
 	})
@@ -235,7 +323,7 @@ describe("useChatModelSelector", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
 			expect(result.current.modelIdKey).toBe("apiModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
+			expect(result.current.defaultModelId).toBe(kimiCodeDefaultModelId)
 			expect(Object.keys(result.current.models!)).toEqual(["kimi-k2"])
 		})
 	})
@@ -254,15 +342,20 @@ describe("useChatModelSelector", () => {
 
 			renderHook(() => useChatModelSelector(), { wrapper })
 
-			expect(mockPostMessage).toHaveBeenCalledWith({
-				type: "requestOpenAiModels",
-				values: {
-					baseUrl: "https://api.example.com/v1",
-					apiKey: "test-key",
-					customHeaders: {},
-					openAiHeaders: {},
-				},
-			})
+			// The request now carries an identity token so the matching response
+			// can be correlated and stale replies discarded.
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "requestOpenAiModels",
+					requestId: expect.any(String),
+					values: {
+						baseUrl: "https://api.example.com/v1",
+						apiKey: "test-key",
+						customHeaders: {},
+						openAiHeaders: {},
+					},
+				}),
+			)
 		})
 
 		it("uses models delivered through the openAiModels message", async () => {
@@ -288,6 +381,54 @@ describe("useChatModelSelector", () => {
 
 			expect(Object.keys(result.current.models!)).toEqual(expect.arrayContaining(["gpt-4o", "gpt-4o-mini"]))
 			expect(result.current.modelIdKey).toBe("openAiModelId")
+		})
+
+		it("reports loading while the openAi request is in flight", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openai,
+					openAiBaseUrl: "https://api.example.com/v1",
+					openAiApiKey: "test-key",
+					openAiHeaders: {},
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.isLoading).toBe(true)
+		})
+
+		it("does not request openAi models when the base URL is missing", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openai,
+					openAiApiKey: "test-key",
+					openAiHeaders: {},
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+			expect(result.current.isLoading).toBe(false)
+		})
+
+		it("does not request openAi models when the API key is missing", () => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openai,
+					openAiBaseUrl: "https://api.example.com/v1",
+					openAiHeaders: {},
+				},
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+			expect(result.current.isLoading).toBe(false)
 		})
 	})
 
@@ -455,6 +596,66 @@ describe("useChatModelSelector", () => {
 			// displayTransform returns "" for missing values
 			expect(result.current.displayTransform!(undefined)).toBe("")
 			expect(result.current.displayTransform!({ vendor: "copilot" })).toBe("")
+		})
+	})
+
+	describe("default model ids", () => {
+		// Asserting the exact default id for every mapped provider kills mutants
+		// that drop or change an entry in STATIC_DEFAULT_MODEL_IDS /
+		// ROUTER_DEFAULT_MODEL_IDS (a weak toBeTruthy() only proves non-empty).
+		const staticProviderDefaults: Array<[string, string]> = [
+			[providerIdentifiers.anthropic, anthropicDefaultModelId],
+			[providerIdentifiers.bedrock, bedrockDefaultModelId],
+			[providerIdentifiers.deepseek, deepSeekDefaultModelId],
+			[providerIdentifiers.moonshot, moonshotDefaultModelId],
+			[providerIdentifiers.gemini, geminiDefaultModelId],
+			[providerIdentifiers.mistral, mistralDefaultModelId],
+			[providerIdentifiers.openaiNative, openAiNativeDefaultModelId],
+			[providerIdentifiers.qwenCode, qwenCodeDefaultModelId],
+			[providerIdentifiers.vertex, vertexDefaultModelId],
+			[providerIdentifiers.xai, xaiDefaultModelId],
+			[providerIdentifiers.sambanova, sambaNovaDefaultModelId],
+			[providerIdentifiers.fireworks, fireworksDefaultModelId],
+			[providerIdentifiers.friendli, friendliDefaultModelId],
+			[providerIdentifiers.minimax, minimaxDefaultModelId],
+			[providerIdentifiers.mimo, mimoDefaultModelId],
+			[providerIdentifiers.baseten, basetenDefaultModelId],
+		]
+
+		it.each(staticProviderDefaults)("resolves the exact default id for %s", (provider, expected) => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: provider },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.defaultModelId).toBe(expected)
+		})
+
+		const routerProviderDefaults: Array<[string, string]> = [
+			[providerIdentifiers.openrouter, openRouterDefaultModelId],
+			[providerIdentifiers.requesty, requestyDefaultModelId],
+			[providerIdentifiers.unbound, unboundDefaultModelId],
+			[providerIdentifiers.litellm, litellmDefaultModelId],
+			[providerIdentifiers.vercelAiGateway, vercelAiGatewayDefaultModelId],
+			[providerIdentifiers.zooGateway, zooGatewayDefaultModelId],
+			[providerIdentifiers.opencodeGo, opencodeGoDefaultModelId],
+			[providerIdentifiers.kenari, kenariDefaultModelId],
+			[providerIdentifiers.nanogpt, nanoGptDefaultModelId],
+			[providerIdentifiers.kimiCode, kimiCodeDefaultModelId],
+			[providerIdentifiers.poe, poeDefaultModelId],
+		]
+
+		it.each(routerProviderDefaults)("resolves the exact router default id for %s", (provider, expected) => {
+			mockUseExtensionState.mockReturnValue({
+				apiConfiguration: { apiProvider: provider },
+				routerModels: undefined,
+			})
+
+			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
+
+			expect(result.current.defaultModelId).toBe(expected)
 		})
 	})
 
