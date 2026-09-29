@@ -80,6 +80,8 @@ export class ProfileValidator {
 				return profile.requestyModelId
 			case providerIdentifiers.unbound:
 				return profile.unboundModelId
+			case providerIdentifiers.zooGateway:
+				return profile.zooGatewayModelId
 			case providerIdentifiers.fakeAi:
 			default:
 				return undefined

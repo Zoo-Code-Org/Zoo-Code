@@ -192,9 +192,10 @@ type UpsertProviderProfileOptions = {
 	/**
 	 * Internal-only bypass of the organization model allow-list, used exclusively
 	 * for Zoo Gateway credential synchronization (token refresh) and sign-out
-	 * writes. `ProfileValidator` cannot map `zoo-gateway` to a model id, so a
-	 * restrictive allow-list would otherwise reject those writes and leave stale
-	 * credentials behind in the active profile.
+	 * writes. These are auth writes, not model selections: a restrictive
+	 * allow-list may omit `zoo-gateway` entirely, or list the provider without the
+	 * active `zooGatewayModelId`, and must not reject the credential write and
+	 * leave stale credentials behind in the active profile.
 	 *
 	 * This flag must never be set from a webview-originated code path: the webview
 	 * is not a trusted boundary, so every user-driven profile write keeps the
@@ -1862,7 +1863,8 @@ export class ClineProvider
 		// unauthorized profile from being written or activated at all.
 		//
 		// `bypassAllowList` is reserved for internal Zoo Gateway credential
-		// writes (token refresh / sign-out); see `UpsertProviderProfileOptions`.
+		// writes (token refresh / sign-out), which are auth writes rather than
+		// model selections; see `UpsertProviderProfileOptions`.
 		if (!options.bypassAllowList) {
 			let organizationAllowList = ORGANIZATION_ALLOW_ALL
 

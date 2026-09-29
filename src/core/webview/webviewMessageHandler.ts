@@ -3037,9 +3037,11 @@ export const webviewMessageHandler = async (
 
 								// The write can still fail for other reasons (disk error,
 								// disabled profile enforcement). Never report a successful
-								// token cleanup in that case: surface it instead.
+								// token cleanup in that case: surface it instead. The
+								// allow-list check is bypassed on this call, so a neutral
+								// message is used rather than an allow-list violation.
 								if (writeResult === undefined) {
-									throw new Error(t("common:errors.violated_organization_allowlist"))
+									throw new Error(`Failed to persist cleaned Zoo Gateway profile "${entry.name}"`)
 								}
 
 								provider.log(

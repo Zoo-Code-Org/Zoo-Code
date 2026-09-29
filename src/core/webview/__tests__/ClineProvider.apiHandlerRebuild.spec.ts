@@ -493,9 +493,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 
 		test("bypassAllowList writes Zoo Gateway credentials even when the allow-list forbids the provider", async () => {
-			// A restrictive allow-list that does not mention zoo-gateway at all —
-			// `ProfileValidator` cannot map zoo-gateway to a model id, so this is
-			// exactly the case that used to strand a refreshed/cleared token.
+			// A restrictive allow-list that does not mention zoo-gateway at all. This
+			// is exactly the case that used to strand a refreshed/cleared token, and
+			// it is why the credential write opts out of the model allow-list.
 			mockGetAllowList.mockResolvedValue({
 				allowAll: false,
 				providers: {
@@ -518,6 +518,54 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				expect.objectContaining({ zooSessionToken: "zoo_ext_token" }),
 			)
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("accepts a Zoo Gateway profile whose model is on the allow-list", async () => {
+			// `ProfileValidator.getModelIdFromProfile` maps zoo-gateway to
+			// `zooGatewayModelId`, so a listed model passes without the bypass.
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.zooGateway]: {
+						allowAll: false,
+						models: ["anthropic/claude-sonnet-4"],
+					},
+				},
+			})
+
+			const result = await provider.upsertProviderProfile("Zoo Gateway", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "zoo_ext_token",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			})
+
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"Zoo Gateway",
+				expect.objectContaining({ zooGatewayModelId: "anthropic/claude-sonnet-4" }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("rejects a Zoo Gateway profile whose model is not on the allow-list", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.zooGateway]: {
+						allowAll: false,
+						models: ["anthropic/claude-sonnet-4"],
+					},
+				},
+			})
+
+			const result = await provider.upsertProviderProfile("Zoo Gateway", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "zoo_ext_token",
+				zooGatewayModelId: "anthropic/claude-opus-4",
+			})
+
+			expect(result).toBeUndefined()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
 		})
 
 		test("the Zoo Gateway bypass does not leak to other providers", async () => {
