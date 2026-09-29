@@ -4,12 +4,16 @@ import Mocha from "mocha"
 import { glob } from "glob"
 import * as vscode from "vscode"
 
-import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
+import { RooCodeEventName, type RooCodeAPI, type RooCodeTestOnlyApi } from "@roo-code/types"
+
+// In the e2e host the extension activates in test mode, so the exports object
+// carries the production-gated test-only surface on top of RooCodeAPI.
+type E2eApi = RooCodeAPI & RooCodeTestOnlyApi
 
 import { isCompletedAsk, waitFor } from "./utils"
 
 export async function run() {
-	const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
+	const extension = vscode.extensions.getExtension<E2eApi>("ZooCodeOrganization.zoo-code")
 
 	if (!extension) {
 		throw new Error("Extension not found")

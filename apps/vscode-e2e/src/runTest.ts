@@ -23,6 +23,8 @@ import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 import { createScenarioWorkspace, removeScenarioWorkspace } from "./restart/scenarioWorkspace"
 import { runRestartScenario } from "./restart/vscodeCoordinator"
+import { toolResultContains } from "./fixtures/tool-result"
+import { addViewStateFixtures } from "./fixtures/view-state"
 
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
@@ -143,6 +145,41 @@ async function main() {
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 				addDeepSeekV4Fixtures(mock)
+				addViewStateFixtures(mock)
+
+				// Model-agnostic predicate fixtures for the view-state suite's post-switch
+				// turns. They coexist with the legacy model-scoped regex fixture below
+				// (shared response id call_modes_post_switch_001) so the modes suite keeps
+				// its OpenRouter-scoped match while view-state runs under any default model.
+				mock.addFixture({
+					match: {
+						predicate: (req) => toolResultContains(req, "call_modes_switch_001", []),
+					},
+					response: {
+						toolCalls: [
+							{
+								name: "attempt_completion",
+								arguments: JSON.stringify({ result: "Switched to ❓ Ask mode as requested." }),
+								id: "call_modes_post_switch_001",
+							},
+						],
+					},
+				})
+
+				mock.addFixture({
+					match: {
+						predicate: (req) => toolResultContains(req, "call_modes_switch_002", []),
+					},
+					response: {
+						toolCalls: [
+							{
+								name: "attempt_completion",
+								arguments: JSON.stringify({ result: "Switched to 🪲 Debug mode as requested." }),
+								id: "call_modes_post_switch_002",
+							},
+						],
+					},
+				})
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
 				// user message starts with <environment_details> directly — no <user_message>

@@ -647,6 +647,7 @@ export interface WebviewMessage {
 		| "openRulesDirectory"
 		| "themeFixtureProbeResponse"
 	text?: string
+	viewStateId?: string
 	taskId?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
