@@ -157,6 +157,130 @@ describe("ContextProxy", () => {
 	})
 
 	describe("updateGlobalState", () => {
+		it("restores the previous cached value when the durable write fails", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "anthropic")).rejects.toThrow("storage failed")
+
+			// A failed durable write must not leave the cache ahead of storage.
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+		})
+
+		it("does not roll back over a newer same-value write when the older write fails", async () => {
+			// Seed the cache so two overlapping writes carry the same new value: the
+			// stale-previous restore is only visible when value comparison matches.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			// The older write's durable update fails while a newer same-key write is
+			// in flight: its failure must not restore its previous value over the
+			// newer write's success (its write token was superseded).
+			mockGlobalState.update.mockRejectedValueOnce(new Error("storage failed"))
+			const older = proxy.updateGlobalState("apiProvider", "anthropic")
+			const newer = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			await expect(older).rejects.toThrow("storage failed")
+			await newer
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
+		it("does not roll back a secret over a newer same-value write when the older write fails", async () => {
+			await proxy.storeSecret("apiKey", "old-key")
+
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+			const older = proxy.storeSecret("apiKey", "new-key")
+			const newer = proxy.storeSecret("apiKey", "new-key")
+
+			await expect(older).rejects.toThrow("secrets failed")
+			await newer
+
+			expect(proxy.getSecret("apiKey")).toBe("new-key")
+		})
+
+		it("restores the previous secret when the durable write fails", async () => {
+			await proxy.storeSecret("apiKey", "old-key")
+			mockSecrets.store.mockRejectedValueOnce(new Error("secrets failed"))
+
+			await expect(proxy.storeSecret("apiKey", "new-key")).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("apiKey")).toBe("old-key")
+		})
+
+		it("does not roll a pre-refresh secret write back over refreshed values", async () => {
+			await proxy.storeSecret("apiKey", "old-key")
+			// Defer the durable failure until after the refresh completes: a failure that
+			// lands before the re-sync runs its rollback microtask first, so the re-sync
+			// would mask the stale restore regardless of the token guard.
+			let failStore!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failStore = reject
+					}),
+			)
+			const pending = proxy.storeSecret("apiKey", "stale-write")
+
+			// The refresh re-syncs the cache from storage and drops the pending write's
+			// token: its later failure must not restore its previous value.
+			mockSecrets.get.mockResolvedValueOnce("refreshed-value")
+			await proxy.refreshSecrets()
+
+			failStore(new Error("secrets failed"))
+			await expect(pending).rejects.toThrow("secrets failed")
+			expect(proxy.getSecret("apiKey")).toBe("refreshed-value")
+		})
+
+		it("does not restore a pending write into a reset cache", async () => {
+			// The pending write fails after resetAllState cleared the token: without the
+			// token guard its stale previous value would resurrect in a cache the reset
+			// just wiped. The failure is deferred (see the pre-refresh case) so the
+			// rollback cannot be masked by the re-initialization's own cache writes.
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+			let failUpdate!: (error: Error) => void
+			mockGlobalState.update.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failUpdate = reject
+					}),
+			)
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			await proxy.resetAllState()
+
+			failUpdate(new Error("storage failed"))
+			await expect(pending).rejects.toThrow("storage failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
+		it("does not restore a pending secret write into a reset cache", async () => {
+			// Same deferred-failure discipline as the state case: the pending secret write
+			// fails after resetAllState cleared the secret token, so without that clear its
+			// stale previous value would resurrect in the re-seeded secret cache.
+			await proxy.storeSecret("apiKey", "old-key")
+			let failStore!: (error: Error) => void
+			mockSecrets.store.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						failStore = reject
+					}),
+			)
+			const pending = proxy.storeSecret("apiKey", "stale-write")
+
+			// Reset re-initialization reads through secrets.get: seed it with undefined so
+			// the re-seeded cache holds nothing for the assertion to distinguish from the
+			// stale restore.
+			mockSecrets.get.mockResolvedValue(undefined)
+			await proxy.resetAllState()
+
+			failStore(new Error("secrets failed"))
+			await expect(pending).rejects.toThrow("secrets failed")
+
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+		})
+
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 
@@ -719,6 +843,22 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })

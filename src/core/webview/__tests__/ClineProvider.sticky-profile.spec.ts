@@ -1015,4 +1015,186 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			)
 		})
 	})
+
+	describe("deleteProviderProfile", () => {
+		it("removes the stored profile so a dangling mode mapping can no longer re-activate it", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Seed the stored profile settings: the default profile plus a child
+			// profile (mirroring the cross-profile subtasks e2e scenario), with the
+			// "ask" mode mapped to the child profile.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.providerSettingsManager.setModeConfig("ask", childId)
+
+			// The UI-facing list mirrors the store, as maintained by upsert/activate.
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// The deleted profile's settings are gone from the manager store.
+			const remaining = await provider.providerSettingsManager.listConfig()
+			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
+			await expect(
+				provider.providerSettingsManager.getProfile({ name: "subtask-child-profile" }),
+			).rejects.toThrow(/subtask-child-profile.*not found/)
+
+			// The mode mapping still points at the deleted id, but it no longer
+			// resolves to a stored profile, so handleModeSwitch falls through to the
+			// current configuration instead of re-activating the deleted profile.
+			const savedConfigId = await provider.providerSettingsManager.getModeConfigId("ask")
+			expect(savedConfigId).toBe(childId)
+			expect(remaining.find(({ id }) => id === savedConfigId)).toBeUndefined()
+
+			// The context was repointed at the surviving profile.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+
+		it("treats an already-gone secret as success so the stale list entry is still pruned", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Only the default profile exists in the store: the ghost profile's secret
+			// was already gone (e.g. pruned by an earlier run) but its list entry
+			// survived.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "ghost-profile",
+			})
+
+			// The manager's "not found" rejection must not surface to the caller ...
+			await expect(
+				provider.deleteProviderProfile({
+					name: "ghost-profile",
+					id: "ghost-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).resolves.not.toThrow()
+
+			// ... it prunes the stale list entry and repoints the selection.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+
+		it("still refuses to delete the last stored profile when a stale list entry remains", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			// A ghost list entry survives next to the only real profile, so the
+			// provider-level "last profile" guard does not fire: the refusal must come
+			// from the settings store itself.
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "default",
+			})
+
+			await expect(
+				provider.deleteProviderProfile({
+					name: "default",
+					id: defaultId,
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).rejects.toThrow("Cannot delete the last remaining configuration")
+
+			// Nothing was repointed or pruned.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "ghost-profile"])
+		})
+
+		it("keeps an unrelated view-local pin when a different profile is deleted", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Three stored profiles: the view pins the keeper (unrelated to the
+			// deletion) and the shared selection also points at the keeper.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const keeperId = await provider.providerSettingsManager.saveConfig("keeper-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			const victimId = await provider.providerSettingsManager.saveConfig("victim-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-nano",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "keeper-profile", id: keeperId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "victim-profile", id: victimId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "keeper-profile",
+			})
+
+			// This view pins the surviving keeper profile, while a different view's
+			// persisted pin references the profile about to be deleted.
+			await provider.saveViewState("currentApiConfigName", "keeper-profile")
+			await provider.contextProxy.setValue("viewStates", {
+				"other-view": { currentApiConfigName: "victim-profile", updatedAt: 1 },
+			})
+
+			await provider.deleteProviderProfile({
+				name: "victim-profile",
+				id: victimId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// The unrelated pin survives: the fallback branch syncs the shared list
+			// only, so neither this view's buffer nor the shared selection changes.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("keeper-profile")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "keeper-profile"])
+
+			// The other view's persisted pin was re-pointed at the replacement profile
+			// (the shared selection) instead of rehydrating the deleted name.
+			const viewStates = mockContext.globalState.get("viewStates") as Record<
+				string,
+				{ currentApiConfigName?: string }
+			>
+			expect(viewStates["other-view"]).toEqual(
+				expect.objectContaining({ currentApiConfigName: "keeper-profile" }),
+			)
+		})
+	})
 })
