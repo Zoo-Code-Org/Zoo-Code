@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useEvent } from "react-use"
 
 import {
@@ -141,7 +141,7 @@ export interface ChatModelSelectorData {
  * - Static providers: `getStaticModelsForProvider`.
  */
 export const useChatModelSelector = (): ChatModelSelectorData => {
-	const { apiConfiguration, routerModels: stateRouterModels } = useExtensionState()
+	const { apiConfiguration, routerModels: stateRouterModels, currentApiConfigName } = useExtensionState()
 
 	const provider = (apiConfiguration?.apiProvider || providerIdentifiers.openrouter) as ProviderName
 	const activeProvider = isRetiredProvider(provider) ? undefined : provider
@@ -159,10 +159,32 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
 	const [vsCodeLmModels, setVsCodeLmModels] = useState<LanguageModelChatSelector[]>([])
 
+	// Identity of the in-flight OpenAI-compatible model request. Responses that
+	// do not match the current request are ignored so a late reply from a
+	// previous provider/profile cannot overwrite the active list.
+	const openAiRequestIdRef = useRef<string | null>(null)
+
+	// Drop any previously fetched message-based model list when the provider or
+	// API profile changes; the lists are provider/profile scoped and a stale
+	// entry would otherwise leak across the switch.
+	useEffect(() => {
+		setOpenAiModels([])
+		setOllamaModels({})
+		setLmStudioModels({})
+		setVsCodeLmModels([])
+		openAiRequestIdRef.current = null
+	}, [activeProvider, currentApiConfigName])
+
 	const onMessage = useCallback((event: MessageEvent) => {
 		const message: ExtensionMessage = event.data
 		switch (message.type) {
 			case "openAiModels":
+				// Only accept a response that belongs to the request we most
+				// recently issued; ignore replies without an identity (other
+				// callers) or from a superseded request.
+				if (message.requestId && message.requestId !== openAiRequestIdRef.current) {
+					break
+				}
 				setOpenAiModels(message.openAiModels ?? [])
 				break
 			case "ollamaModels":
@@ -188,8 +210,13 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 		switch (activeProvider) {
 			case providerIdentifiers.openai:
 				if (apiConfiguration?.openAiBaseUrl && apiConfiguration?.openAiApiKey) {
+					// Tag the request so the matching response can be identified
+					// and stale replies discarded (see `onMessage`).
+					const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+					openAiRequestIdRef.current = requestId
 					vscode.postMessage({
 						type: "requestOpenAiModels",
+						requestId,
 						values: {
 							baseUrl: apiConfiguration.openAiBaseUrl,
 							apiKey: apiConfiguration.openAiApiKey,
@@ -211,6 +238,9 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 		}
 	}, [
 		activeProvider,
+		// Re-request after a provider/profile switch so the list matches the
+		// newly active profile (the reset effect clears the previous list).
+		currentApiConfigName,
 		apiConfiguration?.openAiBaseUrl,
 		apiConfiguration?.openAiApiKey,
 		apiConfiguration?.openAiHeaders,
@@ -332,7 +362,11 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 				break
 			default:
 				// Static models providers (anthropic, bedrock, gemini, etc.).
-				models = MODELS_BY_PROVIDER[activeProvider] ? getStaticModelsForProvider(activeProvider) : null
+				// Pass the configuration so Z.ai resolves models for the same
+				// API line (China vs international) as `defaultModelId`.
+				models = MODELS_BY_PROVIDER[activeProvider]
+					? getStaticModelsForProvider(activeProvider, undefined, apiConfiguration)
+					: null
 				modelIdKey = "apiModelId"
 		}
 

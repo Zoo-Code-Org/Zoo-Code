@@ -24,6 +24,7 @@ import {
 	getCompletionCheckpoint,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
+	ORGANIZATION_ALLOW_ALL,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -57,6 +58,7 @@ import {
 	handleOpenRuleFile,
 	handleOpenRulesDirectory,
 } from "./rulesMessageHandler"
+import { ProfileValidator } from "../../shared/ProfileValidator"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -1475,7 +1477,14 @@ export const webviewMessageHandler = async (
 					message?.values?.openAiHeaders,
 				)
 
-				await provider.postMessageToWebview({ type: OpenAiModelsMessageType.openAiModels, openAiModels })
+				// Echo the caller's request id so the webview can correlate the
+				// response with the request it issued and drop stale replies
+				// that arrive after a provider/profile switch.
+				await provider.postMessageToWebview({
+					type: OpenAiModelsMessageType.openAiModels,
+					openAiModels,
+					requestId: message.requestId,
+				})
 			}
 
 			break
@@ -2280,6 +2289,25 @@ export const webviewMessageHandler = async (
 			break
 		case "upsertApiConfiguration":
 			if (message.text && message.apiConfiguration) {
+				const { organizationAllowList } = await provider.getState()
+
+				// The webview is not a trusted boundary: re-validate the
+				// organization model allow-list before persisting and
+				// activating, so a forged custom model id cannot bypass the
+				// selector's UI gating.
+				if (
+					!ProfileValidator.isProfileAllowed(
+						message.apiConfiguration,
+						organizationAllowList ?? ORGANIZATION_ALLOW_ALL,
+					)
+				) {
+					provider.log(
+						`Blocked upsertApiConfiguration "${message.text}": model is not allowed by the organization allow-list`,
+					)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					break
+				}
+
 				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
 			}
 			break

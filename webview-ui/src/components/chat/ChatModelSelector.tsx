@@ -40,14 +40,47 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 		return available
 	}, [models, provider, organizationAllowList, selectedModelId])
 
+	// Gate arbitrary model ids against the organization allow-list. The webview
+	// is not a security boundary, but this keeps the UI from offering a custom
+	// model that the extension host would reject on save.
+	const isModelAllowed = useCallback(
+		(modelId: string): boolean => {
+			if (!organizationAllowList || organizationAllowList.allowAll) {
+				return true
+			}
+			if (!provider) {
+				return false
+			}
+			const providerConfig = organizationAllowList.providers[provider]
+			if (!providerConfig) {
+				return false
+			}
+			if (providerConfig.allowAll) {
+				return true
+			}
+			return providerConfig.models?.includes(modelId) ?? false
+		},
+		[organizationAllowList, provider],
+	)
+
+	// Only offer a custom (non-listed) model when the allow-list permits that
+	// exact model id for the active provider.
+	const customModelAllowed = useMemo(
+		() => (searchValue ? isModelAllowed(searchValue) : false),
+		[searchValue, isModelAllowed],
+	)
+
 	// Resolve the display value (custom transform for compound config values like VSCode LM).
 	const displayValue = useMemo(() => {
 		if (displayTransform && modelIdKey) {
 			const storedValue = apiConfiguration?.[modelIdKey]
 			return storedValue ? displayTransform(storedValue) : undefined
 		}
-		return selectedModelId || (searchValue ? searchValue : undefined)
-	}, [displayTransform, modelIdKey, apiConfiguration, selectedModelId, searchValue])
+		// Only reflect the saved model in the trigger label (and the row
+		// highlight); fall back to undefined so the default/placeholder shows
+		// instead of the in-progress search text.
+		return selectedModelId || undefined
+	}, [displayTransform, modelIdKey, apiConfiguration, selectedModelId])
 
 	const filteredModelIds = useMemo(() => {
 		if (!searchValue) return modelIds
@@ -58,6 +91,12 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 	const onSelect = useCallback(
 		(modelId: string) => {
 			if (!modelId || !modelIdKey || !apiConfiguration) {
+				return
+			}
+
+			// Defense in depth: never persist a model the allow-list forbids,
+			// even if a caller bypasses the rendered list (e.g. custom search).
+			if (!isModelAllowed(modelId)) {
 				return
 			}
 
@@ -79,7 +118,7 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 				},
 			})
 		},
-		[modelIdKey, apiConfiguration, valueTransform, currentApiConfigName],
+		[modelIdKey, apiConfiguration, valueTransform, currentApiConfigName, isModelAllowed],
 	)
 
 	const onClearSearch = useCallback(() => {
@@ -123,9 +162,12 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 						/>
 						{searchValue.length > 0 && (
 							<div className="absolute right-4 top-0 bottom-0 flex items-center justify-center">
-								<span
-									className="codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
+								<button
+									type="button"
+									aria-label="Clear search"
+									data-testid="chat-model-search-clear"
 									onClick={onClearSearch}
+									className="codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer bg-transparent border-none p-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder"
 								/>
 							</div>
 						)}
@@ -138,12 +180,14 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 					{modelIds.length > 0 && (
 						<div className="max-h-[300px] overflow-y-auto">
 							{filteredModelIds.map((modelId) => (
-								<div
+								<button
 									key={modelId}
+									type="button"
 									onClick={() => onSelect(modelId)}
 									data-testid={`chat-model-option-${modelId}`}
 									className={cn(
-										"px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2",
+										"w-full text-left bg-transparent border-none px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2",
+										"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder focus-visible:ring-inset",
 										"hover:bg-vscode-list-hoverBackground",
 										modelId === displayValue &&
 											"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
@@ -152,18 +196,19 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 										{modelId}
 									</span>
 									{modelId === displayValue && <span className="codicon codicon-check text-xs" />}
-								</div>
+								</button>
 							))}
 						</div>
 					)}
 
-					{searchValue && !modelIds.includes(searchValue) && (
-						<div
+					{searchValue && customModelAllowed && !modelIds.includes(searchValue) && (
+						<button
+							type="button"
 							data-testid="chat-model-use-custom"
 							onClick={() => onSelect(searchValue)}
-							className="px-3 py-1.5 text-sm cursor-pointer hover:bg-vscode-list-hoverBackground border-t border-vscode-input-border">
+							className="w-full text-left bg-transparent border-none px-3 py-1.5 text-sm cursor-pointer hover:bg-vscode-list-hoverBackground border-t border-vscode-input-border focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder focus-visible:ring-inset">
 							{t("chat:useCustomModel", { modelId: searchValue })}
-						</div>
+						</button>
 					)}
 				</div>
 			</PopoverContent>

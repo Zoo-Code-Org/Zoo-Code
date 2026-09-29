@@ -1836,6 +1836,32 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
 	): Promise<string | undefined> {
+		// Enforce the organization model allow-list before persisting or
+		// activating a profile. The webview is not a trusted boundary, so the
+		// model selector's client-side gating cannot be the only check.
+		// Task creation validates too, but rejecting here prevents an
+		// unauthorized profile from being written or activated at all.
+		let organizationAllowList = ORGANIZATION_ALLOW_ALL
+
+		try {
+			organizationAllowList = await CloudService.instance.getAllowList()
+		} catch (error) {
+			// No cloud instance / not authenticated: fall back to allow-all,
+			// matching `getState` and task-creation semantics.
+			this.log(
+				`[upsertProviderProfile] organization allow-list unavailable, using allow-all: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+
+		if (!ProfileValidator.isProfileAllowed(providerSettings, organizationAllowList)) {
+			this.log(
+				`[upsertProviderProfile] Blocked profile "${name}": model is not allowed by the organization allow-list`,
+			)
+			return undefined
+		}
+
 		try {
 			return await this.enqueueProviderProfileMutation(async (signal) => {
 				// TODO: Do we need to be calling `activateProfile`? It's not
