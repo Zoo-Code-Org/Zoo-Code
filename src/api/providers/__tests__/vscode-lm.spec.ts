@@ -1407,6 +1407,109 @@ describe("VsCodeLmHandler", () => {
 			consoleErrorSpy.mockRestore()
 		})
 
+		it("should reject with an AbortError when the external signal aborts before a quiet stream end", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const controller = new AbortController()
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Partial text")
+					await streamGate
+					return // Quiet end: no chunk and no throw after the abort.
+				})(),
+				text: (async function* () {
+					yield "Partial text"
+					await streamGate
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const firstChunk = await stream.next()
+			expect(firstChunk.value).toEqual({ type: "text", text: "Partial text" })
+
+			// The caller aborts while the host stream is parked; the host then ends quietly.
+			controller.abort()
+			releaseStream()
+
+			// The post-loop guard must reject with the canonical abort instead of
+			// counting output tokens and yielding a usage chunk for the partial text.
+			await expect(stream.next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+		})
+
+		it("should reject with an AbortError when a superseded request's stream ends quietly", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			let releaseA: () => void = () => {}
+			const streamAGate = new Promise<void>((resolve) => {
+				releaseA = resolve
+			})
+			mockLanguageModelChat.sendRequest
+				.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("A1")
+						await streamAGate
+						return // Quiet end after supersession.
+					})(),
+					text: (async function* () {
+						yield "A1"
+						await streamAGate
+						return
+					})(),
+				})
+				.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("B1")
+					})(),
+					text: (async function* () {
+						yield "B1"
+					})(),
+				})
+
+			const streamA = handler.createMessage(systemPrompt, messages)
+			const firstChunkA = await streamA.next()
+			expect(firstChunkA.value).toEqual({ type: "text", text: "A1" })
+
+			// B supersedes A: ensureCleanState() cancels A's token while A is parked
+			// between host chunks; the host stream then ends without yielding.
+			const streamB = handler.createMessage(systemPrompt, messages)
+			const firstChunkB = await streamB.next()
+			expect(firstChunkB.value).toEqual({ type: "text", text: "B1" })
+			expect(tokenSourceInstance(0).token.isCancellationRequested).toBe(true)
+
+			releaseA()
+
+			// The external signal was never involved, so only the token check in the
+			// post-loop guard can turn the quiet end into the canonical abort.
+			await expect(streamA.next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Zoo Code <Language Model API>: Request aborted",
+			)
+
+			await streamB.return(undefined)
+			expect(handler["currentRequestCancellation"]).toBeNull()
+			consoleErrorSpy.mockRestore()
+		})
+
 		it("should abort before sendRequest when the external signal fires while counting input tokens", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]

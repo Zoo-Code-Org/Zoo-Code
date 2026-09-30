@@ -1249,6 +1249,16 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				}
 			}
 
+			// Guard against a quiet stream end after the request was aborted or superseded:
+			// the in-loop check only fires when the host delivers another chunk, so a stream
+			// that ends normally after cancellation would otherwise complete with partial
+			// text and a usage chunk instead of rejecting with the canonical abort.
+			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
 
