@@ -1113,11 +1113,34 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should pass a timeout-only request signal when completePrompt timeoutMs is positive", async () => {
-			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
-			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
-			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
-			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
-			expect(requestOptions?.timeout).toBe(5000)
+			// The request must actually observe the merged signal firing: resolving the mock
+			// immediately only proves a signal was passed, not that a live (non-aborted)
+			// one aborts on timeout. Keep the request parked until its signal aborts, then
+			// assert the abort plus the retained timeout and error contract.
+			let capturedOptions: { signal?: AbortSignal; timeout?: number } | undefined
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) => {
+					capturedOptions = options
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new APIUserAbortError()
+				},
+			)
+
+			const requestPromise = handler.completePrompt("test prompt", { timeoutMs: 50 })
+			const resultPromise = captureError(requestPromise)
+
+			await vi.waitFor(() => expect(capturedOptions?.signal?.aborted).toBe(true))
+			expect(capturedOptions?.timeout).toBe(50)
+
+			const result = await resultPromise
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
 		})
 
 		it("should not pass a request signal for zero timeoutMs in completePrompt", async () => {
