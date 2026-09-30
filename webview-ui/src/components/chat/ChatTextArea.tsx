@@ -1036,7 +1036,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									className="absolute inset-0 rounded-lg overflow-hidden pointer-events-none z-[15] forced-color-adjust-none"
 									data-testid="streaming-border">
 									<div
-										className="absolute inset-0 rounded-lg pointer-events-none animate-[border-spin_3s_linear_infinite] forced-color-adjust-none"
+										className="absolute inset-0 rounded-lg pointer-events-none animate-[border-spin_3s_linear_infinite] motion-reduce:animate-none forced-color-adjust-none"
 										style={{
 											padding: "1px",
 											background:
@@ -1055,8 +1055,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								<div
 									className="absolute inset-0 rounded-lg pointer-events-none z-[15] forced-color-adjust-none"
 									data-testid="streaming-border">
-									<div className="absolute inset-0 rounded-lg animate-streaming-glow pointer-events-none" />
-									<div className="absolute inset-0 rounded-lg border border-vscode-focusBorder animate-[border-breathe_2s_ease-in-out_infinite] pointer-events-none" />
+									<div className="absolute inset-0 rounded-lg animate-streaming-glow motion-reduce:animate-none pointer-events-none" />
+									<div className="absolute inset-0 rounded-lg border border-vscode-focusBorder animate-[border-breathe_2s_ease-in-out_infinite] motion-reduce:animate-none pointer-events-none" />
 								</div>
 							)}
 							<div

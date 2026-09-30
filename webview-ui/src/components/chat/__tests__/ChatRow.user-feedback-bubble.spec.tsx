@@ -96,14 +96,14 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		) as HTMLElement | undefined
 
 		expect(actionBar).toBeTruthy()
-		expect(actionBar!.querySelector('[aria-label="Edit message icon"]')).toBeTruthy()
-		expect(actionBar!.querySelector('[aria-label="Delete message icon"]')).toBeTruthy()
+		expect(actionBar!.querySelector('[aria-label="chat:edit"]')).toBeTruthy()
+		expect(actionBar!.querySelector('[aria-label="common:confirmation.deleteMessage"]')).toBeTruthy()
 
-		// The bubble must NOT contain the edit/delete icons
+		// The bubble must NOT contain the edit/delete controls
 		const bubble = container.querySelector(".cursor-text") as HTMLElement | null
 		expect(bubble).toBeTruthy()
-		expect(bubble!.querySelector('[aria-label="Edit message icon"]')).toBeFalsy()
-		expect(bubble!.querySelector('[aria-label="Delete message icon"]')).toBeFalsy()
+		expect(bubble!.querySelector('[aria-label="chat:edit"]')).toBeFalsy()
+		expect(bubble!.querySelector('[aria-label="common:confirmation.deleteMessage"]')).toBeFalsy()
 	})
 
 	it("uses the editor background for the bubble while editing", () => {
@@ -130,10 +130,24 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(screen.queryByLabelText("User icon")).not.toBeInTheDocument()
 	})
 
+	it("renders the edit/delete actions as keyboard-focusable buttons", () => {
+		const { container } = renderRow(makeUserFeedback())
+
+		const editButton = container.querySelector('[aria-label="chat:edit"]') as HTMLButtonElement | null
+		const deleteButton = container.querySelector(
+			'[aria-label="common:confirmation.deleteMessage"]',
+		) as HTMLButtonElement | null
+
+		expect(editButton?.tagName).toBe("BUTTON")
+		expect(deleteButton?.tagName).toBe("BUTTON")
+		expect(editButton?.getAttribute("type")).toBe("button")
+		expect(deleteButton?.getAttribute("type")).toBe("button")
+	})
+
 	it("enters edit mode when the edit action is clicked", () => {
 		const { container } = renderRow(makeUserFeedback())
 
-		const editButton = container.querySelector('[aria-label="Edit message icon"]') as HTMLElement | null
+		const editButton = container.querySelector('[aria-label="chat:edit"]') as HTMLElement | null
 		expect(editButton).toBeTruthy()
 		fireEvent.click(editButton!)
 
@@ -146,7 +160,9 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		mockPostMessage.mockClear()
 		const { container } = renderRow(makeUserFeedback())
 
-		const deleteButton = container.querySelector('[aria-label="Delete message icon"]') as HTMLElement | null
+		const deleteButton = container.querySelector(
+			'[aria-label="common:confirmation.deleteMessage"]',
+		) as HTMLElement | null
 		expect(deleteButton).toBeTruthy()
 		fireEvent.click(deleteButton!)
 

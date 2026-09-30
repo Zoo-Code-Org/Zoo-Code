@@ -21,6 +21,7 @@
 	},
 	"ui": {
 		"search_placeholder": "Ara...",
+		"clear_search": "Aramayı temizle",
 		"no_results": "Sonuç bulunamadı"
 	},
 	"mermaid": {

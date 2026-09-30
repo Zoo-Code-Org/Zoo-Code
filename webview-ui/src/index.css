@@ -683,3 +683,26 @@ input[cmdk-input]:focus {
 	animation: thinking-shine 2s linear infinite;
 	will-change: background-position;
 }
+
+/* Respect the OS-level "reduce motion" accessibility preference: users who
+   request reduced motion must not see the continuously looping effects above.
+   The shimmer keeps its static gradient so the text stays legible. */
+@media (prefers-reduced-motion: reduce) {
+	.animate-smooth-bounce,
+	.animate-slide-in-right,
+	.animate-fade-in,
+	.animate-pulse,
+	.animate-ground-slide,
+	.animate-sun,
+	.animate-streaming-glow,
+	.animate-thinking-shine {
+		animation: none;
+	}
+
+	.animate-thinking-shine {
+		background-image: none;
+		-webkit-text-fill-color: var(--vscode-descriptionForeground);
+		color: var(--vscode-descriptionForeground);
+		will-change: auto;
+	}
+}

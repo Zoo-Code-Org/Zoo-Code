@@ -97,10 +97,20 @@ export const ApiConfigSelector = ({
 			return (
 				<div
 					key={config.id}
+					role="option"
+					tabIndex={0}
+					aria-selected={isCurrentConfig}
 					onClick={() => handleSelect(config.id)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault()
+							handleSelect(config.id)
+						}
+					}}
 					className={cn(
 						"px-3 py-1.5 text-sm cursor-pointer flex items-center group",
 						"hover:bg-vscode-list-hoverBackground",
+						"focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-vscode-focusBorder",
 						isCurrentConfig &&
 							"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
 					)}>
@@ -180,8 +190,10 @@ export const ApiConfigSelector = ({
 							/>
 							{searchValue.length > 0 && (
 								<div className="absolute right-4 top-0 bottom-0 flex items-center justify-center">
-									<span
-										className="codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
+									<button
+										type="button"
+										aria-label={t("common:ui.clear_search")}
+										className="codicon codicon-close bg-transparent border-0 p-0 text-vscode-input-foreground opacity-50 hover:opacity-100 focus-visible:opacity-100 text-xs cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder rounded-sm"
 										onClick={() => setSearchValue("")}
 									/>
 								</div>
@@ -203,6 +215,7 @@ export const ApiConfigSelector = ({
 							{/* Pinned configs - sticky header */}
 							{pinnedConfigs.length > 0 && (
 								<div
+									role="listbox"
 									className={cn(
 										"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
 										unpinnedConfigs.length > 0 && "border-b border-vscode-dropdown-foreground/10",
@@ -214,7 +227,7 @@ export const ApiConfigSelector = ({
 
 							{/* Unpinned configs */}
 							{unpinnedConfigs.length > 0 && (
-								<div className="py-1" aria-label="All configurations">
+								<div role="listbox" className="py-1" aria-label="All configurations">
 									{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
 								</div>
 							)}

@@ -21,6 +21,7 @@
 	},
 	"ui": {
 		"search_placeholder": "Tìm kiếm...",
+		"clear_search": "Xóa tìm kiếm",
 		"no_results": "Không tìm thấy kết quả nào"
 	},
 	"mermaid": {

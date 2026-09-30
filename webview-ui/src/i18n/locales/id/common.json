@@ -21,6 +21,7 @@
 	},
 	"ui": {
 		"search_placeholder": "Cari...",
+		"clear_search": "Hapus pencarian",
 		"no_results": "Tidak ada hasil yang ditemukan"
 	},
 	"mermaid": {

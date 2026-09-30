@@ -1564,6 +1564,16 @@ describe("ChatTextArea", () => {
 			expect(borderDiv!.querySelector('[class*="streaming-glow"]')).not.toBeInTheDocument()
 			expect(borderDiv!.querySelector('[class*="border-breathe"]')).not.toBeInTheDocument()
 		})
+
+		it("applies reduced-motion fallbacks to the streaming animation layers", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} isStreaming={true} />)
+
+			const borderDiv = container.querySelector('[data-testid="streaming-border"]')
+			expect(borderDiv).toBeInTheDocument()
+			const spinLayer = borderDiv!.querySelector('[class*="border-spin"]') as HTMLElement | null
+			expect(spinLayer).toBeTruthy()
+			expect(spinLayer!.className).toContain("motion-reduce:animate-none")
+		})
 	})
 
 	describe("input border state", () => {

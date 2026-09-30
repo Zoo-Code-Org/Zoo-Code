@@ -21,6 +21,7 @@
 	},
 	"ui": {
 		"search_placeholder": "Buscar...",
+		"clear_search": "Borrar búsqueda",
 		"no_results": "No se encontraron resultados"
 	},
 	"mermaid": {

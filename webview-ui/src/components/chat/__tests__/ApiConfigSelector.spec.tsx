@@ -237,11 +237,10 @@ describe("ApiConfigSelector", () => {
 
 		expect(searchInput.value).toBe("test")
 
-		// Find and click the X button
-		const clearButton = screen.getByTestId("popover-content").querySelector(".cursor-pointer")
-		if (clearButton) {
-			fireEvent.click(clearButton)
-		}
+		// Find and click the clear (X) button, which is now a semantic button
+		const clearButton = screen.getByLabelText("common:ui.clear_search")
+		expect(clearButton.tagName).toBe("BUTTON")
+		fireEvent.click(clearButton)
 
 		await waitFor(() => {
 			expect(searchInput.value).toBe("")
@@ -257,6 +256,35 @@ describe("ApiConfigSelector", () => {
 		const config2 = screen.getByText("Config 2")
 		fireEvent.click(config2)
 
+		expect(mockOnChange).toHaveBeenCalledWith("config2")
+	})
+
+	test("exposes listbox/option semantics and marks the selected option", () => {
+		render(<ApiConfigSelector {...defaultProps} />)
+		fireEvent.click(screen.getByTestId("dropdown-trigger"))
+
+		const content = screen.getByTestId("popover-content")
+		expect(content.querySelector('[role="listbox"]')).toBeTruthy()
+
+		const selected = screen
+			.getAllByText("Config 1")
+			.map((el) => el.closest('[role="option"]'))
+			.find(Boolean) as HTMLElement
+		expect(selected.getAttribute("aria-selected")).toBe("true")
+
+		const unselected = screen.getByText("Config 2").closest('[role="option"]') as HTMLElement
+		expect(unselected.getAttribute("aria-selected")).toBe("false")
+		expect(unselected.getAttribute("tabindex")).toBe("0")
+	})
+
+	test("selects a config with the keyboard", () => {
+		render(<ApiConfigSelector {...defaultProps} />)
+		fireEvent.click(screen.getByTestId("dropdown-trigger"))
+
+		const option = screen.getByText("Config 2").closest('[role="option"]') as HTMLElement
+		expect(option).toBeTruthy()
+
+		fireEvent.keyDown(option, { key: "Enter" })
 		expect(mockOnChange).toHaveBeenCalledWith("config2")
 	})
 

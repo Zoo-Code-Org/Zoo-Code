@@ -21,6 +21,7 @@
 	},
 	"ui": {
 		"search_placeholder": "खोजें...",
+		"clear_search": "खोज साफ़ करें",
 		"no_results": "कोई परिणाम नहीं मिला"
 	},
 	"mermaid": {

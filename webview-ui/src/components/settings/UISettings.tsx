@@ -156,6 +156,7 @@ export const UISettings = ({
 						label={t("settings:ui.chatInputEffect.label")}>
 						<div className="flex flex-col gap-1">
 							<VSCodeDropdown
+								aria-label={t("settings:ui.chatInputEffect.label")}
 								value={chatInputEffect}
 								onChange={handleChatInputEffectChange}
 								data-testid="chat-input-effect-dropdown">
