@@ -791,6 +791,57 @@ describe("VsCodeLmHandler", () => {
 			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
 		})
 
+		it("reports the exact raw budget when the tool schema consumes part of it", async () => {
+			// The raw budget subtracts the serialized tool schema: with no tools the -toolSchema
+			// operator is equivalent to +toolSchema, so pin the figure with a non-empty schema. The
+			// mutant that flips it inflates the reported budget by twice the schema size.
+			const contextWindow = handler.getCondenseContextWindow()
+			const targetRawBudgetChars = 1_000
+			const tools = [
+				{
+					type: "function" as const,
+					function: {
+						name: "calculator",
+						description: "A simple calculator",
+						parameters: {
+							type: "object",
+							properties: {
+								operation: { type: "string" },
+								numbers: { type: "array", items: { type: "number" } },
+							},
+						},
+					},
+				},
+			]
+			const toolSchemaChars = JSON.stringify(tools).length
+			const systemPrompt = "S".repeat(
+				Math.floor(contextWindow * 0.8 * 3) - targetRawBudgetChars - toolSchemaChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1_999) }],
+				},
+			]
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(
+				"(estimated 2,006 characters against a budget of 1,000), and it cannot be reduced further without " +
+					"breaking tool-call pairing.",
+			)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
 		it("sends a request whose trimmed size equals the raw budget exactly", async () => {
 			// Admission is strict: a conversation that lands exactly on the raw budget fits, so the
 			// request must be sent. The >= mutant refuses exactly this boundary, which is the
