@@ -3,6 +3,7 @@
 import * as vscode from "vscode"
 
 import { FileWatcher } from "../file-watcher"
+import { FilePreparation } from "../file-preparation"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
@@ -180,6 +181,38 @@ describe("FileWatcher", () => {
 		fileWatcher?.dispose()
 		await vi.runOnlyPendingTimersAsync()
 		vi.useRealTimers()
+	})
+
+	it("reuses constructor-created preparation for public processFile without writing points or cache", async () => {
+		const prepare = vi.spyOn(FilePreparation.prototype, "prepareFile")
+		try {
+			const preparation = fileWatcher["filePreparation"]
+			expect(preparation).toBeInstanceOf(FilePreparation)
+			expect(preparation["dependencies"].fileSystem).toBe(vscode.workspace.fs)
+			expect(preparation["dependencies"].cacheManager).toBe(mockCacheManager)
+			expect(preparation["dependencies"].ignoreController).toBe(fileWatcher["ignoreController"])
+			const path = "/mock/workspace/src/file.ts"
+			const result = await fileWatcher.processFile(path)
+			expect(prepare).toHaveBeenNthCalledWith(1, path)
+			expect(result).toBe(await prepare.mock.results[0].value)
+			expect(result.status).toBe("processed_for_batching")
+			expect(result.pointsToUpsert).toHaveLength(1)
+			expect(vscode.workspace.fs.stat).toHaveBeenCalledWith(vscode.Uri.file(path))
+			expect(vscode.workspace.fs.readFile).toHaveBeenCalledWith(vscode.Uri.file(path))
+			const secondPath = "/mock/workspace/src/second.ts"
+			const secondResult = await fileWatcher.processFile(secondPath)
+			expect(prepare).toHaveBeenCalledTimes(2)
+			expect(prepare).toHaveBeenNthCalledWith(2, secondPath)
+			expect(prepare.mock.contexts[0]).toBe(preparation)
+			expect(prepare.mock.contexts[1]).toBe(preparation)
+			expect(secondResult).toBe(await prepare.mock.results[1].value)
+			expect(secondResult.status).toBe("processed_for_batching")
+			expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
+			expect(mockCacheManager.updateHash).not.toHaveBeenCalled()
+			expect(mockCacheManager.deleteHash).not.toHaveBeenCalled()
+		} finally {
+			prepare.mockRestore()
+		}
 	})
 
 	describe("file filtering", () => {
