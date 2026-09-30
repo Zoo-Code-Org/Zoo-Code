@@ -4,6 +4,8 @@ import { KimiCodeHandler } from "../kimi-code"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { captureError } from "../../../test-utils/errors"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import OpenAI from "openai"
+import { Stream } from "openai/streaming"
 
 const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
 	mockGetAccessToken: vi.fn(),
@@ -26,16 +28,14 @@ vi.mock("../fetchers/modelCache", () => ({
 /**
  * Spies on the inherited OpenAI client's chat.completions.create. `client` is
  * protected on the OpenAiHandler base (not on the public interface), so it is
- * reached through a documented `as unknown as` double assertion (AGENTS.md
- * last resort; no `as any`).
+ * reached through a documented `as unknown as` projection onto the real SDK
+ * client type (AGENTS.md last resort; no `as any`). The spy keeps the SDK
+ * method's own signature, so the mock values below use full SDK response
+ * shapes (ChatCompletion / Stream of ChatCompletionChunk).
  */
-function completionsCreate(handler: KimiCodeHandler): ReturnType<typeof vi.fn> {
-	const client = (
-		handler as unknown as {
-			client: { chat: { completions: Record<string, (...args: never[]) => never> } }
-		}
-	).client
-	return vi.spyOn(client.chat.completions, "create") as unknown as ReturnType<typeof vi.fn>
+function completionsCreate(handler: KimiCodeHandler) {
+	const client = (handler as unknown as { client: OpenAI }).client
+	return vi.spyOn(client.chat.completions, "create")
 }
 
 describe("KimiCodeHandler", () => {
@@ -139,7 +139,20 @@ describe("KimiCodeHandler", () => {
 		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
 		const createCompletion = completionsCreate(handler)
 			.mockRejectedValueOnce(unauthorized)
-			.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
+			.mockResolvedValueOnce({
+				id: "cmpl-1",
+				object: "chat.completion",
+				created: 0,
+				model: "kimi-for-coding",
+				choices: [
+					{
+						index: 0,
+						message: { role: "assistant", content: "retried", refusal: null },
+						logprobs: null,
+						finish_reason: "stop",
+					},
+				],
+			})
 
 		await expect(handler.completePrompt("test")).resolves.toBe("retried")
 		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
@@ -258,9 +271,19 @@ describe("KimiCodeHandler", () => {
 	it("forwards the metadata abort signal to the inherited OpenAI SDK request", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const controller = new AbortController()
-		const streamChunks = (async function* () {
-			yield { choices: [{ delta: { content: "hi" } }] }
-		})()
+		const streamChunks = new Stream<OpenAI.Chat.Completions.ChatCompletionChunk>(
+			() =>
+				(async function* (): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk> {
+					yield {
+						id: "cmpl-1",
+						object: "chat.completion.chunk",
+						created: 0,
+						model: "kimi-for-coding",
+						choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }],
+					}
+				})()[Symbol.asyncIterator](),
+			new AbortController(),
+		)
 		const createCompletion = completionsCreate(handler).mockResolvedValueOnce(streamChunks)
 
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], {
@@ -303,7 +326,20 @@ describe("KimiCodeHandler", () => {
 		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
 		const createCompletion = completionsCreate(handler)
 			.mockRejectedValueOnce(unauthorized)
-			.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
+			.mockResolvedValueOnce({
+				id: "cmpl-1",
+				object: "chat.completion",
+				created: 0,
+				model: "kimi-for-coding",
+				choices: [
+					{
+						index: 0,
+						message: { role: "assistant", content: "retried", refusal: null },
+						logprobs: null,
+						finish_reason: "stop",
+					},
+				],
+			})
 		const controller = new AbortController()
 
 		await expect(
@@ -316,15 +352,17 @@ describe("KimiCodeHandler", () => {
 			// attempts: the external signal is merged in (never passed raw) and
 			// the SDK-level timeout is set, so a retry that dropped either would
 			// be caught here.
-			expect(call[1].timeout).toBe(30_000)
-			expect(call[1].signal).toBeInstanceOf(AbortSignal)
-			expect(call[1].signal).not.toBe(controller.signal)
-			expect(call[1].signal.aborted).toBe(false)
+			const options = call[1]
+			expect(options).toBeDefined()
+			expect(options?.timeout).toBe(30_000)
+			expect(options?.signal).toBeInstanceOf(AbortSignal)
+			expect(options?.signal).not.toBe(controller.signal)
+			expect(options?.signal?.aborted).toBe(false)
 		}
 		// The merged signals follow the external abort on both attempts.
 		controller.abort()
 		for (const call of createCompletion.mock.calls) {
-			expect(call[1].signal.aborted).toBe(true)
+			expect(call[1]?.signal?.aborted).toBe(true)
 		}
 	})
 
