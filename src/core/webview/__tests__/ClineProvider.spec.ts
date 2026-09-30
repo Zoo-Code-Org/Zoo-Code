@@ -27,6 +27,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
+import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -559,6 +560,15 @@ describe("ClineProvider", () => {
 			readResource: vi.fn().mockResolvedValue({ contents: [] }),
 			getAllServers: vi.fn().mockReturnValue([]),
 		})
+	})
+
+	test("exposes only the explicitly associated workspace without a fallback", () => {
+		provider["currentWorkspacePath"] = "/workspace-a"
+		expect(provider.workspacePath).toBe("/workspace-a")
+		provider["currentWorkspacePath"] = "/workspace-b"
+		expect(provider.workspacePath).toBe("/workspace-b")
+		provider["currentWorkspacePath"] = undefined
+		expect(provider.workspacePath).toBeUndefined()
 	})
 
 	test("constructor initializes correctly", () => {
@@ -2957,7 +2967,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				postMessageToWebview: vi.fn().mockResolvedValue(true),
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				getCurrentTask: vi.fn(),
-				getCurrentWorkspaceCodeIndexManager: vi.fn(),
+				getCurrentWorkspaceCodeIndexScope: vi.fn(),
 				getMcpHub: vi.fn().mockReturnValue({
 					getMcpSettingsFilePath: vi.fn().mockResolvedValue("/test/mcp.json"),
 				}),
@@ -3013,10 +3023,11 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockReturnValue(indexingPromise),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
 		expect(manager.startIndexing).toHaveBeenCalledOnce()
 
 		rejectIndexing(new Error("boom"))
@@ -3170,14 +3181,29 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 	it("covers changed indexing status, secret, and missing-manager responses", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: getScope,
+		})
 
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
+		expect(manager.getCurrentStatus).not.toHaveBeenCalled()
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "indexingStatusUpdate",
+			values: expect.objectContaining({ systemStatus: "Error", message: expect.any(String) }),
+		})
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
+		expect(getScope).toHaveBeenCalledTimes(2)
+		expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
+		expect(provider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "indexingStatusUpdate",
+			values: manager.getCurrentStatus.mock.results[0].value,
+		})
 		await webviewMessageHandler(provider, { type: "requestCodeIndexSecretStatus" })
-		getManager.mockReturnValueOnce(undefined)
+		getScope.mockReturnValueOnce(undefined)
 		await webviewMessageHandler(provider, { type: "startIndexing" })
+		expect(getScope).toHaveBeenCalledTimes(3)
+		expect(manager.setWorkspaceEnabled).not.toHaveBeenCalled()
 
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "codeIndexSecretStatus" }),
@@ -3194,7 +3220,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				.mockRejectedValueOnce(new Error("second failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await webviewMessageHandler(provider, { type: "startIndexing" })
@@ -3210,10 +3236,18 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("toggle failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({
+				codeIndexManager: manager,
+				workspaceIndexingEnablementManager: new WorkspaceIndexingEnablementManager(manager),
+			}),
 		})
 
 		await webviewMessageHandler(provider, { type: "stopIndexing" })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "indexingStatusUpdate",
+			values: manager.getCurrentStatus(),
+		})
 		await webviewMessageHandler(provider, { type: "toggleWorkspaceIndexing", bool: true })
 		await Promise.resolve()
 
@@ -3224,8 +3258,87 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		)
 	})
 
+	it("does not toggle indexing or publish status without a workspace scope", async () => {
+		const provider = createProvider()
+		await webviewMessageHandler(provider, { type: "toggleWorkspaceIndexing", bool: true })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledExactlyOnceWith(
+			"Cannot toggle workspace indexing: No workspace folder open",
+		)
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		{ bool: true, expected: true },
+		{ bool: false, expected: false },
+		{ bool: undefined, expected: false },
+	])("delegates workspace enablement with bool=$bool as $expected", async ({ bool, expected }) => {
+		const setEnabled = vi.fn().mockResolvedValue(undefined)
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({
+				workspaceIndexingEnablementManager: { setEnabled },
+			}),
+		})
+		const message: WebviewMessage = { type: "toggleWorkspaceIndexing" }
+		if (bool !== undefined) {
+			message.bool = bool
+		}
+		await webviewMessageHandler(provider, message)
+		expect(setEnabled).toHaveBeenCalledExactlyOnceWith(expected, provider)
+		// Status publication belongs to the enablement manager, not the handler.
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(provider.log).not.toHaveBeenCalled()
+	})
+
+	it("does not stop indexing or publish status without a workspace scope", async () => {
+		const provider = createProvider()
+		await webviewMessageHandler(provider, { type: "stopIndexing" })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledWith("Cannot stop indexing: No workspace folder open")
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it.each([true, false])("resolves the scope after saving index settings (workspace=%s)", async (hasWorkspace) => {
+		const handleSettingsChange = vi.fn().mockResolvedValue(undefined)
+		const manager = createIndexManager({ handleSettingsChange, isFeatureEnabled: false })
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: vi
+				.fn()
+				.mockReturnValue(hasWorkspace ? { codeIndexManager: manager } : undefined),
+		})
+
+		await webviewMessageHandler(provider, {
+			type: "saveCodeIndexSettingsAtomic",
+			codeIndexSettings: {
+				codebaseIndexEnabled: false,
+				codebaseIndexQdrantUrl: "http://localhost:6333",
+				codebaseIndexEmbedderProvider: providerIdentifiers.openai,
+				codebaseIndexEmbedderModelId: "text-embedding-3-small",
+			},
+		})
+
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "codeIndexSettingsSaved", success: true }),
+		)
+		if (hasWorkspace) {
+			expect(handleSettingsChange).toHaveBeenCalledOnce()
+		} else {
+			expect(handleSettingsChange).not.toHaveBeenCalled()
+			expect(provider.log).toHaveBeenCalledWith("Cannot save code index settings: No workspace folder open")
+		}
+	})
+
+	it("does not update auto-enable defaults without a workspace scope", async () => {
+		const provider = createProvider()
+		await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: true })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledWith("Cannot set auto-enable default: No workspace folder open")
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
-		const { CodeIndexManager } = await import("../../../services/code-index/manager")
+		const { CodeIndexManagerRegistry } = await import("../../../services/code-index/code-index-manager-registry")
 		let workspaceEnabled = false
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
@@ -3235,16 +3348,17 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
 		const getAllInstances = vi
-			.spyOn(CodeIndexManager, "getAllInstances")
-			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManager.getAllInstances>)
+			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
+			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		try {
 			await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: true })
 			await Promise.resolve()
 
+			expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
 			expect(manager.startIndexing).toHaveBeenCalledOnce()
 			expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: auto-enable failure")
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -3257,14 +3371,22 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 	it("covers changed clear-index response paths", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })
+		const provider = createProvider({ getCurrentWorkspaceCodeIndexScope: getScope })
 
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
+		expect(manager.clearIndexData).not.toHaveBeenCalled()
+		expect(provider.log).toHaveBeenCalledWith("Cannot clear index data: No workspace folder open")
+		expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "indexCleared",
+			values: { success: false, error: expect.any(String) },
+		})
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
 		manager.clearIndexData.mockRejectedValueOnce(new Error("clear failed"))
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
 
+		expect(getScope).toHaveBeenCalledTimes(3)
+		expect(manager.clearIndexData).toHaveBeenCalledTimes(2)
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "indexCleared",
 			values: { success: true },
@@ -4962,6 +5084,36 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("does not restore a deleted file-backed task from legacy history", async () => {
+			const historyItem = {
+				id: "deleted-task",
+				task: "legacy task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
+				if (key === "taskHistory") {
+					return [historyItem]
+				}
+				return undefined
+			})
+
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			await provider.taskHistoryStore.delete(historyItem.id)
+			provider["taskHistoryStoreInitialized"] = true
+
+			await expect(provider.getTaskWithId(historyItem.id)).rejects.toThrow("Task not found")
+		})
+
+		it("rejects a missing task before file-backed history initialization", async () => {
+			provider["taskHistoryStoreInitialized"] = false
+			vi.mocked(mockContext.globalState.get).mockReturnValue(undefined)
+			await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
+		})
+
 		it("returns empty apiConversationHistory when file is missing", async () => {
 			const historyItem = { id: "missing-api-file-task", task: "test task", ts: Date.now() }
 			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {

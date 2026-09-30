@@ -69,7 +69,15 @@ vi.mock("vscode", () => {
 })
 
 import * as vscode from "vscode"
-import { VsCodeLmHandler, extractLeakedToolCalls, trailingPartialToolMarkerLength } from "../vscode-lm"
+import {
+	VsCodeLmHandler,
+	extractLeakedToolCalls,
+	trailingPartialToolMarkerLength,
+	middleOutTruncate,
+	estimateMessagesChars,
+	truncateToolResultsToFitWindow,
+} from "../vscode-lm"
+import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
@@ -492,10 +500,8 @@ describe("VsCodeLmHandler", () => {
 			})
 
 			it("flushes an over-long never-closing invoke as plain text before the stream ends", async () => {
-				// Defect 4: without a cap the buffer is only drained once the stream finishes, so the
-				// user sees nothing until then. Releasing it at the end looks identical in content —
-				// only the timing distinguishes the fix, so track how much of the source has been
-				// produced at the moment each text chunk reaches the consumer.
+				// End-of-stream flushing produces identical text, so track production timing to
+				// prove the buffer releases text before the stream ends.
 				const filler = "x".repeat(5000)
 				const parts = ['<invoke name="calculator">', filler, filler, filler, filler]
 				let partsProduced = 0
@@ -534,6 +540,396 @@ describe("VsCodeLmHandler", () => {
 				expect(streamedText).toContain('<invoke name="calculator">')
 				expect(streamedText).toContain(filler)
 			})
+		})
+
+		it("returns the original registry name for a tool declared with an encoded name", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const originalName = `read\uD800file`
+
+			// The model echoes the DECLARED name; dispatch must still see the registry name.
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, { a: 1 })
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const tools = [
+				{
+					type: "function" as const,
+					function: { name: originalName, description: "d", parameters: { type: "object" } },
+				},
+			]
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(systemPrompt, [{ role: "user", content: "hi" }], {
+				taskId: "test-task",
+				tools,
+			})) {
+				chunks.push(chunk)
+			}
+
+			const declaredName = mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name
+			expect(declaredName).toBe("read_uD800file")
+			expect(declaredName).toMatch(/^[\w-]+$/)
+
+			const toolCall = chunks.find((chunk) => chunk.type === "tool_call") as { name: string }
+			expect(Array.from({ length: toolCall.name.length }, (_, index) => toolCall.name.charCodeAt(index))).toEqual(
+				Array.from({ length: originalName.length }, (_, index) => originalName.charCodeAt(index)),
+			)
+		})
+
+		it("round-trips a surrogate-free name that looks like the encoding marker", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(systemPrompt, [{ role: "user", content: "hi" }], {
+				taskId: "test-task",
+				tools: [
+					{
+						type: "function" as const,
+						function: { name: "get_uuid", description: "d", parameters: { type: "object" } },
+					},
+				],
+			})) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("get_uuuid")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "get_uuid" })
+		})
+
+		it("preserves an ordinary tool name end to end", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const tools = [
+				{
+					type: "function" as const,
+					function: { name: "get_user", description: "d", parameters: { type: "object" } },
+				},
+			]
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(systemPrompt, [{ role: "user", content: "hi" }], {
+				taskId: "test-task",
+				tools,
+			})) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("get_user")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "get_user" })
+		})
+
+		it("preserves a tool name containing a non-marker u+hex sequence end to end", async () => {
+			mockLanguageModelChat.sendRequest.mockImplementationOnce(async (_messages, options) => {
+				const declaredName = options.tools[0].name
+				return {
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("call-1", declaredName, {})
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				}
+			})
+
+			const chunks = []
+			for await (const chunk of handler.createMessage(
+				"You are a helpful assistant",
+				[{ role: "user", content: "hi" }],
+				{
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: { name: "queue1234", description: "d", parameters: { type: "object" } },
+						},
+					],
+				},
+			)) {
+				chunks.push(chunk)
+			}
+
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][1].tools[0].name).toBe("queue1234")
+			expect(chunks.find((chunk) => chunk.type === "tool_call")).toMatchObject({ name: "queue1234" })
+		})
+
+		describe("system prompt sanitization", () => {
+			it("sanitizes lone surrogates in the system prompt", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
+				const stream = handler.createMessage("sys\uD800tem", [{ role: "user" as const, content: "hi" }])
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				expect(vscode.LanguageModelChatMessage.Assistant).toHaveBeenCalledWith("sys\uFFFDtem")
+			})
+
+			it("sanitizes lone surrogates in tool names, descriptions and nested schema strings", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("sys", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: {
+								name: "read\uD800file",
+								description: "desc\uDC00ription",
+								parameters: {
+									type: "object",
+									properties: { path: { type: "string", description: "p\uD800ath" } },
+								},
+							},
+						},
+						{
+							type: "function" as const,
+							function: { name: "read\uD801file", description: "other" },
+						},
+					],
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+				const codeUnits = (value: string): number[] =>
+					Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
+
+				const requestOptions = mockLanguageModelChat.sendRequest.mock.calls[0][1]
+				const sentTool = requestOptions.tools[0]
+				// Copilot rejects declared tool names that do not match this pattern before sending.
+				expect(sentTool.name).toMatch(/^[\w-]+$/)
+				expect(codeUnits(sentTool.name)).toEqual(codeUnits("read_uD800file"))
+				expect(requestOptions.tools[1].name).toBe("read_uD801file")
+				expect(codeUnits(sentTool.description)).toEqual(codeUnits("desc\uFFFDription"))
+				const schemaProperties = (
+					sentTool.inputSchema as { properties: Record<string, { description: string }> }
+				).properties
+				expect(codeUnits(schemaProperties.path.description)).toEqual(codeUnits("p\uFFFDath"))
+			})
+		})
+
+		it("still trims oversized tool_results when the system prompt consumes most of the budget", async () => {
+			// A system prompt large enough to drive the raw budget negative; the clamp keeps trimming
+			// active for the case where the request is most oversized.
+			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "hi" }],
+				},
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			// No sendRequest response is queued: the request must be refused before it is sent, and a
+			// queued-but-unconsumed response would leak into later tests.
+			// The clamped floor cannot be met once the tool_result bottoms out at its minimum, so the
+			// request must be refused rather than sent over-window (which orphans the tool_result).
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			let refusal: unknown
+			try {
+				for await (const _chunk of stream) {
+					// drain
+				}
+			} catch (error) {
+				refusal = error
+			}
+			const message = (refusal as Error | undefined)?.message ?? ""
+			expect(message).toMatch(/too large for this model's context window/)
+
+			// The reported figure proves trimming ran: without it the estimate would still carry the
+			// full 50,000-char tool_result.
+			const reported = Number(message.match(/estimated ([\d,]+) characters/)?.[1]?.replace(/,/g, ""))
+			expect(reported).toBeLessThan(10_000)
+
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("refuses a request that exceeds a small positive raw budget below the trimming floor", async () => {
+			// The clamp to MIN_TOOL_RESULT_CHARS only keeps trimming productive; admission must still
+			// respect the raw budget, otherwise a conversation between the raw budget and the floor is
+			// sent over-window. Sized so the remaining content exceeds the raw budget but stays under
+			// the floor, and so no tool_result is large enough for trimming to shrink anything.
+			const targetRawBudgetChars = 1000
+			const systemPrompt = "S".repeat(
+				Math.floor(handler.getCondenseContextWindow() * 0.8 * 3) - targetRawBudgetChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1999) }],
+				},
+			]
+
+			// No sendRequest response is queued: refusal must happen before the request is sent.
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(/too large for this model's context window/)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("refuses with an error the task recognises as a context-window failure", async () => {
+			// Asserted through the real detector: without a recognised shape the task takes its
+			// generic retry path and re-sends the same over-window history instead of condensing.
+			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const refusal = await (async () => {
+				try {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				} catch (error) {
+					return error
+				}
+				throw new Error("expected the request to be refused")
+			})()
+
+			expect(checkContextWindowExceededError(refusal)).toBe(true)
+		})
+
+		it("sends a request that fits within a small positive raw budget", async () => {
+			const targetRawBudgetChars = 1000
+			const systemPrompt = "S".repeat(
+				Math.floor(handler.getCondenseContextWindow() * 0.8 * 3) - targetRawBudgetChars,
+			)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Y".repeat(500) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const chunks = await collectStream(stream)
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
+
+		it("sends the request when trimming brings the conversation back under budget", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(500_000) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage("system", messages, { taskId: "test-task" })
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const sent = JSON.stringify(mockLanguageModelChat.sendRequest.mock.calls[0][0])
+			expect(sent).toContain("characters truncated")
+			expect(sent).not.toContain("X".repeat(400_000))
 		})
 
 		it("should handle native tool calls when tools are provided", async () => {
@@ -1527,6 +1923,65 @@ describe("leaked tool-call recovery", () => {
 			expect(calls).toHaveLength(0)
 			expect(leftoverText).toBe(text)
 		})
+
+		it("does not let a wrapper marker quoted inside an unrecovered invoke body arm a later bare invoke", () => {
+			// A wrapper tag is only real when it appears outside an invoke body, otherwise quoted
+			// markup in one block can authorize recovery of an unwrapped block after it.
+			const text =
+				invoke("some_other_tool", `<function${"_calls"}>`) +
+				"\n" +
+				invoke("update_todo_list", param("todos", "[x] one"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on an invoke whose parameter markup is left unclosed", () => {
+			// Partially parsed parameters would dispatch a call missing arguments the model wrote.
+			const text = wrap(invoke("update_todo_list", `<param${"eter"} name="todos">[x] one`))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("fails closed on a malformed parameter opener before a well-formed parameter", () => {
+			// The strict pattern skips the unquoted-attribute opener, so recovering `beta` alone
+			// would dispatch a call missing `alpha`.
+			const text = wrap(
+				invoke("update_todo_list", `<param${"eter"} name=alpha>A</param${"eter"}>` + param("beta", "B")),
+			)
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on a malformed parameter opener between two well-formed parameters", () => {
+			// The defect is any unparseable opener in an inter-match gap, not only a leading one.
+			const text = wrap(
+				invoke(
+					"update_todo_list",
+					param("alpha", "A") + `<param${"eter"} name=mid>M</param${"eter"}>` + param("beta", "B"),
+				),
+			)
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("still recovers an invoke whose multiple parameters are all well-formed", () => {
+			const text = wrap(invoke("update_todo_list", param("alpha", "A") + param("beta", "B")))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { alpha: "A", beta: "B" } }])
+		})
 	})
 
 	// The bare-invoke cases above short-circuit at the wrapper check, so they never exercise the
@@ -1549,18 +2004,38 @@ describe("leaked tool-call recovery", () => {
 			const block = invoke("update_todo_list", param("todos", "[x] one"))
 			const text = quoted("~~~\n" + block + "\n~~~")
 
-			const { calls } = extractLeakedToolCalls(text, tools)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
 
 			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
 		})
 
 		it("suppresses an invoke inside a four-backtick fence containing a narrower fence", () => {
 			const block = invoke("update_todo_list", param("todos", "[x] one"))
 			const text = quoted("````\n```\n" + block + "\n```\n````")
 
-			const { calls } = extractLeakedToolCalls(text, tools)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
 
 			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not treat an info-string fence line as a closing fence", () => {
+			const block = invoke("update_todo_list", param("todos", "[x] one"))
+			const text = quoted("```md\n```ts\n" + block + "\n```\n```")
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("treats a fence line with a whitespace-only suffix as a closing fence", () => {
+			const text = quoted("```\nexample\n```   \n" + invoke("update_todo_list", param("todos", "[x] one")))
+
+			const { calls } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
 		})
 
 		it("recovers an invoke that follows a CLOSED fence, proving the fence guard reopens", () => {
@@ -1574,9 +2049,10 @@ describe("leaked tool-call recovery", () => {
 		it("suppresses an invoke inside an inline code span", () => {
 			const text = quoted("avoid `" + invoke("update_todo_list", param("todos", "x")) + "`")
 
-			const { calls } = extractLeakedToolCalls(text, tools)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
 
 			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
 		})
 
 		it("suppresses an invoke introduced by a quoting cue that ends its line", () => {
@@ -1591,9 +2067,24 @@ describe("leaked tool-call recovery", () => {
 		it("suppresses an invoke followed by narrative text on the same line", () => {
 			const text = quoted(invoke("update_todo_list", param("todos", "x")) + " is what you must not do.")
 
-			const { calls } = extractLeakedToolCalls(text, tools)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
 
 			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("suppresses a bare invoke after a wrapper closer that appeared inside a fence", () => {
+			const text =
+				`<function${"_calls"}>\n` +
+				"```md\n" +
+				`</function${"_calls"}>\n` +
+				"```\n" +
+				invoke("write_to_file", param("path", "a.txt") + param("content", "hi"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["write_to_file"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
 		})
 	})
 
@@ -1874,5 +2365,968 @@ describe("recovered parameters for normalized MCP schemas", () => {
 		const text = wrap(invoke(name, param("tags", '["a"]')))
 
 		expect(extractLeakedToolCalls(text, builderSchemas).calls).toEqual([{ name, input: { tags: ["a"] } }])
+	})
+})
+
+describe("leaked tool-call parser contracts", () => {
+	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
+	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+	const wrap = (body: string) => `<function${"_calls"}>${body}</function${"_calls"}>`
+	// The fence in a quoting fixture must begin a line, so the wrapper opens on its own line.
+	const wrapLines = (body: string) => `<function${"_calls"}>\n${body}\n</function${"_calls"}>`
+
+	const tools = new Set(["update_todo_list"])
+	const callsOf = (text: string) => extractLeakedToolCalls(text, tools).calls
+	const todo = (value = "x") => invoke("update_todo_list", param("todos", value))
+
+	const schemaFor = (properties: Record<string, unknown>) =>
+		new Map<string, Record<string, unknown> | undefined>([["update_todo_list", { properties }]])
+	const convert = (properties: Record<string, unknown>, raw: string) =>
+		extractLeakedToolCalls(wrap(invoke("update_todo_list", param("value", raw))), schemaFor(properties)).calls
+
+	describe("wrapper discrimination", () => {
+		it("requires whitespace between invoke and its name attribute", () => {
+			const glued = `<function${"_calls"}><in${"voke"}name="update_todo_list"></in${"voke"}></function${"_calls"}>`
+
+			expect(callsOf(glued)).toHaveLength(0)
+		})
+
+		it("tolerates a newline between invoke and its name attribute", () => {
+			const spaced = wrap(`<in${"voke"}\n name="update_todo_list">${param("todos", "x")}</in${"voke"}>`)
+
+			expect(callsOf(spaced)).toHaveLength(1)
+		})
+
+		it("does not recover an unterminated name attribute", () => {
+			expect(callsOf(wrap(`<in${"voke"} name="update_todo_list>x</in${"voke"}>`))).toHaveLength(0)
+		})
+
+		it("does not recover an empty name attribute", () => {
+			expect(callsOf(wrap(invoke("", param("todos", "x"))))).toHaveLength(0)
+		})
+
+		it("recovers after an unrelated closed wrapper", () => {
+			expect(callsOf(`${wrap("")}\n${wrap(todo())}`)).toHaveLength(1)
+		})
+
+		it("does not let a wrapper opener inside a closed code fence arm a later bare invoke", () => {
+			const text = ["```", `<function${"_calls"}>`, "```", "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside an inline-code span arm a later bare invoke", () => {
+			const text = [`Use \`<function${"_calls"}>\` to open a block.`, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside a double-backtick span arm a later bare invoke", () => {
+			const text = [`Example: \`\`<function${"_calls"}>\`\``, "", todo()].join("\n")
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("keeps a double-backtick span quoted when it nests a literal single backtick", () => {
+			const text = [`Example: \`\`<function${"_calls"}> \` here\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not let a wrapper opener inside a four-backtick span arm a later bare invoke", () => {
+			const text = [`Example: \`\`\`\`<function${"_calls"}>\`\`\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a double-backtick span with a wider backtick run", () => {
+			const text = [`Example: \`\`quoted \`\`\` <function${"_calls"}>\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a double-backtick span with either a wider or a narrower backtick run", () => {
+			const text = [`Example: \`\`a \`\`\` b \` c <function${"_calls"}>\`\``, "", todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("arms on a wrapper opener that follows a closed double-backtick span", () => {
+			const text = [`Example: \`\`quoted\`\` then <function${"_calls"}>`, todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("still arms on a wrapper opener that is not inside any backtick span", () => {
+			expect(callsOf(wrap(todo()))).toHaveLength(1)
+		})
+
+		it("does not leak an unterminated double-backtick span across a newline", () => {
+			expect(callsOf(wrapLines("see ``\n" + todo()))).toHaveLength(1)
+		})
+
+		it("still arms on a real wrapper opener that follows a closed code fence", () => {
+			const text = ["```", "example", "```", "", `<function${"_calls"}>`, todo()].join("\n")
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("arms on an opening wrapper tag carrying inner whitespace", () => {
+			expect(callsOf(`<function${"_calls"} >${todo()}`)).toHaveLength(1)
+		})
+
+		it("disarms on a closing wrapper tag carrying inner whitespace", () => {
+			expect(callsOf(`<function${"_calls"}></function${"_calls"} >${todo()}`)).toHaveLength(0)
+		})
+	})
+
+	describe("fence and quote discrimination", () => {
+		it("keeps a fence indented three spaces open", () => {
+			expect(callsOf(wrapLines("   ```\n" + todo()))).toHaveLength(0)
+		})
+
+		it("does not open a fence indented four spaces", () => {
+			expect(callsOf(wrapLines("    ```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("requires a fence to begin its line", () => {
+			expect(callsOf(wrapLines("text ```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("does not arm a wrapper opener that shares a line with a fence opener", () => {
+			// The invoke is placed AFTER the fence closes so the fence gate alone cannot
+			// suppress it — only the missing wrapper can.  A mutation that drops the
+			// opener guard would open the wrapper, recover the invoke, and fail this test.
+			const text = `~~~ ` + `<function${"_calls"}>` + `\n~~~\n` + todo()
+			expect(callsOf(text)).toHaveLength(0)
+		})
+
+		it("does not close a wide fence with a narrower one", () => {
+			expect(callsOf(wrapLines("````\n```\n" + todo() + "\n"))).toHaveLength(0)
+		})
+
+		it("closes a fence of equal width", () => {
+			expect(callsOf(wrapLines("```\ncode\n```\n" + todo()))).toHaveLength(1)
+		})
+
+		it("does not close a tilde fence with a backtick fence", () => {
+			expect(callsOf(wrapLines("~~~\n```\n" + todo() + "\n"))).toHaveLength(0)
+		})
+
+		it("does not treat a closed inline-code run before the wrapper as a fence", () => {
+			const text = "text ```x``` " + `<function${"_calls"}>` + "\n" + todo()
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("does not open a backtick fence whose info string contains a backtick", () => {
+			expect(callsOf("```lang`value\nmore\n" + wrapLines(todo()))).toHaveLength(1)
+		})
+
+		it("still opens a tilde fence whose info string contains a backtick", () => {
+			expect(callsOf("~~~lang`value\nmore\n" + wrapLines(todo()))).toHaveLength(0)
+		})
+
+		it("suppresses on an odd backtick count earlier in the line", () => {
+			expect(callsOf(wrapLines("see `" + todo()))).toHaveLength(0)
+		})
+
+		it("does not suppress on an even backtick count", () => {
+			expect(callsOf(wrapLines("see `x` " + todo()))).toHaveLength(1)
+		})
+
+		it("does not suppress on trailing whitespace alone", () => {
+			expect(callsOf(wrapLines(todo() + "   "))).toHaveLength(1)
+		})
+
+		it("does not suppress on trailing residual tags alone", () => {
+			expect(callsOf(wrapLines(todo() + "<<>>"))).toHaveLength(1)
+		})
+
+		it("stops applying a quoting cue after sentence punctuation", () => {
+			expect(callsOf(wrapLines("Never do that. Now " + todo()))).toHaveLength(1)
+		})
+
+		it("does not suppress on ordinary narration", () => {
+			expect(callsOf(wrapLines("Working on it now " + todo()))).toHaveLength(1)
+		})
+	})
+
+	describe("schema-directed conversion boundaries", () => {
+		it("rejects a float for a declared integer", () => {
+			expect(convert({ value: { type: "integer" } }, "1.5")).toHaveLength(0)
+		})
+
+		it("rejects a non-finite number", () => {
+			expect(convert({ value: { type: "number" } }, "1e400")).toHaveLength(0)
+		})
+
+		it("rejects an array for a declared object", () => {
+			expect(convert({ value: { type: "object" } }, "[]")).toHaveLength(0)
+		})
+
+		it("leaves an ambiguous multi-type union literal", () => {
+			expect(convert({ value: { type: ["array", "object"] } }, '["a"]')[0].input).toEqual({ value: '["a"]' })
+		})
+
+		it("fails a block closed for an unsupported declared type", () => {
+			expect(convert({ value: { type: "date" } }, "x")).toHaveLength(0)
+		})
+
+		it("does not treat an inherited Object.prototype key as a supported type", () => {
+			expect(convert({ value: { type: "toString" } }, "x")).toHaveLength(0)
+		})
+
+		it("bails out on a null anyOf branch", () => {
+			expect(convert({ value: { anyOf: [null] } }, '["a"]')[0].input).toEqual({ value: '["a"]' })
+		})
+
+		it("trims a parameter value", () => {
+			expect(callsOf(wrap(invoke("update_todo_list", param("todos", "  spaced  "))))[0].input).toEqual({
+				todos: "spaced",
+			})
+		})
+
+		it("parses a whitespace-padded JSON array", () => {
+			expect(convert({ value: { type: "array" } }, '  ["a"]  ')[0].input).toEqual({ value: ["a"] })
+		})
+
+		it("rejects a number for a declared object", () => {
+			expect(convert({ value: { type: "object" } }, "5")).toHaveLength(0)
+		})
+
+		it("fails closed on a nested unclosed parameter tag and passes the text through", () => {
+			const schemas = schemaFor({ a: { type: "string" }, b: { type: "string" } })
+			const body = `<param${"eter"} name="a">` + param("b", "1") + "\n"
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a value hides markup that would overwrite an earlier argument", () => {
+			// The split block would otherwise re-bind `path`, dispatching an attacker-chosen target.
+			const schemas = schemaFor({ path: { type: "string" }, content: { type: "string" } })
+			const body =
+				param("path", "safe.txt") +
+				param("content", `harmless</param${"eter"}><param${"eter"} name="path">/evil`)
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed on a value whose markup repeats the same parameter name", () => {
+			const schemas = schemaFor({ path: { type: "string" } })
+			const body = param("path", `a</param${"eter"}><param${"eter"} name="path">b`)
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when a value injects a parameter name absent from the schema", () => {
+			// A different-name injection bypasses the same-name Object.hasOwn guard; the schema
+			// allow-list check after the loop is what catches it.
+			const schemas = schemaFor({ path: { type: "string" }, content: { type: "string" } })
+			const body =
+				param("path", "safe.txt") +
+				param("content", `harmless</param${"eter"}><param${"eter"} name="injected">evil`)
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when the schema declares no properties but a parameter is present", () => {
+			const schemas = schemaFor({})
+			const body = param("path", "safe.txt")
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("fails closed when the schema has no properties record despite having a type constraint", () => {
+			// A schema like { type: "object", additionalProperties: false } has no properties key.
+			// Without schema.properties to validate against, recovery cannot safely allow-list params.
+			const schemas = new Map<string, Record<string, unknown> | undefined>([
+				["update_todo_list", { type: "object", additionalProperties: false }],
+			])
+			const body = param("path", "safe.txt")
+			const text = wrapLines(`<in${"voke"} name="update_todo_list">\n${body}\n</in${"voke"}>`)
+			const { calls, leftoverText } = extractLeakedToolCalls(text, schemas)
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("also rejects a declared-string value containing literal parameter markup", () => {
+			// Deliberate narrowing: failing closed beats dispatching a wrongly-parsed argument.
+			expect(convert({ value: { type: "string" } }, `see <param${"eter"} name="b">`)).toHaveLength(0)
+		})
+
+		it("rejects a number for a declared boolean", () => {
+			expect(convert({ value: { type: "boolean" } }, "5")).toHaveLength(0)
+		})
+
+		it("fails a block closed when an unsupported declared type carries parseable JSON", () => {
+			expect(convert({ value: { type: "date" } }, "5")).toHaveLength(0)
+		})
+
+		it("ignores a non-string member of a declared type union", () => {
+			expect(convert({ value: { type: ["array", 5] } }, '["a"]')[0].input).toEqual({ value: ["a"] })
+		})
+	})
+
+	describe("carry boundaries", () => {
+		it("holds a generic fragment of exactly the carry bound", () => {
+			expect(trailingPartialToolMarkerLength("<" + "a".repeat(63))).toBe(64)
+		})
+
+		it("drops a generic fragment one character past the bound", () => {
+			expect(trailingPartialToolMarkerLength("<" + "a".repeat(64))).toBe(0)
+		})
+
+		it("holds an invoke tail of exactly the carry bound", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(56))).toBe(64)
+		})
+
+		it("drops an invoke tail one character past the bound", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(57))).toBe(0)
+		})
+	})
+
+	describe("preceding text and leftover segments", () => {
+		it("positions the quote window using preceding text", () => {
+			const { calls } = extractLeakedToolCalls(todo(), tools, `<function${"_calls"}>`)
+
+			expect(calls).toHaveLength(1)
+		})
+
+		it("suppresses on a fence opened in an earlier chunk", () => {
+			const { calls } = extractLeakedToolCalls(todo(), tools, `<function${"_calls"}>\n\`\`\`\n`)
+
+			expect(calls).toHaveLength(0)
+		})
+
+		it("keeps text that follows a recovered call", () => {
+			expect(extractLeakedToolCalls(`${wrap(todo())}\nAfterwards.`, tools).leftoverText).toBe("\nAfterwards.")
+		})
+
+		it("strips a closing wrapper tag carrying inner whitespace", () => {
+			const text = `<function${"_calls"}>${todo()}</function${"_calls"} >`
+
+			expect(extractLeakedToolCalls(text, tools).leftoverText).toBe("")
+		})
+
+		it("recovers two calls from one wrapper", () => {
+			const { calls } = extractLeakedToolCalls(wrap(`${todo("a")}\n${todo("b")}`), tools)
+
+			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
+		})
+
+		// Two recoveries put a non-last placeholder segment in the middle of the array, where both the
+		// placeholder seeding and the last-segment lookup can silently reorder or leak text.
+		it("keeps interleaved text in order across two recovered calls", () => {
+			const text = `${wrap(`${todo("a")}\nmid\n${todo("b")}`)}\ntail`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+
+			expect(calls.map((call) => call.input.todos)).toEqual(["a", "b"])
+			expect(leftoverText).toBe("\nmid\n\ntail")
+		})
+	})
+
+	// Tag shapes a real backend varies on: whitespace inside the tags, and the `antml:` prefix.
+	describe("tag whitespace tolerance", () => {
+		it("recovers an invoke whose opening tag has whitespace before the closing bracket", () => {
+			const spaced = `<in${"voke"} name="update_todo_list" >${param("todos", "x")}</in${"voke"}>`
+
+			expect(callsOf(wrap(spaced))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("recovers an invoke whose closing tag has whitespace before the bracket", () => {
+			const spaced = `<in${"voke"} name="update_todo_list">${param("todos", "x")}</in${"voke"} >`
+
+			expect(callsOf(wrap(spaced))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("keeps a parameter whose closing tag has whitespace before the bracket", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"} >`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("reads a parameter name separated by more than one whitespace character", () => {
+			const body = `<param${"eter"}\t\tname="todos">x</param${"eter"}>`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("arms on a reopened wrapper whose tag carries inner whitespace", () => {
+			const text = `${wrap("")}\n<function${"_calls"} >\n${todo()}`
+
+			expect(callsOf(text)).toHaveLength(1)
+		})
+
+		it("treats a tilde run shorter than three characters as ordinary text, not a fence", () => {
+			expect(callsOf(`<function${"_calls"}>\n~\n${todo()}`)).toHaveLength(1)
+		})
+
+		it("recovers an invoke inside an antml: prefixed wrapper and strips the wrapper from leftover", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"}>`
+			const invoke = `<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`
+			const text = `<antml:function${"_calls"}>${invoke}</antml:function${"_calls"}>`
+			const { calls, leftoverText } = extractLeakedToolCalls(text, tools)
+			expect(calls[0].input).toEqual({ todos: "x" })
+			expect(leftoverText).toBe("")
+		})
+
+		it("recovers an antml: prefixed invoke inside a regular wrapper", () => {
+			const body = `<param${"eter"} name="todos">x</param${"eter"}>`
+			const invoke = `<antml:in${"voke"} name="update_todo_list">${body}</antml:in${"voke"}>`
+			expect(callsOf(wrap(invoke))[0].input).toEqual({ todos: "x" })
+		})
+
+		it("reads a parameter wrapped in antml: prefixed parameter tags", () => {
+			const body = `<antml:param${"eter"} name="todos">x</antml:param${"eter"}>`
+			const text = wrap(`<in${"voke"} name="update_todo_list">${body}</in${"voke"}>`)
+			expect(callsOf(text)[0].input).toEqual({ todos: "x" })
+		})
+
+		it("holds back a trailing antml: prefixed partial invoke at a chunk boundary", () => {
+			expect(trailingPartialToolMarkerLength(`leading <antml:in${"voke"} name="`)).toBe(20)
+		})
+	})
+
+	describe("chunk-boundary positioning", () => {
+		it("does not hold back an invoke tag that already closed earlier in the chunk", () => {
+			expect(trailingPartialToolMarkerLength("mid <invoke tail> more")).toBe(0)
+		})
+
+		it("locates the quoting cue relative to the preceding chunk, not its mirror image", () => {
+			// The window offset is preceding.length + match.index; subtracting instead lands on an
+			// earlier, cue-free slice and wrongly recovers the quoted block.
+			const { calls } = extractLeakedToolCalls(`see \`${todo()}`, tools, `<function${"_calls"}>`)
+
+			expect(calls).toHaveLength(0)
+		})
+	})
+})
+
+describe("quoting heuristics on the incremental scanner", () => {
+	const tools = new Set(["update_todo_list"])
+	const open = `<function${"_calls"}>`
+	const todo = () =>
+		`<in${"voke"} name="update_todo_list"><param${"eter"} name="todos">x</param${"eter"}></in${"voke"}>`
+	const callsOf = (text: string) => extractLeakedToolCalls(text, tools).calls
+	const fence = "```"
+
+	it("suppresses on an unterminated tag left after the block on the same line", () => {
+		expect(callsOf(`${open}\n${todo()} <`)).toHaveLength(0)
+	})
+
+	it("suppresses on narrative words following the block on the same line", () => {
+		expect(callsOf(`${open}\n${todo()} trailing words`)).toHaveLength(0)
+	})
+
+	it("suppresses on a stray closing angle bracket after the block", () => {
+		expect(callsOf(`${open}\n${todo()} >`)).toHaveLength(0)
+	})
+
+	it("suppresses when an unterminated tag precedes the block after a quoting cue", () => {
+		expect(callsOf(`${open}\nnever <${todo()}`)).toHaveLength(0)
+	})
+
+	it("recovers when a sentence terminator inside an unterminated tag ends the cue's sentence", () => {
+		expect(callsOf(`${open}\nnever <a.b${todo()}`)).toHaveLength(1)
+	})
+
+	it("recovers when the terminator immediately closes the cue's sentence", () => {
+		expect(callsOf(`${open}\nnever.${todo()}`)).toHaveLength(1)
+	})
+
+	it("treats a repeated non-fence character run as ordinary text", () => {
+		expect(callsOf(`${open}\n---\n${todo()}`)).toHaveLength(1)
+	})
+
+	it("closes a fence whose run is bare", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence}\n${todo()}`)).toHaveLength(1)
+	})
+
+	it("closes a fence whose suffix is whitespace only", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence} \n${todo()}`)).toHaveLength(1)
+	})
+
+	it("keeps a fence open when its closing run carries a single-character info string", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence}j\n${todo()}`)).toHaveLength(0)
+	})
+
+	it("keeps a fence open when its closing run carries a space-separated info string", () => {
+		expect(callsOf(`${open}\n${fence}\n${fence} j\n${todo()}`)).toHaveLength(0)
+	})
+
+	it("tracks the line start across a newline that follows an earlier block on its own line", () => {
+		// The first block leaves the scanner mid-line; the newline after it arrives in a later span,
+		// so the running offset must survive that hand-off for the second block's cue to be found.
+		expect(callsOf(`${open}\n${todo()}\nnever ${todo()}`)).toHaveLength(1)
+	})
+
+	it("measures the cue window from the line start when the preceding chunk ends mid-line", () => {
+		// The cue sits in the preceding chunk, so the line-start offset must carry across the
+		// boundary; drifting it lands on a different slice and the quoted block is wrongly recovered.
+		expect(extractLeakedToolCalls(todo(), tools, `${open}\nnever `).calls).toHaveLength(0)
+	})
+})
+
+describe("leaked tool-call parser scaling", () => {
+	const tools = new Set(["update_todo_list"])
+	const todo = () =>
+		`<in${"voke"} name="update_todo_list"><param${"eter"} name="todos">x</param${"eter"}></in${"voke"}>`
+
+	/**
+	 * Characters the parser copies out of the message while scanning. Wall-clock timing flaked on
+	 * shared CI runners, so work performed is counted instead: it is exact and machine-independent.
+	 */
+	const charactersScanned = (run: () => void): number => {
+		const originalSlice = String.prototype.slice
+		let scanned = 0
+		String.prototype.slice = function (this: string, start?: number, end?: number): string {
+			const piece = originalSlice.call(this, start, end)
+			scanned += piece.length
+			return piece
+		}
+		try {
+			run()
+		} finally {
+			String.prototype.slice = originalSlice
+		}
+		return scanned
+	}
+
+	/**
+	 * Work at 4x input over work at 1x. Linear scanning lands near 4; the quadratic prefix re-scan
+	 * this pins landed near 16. Only the ratio is asserted, never an absolute count.
+	 */
+	const growthFactor = (build: (size: number) => string, baseSize: number, run: (input: string) => void): number => {
+		const small = build(baseSize)
+		const large = build(baseSize * 4)
+		return (
+			charactersScanned(() => run(large)) /
+			Math.max(
+				charactersScanned(() => run(small)),
+				1,
+			)
+		)
+	}
+
+	/** Linear work must grow with the input, so a collapsed ratio near 1 fails too. */
+	const expectLinearGrowth = (growth: number) => {
+		expect(growth).toBeGreaterThan(3)
+		expect(growth).toBeLessThan(6)
+	}
+
+	it("scans ordinary wrapped output doing work linear in message length", () => {
+		const build = (count: number) => `<function${"_calls"}>\n${`${todo()}\n`.repeat(count)}</function${"_calls"}>\n`
+
+		expectLinearGrowth(growthFactor(build, 150, (input) => extractLeakedToolCalls(input, tools)))
+		expect(extractLeakedToolCalls(build(150), tools).calls).toHaveLength(150)
+	})
+
+	it("scans unclosed markup, deep nesting, and repeated quoting cues without quadratic blowup", () => {
+		const unclosed = (count: number) =>
+			`<function${"_calls"}>\n${`<in${"voke"} name="update_todo_list">\n`.repeat(count)}`
+		expectLinearGrowth(growthFactor(unclosed, 400, (input) => extractLeakedToolCalls(input, tools)))
+
+		// Nested tags before the block exercise tag stripping; cues with a trailing terminator
+		// exercise the quoting-cue scan. Both are read through the public entry point.
+		const nested = (depth: number) =>
+			`<function${"_calls"}>\n${"<".repeat(depth)}tag${">".repeat(depth)} ${todo()}\n`
+		expectLinearGrowth(growthFactor(nested, 500, (input) => extractLeakedToolCalls(input, tools)))
+
+		const cues = (count: number) => `<function${"_calls"}>\n${"never. ".repeat(count)}never ${todo()}\n`
+		expectLinearGrowth(growthFactor(cues, 500, (input) => extractLeakedToolCalls(input, tools)))
+		// The cue still suppresses recovery, so the fast path did not silently change the verdict.
+		expect(extractLeakedToolCalls(cues(500), tools).calls).toHaveLength(0)
+	})
+})
+
+describe("context-window tool_result truncation", () => {
+	describe("middleOutTruncate", () => {
+		it("returns text unchanged when within the limit", () => {
+			expect(middleOutTruncate("hello world", 100)).toBe("hello world")
+		})
+
+		it("returns text unchanged when its length exactly equals the limit", () => {
+			// Longer than the truncation marker, so `<=` is observable here: the marker-less
+			// fallback for tiny limits would otherwise return the same text under either operator.
+			const text = "A".repeat(200)
+			expect(middleOutTruncate(text, 200)).toBe(text)
+		})
+
+		it("stays within a limit too small to hold the truncation marker", () => {
+			const text = "A".repeat(500)
+			for (const limit of [1, 5, 50]) {
+				const result = middleOutTruncate(text, limit)
+				expect(result).toBe("A".repeat(limit))
+			}
+		})
+
+		it("does not end a marker-less truncation on a lone high surrogate", () => {
+			// Index-based so a surrogate pair contributes BOTH of its code units to the assertion.
+			const codeUnits = (value: string): number[] =>
+				Array.from({ length: value.length }, (_, index) => value.charCodeAt(index))
+
+			// The limit lands between the halves of the pair at index 3, which would otherwise be
+			// emitted alone and make the payload un-encodable as UTF-8.
+			const result = middleOutTruncate(`abc\uD83D\uDE00${"z".repeat(200)}`, 4)
+
+			expect(codeUnits(result)).toEqual(codeUnits("abc"))
+		})
+
+		it("keeps the head and tail and inserts a truncation marker", () => {
+			const text = "A".repeat(500) + "B".repeat(500)
+			const result = middleOutTruncate(text, 200)
+
+			expect(result.length).toBeLessThanOrEqual(200)
+			expect(result).toContain("characters truncated to fit the model context window")
+			expect(result.startsWith("A")).toBe(true)
+			expect(result.endsWith("B")).toBe(true)
+		})
+
+		it("returns an empty string for a non-positive limit", () => {
+			expect(middleOutTruncate("anything", 0)).toBe("")
+		})
+
+		// A lone surrogate cannot be encoded as UTF-8 and 400s the whole request.
+		it("never splits a surrogate pair across the removed middle", () => {
+			const pair = "\u{1F600}" // one astral char = high + low surrogate
+			const text = pair.repeat(400)
+			const result = middleOutTruncate(text, 200)
+
+			expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result)).toBe(false)
+		})
+	})
+
+	describe("truncateToolResultsToFitWindow", () => {
+		const toolUseMessage = (id: string): Anthropic.Messages.MessageParam => ({
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Calling a tool." },
+				{ type: "tool_use", id, name: "some_tool", input: { a: 1 } },
+			],
+		})
+
+		const toolResultMessage = (id: string, content: string): Anthropic.Messages.MessageParam => ({
+			role: "user",
+			content: [
+				{ type: "tool_result", tool_use_id: id, content },
+				{ type: "text", text: "<environment_details>env</environment_details>" },
+			],
+		})
+
+		const findBlock = (message: Anthropic.Messages.MessageParam, type: string) =>
+			(message.content as unknown as Array<{ type: string; [key: string]: unknown }>).find(
+				(block) => block.type === type,
+			)!
+
+		it("is a no-op when the conversation already fits the budget", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "small result"),
+			]
+			const before = JSON.parse(JSON.stringify(messages))
+
+			truncateToolResultsToFitWindow(messages, 100_000)
+
+			expect(messages).toEqual(before)
+		})
+
+		it("returns messages untouched when the budget is not a usable number", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "Y".repeat(50_000)),
+			]
+			const before = JSON.parse(JSON.stringify(messages))
+
+			expect(truncateToolResultsToFitWindow(messages, 0).messages).toBe(messages)
+			expect(truncateToolResultsToFitWindow(messages, Number.NaN).messages).toBe(messages)
+			expect(messages).toEqual(before)
+		})
+
+		it("returns a remainingChars equal to a fresh scan on every path", () => {
+			// The caller trusts remainingChars instead of re-scanning, so incremental bookkeeping
+			// that drifts from estimateMessagesChars would silently admit an over-window request.
+			const scenarios: Array<{ name: string; messages: Anthropic.Messages.MessageParam[]; budget: number }> = [
+				{
+					name: "unusable budget",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "Y".repeat(50_000))],
+					budget: 0,
+				},
+				{
+					name: "already fits",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "small result")],
+					budget: 100_000,
+				},
+				{
+					name: "single oversized result",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "X".repeat(50_000))],
+					budget: 10_000,
+				},
+				{
+					name: "several results, largest first",
+					messages: [
+						toolUseMessage("t1"),
+						toolResultMessage("t1", "B".repeat(40_000)),
+						toolUseMessage("t2"),
+						toolResultMessage("t2", "C".repeat(20_000)),
+						toolUseMessage("t3"),
+						toolResultMessage("t3", "small but real result"),
+					],
+					budget: 12_000,
+				},
+				{
+					name: "floor reached, budget unreachable",
+					messages: [
+						toolUseMessage("t1"),
+						toolResultMessage("t1", "D".repeat(30_000)),
+						toolUseMessage("t2"),
+						toolResultMessage("t2", "E".repeat(30_000)),
+					],
+					budget: 100,
+				},
+				{
+					name: "array-form content with an image part",
+					messages: [
+						toolUseMessage("t1"),
+						{
+							role: "user",
+							content: [
+								{
+									type: "tool_result",
+									tool_use_id: "t1",
+									content: [
+										{ type: "text", text: "Z".repeat(50_000) },
+										{
+											type: "image",
+											source: { type: "base64", media_type: "image/png", data: "abc" },
+										},
+									],
+								},
+							],
+						} as unknown as Anthropic.Messages.MessageParam,
+					],
+					budget: 9_000,
+				},
+				{
+					name: "plain string turn and a non-string non-array tool_result",
+					messages: [
+						{ role: "user", content: "a plain string turn" },
+						toolUseMessage("t1"),
+						toolResultMessage("t1", "F".repeat(50_000)),
+						{
+							role: "user",
+							content: [{ type: "tool_result", tool_use_id: "t2", content: undefined }],
+						} as unknown as Anthropic.Messages.MessageParam,
+					],
+					budget: 10_000,
+				},
+				{
+					name: "astral characters that truncation may trim by a surrogate",
+					messages: [toolUseMessage("t1"), toolResultMessage("t1", "😀".repeat(20_000))],
+					budget: 7_000,
+				},
+			]
+
+			for (const scenario of scenarios) {
+				const { messages, remainingChars } = truncateToolResultsToFitWindow(scenario.messages, scenario.budget)
+				expect(`${scenario.name}:${remainingChars}`).toBe(`${scenario.name}:${estimateMessagesChars(messages)}`)
+			}
+		})
+
+		it("truncates the largest tool_result first, sparing a smaller one above the floor", () => {
+			// Both results sit above MIN_TOOL_RESULT_CHARS, so descending order is what spares the
+			// smaller one; ascending order would shrink it before reaching the larger result.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "B".repeat(30_000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", "C".repeat(5_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 20_000)
+
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+			expect(findBlock(messages[3], "tool_result").content).toBe("C".repeat(5_000))
+		})
+
+		it("truncates array-form tool_result content and preserves non-text parts", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t1",
+							content: [
+								{ type: "text", text: "Z".repeat(50_000) },
+								{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+							],
+						},
+					],
+				} as unknown as Anthropic.Messages.MessageParam,
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			const parts = toolResult.content as Array<{ type: string; text?: string }>
+			expect(parts[0].text).toContain("characters truncated")
+			// Exact shape: a surviving original text part would leave a third element behind.
+			expect(parts.map((part) => part.type)).toEqual(["text", "image"])
+		})
+
+		it("ignores string content and skips messages that cannot hold tool_result blocks", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "a plain string turn" },
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "t1", content: "W".repeat(50_000) },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+					],
+				} as unknown as Anthropic.Messages.MessageParam,
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			expect(messages[0].content).toBe("a plain string turn")
+			expect(String(findBlock(messages[2], "tool_result").content)).toContain("characters truncated")
+		})
+
+		it("ignores a tool_result whose content is neither string nor array", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "V".repeat(50_000)),
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t2", content: undefined }],
+				} as unknown as Anthropic.Messages.MessageParam,
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			expect(findBlock(messages[2], "tool_result").content).toBeUndefined()
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+		})
+
+		it("leaves every tool_result untouched when the conversation already fits the budget", () => {
+			// Budget exceeds the estimated total, so the early return fires and nothing is trimmed.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "U".repeat(3000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", "T".repeat(2500)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 5700)
+
+			expect(findBlock(messages[1], "tool_result").content).toBe("U".repeat(3000))
+			expect(findBlock(messages[3], "tool_result").content).toBe("T".repeat(2500))
+		})
+
+		it("leaves a tool_result at or below the minimum size alone", () => {
+			const shortResult = "S".repeat(1500)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", shortResult),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", shortResult),
+			]
+
+			truncateToolResultsToFitWindow(messages, 100)
+
+			expect(findBlock(messages[1], "tool_result").content).toBe(shortResult)
+			expect(findBlock(messages[3], "tool_result").content).toBe(shortResult)
+		})
+
+		it("shrinks an oversized tool_result so the conversation fits the budget", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "X".repeat(50_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			expect(toolResult.tool_use_id).toBe("t1") // pairing preserved
+			expect(String(toolResult.content).length).toBeLessThanOrEqual(10_000)
+			expect(String(toolResult.content)).toContain("characters truncated")
+		})
+
+		it("truncates the largest tool_result first and leaves small ones intact", () => {
+			const small = "small but real result"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "B".repeat(40_000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", small),
+			]
+
+			truncateToolResultsToFitWindow(messages, 12_000)
+
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+			expect(findBlock(messages[3], "tool_result").content).toBe(small) // untouched
+		})
+
+		it("never truncates tool_use blocks, assistant text, or environment details", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "X".repeat(50_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 8_000)
+
+			expect(findBlock(messages[0], "text").text).toBe("Calling a tool.")
+			expect(findBlock(messages[0], "tool_use")).toMatchObject({ id: "t1", name: "some_tool" })
+			expect(findBlock(messages[1], "text").text).toBe("<environment_details>env</environment_details>")
+		})
+
+		it("handles array-form tool_result content and keeps it valid", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t1",
+							content: [{ type: "text", text: "Y".repeat(40_000) }],
+						},
+					],
+				},
+			]
+
+			truncateToolResultsToFitWindow(messages, 8_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			expect(toolResult.tool_use_id).toBe("t1")
+			expect(Array.isArray(toolResult.content)).toBe(true)
+			const parts = toolResult.content as Array<{ type: string; text?: string }>
+			expect(parts[0].type).toBe("text")
+			expect(String(parts[0].text)).toContain("characters truncated")
+		})
 	})
 })

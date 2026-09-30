@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.82.0
+## What's New in v3.84.0
 
-- 🔑 **Use your Zoo Gateway API key anywhere** — bring it to any OpenAI-compatible client or workflow: https://zoocode.dev/models
-- 🎁 **Free model access for a limited time** — get free access to MiniMax-M3 through Zoo Gateway.
-- ✨ **Brand-new models** — GPT-6 Astra and Claude Fable 5.1 are now available.
+- ✨ **New SOTA models added:** Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.
+- 🧭 **More reliable tasks and subtasks:** Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.
+- 🛠️ **More dependable terminal, provider, and code-search behavior:** Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.
 
 <details>
   <summary>🌐 Available languages</summary>

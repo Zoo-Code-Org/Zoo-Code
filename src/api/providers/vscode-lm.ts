@@ -15,7 +15,16 @@ import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared
 import { normalizeToolSchema } from "../../utils/json-schema"
 
 import { ApiStream, ApiStreamChunk } from "../transform/stream"
-import { convertToVsCodeLmMessages, extractTextCountFromMessage } from "../transform/vscode-lm-format"
+import {
+	convertToVsCodeLmMessages,
+	decodeToolNameSurrogates,
+	extractTextCountFromMessage,
+	sanitizeSurrogates,
+	sanitizeSurrogatesDeep,
+	sanitizeToolNameSurrogates,
+} from "../transform/vscode-lm-format"
+
+import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-management/context-error-handling"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -31,10 +40,13 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 	return tools
 		.filter((tool) => tool.type === "function")
 		.map((tool) => ({
-			name: tool.function.name,
-			description: tool.function.description || "",
+			// Declared names must stay within Copilot's ^[\w-]+$ validation while remaining distinct.
+			name: sanitizeToolNameSurrogates(tool.function.name),
+			description: sanitizeSurrogates(tool.function.description || ""),
 			inputSchema: tool.function.parameters
-				? normalizeToolSchema(tool.function.parameters as Record<string, unknown>)
+				? (sanitizeSurrogatesDeep(
+						normalizeToolSchema(tool.function.parameters as Record<string, unknown>),
+					) as object)
 				: undefined,
 		}))
 }
@@ -88,7 +100,6 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 // the rest of the response, so the marker only counts once the `name="` attribute has arrived.
 const LEAKED_TOOL_CALL_START = /<(?:antml:)?(?:function_calls\s*>|invoke\s+name=")/i
 const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
-const LEAKED_INVOKE_PARAM = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
 
 /** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
@@ -100,37 +111,6 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
  */
 const MAX_SALVAGE_BUFFER_CHARS = 64 * MAX_PARTIAL_INVOKE_CARRY
 
-/**
- * Same-line prose that introduces markup as an example rather than invoking it. This is a
- * deliberately narrow lexical cue: a quoted invoke that ENDS its line is otherwise
- * indistinguishable from a genuine leak, which is just as often preceded by prose.
- */
-const QUOTING_CUE =
-	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
-
-/**
- * True when `before` ends inside an open Markdown code fence. Tracks the fence character and its
- * width so tilde fences and fences of 4+ backticks (which may legally contain shorter fences) are
- * recognized, rather than counting three-backtick runs for parity.
- */
-function isInsideCodeFence(before: string): boolean {
-	let openFence: { marker: string; width: number } | null = null
-	for (const line of before.split("\n")) {
-		const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/)
-		if (!fenceMatch) {
-			continue
-		}
-		const marker = fenceMatch[1][0]
-		const width = fenceMatch[1].length
-		if (!openFence) {
-			openFence = { marker, width }
-		} else if (marker === openFence.marker && width >= openFence.width) {
-			openFence = null
-		}
-	}
-	return openFence !== null
-}
-
 /** True when `text` already contains a closed `<invoke>` block, so buffering is still productive. */
 function hasCompleteInvokeBlock(text: string): boolean {
 	LEAKED_INVOKE_BLOCK.lastIndex = 0
@@ -140,18 +120,121 @@ function hasCompleteInvokeBlock(text: string): boolean {
 }
 
 /**
- * Strips well-formed tags repeatedly until the result stops changing. A single pass is unsafe:
- * `<<invoke>>` reassembles into a live-looking tag after one replacement.
+ * Left-to-right scan state behind the quoting heuristics: open code fence, current line start,
+ * backticks seen on the current line, and whether a `<function_calls>` wrapper is open.
+ *
+ * State is threaded through the match loop and advanced only over newly consumed text. Rebuilding
+ * each candidate's prefix and re-walking it was quadratic in message length on ordinary output.
+ */
+class QuotingScanState {
+	private openFence: { marker: string; width: number } | null = null
+	private wrapperOpen = false
+	/** Text of the line now being scanned, up to the point the scan has reached. */
+	sameLineBefore = ""
+
+	/** Consumes the next contiguous span of the stream. Spans must not overlap or skip text. */
+	advance(span: string): void {
+		const lines = span.split("\n")
+		for (const [index, line] of lines.entries()) {
+			const lineStart = this.sameLineBefore.length
+			const fenceBeforeLine = this.openFence
+			this.sameLineBefore += line
+			// A wrapper opener shown as an example must not arm wrapped-only recovery for a later
+			// bare invoke, so tags are read in source order and openers are ignored in quoted code.
+			// A wrapper tag admits only whitespace before its `>`, so it never straddles a span
+			// boundary, which always falls on the `<` of an `<invoke>` marker.
+			for (const wrapperTag of line.matchAll(/<(\/?)(?:antml:)?function_calls\s*>/gi)) {
+				const textBeforeTag = this.sameLineBefore.slice(0, lineStart + wrapperTag.index)
+				if (this.insideInlineSpanAt(textBeforeTag)) {
+					continue
+				}
+				// A closer can only ever suppress recovery, so honour it even inside a fence.
+				if (wrapperTag[1] !== "") {
+					this.wrapperOpen = false
+				} else if (fenceBeforeLine === null && !/^ {0,3}(?:`{3,}|~{3,})/.test(this.sameLineBefore)) {
+					this.wrapperOpen = true
+				}
+			}
+			if (index < lines.length - 1) {
+				this.openFence = this.fenceAfterCurrentLine()
+				this.sameLineBefore = ""
+			}
+		}
+	}
+
+	/** True when the stream so far ends inside an open Markdown code fence. */
+	isInsideCodeFence(): boolean {
+		return this.fenceAfterCurrentLine() !== null
+	}
+
+	/** True when the stream so far ends inside an inline code span. */
+	hasOddBacktickCountOnLine(): boolean {
+		return this.insideInlineSpanAt(this.sameLineBefore)
+	}
+
+	/** CommonMark: a code span closes only on a backtick run of the SAME width that opened it. */
+	private insideInlineSpanAt(prefix: string): boolean {
+		let activeWidth = 0
+		for (const run of prefix.matchAll(/`+/g)) {
+			const width = run[0].length
+			if (activeWidth === 0) {
+				activeWidth = width
+			} else if (width === activeWidth) {
+				activeWidth = 0
+			}
+		}
+		return activeWidth !== 0
+	}
+
+	isInsideFunctionCallsWrapper(): boolean {
+		return this.wrapperOpen
+	}
+
+	/** Fence state including the partial line now being scanned, which may itself open a fence. */
+	private fenceAfterCurrentLine(): { marker: string; width: number } | null {
+		// The scanned line never contains a newline, so the run's suffix is simply the rest of it.
+		const fenceMatch = this.sameLineBefore.match(/^ {0,3}(`{3,}|~{3,})/)
+		if (!fenceMatch) {
+			return this.openFence
+		}
+		const marker = fenceMatch[1][0]
+		const width = fenceMatch[1].length
+		const suffix = this.sameLineBefore.slice(fenceMatch[0].length)
+		if (!this.openFence) {
+			// CommonMark: a backtick opening fence's info string may not contain a backtick.
+			return marker === "`" && suffix.includes("`") ? null : { marker, width }
+		}
+		// CommonMark allows an info string only on an opening fence, never a closing one.
+		const closesFence = marker === this.openFence.marker && width >= this.openFence.width && suffix.trim() === ""
+		return closesFence ? null : this.openFence
+	}
+}
+
+/**
+ * Strips well-formed tags, including nested ones. Removing a tag can reassemble a live-looking tag
+ * from the characters around it (`<<invoke>>`), so tags are matched with a single-pass stack rather
+ * than by re-replacing until the text stops changing.
  */
 function stripTagsCompletely(text: string): string {
-	let current = text
-	for (;;) {
-		const stripped = current.replace(/<[^<>]*>/g, "")
-		if (stripped === current) {
-			return stripped
+	let output = ""
+	// Bodies of `<` runs still awaiting a `>`; an unterminated one is never a tag, so it is emitted verbatim.
+	const pendingTags: string[] = []
+	for (let iter = 0; iter < text.length; iter += 1) {
+		const character = text[iter]
+		if (character === "<") {
+			pendingTags.push("")
+		} else if (character === ">" && pendingTags.length > 0) {
+			pendingTags.pop()
+		} else if (pendingTags.length > 0) {
+			pendingTags[pendingTags.length - 1] += character
+		} else {
+			output += character
 		}
-		current = stripped
 	}
+	for (const pending of pendingTags) {
+		output += `<${pending}`
+	}
+	return output
 }
 
 /**
@@ -171,49 +254,50 @@ export function trailingPartialToolMarkerLength(text: string): number {
 }
 
 /**
- * True when an unclosed `<function_calls>` wrapper is open at the end of `before`.
- *
- * Every wrapped-leak sample we have came with this wrapper, and the quoted-in-prose cases were
- * bare, making the wrapper the sharpest discriminator available. Requiring it keeps untrusted bare
- * `<invoke>` markup — which a prompt-injected file or a quoted example can contain — from becoming
- * a real call. It is a heuristic filter, not a security boundary.
+ * Words that mark nearby markup as being talked about rather than invoked.
  */
-function isInsideFunctionCallsWrapper(before: string): boolean {
-	const lastOpen = before.search(/<(?:antml:)?function_calls\s*>(?![\s\S]*<(?:antml:)?function_calls\s*>)/i)
-	if (lastOpen === -1) {
-		return false
+const QUOTING_CUE_PATTERN =
+	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b/gi
+
+/**
+ * True when a quoting cue falls in the unterminated final sentence of `sameLineBefore`. Pairing the
+ * cue with a terminator-free tail in one pattern re-scanned that tail once per cue.
+ */
+function hasQuotingCue(sameLineBefore: string): boolean {
+	const lastTerminator = Math.max(
+		sameLineBefore.lastIndexOf("."),
+		sameLineBefore.lastIndexOf("!"),
+		sameLineBefore.lastIndexOf("?"),
+	)
+	for (const cue of sameLineBefore.matchAll(QUOTING_CUE_PATTERN)) {
+		if (cue.index + cue[0].length > lastTerminator) {
+			return true
+		}
 	}
-	return !/<\/(?:antml:)?function_calls\s*>/i.test(before.slice(lastOpen))
+	return false
 }
 
 /**
- * True when the block spanning `[index, endIndex)` is being quoted — inside a fenced code block,
- * inside an inline code span, or embedded mid-sentence in plain prose — rather than invoked.
+ * True when the block ending at `endIndex` is being quoted — inside a fenced code block, inside an
+ * inline code span, or embedded mid-sentence in plain prose — rather than invoked.
+ *
+ * `scan` must already be advanced to the start of the block.
  */
-function isQuotedAsCode(text: string, index: number, endIndex: number): boolean {
-	const before = text.slice(0, index)
-	if (isInsideCodeFence(before)) {
-		return true
-	}
-	const lineStart = before.lastIndexOf("\n") + 1
-	const sameLineBefore = before.slice(lineStart)
-	if ((sameLineBefore.match(/`/g)?.length ?? 0) % 2 === 1) {
+function isQuotedAsCode(text: string, endIndex: number, scan: QuotingScanState): boolean {
+	if (scan.isInsideCodeFence() || scan.hasOddBacktickCountOnLine()) {
 		return true
 	}
 	// Narrative words after the block on the same line mean the markup is being talked about
 	// (e.g. "never emit <invoke ...> directly"), which must not be replayed as a live call.
-	const after = text.slice(endIndex)
-	const lineEnd = after.indexOf("\n")
-	const restOfLine = lineEnd === -1 ? after : after.slice(0, lineEnd)
+	const lineEnd = text.indexOf("\n", endIndex)
+	const restOfLine = text.slice(endIndex, lineEnd === -1 ? undefined : lineEnd)
 	if (stripTagsCompletely(restOfLine).trim().length > 0) {
 		return true
 	}
-	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off the mere
-	// presence of leading prose was tried and regressed genuine recoveries, because a real leak is
-	// commonly preceded by narration too ("Working on it.\n"), so only an explicit quoting cue
-	// immediately before the markup suppresses it. Heuristic: prose that quotes markup without
-	// such a cue still reads as a live call.
-	return QUOTING_CUE.test(stripTagsCompletely(sameLineBefore))
+	// A quoted invoke that ENDS its line leaves no trailing text to judge, and a real leak is
+	// commonly narrated too — keying off leading prose alone regressed genuine recoveries, so only
+	// this narrow cue suppresses it.
+	return hasQuotingCue(stripTagsCompletely(scan.sameLineBefore))
 }
 
 /**
@@ -223,19 +307,39 @@ function isQuotedAsCode(text: string, index: number, endIndex: number): boolean 
  */
 export type LeakedToolSchemas = ReadonlyMap<string, Record<string, unknown> | undefined>
 
-/** Non-string JSON Schema types a leaked parameter may be converted into. */
-const STRUCTURED_PARAM_TYPES = new Set(["object", "array", "number", "integer", "boolean", "null"])
+/**
+ * Non-string JSON Schema types a leaked parameter may be converted into, each paired with the
+ * check that a parsed value must satisfy. A null-only declaration is settled by its own branch in
+ * `convertLeakedParamValue` and so has no entry here.
+ */
+function structuredParamCheck(declaredType: string): ((parsed: unknown) => boolean) | undefined {
+	const checks: Record<string, (parsed: unknown) => boolean> = {
+		object: (parsed) => typeof parsed === "object" && !Array.isArray(parsed),
+		array: (parsed) => Array.isArray(parsed),
+		number: (parsed) => Number.isFinite(parsed),
+		integer: (parsed) => Number.isInteger(parsed),
+		boolean: (parsed) => typeof parsed === "boolean",
+	}
+	// Own-property only: a schema declaring `"toString"` would otherwise inherit a live function
+	// from Object.prototype and be treated as a supported type.
+	return Object.hasOwn(checks, declaredType) ? checks[declaredType] : undefined
+}
+
+/** A resolved declaration, or `undefined` when the schema does not pin down a single type. */
+type DeclaredType = { type: string; nullable: boolean }
 
 /** Resolves a `["T","null"]` type union to `T` while reporting that null is permitted. */
-function resolveTypeUnion(types: string[]): { type: string | undefined; nullable: boolean } {
+function resolveTypeUnion(types: string[]): DeclaredType | undefined {
 	const nullable = types.includes("null")
 	const nonNullTypes = types.filter((entry) => entry !== "null")
+	// A null-only union has no non-null member; leaving the type unresolved would fall back to the
+	// raw string "null", so name the null type and let convertLeakedParamValue settle it.
+	if (nonNullTypes.length === 0) {
+		return nullable ? { type: "null", nullable } : undefined
+	}
 	// Two or more non-null members leave the intended type ambiguous; picking one would coerce the
 	// value to a type the tool may not accept, so the raw string is kept instead.
-	const nonNull = nonNullTypes.length === 1 ? nonNullTypes[0] : undefined
-	// A null-only union has no non-null member; keeping type undefined would fall back to the raw
-	// string "null", so declare the null type explicitly to force a JSON parse.
-	return { type: nonNull ?? (nonNullTypes.length === 0 && nullable ? "null" : undefined), nullable }
+	return nonNullTypes.length === 1 ? { type: nonNullTypes[0], nullable } : undefined
 }
 
 /**
@@ -246,15 +350,14 @@ function resolveTypeUnion(types: string[]): { type: string | undefined; nullable
  * union into typed `anyOf` branches. Without reading that form a declared array or object would
  * fall through to the raw string, and the tool would receive `'["a","b"]'` instead of a list.
  */
-function declaredParamType(
-	schema: Record<string, unknown> | undefined,
-	paramName: string,
-): { type: string | undefined; nullable: boolean } {
+function declaredParamType(schema: Record<string, unknown> | undefined, paramName: string): DeclaredType | undefined {
 	const properties = schema?.["properties"] as Record<string, unknown> | undefined
 	const property = properties?.[paramName] as Record<string, unknown> | undefined
 	const type = property?.["type"]
 	if (typeof type === "string") {
-		return { type, nullable: type === "null" }
+		// A bare declaration permits null only when the type IS "null", which convertLeakedParamValue
+		// settles on its own before reading this flag.
+		return { type, nullable: false }
 	}
 	if (Array.isArray(type)) {
 		return resolveTypeUnion(type.filter((entry): entry is string => typeof entry === "string"))
@@ -267,13 +370,217 @@ function declaredParamType(
 			// Any branch that is not a simple named type (nested composition, $ref, enum-only) makes
 			// the union unsupported here; bail out rather than guess at a partial reading.
 			if (typeof branchType !== "string") {
-				return { type: undefined, nullable: false }
+				return undefined
 			}
 			branchTypes.push(branchType)
 		}
 		return resolveTypeUnion(branchTypes)
 	}
-	return { type: undefined, nullable: false }
+	return undefined
+}
+
+/**
+ * Context-window safety for Copilot's backend
+ * -------------------------------------------
+ * Copilot's backend enforces its own context window and, for third-party `sendRequest` callers,
+ * trims an over-window request in a way that is NOT tool-pair-aware: it can drop the assistant
+ * message holding a `tool_use` while keeping the matching `tool_result`, after which Anthropic
+ * rejects the request with "unexpected tool_use_id". To keep trimming on OUR side — where
+ * pairing is preserved — we shrink oversized `tool_result` payloads before sending. Only
+ * `tool_result` text is truncated (never `tool_use`, assistant text, summaries, or environment
+ * details), and only when the request would otherwise exceed the budget.
+ */
+
+/**
+ * Conservative characters-per-token ratio used to turn a token window into a character budget.
+ *
+ * `client.countTokens` is the model's real tokenizer, but it counts only a string: it cannot price
+ * the tool schemas, image placeholders, or per-message framing the backend adds, so it cannot give
+ * the true total for the request we are about to send. It is also an async, per-call RPC, and the
+ * budget is needed for every message on every turn. We therefore keep a character estimate here
+ * and stay deliberately conservative — 3 chars/token rather than the ~4 typical of English —
+ * because the token-dense JSON, logs, and code that dominate oversized tool results tokenize to
+ * fewer characters per token than prose. Under-counting biases toward trimming too early, which is
+ * recoverable; over-counting sends an over-window request, which is not.
+ */
+const VSCODE_LM_BUDGET_CHARS_PER_TOKEN = 3
+
+/**
+ * Fraction of the context window the *entire* input (system prompt + tool schemas + conversation)
+ * is allowed to occupy. The remaining headroom absorbs char/token estimation variance and any
+ * output/overhead the backend reserves.
+ */
+const VSCODE_LM_INPUT_BUDGET_FRACTION = 0.8
+
+/** A tool_result is never shrunk below this many characters, so a truncated result stays useful. */
+const MIN_TOOL_RESULT_CHARS = 2000
+
+/**
+ * Length charged for an image block. VS Code LM cannot carry image data, so
+ * `convertToVsCodeLmMessages` replaces each image with a sentence-long textual placeholder; this
+ * is that placeholder's approximate length.
+ */
+const IMAGE_PLACEHOLDER_CHARS = 64
+
+function readToolResultText(block: Anthropic.Messages.ContentBlockParam): string | undefined {
+	if (!block || (block as { type?: string }).type !== "tool_result") {
+		return undefined
+	}
+	const content = (block as Anthropic.Messages.ToolResultBlockParam).content
+	if (typeof content === "string") {
+		return content
+	}
+	if (Array.isArray(content)) {
+		return content
+			.filter((part): part is Anthropic.Messages.TextBlockParam => (part as { type?: string })?.type === "text")
+			.map((part) => part.text ?? "")
+			.join("")
+	}
+	return undefined
+}
+
+function writeToolResultText(block: Anthropic.Messages.ContentBlockParam, text: string): void {
+	const toolResult = block as Anthropic.Messages.ToolResultBlockParam
+	const content = toolResult.content
+	if (Array.isArray(content)) {
+		// Preserve any non-text parts (e.g. images) and collapse the text into one truncated part.
+		const nonText = content.filter((part) => (part as { type?: string })?.type !== "text")
+		toolResult.content = [{ type: "text", text }, ...nonText] as typeof content
+		return
+	}
+	toolResult.content = text
+}
+
+/**
+ * Drops a trailing lone high surrogate, whose low half was cut away. A lone surrogate cannot be
+ * encoded as UTF-8, and the backend 400s the whole request when one is present.
+ */
+function trimTrailingHighSurrogate(text: string): string {
+	return text.length > 0 && (text.charCodeAt(text.length - 1) & 0xfc00) === 0xd800 ? text.slice(0, -1) : text
+}
+
+/**
+ * Middle-out truncate `text` to at most `maxChars`, keeping the head and tail and replacing the
+ * middle with a marker noting how many characters were removed. Head/tail are preserved because
+ * logs and file dumps carry the most signal at their start (structure) and end (recent output).
+ */
+export function middleOutTruncate(text: string, maxChars: number): string {
+	if (maxChars <= 0) {
+		return ""
+	}
+	if (text.length <= maxChars) {
+		return text
+	}
+
+	const buildMarker = (removed: number) =>
+		`\n\n[... ${removed.toLocaleString("en-US")} characters truncated to fit the model context window ...]\n\n`
+
+	// Reserve room for the marker, sized against the original length so the result never grows.
+	const reservedMarkerLength = buildMarker(text.length).length
+	// A budget too small to hold the marker cannot describe its own truncation without breaking the
+	// maxChars promise this function makes to callers, so drop the marker and keep a bare head.
+	if (maxChars <= reservedMarkerLength) {
+		return trimTrailingHighSurrogate(text.slice(0, maxChars))
+	}
+	const keep = maxChars - reservedMarkerLength
+	const headLength = Math.ceil(keep / 2)
+	const tailLength = keep - headLength
+	const head = trimTrailingHighSurrogate(text.slice(0, headLength))
+	let tail = tailLength > 0 ? text.slice(text.length - tailLength) : ""
+	// Likewise, don't start the tail on a lone low surrogate (its high half is in the removed middle).
+	if (tail.length > 0 && (tail.charCodeAt(0) & 0xfc00) === 0xdc00) {
+		tail = tail.slice(1)
+	}
+	const removed = text.length - head.length - tail.length
+	return `${head}${buildMarker(removed)}${tail}`
+}
+
+/** Estimated character cost of a whole conversation, using the same accounting as truncation. */
+export function estimateMessagesChars(messages: Anthropic.Messages.MessageParam[]): number {
+	return messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
+}
+
+function estimateContentChars(content: Anthropic.Messages.MessageParam["content"]): number {
+	if (typeof content === "string") {
+		return content.length
+	}
+	if (!Array.isArray(content)) {
+		return 0
+	}
+	let total = 0
+	for (const block of content) {
+		const type = (block as { type?: string })?.type
+		if (type === "text") {
+			total += (block as Anthropic.Messages.TextBlockParam).text?.length ?? 0
+		} else if (type === "tool_result") {
+			total += readToolResultText(block)?.length ?? 0
+		} else if (type === "tool_use") {
+			total += JSON.stringify((block as Anthropic.Messages.ToolUseBlockParam).input ?? {}).length
+		} else if (type === "image") {
+			// VS Code LM cannot send image data; convertToVsCodeLmMessages substitutes a textual
+			// placeholder, so charge that placeholder's real length rather than a token-sized guess.
+			total += IMAGE_PLACEHOLDER_CHARS
+		}
+	}
+	return total
+}
+
+/**
+ * Shrinks oversized `tool_result` payloads (largest first, middle-out) until the conversation fits
+ * `budgetChars`. Mutates the tool_result blocks of the supplied messages in place — callers pass a
+ * cloned array (see `createMessage`) so stored history is never mutated. A no-op when the
+ * conversation already fits. `remainingChars` is the post-truncation cost, equal to
+ * `estimateMessagesChars(messages)`, so callers need not re-scan.
+ */
+export function truncateToolResultsToFitWindow(
+	messages: Anthropic.Messages.MessageParam[],
+	budgetChars: number,
+): { messages: Anthropic.Messages.MessageParam[]; remainingChars: number } {
+	const initialTotal = () => messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
+	if (!Number.isFinite(budgetChars) || budgetChars <= 0) {
+		return { messages, remainingChars: initialTotal() }
+	}
+
+	let total = initialTotal()
+	if (total <= budgetChars) {
+		return { messages, remainingChars: total }
+	}
+
+	// Collect every truncatable tool_result block, largest first. The text is derived once per
+	// block here because the comparator and the truncation loop below would otherwise re-derive it.
+	const blockText = new Map<Anthropic.Messages.ContentBlockParam, string>()
+	for (const message of messages) {
+		if (!Array.isArray(message.content)) {
+			continue
+		}
+		for (const block of message.content) {
+			const text = readToolResultText(block)
+			if (text !== undefined) {
+				blockText.set(block, text)
+			}
+		}
+	}
+	const toolResultBlocks = [...blockText.keys()]
+	toolResultBlocks.sort((a, b) => (blockText.get(b)?.length ?? 0) - (blockText.get(a)?.length ?? 0))
+
+	for (const block of toolResultBlocks) {
+		if (total <= budgetChars) {
+			break
+		}
+		const text = blockText.get(block)
+		if (text === undefined || text.length <= MIN_TOOL_RESULT_CHARS) {
+			continue
+		}
+
+		const overage = total - budgetChars
+		const target = Math.max(MIN_TOOL_RESULT_CHARS, text.length - overage)
+
+		const truncated = middleOutTruncate(text, target)
+		total -= text.length - truncated.length
+		writeToolResultText(block, truncated)
+	}
+
+	return { messages, remainingChars: total }
 }
 
 /**
@@ -287,15 +594,16 @@ function declaredParamType(
  * reported as a failure so the caller can pass the block through as text rather than dispatch a
  * malformed call.
  */
-function convertLeakedParamValue(
-	raw: string,
-	declared: { type: string | undefined; nullable: boolean },
-): { value: unknown } | undefined {
-	const declaredType = declared.type
-	if (declaredType === undefined || declaredType === "string") {
+function convertLeakedParamValue(raw: string, declared: DeclaredType | undefined): { value: unknown } | undefined {
+	if (declared === undefined || declared.type === "string") {
 		return { value: raw }
 	}
-	if (!STRUCTURED_PARAM_TYPES.has(declaredType)) {
+	// A null-only declaration admits the literal null and nothing else, so no parse is needed.
+	if (declared.type === "null") {
+		return raw === "null" ? { value: null } : undefined
+	}
+	const matchesDeclaredType = structuredParamCheck(declared.type)
+	if (!matchesDeclaredType) {
 		return undefined
 	}
 
@@ -306,25 +614,12 @@ function convertLeakedParamValue(
 		return undefined
 	}
 
-	// Must precede the type ladder, whose object branch rejects null outright.
+	// Must precede the table, whose object check would otherwise accept a null.
 	if (parsed === null) {
 		return declared.nullable ? { value: null } : undefined
 	}
 
-	const matchesDeclaredType =
-		declaredType === "null"
-			? false
-			: declaredType === "object"
-				? typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-				: declaredType === "array"
-					? Array.isArray(parsed)
-					: declaredType === "boolean"
-						? typeof parsed === "boolean"
-						: declaredType === "integer"
-							? Number.isInteger(parsed)
-							: typeof parsed === "number" && Number.isFinite(parsed)
-
-	return matchesDeclaredType ? { value: parsed } : undefined
+	return matchesDeclaredType(parsed) ? { value: parsed } : undefined
 }
 
 /**
@@ -336,16 +631,47 @@ function parseLeakedInvokeParams(
 	schema: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
 	const input: Record<string, unknown> = {}
-	LEAKED_INVOKE_PARAM.lastIndex = 0
-	let match: RegExpExecArray | null
-	while ((match = LEAKED_INVOKE_PARAM.exec(body)) !== null) {
+	const paramPattern = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
+	let consumedUpTo = 0
+	for (const match of body.matchAll(paramPattern)) {
 		const name = match[1]
+		// A `<parameter` token in the gap before this match is an opener the pattern could not
+		// parse, so recovering would dispatch a call missing an argument the model wrote.
+		if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo, match.index ?? 0))) {
+			return undefined
+		}
+		// A nested unclosed `<parameter` inside the captured value means the lazy pattern swallowed
+		// markup as data and dropped the inner parameter, so fail closed rather than dispatch it.
+		if (/<(?:antml:)?parameter\b/i.test(match[2])) {
+			return undefined
+		}
+		// A repeated name means injected markup split the block into adjacent well-formed matches,
+		// which would silently rebind an argument to an attacker-chosen value.
+		if (Object.hasOwn(input, name)) {
+			return undefined
+		}
 		const converted = convertLeakedParamValue(match[2].trim(), declaredParamType(schema, name))
 		if (!converted) {
-			LEAKED_INVOKE_PARAM.lastIndex = 0
 			return undefined
 		}
 		input[name] = converted.value
+		consumedUpTo = (match.index ?? 0) + match[0].length
+	}
+	// An unclosed parameter tag is skipped by the pattern above, so recovering would dispatch a
+	// call missing an argument the model wrote; fail closed instead.
+	if (/<(?:antml:)?parameter\b/i.test(body.slice(consumedUpTo))) {
+		return undefined
+	}
+	if (schema !== undefined) {
+		const props = schema.properties
+		if (props === null || props === undefined || typeof props !== "object" || Array.isArray(props)) {
+			return undefined
+		}
+		for (const k of Object.keys(input)) {
+			if (!Object.hasOwn(props as Record<string, unknown>, k)) {
+				return undefined
+			}
+		}
 	}
 	return input
 }
@@ -366,61 +692,59 @@ export function extractLeakedToolCalls(
 	const schemaFor = (name: string) =>
 		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
 	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
-	// Text between recovered/passed-through blocks, kept as segments so the wrapper cleanup below
-	// only touches segments adjacent to a block that was actually recovered.
-	const segments: Array<{ text: string; nearRecovery: boolean }> = []
-	let pending = ""
+	// Text outside recovered blocks, in stream order.
+	let leftover = ""
 	let lastIndex = 0
 
-	LEAKED_INVOKE_BLOCK.lastIndex = 0
-	let match: RegExpExecArray | null
-	while ((match = LEAKED_INVOKE_BLOCK.exec(text)) !== null) {
-		pending += text.slice(lastIndex, match.index)
-		const name = match[1]
-		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
+	// Quote detection needs the text streamed before the buffer, since a fence may have opened
+	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	let scannedUpTo = 0
+
+	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
+	const closePattern = /<\/(?:antml:)?invoke\s*>/gi
+	for (let open = openPattern.exec(text); open !== null; open = openPattern.exec(text)) {
+		const bodyStart = open.index + open[0].length
+		closePattern.lastIndex = bodyStart
+		const close = closePattern.exec(text)
+		// With no closing tag after this open there is none after any later open either.
+		if (!close) {
+			break
+		}
+		const blockEnd = close.index + close[0].length
+		leftover += text.slice(lastIndex, open.index)
+		const name = open[1]
+		scan.advance(text.slice(scannedUpTo, open.index))
+		// Only text outside invoke bodies may move parser state, otherwise markup quoted in one
+		// block could open a wrapper or fence that changes the verdict on a later block.
+		scannedUpTo = blockEnd
 		const recoverable =
-			validTools.has(name) &&
-			isInsideFunctionCallsWrapper(precedingText + text.slice(0, match.index)) &&
-			!isQuotedAsCode(
-				precedingText + text,
-				precedingText.length + match.index,
-				precedingText.length + match.index + match[0].length,
-			)
+			validTools.has(name) && scan.isInsideFunctionCallsWrapper() && !isQuotedAsCode(text, blockEnd, scan)
 		// Parsing may still fail closed when a parameter doesn't match its declared type.
-		const input = recoverable ? parseLeakedInvokeParams(match[2], schemaFor(name)) : undefined
+		const input = recoverable
+			? parseLeakedInvokeParams(text.slice(bodyStart, close.index), schemaFor(name))
+			: undefined
 		if (input) {
 			calls.push({ name, input })
-			segments.push({ text: pending, nearRecovery: true })
-			pending = ""
-			// The segment that follows a recovery also holds that call's closing wrapper.
-			segments.push({ text: "", nearRecovery: true })
 		} else {
 			// Not one of our tools, quoted as code, or un-convertible — keep the block as literal text.
-			pending += match[0]
+			leftover += text.slice(open.index, blockEnd)
 		}
-		lastIndex = match.index + match[0].length
+		lastIndex = blockEnd
+		openPattern.lastIndex = blockEnd
 	}
-	pending += text.slice(lastIndex)
-	const trailing =
-		segments.length > 0 && segments[segments.length - 1].nearRecovery && segments[segments.length - 1].text === ""
-	if (trailing) {
-		segments[segments.length - 1].text = pending
-	} else {
-		segments.push({ text: pending, nearRecovery: false })
-	}
+	leftover += text.slice(lastIndex)
 
-	// Remove the wrapper tags belonging to a recovered call (cosmetic; also avoids re-teaching the
-	// model this format when the turn is sent back as history). Wrappers around blocks that were
-	// NOT recovered are user-visible text and must survive verbatim.
-	const leftover = segments
-		.map((segment) =>
-			segment.nearRecovery ? segment.text.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "") : segment.text,
-		)
-		.join("")
+	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
+	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
+	// With nothing recovered the same tags are user-visible prose and must survive verbatim.
+	if (calls.length > 0) {
+		leftover = leftover.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "")
+	}
 
 	return { calls, leftoverText: leftover }
 }
-
 
 export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -745,9 +1069,48 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			content: this.cleanMessageContent(msg.content),
 		}))
 
+		// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
+		// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
+		// 400 ("unexpected tool_use_id"). See truncateToolResultsToFitWindow.
+		const contextWindowTokens = this.getCondenseContextWindow()
+		if (Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
+			const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
+			const rawBudgetChars =
+				contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
+				systemPrompt.length -
+				toolSchemaChars
+			// A system prompt or tool schema large enough to consume the whole budget would leave a
+			// non-positive budget, which disables trimming exactly when the request is most oversized.
+			const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
+			const { remainingChars } = truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+
+			// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
+			// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
+			// prompt) that we must not touch. Dropping messages here would orphan a tool_result from
+			// its tool_use — the exact 400 this guard exists to prevent — so fail loudly instead of
+			// sending a request we already know is over the window.
+			// Admission is judged against the RAW budget, not the clamped one: the clamp exists only
+			// to keep trimming productive, so accepting up to it would send a request the window
+			// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
+			if (remainingChars > rawBudgetChars) {
+				// `status` is what makes checkContextWindowExceededError recognise this as a context
+				// -window failure; without it the task takes its generic retry path and re-sends the
+				// same over-window history instead of condensing.
+				throw Object.assign(
+					new Error(
+						"Zoo Code <Language Model API>: The request is too large for this model's context window " +
+							`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
+							`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
+							"breaking tool-call pairing. Condense the conversation or start a new task.",
+					),
+					{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
+				)
+			}
+		}
+
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(systemPrompt),
+			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
 			...convertToVsCodeLmMessages(cleanedMessages),
 		]
 
@@ -760,10 +1123,8 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
 
-		// Leaked tool-call recovery state (see `extractLeakedToolCalls`). Only enabled when we
-		// actually offered tools this turn, so it can never misfire on plain conversations.
-		// Carries each tool's parameter schema, so a recovered parameter is converted to the type
-		// the tool declares instead of always arriving as a string.
+		// Only offered tools may be recovered; their schemas keep recovered parameters typed
+		// rather than passing every value through as a string.
 		const providedToolSchemas: LeakedToolSchemas = new Map(
 			(metadata?.tools ?? [])
 				.filter((tool) => tool.type === "function")
@@ -924,7 +1285,8 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 							yield {
 								type: "tool_call",
 								id: chunk.callId,
-								name: chunk.name,
+								// Undo the declaration-time encoding; dispatch matches registry names.
+								name: decodeToolNameSurrogates(chunk.name),
 								arguments: argumentsString,
 							}
 						}
