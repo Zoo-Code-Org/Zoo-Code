@@ -1155,12 +1155,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				return flushed
 			}
 
+			// Buffering is only entered with the marker already in the buffer, so `buffered` is
+			// always non-empty here; an emptiness guard would be unreachable code.
 			const buffered = salvageBuffer
 			salvageBuffering = false
 			salvageBuffer = ""
-			if (!buffered) {
-				return flushed
-			}
 
 			const { calls, leftoverText } = extractLeakedToolCalls(buffered, providedToolSchemas, salvageEmittedText)
 			salvageEmittedText += buffered
