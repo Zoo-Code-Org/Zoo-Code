@@ -276,6 +276,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}),
+			// Default to "does not exist yet"; tests that simulate an existing
+			// profile must override this so the prior-profile snapshot is taken.
+			hasConfig: vi.fn().mockResolvedValue(false),
 		}
 
 		// Get the buildApiHandler mock
@@ -618,6 +621,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}
+			// The profile pre-exists, so existence is confirmed and its prior value is read.
+			provider["providerSettingsManager"].hasConfig = vi.fn().mockResolvedValue(true)
 			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(priorProfile)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue(undefined)
 			// Fail an activation write that runs *after* saveConfig succeeded.
@@ -644,6 +649,30 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			// The previously active profile name ("test-config") is restored.
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 			// No activation success state leaked to the webview.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+		})
+
+		test("aborts without deleting an existing profile when the prior profile cannot be read", async () => {
+			// The profile exists, but reading it fails (e.g. a transient secrets error).
+			// A swallowed failure must NOT be treated as "absent": rollback must never
+			// delete the still-existing profile and its secrets.
+			provider["providerSettingsManager"].hasConfig = vi.fn().mockResolvedValue(true)
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockRejectedValue(new Error("transient secrets read failure"))
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+			const deleteConfig = vi.fn().mockResolvedValue(undefined)
+			provider["providerSettingsManager"].deleteConfig = deleteConfig
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4-turbo",
+			})
+
+			// The write aborts *before* saveConfig, so the existing profile is untouched.
+			expect(result).toBeUndefined()
+			expect(saveConfig).not.toHaveBeenCalled()
+			expect(deleteConfig).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 		})
 	})

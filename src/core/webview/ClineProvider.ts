@@ -1914,11 +1914,32 @@ export class ClineProvider
 				// or current profile still pointed at the old one.
 				const priorCurrentApiConfigName = this.contextProxy.getValue("currentApiConfigName")
 				const priorProviderSettings = this.contextProxy.getProviderSettings()
-				let priorProfile: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
+
+				// `getProfile` wraps both "not found" and transient read failures in the
+				// same error, so it cannot decide whether the profile pre-existed. Probe
+				// existence explicitly: a destructive rollback (`deleteConfig`) must only
+				// run when absence is confirmed, never on a swallowed read error that would
+				// otherwise delete an existing profile and its secrets.
+				let profileExisted: boolean | undefined
 				try {
-					priorProfile = await this.providerSettingsManager.getProfile({ name })
+					profileExisted = await this.providerSettingsManager.hasConfig(name)
 				} catch {
-					// No existing profile with this name; rollback deletes the new one.
+					// Existence is unknown; rollback will restore/no-op rather than delete.
+					profileExisted = undefined
+				}
+
+				let priorProfile: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
+				if (profileExisted !== false) {
+					try {
+						priorProfile = await this.providerSettingsManager.getProfile({ name })
+					} catch (error) {
+						// The profile exists (or existence is unknown) but could not be read.
+						// When existence was confirmed, propagate so the write aborts *before*
+						// `saveConfig` rather than proceeding with an unknown prior state.
+						if (profileExisted === true) {
+							throw error
+						}
+					}
 				}
 
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
@@ -1969,7 +1990,9 @@ export class ClineProvider
 						try {
 							if (priorProfile) {
 								await this.providerSettingsManager.saveConfig(name, priorProfile)
-							} else {
+							} else if (profileExisted === false) {
+								// Absence was confirmed before the write; remove the new profile.
+								// A swallowed read error (unknown existence) must never reach here.
 								await this.providerSettingsManager.deleteConfig(name)
 							}
 							// A pre-existing mode mapping is restored; a newly created one
