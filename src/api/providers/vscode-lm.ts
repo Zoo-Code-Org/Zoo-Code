@@ -1254,7 +1254,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// that ends normally after cancellation would otherwise complete with partial
 			// text and a usage chunk instead of rejecting with the canonical abort.
 			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+				// Stryker disable next-line StringLiteral: caught by the abort branch in the catch below, which re-throws its own canonical abort error with the identical message, so this string is never observed
 				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				// Stryker disable next-line StringLiteral: caught by the abort branch in the catch below, which re-throws its own canonical abort error with the identical name, so this string is never observed
 				abortError.name = "AbortError"
 				throw abortError
 			}

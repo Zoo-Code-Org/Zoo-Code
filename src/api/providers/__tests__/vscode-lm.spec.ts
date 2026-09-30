@@ -723,6 +723,105 @@ describe("VsCodeLmHandler", () => {
 			expect(sent).not.toContain("X".repeat(400_000))
 		})
 
+		it("sends an oversized request untouched when the context window resolves to zero", async () => {
+			// A non-positive window disables the budget gate entirely: no trimming and no refusal, even
+			// for a conversation far larger than any window. The mutants that force the gate open must
+			// refuse here (the tool_result cannot shrink below its floor against a non-positive raw
+			// budget), so asserting the send is what distinguishes them.
+			vi.spyOn(handler, "getCondenseContextWindow").mockReturnValue(0)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(5_000) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage("system", messages, { taskId: "test-task" })
+			const chunks = await collectStream(stream)
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
+
+		it("reports the exact raw budget and pairing warning when refusing a request", async () => {
+			// The refusal message carries the RAW (unclamped) budget: asserting the full text pins the
+			// budget arithmetic (window * 0.8 * 3 - systemPrompt.length) and both message fragments,
+			// which the looser regex assertions in the other refusal tests do not cover.
+			const contextWindow = handler.getCondenseContextWindow()
+			const targetRawBudgetChars = 1_000
+			const systemPrompt = "S".repeat(Math.floor(contextWindow * 0.8 * 3) - targetRawBudgetChars)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(1_999) }],
+				},
+			]
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			await expect(
+				(async () => {
+					for await (const _chunk of stream) {
+						// drain
+					}
+				})(),
+			).rejects.toThrow(
+				"Zoo Code <Language Model API>: The request is too large for this model's context window " +
+					"(estimated 2,006 characters against a budget of 1,000), and it cannot be reduced further without " +
+					"breaking tool-call pairing. Condense the conversation or start a new task.",
+			)
+			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("sends a request whose trimmed size equals the raw budget exactly", async () => {
+			// Admission is strict: a conversation that lands exactly on the raw budget fits, so the
+			// request must be sent. The >= mutant refuses exactly this boundary, which is the
+			// off-by-one this test exists to catch.
+			const contextWindow = handler.getCondenseContextWindow()
+			const targetRawBudgetChars = 1_000
+			const systemPrompt = "S".repeat(Math.floor(contextWindow * 0.8 * 3) - targetRawBudgetChars)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Y".repeat(targetRawBudgetChars) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			const chunks = await collectStream(stream)
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
 		it("should handle native tool calls when tools are provided", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [
