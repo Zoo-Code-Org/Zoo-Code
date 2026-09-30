@@ -1,5 +1,9 @@
 // npx vitest run __tests__/provider-delegation.spec.ts
 
+import * as fs from "fs/promises"
+import * as os from "os"
+import * as path from "path"
+
 import { describe, it, expect, vi } from "vitest"
 import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
@@ -1150,5 +1154,97 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(replacedParent.pendingAction).toEqual(replacementAction)
 		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(replacedParent)
+	})
+
+	it("keeps directory cleanup and parent restoration when the child history lock failure is swallowed", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const settledParent: HistoryItem = { ...interruptedParent, pendingAction: undefined }
+		const childItem: HistoryItem = { ...parentHistoryItem, id: "child-1", task: "Child" }
+
+		const globalStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "delegation-rollback-cleanup-"))
+		const childDir = path.join(globalStorageDir, "tasks", "child-1")
+		await fs.mkdir(childDir, { recursive: true })
+		await fs.writeFile(path.join(childDir, "ui_messages.json"), "[]")
+
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const getTaskWithId = vi.fn(async (taskId: string) => {
+			if (taskId === "parent-1") {
+				return { historyItem: settledParent }
+			}
+			return { taskDirPath: childDir, historyItem: childItem }
+		})
+		const clearPendingActionIfMatching = vi.fn(async () => settledParent)
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			recentTasksCache: [parentHistoryItem],
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			// The real deletion path: the store swallows a per-file history
+			// lock failure, so deleteMany resolves and cleanup continues.
+			deleteTaskWithId: ClineProvider.prototype.deleteTaskWithId,
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+			isViewLaunched: false,
+			contextProxy: { globalStorageUri: { fsPath: globalStorageDir } },
+			cwd: globalStorageDir,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+					updater(interruptedParent)
+					return []
+				}),
+				clearPendingActionIfMatching,
+				deleteMany: vi.fn().mockResolvedValue(undefined),
+			},
+		} as unknown as ClineProvider
+
+		try {
+			await expect(
+				ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+					parentTaskId: "parent-1",
+					message: pendingAction.message,
+					initialTodos: pendingAction.todos,
+					mode: pendingAction.mode,
+					pendingActionId: pendingAction.actionId,
+				}),
+			).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+			// The child task directory was removed even though the child's
+			// history lock failed and was swallowed, and the settled parent
+			// was restored before the original rejection surfaced.
+			await expect(fs.access(childDir)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", "create-action")
+			expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
+				expect.objectContaining({ status: "interrupted", pendingAction: undefined }),
+			)
+		} finally {
+			await fs.rm(globalStorageDir, { recursive: true, force: true }).catch(() => {})
+		}
 	})
 })

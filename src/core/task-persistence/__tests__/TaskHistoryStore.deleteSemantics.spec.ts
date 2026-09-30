@@ -1,6 +1,6 @@
 // pnpm --filter roo-cline test core/task-persistence/__tests__/TaskHistoryStore.deleteSemantics.spec.ts
 //
-// Focused fail-closed deletion semantics for `delete()` and `deleteMany()`.
+// Best-effort deletion semantics for `delete()` and `deleteMany()`.
 // Lock, unlink, and fs behavior stay real by default; individual tests force
 // one lock or unlink failure through the wrappers below.
 
@@ -10,7 +10,7 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { TaskHistoryStore, TaskHistoryPartialDeleteError } from "../TaskHistoryStore"
+import { TaskHistoryStore } from "../TaskHistoryStore"
 import { withFileLock } from "../../../utils/fileLock"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 
@@ -52,11 +52,17 @@ function historyFilePath(storagePath: string, taskId: string): string {
 	return path.join(storagePath, "tasks", taskId, GlobalFileNames.historyItem)
 }
 
-function epermLike(message: string): NodeJS.ErrnoException {
-	return Object.assign(new Error(message), { code: "EACCES" })
+function storeInternals(store: TaskHistoryStore): {
+	cache: Map<string, HistoryItem>
+	taskFileMtimes: Map<string, number>
+} {
+	return {
+		cache: store["cache"],
+		taskFileMtimes: store["taskFileMtimes"],
+	}
 }
 
-describe("TaskHistoryStore fail-closed deletion semantics", () => {
+describe("TaskHistoryStore best-effort deletion semantics", () => {
 	let storagePath: string
 	let stores: TaskHistoryStore[]
 	let onWrite: ReturnType<typeof vi.fn>
@@ -85,67 +91,92 @@ describe("TaskHistoryStore fail-closed deletion semantics", () => {
 	}
 
 	describe("delete()", () => {
-		it("propagates a lock acquisition failure, keeps the cache entry and file, and skips write-through", async () => {
+		it("unlinks under the shared per-file lock, evicts cache and mtime, and writes through once", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "locked-delete" }))
+			onWrite.mockClear()
+
+			await expect(store.delete("locked-delete")).resolves.toBeUndefined()
+
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(
+				historyFilePath(storagePath, "locked-delete"),
+				expect.any(Function),
+			)
+			await expect(fs.access(historyFilePath(storagePath, "locked-delete"))).rejects.toMatchObject({
+				code: "ENOENT",
+			})
+
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("locked-delete")).toBe(false)
+			expect(taskFileMtimes.has("locked-delete")).toBe(false)
+			expect(store.get("locked-delete")).toBeUndefined()
+
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
+			expect(writtenIds).not.toContain("locked-delete")
+		})
+
+		it("swallows a lock acquisition failure, evicts cache and mtime, and still writes through once", async () => {
 			const store = createStore()
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "lock-fail" }))
 			onWrite.mockClear()
 
-			const lockError = new Error("lock acquisition timed out")
-			vi.mocked(withFileLock).mockRejectedValueOnce(lockError)
+			vi.mocked(withFileLock).mockRejectedValueOnce(new Error("lock acquisition timed out"))
 
-			await expect(store.delete("lock-fail")).rejects.toBe(lockError)
+			await expect(store.delete("lock-fail")).resolves.toBeUndefined()
 
-			// The file stayed on disk, the cache entry survived, and no
-			// removal was persisted through onWrite.
+			// The unlink never ran, but the in-memory eviction and the single
+			// write-through still completed.
 			await expect(fs.access(historyFilePath(storagePath, "lock-fail"))).resolves.toBeUndefined()
-			expect(store.get("lock-fail")).toBeDefined()
-			expect(onWrite).not.toHaveBeenCalled()
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("lock-fail")).toBe(false)
+			expect(taskFileMtimes.has("lock-fail")).toBe(false)
+			expect(store.get("lock-fail")).toBeUndefined()
+			expect(onWrite).toHaveBeenCalledTimes(1)
 		})
 
-		it("propagates a non-ENOENT unlink failure, keeps the cache entry and file, and stays deletable afterwards", async () => {
+		it("swallows a non-ENOENT unlink failure, evicts cache and mtime, and stays deletable afterwards", async () => {
 			const store = createStore()
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "perm-fail" }))
 			onWrite.mockClear()
 
-			const unlinkError = epermLike("EACCES: permission denied, unlink")
-			vi.mocked(fs.unlink).mockRejectedValueOnce(unlinkError)
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied, unlink"), { code: "EACCES" }),
+			)
 
-			await expect(store.delete("perm-fail")).rejects.toBe(unlinkError)
+			await expect(store.delete("perm-fail")).resolves.toBeUndefined()
 
 			await expect(fs.access(historyFilePath(storagePath, "perm-fail"))).resolves.toBeUndefined()
-			expect(store.get("perm-fail")).toBeDefined()
-			expect(onWrite).not.toHaveBeenCalled()
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("perm-fail")).toBe(false)
+			expect(taskFileMtimes.has("perm-fail")).toBe(false)
+			expect(onWrite).toHaveBeenCalledTimes(1)
 
 			// The per-file lock was released: a retry without the injected
-			// failure deletes the file and writes through.
+			// failure deletes the file and writes through again.
 			await expect(store.delete("perm-fail")).resolves.toBeUndefined()
 			await expect(fs.access(historyFilePath(storagePath, "perm-fail"))).rejects.toMatchObject({
 				code: "ENOENT",
 			})
-			expect(store.get("perm-fail")).toBeUndefined()
-			expect(onWrite).toHaveBeenCalledTimes(1)
+			expect(onWrite).toHaveBeenCalledTimes(2)
 		})
 
-		it("treats a confirmed ENOENT as a successful deletion", async () => {
+		it("treats a missing file as a completed deletion", async () => {
 			const store = createStore()
 			await store.initialize()
+			onWrite.mockClear()
 
-			// A task that never existed resolves without throwing.
 			await expect(store.delete("never-existed")).resolves.toBeUndefined()
-
-			// A task whose file a peer already removed also deletes cleanly.
-			await store.upsert(makeHistoryItem({ id: "peer-removed" }))
-			await fs.unlink(historyFilePath(storagePath, "peer-removed"))
-			await expect(store.delete("peer-removed")).resolves.toBeUndefined()
-			expect(store.get("peer-removed")).toBeUndefined()
-			expect(onWrite).toHaveBeenCalled()
+			expect(store.get("never-existed")).toBeUndefined()
+			expect(onWrite).toHaveBeenCalledTimes(1)
 		})
 	})
 
 	describe("deleteMany()", () => {
-		it("stops at the first failure, preserves failed and unattempted cache entries, and writes through completed deletions before rejecting", async () => {
+		it("continues the batch after a failed unlink, evicts every entry, and writes through exactly once", async () => {
 			const store = createStore()
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "batch-a", ts: 1000 }))
@@ -153,93 +184,60 @@ describe("TaskHistoryStore fail-closed deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "batch-c", ts: 3000 }))
 			onWrite.mockClear()
 
-			const unlinkError = epermLike("EACCES: permission denied, unlink")
-			const events: string[] = []
-			onWrite.mockImplementation(async () => {
-				events.push("write-through")
-			})
-
 			vi.mocked(fs.unlink).mockImplementation(async (p) => {
 				if (p === historyFilePath(storagePath, "batch-b")) {
-					throw unlinkError
+					throw Object.assign(new Error("EACCES: permission denied, unlink"), { code: "EACCES" })
 				}
 				return actualFs.unlink(p)
 			})
 
-			const pending = store.deleteMany(["batch-a", "batch-b", "batch-c"]).catch((error) => {
-				events.push("rejected")
-				return error
-			})
-			const partialError = (await pending) as TaskHistoryPartialDeleteError
+			await expect(store.deleteMany(["batch-a", "batch-b", "batch-c"])).resolves.toBeUndefined()
 
-			// The write-through of completed deletions is awaited before the
-			// rejection reaches the caller.
-			expect(events).toEqual(["write-through", "rejected"])
-
-			expect(partialError).toBeInstanceOf(TaskHistoryPartialDeleteError)
-			expect(partialError.failures).toEqual([{ taskId: "batch-b", reason: unlinkError }])
-			expect(partialError.cause).toBe(unlinkError)
-
-			// batch-a completed: file gone, cache evicted.
+			// batch-b failed but the batch continued around it.
 			await expect(fs.access(historyFilePath(storagePath, "batch-a"))).rejects.toMatchObject({ code: "ENOENT" })
-			expect(store.get("batch-a")).toBeUndefined()
-
-			// batch-b failed: file present, cache entry preserved.
 			await expect(fs.access(historyFilePath(storagePath, "batch-b"))).resolves.toBeUndefined()
-			expect(store.get("batch-b")).toBeDefined()
+			await expect(fs.access(historyFilePath(storagePath, "batch-c"))).rejects.toMatchObject({ code: "ENOENT" })
 
-			// batch-c was never attempted: file present, cache entry preserved.
-			await expect(fs.access(historyFilePath(storagePath, "batch-c"))).resolves.toBeUndefined()
-			expect(store.get("batch-c")).toBeDefined()
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("batch-a")).toBe(false)
+			expect(cache.has("batch-b")).toBe(false)
+			expect(cache.has("batch-c")).toBe(false)
+			expect(taskFileMtimes.has("batch-a")).toBe(false)
+			expect(taskFileMtimes.has("batch-b")).toBe(false)
+			expect(taskFileMtimes.has("batch-c")).toBe(false)
+			expect(store.get("batch-b")).toBeUndefined()
 
-			// The write-through saw the cache after completed deletions only.
-			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id).sort()
-			expect(writtenIds).toEqual(["batch-b", "batch-c"])
+			// One write-through, after the whole batch, seeing the final cache.
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
+			expect(writtenIds).toEqual([])
 		})
 
-		it("preserves the original deletion error when the failure-path write-through also fails", async () => {
+		it("swallows a lock failure for one item and continues the batch with one write-through", async () => {
 			const store = createStore()
 			await store.initialize()
-			await store.upsert(makeHistoryItem({ id: "batch-a", ts: 1000 }))
-			await store.upsert(makeHistoryItem({ id: "batch-b", ts: 2000 }))
+			await store.upsert(makeHistoryItem({ id: "lock-a", ts: 1000 }))
+			await store.upsert(makeHistoryItem({ id: "lock-b", ts: 2000 }))
 			onWrite.mockClear()
 
-			const unlinkError = epermLike("EACCES: permission denied, unlink")
-			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			vi.mocked(withFileLock).mockRejectedValueOnce(new Error("lock acquisition timed out"))
 
-			vi.mocked(fs.unlink).mockImplementation(async (p) => {
-				if (p === historyFilePath(storagePath, "batch-b")) {
-					throw unlinkError
-				}
-				return actualFs.unlink(p)
-			})
-			onWrite.mockRejectedValue(new Error("write-through boom"))
+			await expect(store.deleteMany(["lock-a", "lock-b"])).resolves.toBeUndefined()
 
-			try {
-				const partialError = (await store
-					.deleteMany(["batch-a", "batch-b"])
-					.catch((error) => error)) as TaskHistoryPartialDeleteError
+			// The first item's lock failed before its unlink; the second item
+			// still completed.
+			await expect(fs.access(historyFilePath(storagePath, "lock-a"))).resolves.toBeUndefined()
+			await expect(fs.access(historyFilePath(storagePath, "lock-b"))).rejects.toMatchObject({ code: "ENOENT" })
 
-				// The original deletion failure stays the reported error.
-				expect(partialError).toBeInstanceOf(TaskHistoryPartialDeleteError)
-				expect(partialError.failures).toEqual([{ taskId: "batch-b", reason: unlinkError }])
-				expect(partialError.cause).toBe(unlinkError)
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("lock-a")).toBe(false)
+			expect(cache.has("lock-b")).toBe(false)
+			expect(taskFileMtimes.has("lock-a")).toBe(false)
+			expect(taskFileMtimes.has("lock-b")).toBe(false)
 
-				// The secondary write-through failure is logged, not thrown.
-				expect(consoleError).toHaveBeenCalledWith(
-					"[TaskHistoryStore] Write-through after partial deleteMany failed:",
-					expect.any(Error),
-				)
-
-				// batch-a stays deleted and batch-b stays intact.
-				await expect(fs.access(historyFilePath(storagePath, "batch-a"))).rejects.toMatchObject({
-					code: "ENOENT",
-				})
-				await expect(fs.access(historyFilePath(storagePath, "batch-b"))).resolves.toBeUndefined()
-				expect(store.get("batch-b")).toBeDefined()
-			} finally {
-				consoleError.mockRestore()
-			}
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
+			expect(writtenIds).toEqual([])
 		})
 	})
 })

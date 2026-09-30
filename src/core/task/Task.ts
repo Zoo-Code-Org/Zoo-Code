@@ -1003,14 +1003,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * An interrupted task cannot legally delegate, so its staged create-subtask
-	 * action is a durable rejection marker rather than replayable work. Reconcile
-	 * it before restart replay; if persistence is still unavailable, propagate the
-	 * error and leave the task stopped instead of creating another doomed child.
+	 * An interrupted task cannot legally delegate, so a staged create-subtask
+	 * action is a durable rejection marker rather than replayable work. The
+	 * constructor-injected history item can be stale, so the persisted record
+	 * is refreshed first and the refreshed action is the one settled. A failed
+	 * refresh, lookup, or settlement stops replay instead of risking another
+	 * doomed child.
 	 */
 	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
-		const action = this.pendingAction
-		if (this.initialStatus !== "interrupted" || action?.kind !== "create_subtask") {
+		if (this.initialStatus !== "interrupted") {
 			return
 		}
 
@@ -1019,6 +1020,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new PendingActionSettlementError(
 				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
 			)
+		}
+
+		try {
+			await provider.taskHistoryStore.reconcile({ forceRefresh: true })
+		} catch (error) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to refresh task history for task ${this.taskId}`,
+				{ cause: error },
+			)
+		}
+
+		const refreshedItem = provider.taskHistoryStore.get(this.taskId)
+		if (!refreshedItem) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} not found in refreshed task history`,
+			)
+		}
+		this.pendingAction = refreshedItem.pendingAction
+
+		const action = refreshedItem.pendingAction
+		if (action?.kind !== "create_subtask") {
+			return
 		}
 
 		let authoritative: HistoryItem
@@ -1030,15 +1053,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				{ cause: error },
 			)
 		}
-		if (this.pendingAction?.actionId === action.actionId) {
-			this.pendingAction = authoritative.pendingAction
-		}
-
-		if (this.pendingAction?.kind === "create_subtask") {
-			throw new PendingActionSettlementError(
-				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} still has a rejected create-subtask action`,
-			)
-		}
+		this.pendingAction = authoritative.pendingAction
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {

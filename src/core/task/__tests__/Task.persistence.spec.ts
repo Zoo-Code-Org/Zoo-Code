@@ -1244,6 +1244,13 @@ describe("Task persistence", () => {
 				},
 			])
 
+			// Restart settlement needs the refreshed record to exist, and a
+			// record without a pending action keeps the replay path unchanged.
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "interrupted-subtask",
+				status: "interrupted",
+			})
+
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
@@ -1308,6 +1315,13 @@ describe("Task persistence", () => {
 					],
 				},
 			])
+
+			// Restart settlement needs the refreshed record to exist, and a
+			// record without a pending action keeps the replay path unchanged.
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "interrupted-subtask-2",
+				status: "interrupted",
+			})
 
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
@@ -1421,6 +1435,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			expect(clearRejectedAction).not.toHaveBeenCalled()
+			expect(mockProvider.taskHistoryStore.reconcile).not.toHaveBeenCalled()
 			expect(replay).toHaveBeenCalledWith(createSubtaskAction)
 		})
 
@@ -1429,6 +1444,12 @@ describe("Task persistence", () => {
 				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },
 			])
 			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: "Previous response" }])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: createSubtaskAction,
+			})
 			const clearRejectedAction = vi.fn().mockResolvedValue({
 				id: "parent-1",
 				status: "interrupted",
@@ -1457,6 +1478,8 @@ describe("Task persistence", () => {
 
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
+			expect(mockProvider.taskHistoryStore.reconcile).toHaveBeenCalledWith({ forceRefresh: true })
+			expect(mockProvider.taskHistoryStore.get).toHaveBeenCalledWith("parent-1")
 			expect(clearRejectedAction).toHaveBeenCalledWith("parent-1", "create-action")
 			expect(replay).not.toHaveBeenCalled()
 			expect(task.ask).toHaveBeenCalledWith("resume_task")
@@ -1466,6 +1489,12 @@ describe("Task persistence", () => {
 			const settlementError = new Error("settlement unavailable")
 			mockReadTaskMessages.mockResolvedValue([])
 			mockReadApiMessages.mockResolvedValue([])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: createSubtaskAction,
+			})
 			mockProvider.taskHistoryStore.clearPendingActionIfMatching = vi.fn().mockRejectedValue(settlementError)
 			const task = new Task({
 				provider: mockProvider,
@@ -1500,7 +1529,7 @@ describe("Task persistence", () => {
 			expect(ask).not.toHaveBeenCalled()
 		})
 
-		it("stops replay when settlement preserves a replacement create-subtask action", async () => {
+		it("adopts the authoritative replacement pending action returned by settlement", async () => {
 			const replacementAction = {
 				...createSubtaskAction,
 				actionId: "create-action-b",
@@ -1510,11 +1539,197 @@ describe("Task persistence", () => {
 				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },
 			])
 			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: "Previous response" }])
-			mockProvider.taskHistoryStore.clearPendingActionIfMatching = vi.fn().mockResolvedValue({
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: createSubtaskAction,
+			})
+			const clearRejectedAction = vi.fn().mockResolvedValue({
 				id: "parent-1",
 				status: "interrupted",
 				pendingAction: replacementAction,
 			})
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "parent-1",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					pendingAction: createSubtaskAction,
+				},
+				startTask: false,
+			})
+			const taskState = task as unknown as { pendingAction?: PendingTaskAction }
+			const ask = vi.spyOn(task, "ask")
+			const replay = vi
+				.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+				.mockResolvedValue(undefined)
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(clearRejectedAction).toHaveBeenCalledWith("parent-1", "create-action")
+			expect(taskState.pendingAction).toEqual(replacementAction)
+			expect(replay).toHaveBeenCalledWith(replacementAction)
+			expect(ask).not.toHaveBeenCalled()
+		})
+
+		it("settles the refreshed action when the staged action was replaced before restart", async () => {
+			const refreshedAction = {
+				...createSubtaskAction,
+				actionId: "create-action-b",
+				message: "Refreshed child",
+			}
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },
+			])
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: "Previous response" }])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: refreshedAction,
+			})
+			const clearRejectedAction = vi.fn().mockResolvedValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: undefined,
+			})
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "parent-1",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					pendingAction: createSubtaskAction,
+				},
+				startTask: false,
+			})
+			const taskState = task as unknown as { pendingAction?: PendingTaskAction }
+			const ask = vi.spyOn(task, "ask")
+			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			// The stale staged action never reaches settlement; the refreshed
+			// one does, and the cleared authoritative result ends the replay.
+			expect(clearRejectedAction).toHaveBeenCalledTimes(1)
+			expect(clearRejectedAction).toHaveBeenCalledWith("parent-1", "create-action-b")
+			expect(taskState.pendingAction).toBeUndefined()
+			expect(replay).not.toHaveBeenCalled()
+			expect(ask).toHaveBeenCalledWith("resume_task")
+		})
+
+		it("replays without settlement when the refreshed record has no pending action", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },
+			])
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: "Previous response" }])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: undefined,
+			})
+			const clearRejectedAction = vi.fn()
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "parent-1",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					pendingAction: createSubtaskAction,
+				},
+				startTask: false,
+			})
+			const taskState = task as unknown as { pendingAction?: PendingTaskAction }
+			const ask = vi.spyOn(task, "ask")
+			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(mockProvider.taskHistoryStore.reconcile).toHaveBeenCalledWith({ forceRefresh: true })
+			expect(clearRejectedAction).not.toHaveBeenCalled()
+			expect(taskState.pendingAction).toBeUndefined()
+			expect(replay).not.toHaveBeenCalled()
+			expect(ask).toHaveBeenCalledWith("resume_task")
+		})
+
+		it("replays a refreshed non-create-subtask action without settlement", async () => {
+			const refreshedFinishAction: PendingTaskAction = {
+				...pendingAction,
+				actionId: "finish-action-b",
+			}
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "ask", ask: "tool", text: createSubtaskAction.approvalText },
+			])
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: "Previous response" }])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "parent-1",
+				status: "interrupted",
+				pendingAction: refreshedFinishAction,
+			})
+			const clearRejectedAction = vi.fn()
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "parent-1",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					pendingAction: createSubtaskAction,
+				},
+				startTask: false,
+			})
+			const taskState = task as unknown as { pendingAction?: PendingTaskAction }
+			const ask = vi.spyOn(task, "ask")
+			const replay = vi
+				.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+				.mockResolvedValue(undefined)
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(clearRejectedAction).not.toHaveBeenCalled()
+			expect(taskState.pendingAction).toEqual(refreshedFinishAction)
+			expect(replay).toHaveBeenCalledWith(refreshedFinishAction)
+			expect(ask).not.toHaveBeenCalled()
+		})
+
+		it("stops replay when the refreshed task history cannot be read", async () => {
+			const refreshError = new Error("reconcile unavailable")
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages.mockResolvedValue([])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockRejectedValue(refreshError)
+			const clearRejectedAction = vi.fn()
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -1534,10 +1749,56 @@ describe("Task persistence", () => {
 			const ask = vi.spyOn(task, "ask")
 			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
 
-			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow(
-				"[Task#settleInterruptedCreateSubtaskBeforeReplay] Task parent-1 still has a rejected create-subtask action",
-			)
+			const resumeError = await getTaskPersistenceAccess(task)
+				.resumeTaskFromHistory()
+				.catch((error: unknown) => error)
 
+			expect(resumeError).toBeInstanceOf(PendingActionSettlementError)
+			expect(resumeError).toMatchObject({
+				name: "PendingActionSettlementError",
+				cause: refreshError,
+			})
+			expect(clearRejectedAction).not.toHaveBeenCalled()
+			expect(replay).not.toHaveBeenCalled()
+			expect(ask).not.toHaveBeenCalled()
+		})
+
+		it("stops replay when the task is missing from the refreshed task history", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages.mockResolvedValue([])
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue(undefined)
+			const clearRejectedAction = vi.fn()
+			mockProvider.taskHistoryStore.clearPendingActionIfMatching = clearRejectedAction
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "parent-1",
+					number: 1,
+					ts: 1,
+					task: "Parent",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					pendingAction: createSubtaskAction,
+				},
+				startTask: false,
+			})
+			const ask = vi.spyOn(task, "ask")
+			const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+
+			const resumeError = await getTaskPersistenceAccess(task)
+				.resumeTaskFromHistory()
+				.catch((error: unknown) => error)
+
+			expect(resumeError).toBeInstanceOf(PendingActionSettlementError)
+			expect(resumeError).toMatchObject({
+				name: "PendingActionSettlementError",
+				message: expect.stringContaining("not found in refreshed task history"),
+			})
+			expect(clearRejectedAction).not.toHaveBeenCalled()
 			expect(replay).not.toHaveBeenCalled()
 			expect(ask).not.toHaveBeenCalled()
 		})

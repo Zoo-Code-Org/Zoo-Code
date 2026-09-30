@@ -1,6 +1,5 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.taskHistory.spec.ts
 
-import * as fs from "fs/promises"
 import * as vscode from "vscode"
 import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
@@ -26,9 +25,6 @@ vi.mock("fs/promises", () => ({
 	rmdir: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 	rm: vi.fn().mockResolvedValue(undefined),
-	// Deletion verifies disk state after a failed lock or unlink, so the
-	// harness reports every probed file as absent.
-	stat: vi.fn().mockRejectedValue(Object.assign(new Error("no such file or directory"), { code: "ENOENT" })),
 }))
 
 vi.mock("axios", () => ({
@@ -845,26 +841,6 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(ids).toContain("keep-me")
 			expect(ids).toContain("new-item")
 			expect(ids).not.toContain("remove-me")
-		})
-
-		it("fails closed: does not remove task directories when history deletion fails", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			const item = createHistoryItem({ id: "dir-keep", task: "Keep directory" })
-			await provider.updateTaskHistory(item, { broadcast: false })
-
-			const failure = new Error("lock acquisition failed")
-			const deleteManySpy = vi.spyOn(provider.taskHistoryStore, "deleteMany").mockRejectedValue(failure)
-
-			try {
-				// The failed history deletion aborts deleteTaskWithId before
-				// any checkpoint or task directory removal.
-				await expect(provider.deleteTaskWithId("dir-keep")).rejects.toBe(failure)
-			} finally {
-				deleteManySpy.mockRestore()
-			}
-
-			expect(fs.rm).not.toHaveBeenCalled()
 		})
 
 		it("does not block subsequent writes when a previous store write errors", async () => {
