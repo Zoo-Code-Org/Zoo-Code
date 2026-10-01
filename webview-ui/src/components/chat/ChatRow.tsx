@@ -1252,22 +1252,17 @@ export const ChatRowContent = ({
 										/>
 									</div>
 								) : (
-									<button
-										type="button"
-										className="text-left px-2 py-1 wrap-anywhere rounded-lg transition-colors bg-transparent border-0 font-[inherit] text-[inherit] cursor-text focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder"
-										disabled={isStreaming}
+									<div
+										className="px-2 py-1 wrap-anywhere rounded-lg transition-colors cursor-text"
 										onClick={(e) => {
 											e.stopPropagation()
-											// Clicks on an inline mention open its own target and must not
-											// also enter edit mode for the surrounding message bubble.
-											if ((e.target as HTMLElement).closest("[data-mention]")) return
 											if (!isStreaming) {
 												handleEditClick()
 											}
 										}}
 										title={t("chat:queuedMessages.clickToEdit")}>
 										<Mention text={message.text} withShadow />
-									</button>
+									</div>
 								)}
 								{!isEditing && message.images && message.images.length > 0 && (
 									<Thumbnails images={message.images} style={{ marginTop: "8px" }} />

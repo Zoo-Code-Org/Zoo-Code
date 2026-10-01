@@ -95,13 +95,8 @@ export const ApiConfigSelector = ({
 			const isCurrentConfig = config.id === value
 
 			return (
-				// The row contains a pin action, so it must not be exposed as a
-				// listbox option. Selection is a dedicated button and pinning is a
-				// separate, independent button.
 				<div
 					key={config.id}
-					role="group"
-					aria-label={config.name}
 					className={cn(
 						"px-3 py-1.5 text-sm flex items-center group",
 						isCurrentConfig &&
@@ -222,19 +217,18 @@ export const ApiConfigSelector = ({
 							{/* Pinned configs - sticky header */}
 							{pinnedConfigs.length > 0 && (
 								<div
-									role="group"
+									data-testid="pinned-configs"
 									className={cn(
 										"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
 										unpinnedConfigs.length > 0 && "border-b border-vscode-dropdown-foreground/10",
-									)}
-									aria-label="Pinned configurations">
+									)}>
 									{pinnedConfigs.map((config) => renderConfigItem(config, true))}
 								</div>
 							)}
 
 							{/* Unpinned configs */}
 							{unpinnedConfigs.length > 0 && (
-								<div role="group" className="py-1" aria-label="All configurations">
+								<div data-testid="unpinned-configs" className="py-1">
 									{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
 								</div>
 							)}
