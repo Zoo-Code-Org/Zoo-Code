@@ -6,7 +6,7 @@ export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
 export const VALID_TASK_STATUS_TRANSITIONS: Readonly<Record<HistoryItemStatus, readonly HistoryItemStatus[]>> = {
 	active: ["delegated", "completed", "interrupted"],
 	delegated: ["active"],
-	interrupted: ["completed"],
+	interrupted: ["delegated", "completed"],
 	completed: [],
 }
 
@@ -28,8 +28,19 @@ export function delegateTaskToChild(
 	parent: HistoryItem,
 	childId: string,
 	awaitedChildStatus?: HistoryItemStatus,
+	owningParent?: HistoryItem,
 ): HistoryItem {
 	let base = parent
+	// Approval to delegate resumes interrupted work. Keep its old lineage only
+	// while that parent still awaits it; startup repair or re-delegation may
+	// already have released ownership. Never steal another child's handoff.
+	if (
+		parent.status === "interrupted" &&
+		parent.parentTaskId &&
+		(owningParent?.id !== parent.parentTaskId || owningParent.awaitingChildId !== parent.id)
+	) {
+		base = { ...parent, parentTaskId: undefined, rootTaskId: undefined }
+	}
 	if (parent.status === "delegated") {
 		if (awaitedChildStatus !== "interrupted") {
 			throw new LifecycleTransitionError(
