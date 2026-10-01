@@ -28,7 +28,7 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { OpenAICompatibleHandler, OpenAICompatibleConfig } from "../openai-compatible"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
-import type { LanguageModel } from "ai"
+import { APICallError, type LanguageModel } from "ai"
 
 /** Error shape produced when the upstream API responds with a 4xx/5xx status. */
 type StatusedError = Error & { status: number }
@@ -224,9 +224,16 @@ describe("OpenAICompatibleHandler", () => {
 			expect(toolChunks[2]).toMatchObject({ type: "tool_call_end", id: "tc_1" })
 		})
 
-		// Test 1: createMessage() with mock 429 response → verify thrown error has .status === 429 and provider name in message
+		// Test 1: createMessage() with a real AI SDK APICallError 429 (the AI SDK
+		// exposes the HTTP status as statusCode, not status) → verify the wrapped error
+		// surfaces .status === 429 and the provider name in its message.
 		it("should throw error with .status 429 when API returns 429", async () => {
-			const rateLimitError = Object.assign(new Error("Rate limited"), { status: 429 })
+			const rateLimitError = new APICallError({
+				message: "Rate limited",
+				statusCode: 429,
+				url: "https://test.invalid/v1/chat/completions",
+				requestBodyValues: {},
+			})
 
 			mockStreamText.mockReturnValue({
 				// eslint-disable-next-line require-yield
