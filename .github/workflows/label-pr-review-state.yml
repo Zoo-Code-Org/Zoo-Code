@@ -326,8 +326,11 @@ jobs:
             //   'add'      — stable head, maintainer queue, qualifying fresh approval
             //   'remove'   — known non-maintainer phase, known head change, or
             //                invalidated approval (known invalidation beats uncertainty)
-            //   'preserve' — unknown mergeability or community-only lookup
-            //                uncertainty with no known invalidation
+            //   'preserve' — unknown mergeability, or a permission lookup that
+            //                fails only in the community check, with no known
+            //                invalidation. A lookup failure that also blocks
+            //                maintainer classification fails the PR and removes
+            //                the label through the outer catch instead.
             // A failed community label update is advisory: it must not clear the
             // queue label or fail the review gate, so errors are logged, not thrown.
             async function reconcileCommunityApproval(pr, decision) {
