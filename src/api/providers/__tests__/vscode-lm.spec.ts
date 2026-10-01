@@ -393,6 +393,12 @@ describe("VsCodeLmHandler", () => {
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
 			})
 
+			it("emits no text chunk when a chunk is entirely a carried marker fragment", async () => {
+				const chunks = await collect(["<fun", "ky text"])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "<funky text" }])
+			})
+
 			it("buffers across chunks that arrive after the marker", async () => {
 				const chunks = await collect([
 					'prose <function_calls><invoke name="calculator">',
