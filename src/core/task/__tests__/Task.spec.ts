@@ -43,6 +43,7 @@ type TaskTestAccess = {
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	presentAssistantMessageSafe: () => void
+	hasCompleteToolResultsForCurrentTurn: () => boolean
 	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
@@ -576,6 +577,93 @@ describe("Cline", () => {
 	})
 
 	describe("native tool-call request isolation", () => {
+		it("derives readiness only from a closed, idle, fully paired tool turn", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "tool turn readiness test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_ready",
+					name: "read_file",
+					params: {},
+					nativeArgs: { path: "README.md" },
+					partial: false,
+				},
+			]
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+
+			expect(readiness()).toBe(false)
+			task.didCompleteReadingStream = true
+			task.presentAssistantMessageLocked = true
+			expect(readiness()).toBe(false)
+			task.presentAssistantMessageLocked = false
+			task.assistantMessageContent[0].partial = true
+			expect(readiness()).toBe(false)
+			task.assistantMessageContent[0].partial = false
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "different_call", content: "finished" }]
+			expect(readiness()).toBe(false)
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			expect(readiness()).toBe(true)
+		})
+
+		it("continues after a complete read_file result when the readiness flag update is lost", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "read file continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				const completedRead = task.assistantMessageContent.find(
+					(block) => block.type === "tool_use" && block.name === "read_file" && !block.partial,
+				)
+				if (!completedRead || completedRead.type !== "tool_use" || !completedRead.id) return
+
+				task.pushToolResultToUserContent({
+					type: "tool_result",
+					tool_use_id: completedRead.id,
+					content: "File: README.md\nfinished",
+				})
+				// Reproduce the persisted field symptom: the tool result exists and
+				// presentation is no longer running, but the one-shot readiness latch
+				// never flips, so the old loop waits forever before the next request.
+				task.userMessageContentReady = false
+			})
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					throw new Error("continuation request reached")
+				})
+
+			vi.mocked(pWaitFor).mockImplementation(async (condition) => {
+				if (!(await condition())) {
+					throw new Error("read_file continuation would stall")
+				}
+			})
+
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		})
+
 		it("keeps overlapping Task parser state scoped to each request", async () => {
 			const firstTask = new Task({
 				provider: mockProvider,

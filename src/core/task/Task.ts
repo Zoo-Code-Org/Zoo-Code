@@ -487,6 +487,44 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.userMessageContent.push(toolResult)
 		return true
 	}
+
+	/**
+	 * Derives terminal tool-turn readiness from the protocol state instead of
+	 * relying exclusively on the presenter's one-shot boolean latch.
+	 *
+	 * A re-entrant presenter can lose the latch update after every tool has
+	 * already completed. At that point the assistant turn is safe to continue
+	 * when the stream is closed, presentation is idle, every content block is
+	 * final, and every tool call has its matching result.
+	 */
+	private hasCompleteToolResultsForCurrentTurn(): boolean {
+		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+			return false
+		}
+
+		const toolResultIds = new Set(
+			this.userMessageContent
+				.filter((block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result")
+				.map((block) => block.tool_use_id),
+		)
+		let toolUseCount = 0
+
+		for (const block of this.assistantMessageContent) {
+			if (block.partial) {
+				return false
+			}
+			if (block.type !== "tool_use" && block.type !== "mcp_tool_use") {
+				continue
+			}
+
+			toolUseCount++
+			if (!block.id || !toolResultIds.has(sanitizeToolUseId(block.id))) {
+				return false
+			}
+		}
+
+		return toolUseCount > 0
+	}
 	didRejectTool = false
 	didAlreadyUseTool = false
 	didToolFailInCurrentTurn = false
@@ -4084,7 +4122,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+					await pWaitFor(
+						() =>
+							this.userMessageContentReady ||
+							this.hasCompleteToolResultsForCurrentTurn() ||
+							this.abort ||
+							this.abandoned,
+					)
 
 					if (this.abort || this.abandoned) {
 						throw new Error(
