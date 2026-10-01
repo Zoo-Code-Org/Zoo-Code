@@ -934,7 +934,7 @@ export const openAiNativeModels = {
 // provider by default.
 export const openAiModelInfoSaneDefaults: ModelInfo = {
 	contextWindow: 128_000,
-	supportsImages: true,
+	supportsImages: false,
 	supportsPromptCache: false,
 	inputPrice: 0,
 	outputPrice: 0,
