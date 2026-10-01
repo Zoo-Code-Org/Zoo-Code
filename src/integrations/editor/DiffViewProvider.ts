@@ -18,6 +18,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { safeWriteText } from "../../services/file-safety/safeWriteText"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1156,7 +1157,7 @@ export class DiffViewProvider {
 
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await safeWriteText(absolutePath, content)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
