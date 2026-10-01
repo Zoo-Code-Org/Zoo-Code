@@ -1258,6 +1258,9 @@ export const ChatRowContent = ({
 										disabled={isStreaming}
 										onClick={(e) => {
 											e.stopPropagation()
+											// Clicks on an inline mention open its own target and must not
+											// also enter edit mode for the surrounding message bubble.
+											if ((e.target as HTMLElement).closest("[data-mention]")) return
 											if (!isStreaming) {
 												handleEditClick()
 											}

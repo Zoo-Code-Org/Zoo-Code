@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
+import { render, screen, fireEvent, waitFor, within } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
 import { providerIdentifiers } from "@roo-code/types"
 
@@ -259,32 +259,41 @@ describe("ApiConfigSelector", () => {
 		expect(mockOnChange).toHaveBeenCalledWith("config2")
 	})
 
-	test("exposes listbox/option semantics and marks the selected option", () => {
+	test("renders each config as a group row with a dedicated selection button (no role=option)", () => {
 		render(<ApiConfigSelector {...defaultProps} />)
 		fireEvent.click(screen.getByTestId("dropdown-trigger"))
 
 		const content = screen.getByTestId("popover-content")
-		expect(content.querySelector('[role="listbox"]')).toBeTruthy()
 
-		const selected = screen
-			.getAllByText("Config 1")
-			.map((el) => el.closest('[role="option"]'))
-			.find(Boolean) as HTMLElement
-		expect(selected.getAttribute("aria-selected")).toBe("true")
+		// Rows must not be exposed as options because they contain a pin action.
+		expect(content.querySelector('[role="option"]')).toBeNull()
 
-		const unselected = screen.getByText("Config 2").closest('[role="option"]') as HTMLElement
-		expect(unselected.getAttribute("aria-selected")).toBe("false")
-		expect(unselected.getAttribute("tabindex")).toBe("0")
+		const selectedRow = within(content).getByText("Config 1").closest('[role="group"]') as HTMLElement
+		expect(selectedRow).toBeTruthy()
+		expect(selectedRow.getAttribute("aria-label")).toBe("Config 1")
+
+		// Selection is a dedicated, keyboard-focusable button.
+		const selectionButton = within(content).getByText("Config 1").closest("button") as HTMLButtonElement
+		expect(selectionButton).toBeTruthy()
+		expect(selectionButton.tagName).toBe("BUTTON")
+
+		const unselectedRow = within(content).getByText("Config 2").closest('[role="group"]') as HTMLElement
+		expect(unselectedRow).toBeTruthy()
+		expect(unselectedRow.getAttribute("aria-label")).toBe("Config 2")
 	})
 
 	test("selects a config with the keyboard", () => {
 		render(<ApiConfigSelector {...defaultProps} />)
 		fireEvent.click(screen.getByTestId("dropdown-trigger"))
 
-		const option = screen.getByText("Config 2").closest('[role="option"]') as HTMLElement
-		expect(option).toBeTruthy()
+		const content = screen.getByTestId("popover-content")
+		const selectionButton = within(content).getByText("Config 2").closest("button") as HTMLButtonElement
+		expect(selectionButton).toBeTruthy()
 
-		fireEvent.keyDown(option, { key: "Enter" })
+		// The selection control is keyboard-focusable (native button tab order).
+		expect(selectionButton.tabIndex).toBe(0)
+
+		fireEvent.keyDown(selectionButton, { key: "Enter" })
 		expect(mockOnChange).toHaveBeenCalledWith("config2")
 	})
 
@@ -456,9 +465,11 @@ describe("ApiConfigSelector", () => {
 		const searchInput = screen.getByPlaceholderText("common:ui.search_placeholder") as HTMLInputElement
 		fireEvent.change(searchInput, { target: { value: "Config" } })
 
-		// Pin a config
-		const config2Row = screen.getByText("Config 2").closest("div")
-		const pinButton = config2Row?.querySelector("button")
+		// Pin a config (target the pin button, not the selection button)
+		const config2Row = screen.getByText("Config 2").closest('[role="group"]') as HTMLElement | null
+		const pinButton = Array.from(config2Row?.querySelectorAll("button") ?? []).find((btn) =>
+			btn.querySelector(".codicon-pin"),
+		)
 		if (pinButton) {
 			fireEvent.click(pinButton)
 		}

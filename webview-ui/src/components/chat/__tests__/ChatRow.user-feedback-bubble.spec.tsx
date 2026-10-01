@@ -1,4 +1,5 @@
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { fireEvent, renderWithExtensionState, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
 import { ChatRowContent } from "../ChatRow"
@@ -33,13 +34,13 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 const makeUserFeedback = (): ClineMessage =>
 	({ ts: 1, type: "say", say: "user_feedback", text: "hello bubble" }) as ClineMessage
 
-function renderRow(message: ClineMessage) {
+function renderRow(message: ClineMessage, isStreaming = false) {
 	return renderWithExtensionState(
 		<ChatRowContent
 			message={message}
 			isExpanded={false}
 			isLast={false}
-			isStreaming={false}
+			isStreaming={isStreaming}
 			onToggleExpand={() => {}}
 			onSuggestionClick={() => {}}
 			onBatchFileResponse={() => {}}
@@ -87,21 +88,25 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(bubble!.textContent).toContain("hello bubble")
 	})
 
-	it("places edit/delete action buttons outside the bubble", () => {
+	it("places the action bar as the bubble's immediate next sibling, outside the bubble", () => {
 		const { container } = renderRow(makeUserFeedback())
 
-		// The action buttons container is a sibling of the bubble, below it
+		const bubble = container.querySelector(".cursor-text") as HTMLElement | null
 		const actionBar = Array.from(container.querySelectorAll("div")).find(
 			(el) => el.className.includes("flex") && el.className.includes("gap-2") && el.className.includes("pr-1"),
 		) as HTMLElement | undefined
 
+		expect(bubble).toBeTruthy()
 		expect(actionBar).toBeTruthy()
+
+		// The action bar must share the bubble's parent and immediately follow it.
+		expect(actionBar!.parentElement).toBe(bubble!.parentElement)
+		expect(bubble!.nextElementSibling).toBe(actionBar)
+
 		expect(actionBar!.querySelector('[aria-label="chat:edit"]')).toBeTruthy()
 		expect(actionBar!.querySelector('[aria-label="common:confirmation.deleteMessage"]')).toBeTruthy()
 
 		// The bubble must NOT contain the edit/delete controls
-		const bubble = container.querySelector(".cursor-text") as HTMLElement | null
-		expect(bubble).toBeTruthy()
 		expect(bubble!.querySelector('[aria-label="chat:edit"]')).toBeFalsy()
 		expect(bubble!.querySelector('[aria-label="common:confirmation.deleteMessage"]')).toBeFalsy()
 	})
@@ -167,5 +172,51 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		fireEvent.click(deleteButton!)
 
 		expect(mockPostMessage).toHaveBeenCalledWith({ type: "deleteMessage", value: 1 })
+	})
+
+	it("disables the edit/delete actions while streaming and sends no message when activated", () => {
+		const { container } = renderRow(makeUserFeedback(), true)
+
+		const editButton = container.querySelector('[aria-label="chat:edit"]') as HTMLButtonElement | null
+		const deleteButton = container.querySelector(
+			'[aria-label="common:confirmation.deleteMessage"]',
+		) as HTMLButtonElement | null
+
+		expect(editButton).toBeTruthy()
+		expect(deleteButton).toBeTruthy()
+		expect(editButton!.disabled).toBe(true)
+		expect(deleteButton!.disabled).toBe(true)
+
+		mockPostMessage.mockClear()
+		fireEvent.click(editButton!)
+		fireEvent.click(deleteButton!)
+
+		// No edit mode entered and no delete message posted while streaming.
+		expect(container.querySelector("textarea")).not.toBeInTheDocument()
+		expect(mockPostMessage).not.toHaveBeenCalled()
+	})
+
+	it("opens a mention without entering edit mode when the mention inside the bubble is clicked", async () => {
+		mockPostMessage.mockClear()
+		const user = userEvent.setup()
+		const message = {
+			ts: 1,
+			type: "say",
+			say: "user_feedback",
+			text: "hello @/path/to/file.txt",
+		} as ClineMessage
+		const { container } = renderRow(message)
+
+		const bubble = container.querySelector(".cursor-text") as HTMLElement | null
+		expect(bubble).toBeTruthy()
+
+		const mention = bubble!.querySelector("[data-mention]") as HTMLElement | null
+		expect(mention).toBeTruthy()
+
+		await user.click(mention!)
+
+		// The mention click opens its target but must not enter edit mode.
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "/path/to/file.txt" })
+		expect(container.querySelector("textarea")).not.toBeInTheDocument()
 	})
 })
