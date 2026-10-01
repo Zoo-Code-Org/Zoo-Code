@@ -1008,7 +1008,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * constructor-injected history item can be stale, so the persisted record
 	 * is refreshed first and the refreshed action is the one settled. A failed
 	 * refresh, lookup, or settlement stops replay instead of risking another
-	 * doomed child.
+	 * doomed child. A refreshed action kept for replay must also appear in the
+	 * loaded conversation, because a replayed acknowledgment without a matching
+	 * tool use could answer the wrong tool call.
 	 */
 	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
 		if (this.initialStatus !== "interrupted") {
@@ -1040,20 +1042,42 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.pendingAction = refreshedItem.pendingAction
 
 		const action = refreshedItem.pendingAction
-		if (action?.kind !== "create_subtask") {
-			return
+		if (action?.kind === "create_subtask") {
+			let authoritative: HistoryItem
+			try {
+				authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(
+					this.taskId,
+					action.actionId,
+				)
+			} catch (error) {
+				throw new PendingActionSettlementError(
+					`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
+					{ cause: error },
+				)
+			}
+			this.pendingAction = authoritative.pendingAction
 		}
 
-		let authoritative: HistoryItem
-		try {
-			authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(this.taskId, action.actionId)
-		} catch (error) {
+		const replayAction = this.pendingAction
+		if (replayAction && !this.loadedConversationContainsToolUse(replayAction.actionId)) {
 			throw new PendingActionSettlementError(
-				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
-				{ cause: error },
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Refreshed action ${replayAction.actionId} for task ${this.taskId} is missing from the loaded conversation`,
 			)
 		}
-		this.pendingAction = authoritative.pendingAction
+	}
+
+	/**
+	 * A replayed acknowledgment is safe only when its tool call is part of the
+	 * conversation the task just loaded. A tool result for an unmatched action
+	 * id could otherwise answer a tool call the model never made here.
+	 */
+	private loadedConversationContainsToolUse(actionId: string): boolean {
+		return this.apiConversationHistory.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "tool_use" && block.id === actionId),
+		)
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
