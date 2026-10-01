@@ -13,13 +13,16 @@ export {
 } from "./taskMessages"
 export { taskMetadata } from "./taskMetadata"
 export { ensureMessageIdentifiers } from "./mergeMessageSnapshots"
-export { TaskHistoryStore } from "./TaskHistoryStore"
+export { TaskHistoryStore, withTaskOwnershipReservation } from "./TaskHistoryStore"
 export {
 	abandonDelegatedChild,
 	assertValidTransition,
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
+	recoverDelegationParent,
 	LifecycleTransitionError,
 	type HistoryItemStatus,
 	VALID_TASK_STATUS_TRANSITIONS,

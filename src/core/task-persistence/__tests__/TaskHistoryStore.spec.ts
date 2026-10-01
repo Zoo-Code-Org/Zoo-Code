@@ -528,6 +528,49 @@ describe("TaskHistoryStore", () => {
 		})
 	})
 
+	describe("refreshStrict()", () => {
+		it.each([
+			["missing", undefined],
+			["read-error", { code: "EISDIR" }],
+			["malformed", { name: "SyntaxError" }],
+			["other-task-id", { message: expect.stringContaining("Invalid task history record") }],
+		] as const)("keeps the cached record unless the file is missing (%s)", async (scenario, error) => {
+			await store.initialize()
+			store.dispose() // Keep filesystem watcher reconciliation out of this explicit refresh test.
+			const owner = makeHistoryItem({ id: "owner", status: "delegated", awaitingChildId: "child" })
+			await store.upsert(owner)
+			const filePath = path.join(tmpDir, "tasks", "owner", GlobalFileNames.historyItem)
+			if (scenario === "malformed") {
+				await fs.writeFile(filePath, "{")
+			} else if (scenario === "other-task-id") {
+				await fs.writeFile(filePath, JSON.stringify({ ...owner, id: "other-task" }))
+			} else {
+				await fs.unlink(filePath)
+				if (scenario === "read-error") await fs.mkdir(filePath)
+			}
+
+			if (error) {
+				await expect(store.refreshStrict("owner")).rejects.toMatchObject(error)
+				expect(store.get("owner")).toEqual(owner)
+			} else {
+				await expect(store.refreshStrict("owner")).resolves.toBeUndefined()
+				expect(store.get("owner")).toBeUndefined()
+			}
+		})
+
+		it("re-reads a valid record from disk", async () => {
+			await store.initialize()
+			const item = makeHistoryItem({ id: "strict-task", tokensIn: 100 })
+			await store.upsert(item)
+			const filePath = path.join(tmpDir, "tasks", "strict-task", GlobalFileNames.historyItem)
+			await fs.writeFile(filePath, JSON.stringify({ ...item, tokensIn: 999 }))
+
+			await store.refreshStrict("strict-task")
+
+			expect(store.get("strict-task")?.tokensIn).toBe(999)
+		})
+	})
+
 	describe("invalidateAll()", () => {
 		it("waits for an in-flight write before clearing the cache", async () => {
 			const onWrite = vi.fn().mockResolvedValue(undefined)

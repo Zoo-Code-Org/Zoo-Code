@@ -7,11 +7,14 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	isDeadDelegationChain,
+	recoverDeadDelegatedChild,
+	recoverDelegationParent,
 } from "../src/core/task-persistence/taskLifecycle"
 
 const taskIds = ["parent", "child-a", "child-b"] as const
 type TaskId = (typeof taskIds)[number]
-type ModelState = Record<TaskId, HistoryItem | undefined>
+type ModelState = Record<TaskId, HistoryItem | undefined> & { liveTaskIds: TaskId[] }
 
 interface Transition {
 	name: string
@@ -25,7 +28,15 @@ interface TraceStep {
 
 const MAX_DEPTH = 12
 const MAX_STATES = 10_000
-const expectedActions = ["delegate", "interrupt", "complete", "abandon"] as const
+const expectedActions = [
+	"delegate",
+	"owner-loss",
+	"interrupt",
+	"recover-active",
+	"recover",
+	"complete",
+	"abandon",
+] as const
 const semanticLandmarks = {
 	"interrupted-child-redelegation": (state: ModelState) =>
 		state.parent?.status === "delegated" &&
@@ -36,6 +47,14 @@ const semanticLandmarks = {
 		state.parent.awaitingChildId === "child-a" &&
 		state["child-a"]?.status === "delegated" &&
 		state["child-a"].awaitingChildId === "child-b",
+	"delegated-owner-loss": (state: ModelState) =>
+		state["child-a"]?.status === "delegated" && !state.liveTaskIds.includes("child-a"),
+	"dead-nested-chain-recovered": (state: ModelState) =>
+		state.parent?.status === "delegated" &&
+		state.parent.awaitingChildId === "child-a" &&
+		state["child-a"]?.status === "interrupted" &&
+		state["child-a"].awaitingChildId === undefined &&
+		state["child-b"]?.status === "interrupted",
 } satisfies Record<string, (state: ModelState) => boolean>
 
 function task(id: TaskId, parentTaskId?: TaskId): HistoryItem {
@@ -55,13 +74,17 @@ function task(id: TaskId, parentTaskId?: TaskId): HistoryItem {
 }
 
 function initialState(): ModelState {
-	return { parent: task("parent"), "child-a": undefined, "child-b": undefined }
+	return { parent: task("parent"), "child-a": undefined, "child-b": undefined, liveTaskIds: ["parent"] }
 }
 
 function replace(state: ModelState, ...updates: HistoryItem[]): ModelState {
 	const next = { ...state }
 	for (const update of updates) next[update.id as TaskId] = update
 	return next
+}
+
+function withLiveTasks(state: ModelState, ...liveTaskIds: TaskId[]): ModelState {
+	return { ...state, liveTaskIds: Array.from(new Set(liveTaskIds)).sort() }
 }
 
 function transitions(state: ModelState): Transition[] {
@@ -77,9 +100,20 @@ function transitions(state: ModelState): Transition[] {
 				continue
 			}
 			const delegated = delegateTaskToChild(parent, childId, awaitedStatus)
+			const next = replace(state, delegated, task(childId, parentId))
 			result.push({
 				name: `delegate(${parentId}, ${childId})`,
-				next: replace(state, delegated, task(childId, parentId)),
+				next: withLiveTasks(next, ...state.liveTaskIds.filter((id) => id !== parentId), childId),
+			})
+		}
+	}
+
+	for (const taskId of state.liveTaskIds) {
+		const current = state[taskId]
+		if (current && current.parentTaskId && (current.status === "active" || current.status === "delegated")) {
+			result.push({
+				name: `owner-loss(${taskId})`,
+				next: withLiveTasks(state, ...state.liveTaskIds.filter((id) => id !== taskId)),
 			})
 		}
 	}
@@ -92,7 +126,30 @@ function transitions(state: ModelState): Transition[] {
 
 		if (parent.status === "delegated" && parent.awaitingChildId === child.id && child.status === "active") {
 			const interrupted = interruptDelegatedChild(parent, child)
-			result.push({ name: `interrupt(${childId})`, next: replace(state, interrupted) })
+			result.push({
+				name: `interrupt(${childId})`,
+				next: withLiveTasks(replace(state, interrupted), ...state.liveTaskIds.filter((id) => id !== childId)),
+			})
+			if (!state.liveTaskIds.includes(childId) && !state.liveTaskIds.includes(parent.id as TaskId)) {
+				const ancestor = parent.parentTaskId ? state[parent.parentTaskId as TaskId] : undefined
+				result.push({
+					name: `recover-active(${childId})`,
+					next: replace(state, interrupted, recoverDelegationParent(parent, ancestor)),
+				})
+			}
+		}
+
+		if (
+			parent.status === "delegated" &&
+			parent.awaitingChildId === child.id &&
+			isDeadDelegationChain(
+				child,
+				(id) => state[id as TaskId],
+				(id) => state.liveTaskIds.includes(id as TaskId),
+			)
+		) {
+			const recovered = recoverDeadDelegatedChild(parent, child)
+			result.push({ name: `recover(${childId})`, next: replace(state, recovered) })
 		}
 
 		if (
@@ -103,7 +160,11 @@ function transitions(state: ModelState): Transition[] {
 			const completed = completeDelegatedChild(parent, child, `${childId} result`)
 			result.push({
 				name: `complete(${childId})`,
-				next: replace(state, completed.parent, completed.child),
+				next: withLiveTasks(
+					replace(state, completed.parent, completed.child),
+					...state.liveTaskIds.filter((id) => id !== childId),
+					child.parentTaskId as TaskId,
+				),
 			})
 		}
 
@@ -111,11 +172,32 @@ function transitions(state: ModelState): Transition[] {
 			const abandoned = abandonDelegatedChild(parent, child)
 			result.push({
 				name: `abandon(${childId})`,
-				next: replace(state, abandoned.parent, abandoned.child),
+				next: withLiveTasks(
+					replace(state, abandoned.parent, abandoned.child),
+					...state.liveTaskIds.filter((id) => id !== childId),
+					child.parentTaskId as TaskId,
+				),
 			})
 		}
 	}
+
 	return result
+}
+function deadDelegatedChildren(state: ModelState): TaskId[] {
+	return taskIds.filter((childId) => {
+		const child = state[childId]
+		if (!child?.parentTaskId) return false
+		const parent = state[child.parentTaskId as TaskId]
+		return (
+			parent?.status === "delegated" &&
+			parent.awaitingChildId === child.id &&
+			isDeadDelegationChain(
+				child,
+				(id) => state[id as TaskId],
+				(id) => state.liveTaskIds.includes(id as TaskId),
+			)
+		)
+	})
 }
 
 function invariantViolations(state: ModelState): string[] {
@@ -158,11 +240,16 @@ function invariantViolations(state: ModelState): string[] {
 			cursor = state[cursor as TaskId]?.parentTaskId
 		}
 	}
+	for (const childId of deadDelegatedChildren(state)) {
+		if (!transitions(state).some((transition) => transition.name === `recover(${childId})`)) {
+			violations.push(`${childId}: dead delegated chain must be recoverable in the next transition`)
+		}
+	}
 	return violations
 }
 
 function canonical(state: ModelState): string {
-	return JSON.stringify(taskIds.map((id) => state[id] ?? null))
+	return JSON.stringify({ tasks: taskIds.map((id) => state[id] ?? null), liveTaskIds: state.liveTaskIds })
 }
 
 function formatCounterexample(message: string, trace: TraceStep[]): string {
@@ -274,6 +361,13 @@ function runRepresentativeScenarios(): void {
 	const nestedCompletion = completeDelegatedChild(nestedParent, childB, "nested result")
 	assert.equal(nestedCompletion.parent.status, "active")
 	assert.equal(nestedCompletion.parent.completedByChildId, childB.id)
+	const interruptedNestedChild = interruptDelegatedChild(nestedParent, childB)
+	const recoveredNestedParent = recoverDeadDelegatedChild(delegated, {
+		...nestedParent,
+		awaitingChildId: interruptedNestedChild.id,
+	})
+	assert.equal(recoveredNestedParent.status, "interrupted")
+	assert.equal(recoveredNestedParent.awaitingChildId, undefined)
 
 	const interruptedCompletion = completeDelegatedChild(delegated, interruptedA, "resumed result")
 	assert.equal(interruptedCompletion.child.status, "completed")
