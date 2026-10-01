@@ -99,7 +99,6 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 // Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
 // the rest of the response, so the marker only counts once the `name="` attribute has arrived.
 const LEAKED_TOOL_CALL_START = /<(?:antml:)?(?:function_calls\s*>|invoke\s+name=")/i
-const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
 
 /** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
@@ -108,12 +107,25 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
 // bounding how much never-closing markup can withhold from the user.
 const MAX_SALVAGE_BUFFER_CHARS = 256 * 1024
 
-/** True when `text` already contains a closed `<invoke>` block, so buffering is still productive. */
-function hasCompleteInvokeBlock(text: string): boolean {
-	LEAKED_INVOKE_BLOCK.lastIndex = 0
-	const found = LEAKED_INVOKE_BLOCK.test(text)
-	LEAKED_INVOKE_BLOCK.lastIndex = 0
-	return found
+/**
+ * End offset just past the last closed `<invoke>` block in `text`, or 0 when none is closed.
+ * Mirrors `extractLeakedToolCalls`' forward scan so both agree on what is decidable.
+ */
+function lastCompleteInvokeBlockEnd(text: string): number {
+	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
+	const closePattern = /<\/(?:antml:)?invoke\s*>/gi
+	let end = 0
+	for (let open = openPattern.exec(text); open !== null; open = openPattern.exec(text)) {
+		closePattern.lastIndex = open.index + open[0].length
+		const close = closePattern.exec(text)
+		// With no closing tag after this open there is none after any later open either.
+		if (!close) {
+			break
+		}
+		end = close.index + close[0].length
+		openPattern.lastIndex = end
+	}
+	return end
 }
 
 /**
@@ -1135,21 +1147,46 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		let salvageEmittedText = ""
 		let salvagedToolCallIndex = 0
 
+		// Parses one fully-decided span and returns its ordered chunks: prose first, then recovered
+		// calls. Advancing `salvageEmittedText` by exactly the consumed span is what preserves the
+		// quoting and wrapper context for whatever tail stays buffered.
+		const drainSalvagePrefix = (span: string): ApiStreamChunk[] => {
+			const drained: ApiStreamChunk[] = []
+			const { calls, leftoverText } = extractLeakedToolCalls(span, providedToolSchemas, salvageEmittedText)
+			salvageEmittedText += span
+			if (leftoverText) {
+				drained.push({ type: "text", text: leftoverText })
+			}
+			for (const call of calls) {
+				console.warn(
+					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
+					{ name: call.name, params: Object.keys(call.input) },
+				)
+				drained.push({
+					type: "tool_call",
+					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
+					name: call.name,
+					arguments: JSON.stringify(call.input),
+				})
+			}
+			return drained
+		}
+
 		// Drains the salvage state into ordered chunks: prose first, then any recovered calls. Must
 		// run before a native tool_call is yielded — text after a tool_use block is rejected by
 		// Anthropic once the turn is serialized back into history.
 		const flushSalvage = (): ApiStreamChunk[] => {
-			const flushed: ApiStreamChunk[] = []
 			if (!salvageLeakedToolCalls) {
-				return flushed
+				return []
 			}
 
 			if (!salvageBuffering) {
 				if (salvageCarry) {
-					flushed.push({ type: "text", text: salvageCarry })
+					const carried = salvageCarry
 					salvageCarry = ""
+					return [{ type: "text", text: carried }]
 				}
-				return flushed
+				return []
 			}
 
 			// Buffering is only entered with the marker already in the buffer, so `buffered` is
@@ -1157,25 +1194,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			const buffered = salvageBuffer
 			salvageBuffering = false
 			salvageBuffer = ""
-
-			const { calls, leftoverText } = extractLeakedToolCalls(buffered, providedToolSchemas, salvageEmittedText)
-			salvageEmittedText += buffered
-			if (leftoverText) {
-				flushed.push({ type: "text", text: leftoverText })
-			}
-			for (const call of calls) {
-				console.warn(
-					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
-					{ name: call.name, params: Object.keys(call.input) },
-				)
-				flushed.push({
-					type: "tool_call",
-					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
-					name: call.name,
-					arguments: JSON.stringify(call.input),
-				})
-			}
-			return flushed
+			return drainSalvagePrefix(buffered)
 		}
 
 		try {
@@ -1213,13 +1232,24 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					// stream so the full markup can be parsed and replayed as a structured call.
 					if (salvageBuffering) {
 						salvageBuffer += chunk.value
-						// Release never-closing markup past the cap; a later fresh marker can re-arm recovery.
-						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS && !hasCompleteInvokeBlock(salvageBuffer)) {
-							const overflowed = salvageBuffer
-							salvageBuffering = false
-							salvageBuffer = ""
-							salvageEmittedText += overflowed
-							yield { type: "text", text: overflowed }
+						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS) {
+							// Past the cap, drain only the decided prefix: emitting the undecided tail as
+							// text would strand a call whose closing tag is still in flight.
+							const decidedEnd = lastCompleteInvokeBlockEnd(salvageBuffer)
+							if (decidedEnd > 0) {
+								const decided = salvageBuffer.slice(0, decidedEnd)
+								salvageBuffer = salvageBuffer.slice(decidedEnd)
+								yield* drainSalvagePrefix(decided)
+							}
+							// Still over the cap with nothing decidable: markup that never closes must not
+							// withhold the stream, so release it and let a later marker re-arm recovery.
+							if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS) {
+								const overflowed = salvageBuffer
+								salvageBuffering = false
+								salvageBuffer = ""
+								salvageEmittedText += overflowed
+								yield { type: "text", text: overflowed }
+							}
 						}
 						continue
 					}

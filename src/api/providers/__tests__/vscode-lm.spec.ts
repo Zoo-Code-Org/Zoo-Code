@@ -580,6 +580,109 @@ describe("VsCodeLmHandler", () => {
 				expect(streamedText).toContain('<invoke name="calculator">')
 				expect(streamedText).toContain(filler)
 			})
+
+			it("recovers a completed call and releases text when the buffer passes the cap", async () => {
+				// The cap used to be bypassed whenever a complete block sat in the buffer, so both the
+				// call and 512 KB of trailing prose were withheld until the stream ended.
+				const filler = "y".repeat(256 * 1024)
+				const parts = [
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
+					filler,
+					filler,
+				]
+				let partsProduced = 0
+
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							partsProduced++
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				let sawTextBeforeStreamEnd = false
+				const toolCalls = []
+				for await (const chunk of stream) {
+					if (chunk.type === "text" && partsProduced < parts.length) {
+						sawTextBeforeStreamEnd = true
+					}
+					if (chunk.type === "tool_call") {
+						toolCalls.push(chunk)
+					}
+				}
+
+				expect(sawTextBeforeStreamEnd).toBe(true)
+				expect(toolCalls).toMatchObject([
+					{ name: "calculator", arguments: JSON.stringify({ operation: "add" }) },
+				])
+			})
+
+			it("keeps an invoke still in flight buffered when the cap is passed", async () => {
+				// Only the decided prefix may drain; emitting the open block as text would strand the
+				// call whose closing tag arrives in a later chunk. Every complete block in the
+				// over-cap buffer must drain now, so timing is asserted rather than final order.
+				const bulky = "z".repeat(256 * 1024)
+				const parts = [
+					`<function_calls>\n<invoke name="calculator"><parameter name="operation">${bulky}</parameter></invoke>\n` +
+						'<invoke name="calculator"><parameter name="operation">mid</parameter></invoke>\n',
+					'<invoke name="calculator"><parameter name="operation">sub</parameter>',
+					"</invoke></function_calls>",
+				]
+				let partsProduced = 0
+
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							partsProduced++
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				const toolCalls = []
+				const drainedEarly = []
+				for await (const chunk of stream) {
+					if (chunk.type === "tool_call") {
+						toolCalls.push(chunk)
+						if (partsProduced < parts.length) {
+							drainedEarly.push(chunk)
+						}
+					}
+				}
+
+				// Both complete blocks sit in the buffer when the cap is crossed, so both must drain
+				// before the stream ends; the still-open third only resolves at the final chunk.
+				expect(drainedEarly).toMatchObject([
+					{ arguments: JSON.stringify({ operation: bulky }) },
+					{ arguments: JSON.stringify({ operation: "mid" }) },
+				])
+				expect(toolCalls).toMatchObject([
+					{ name: "calculator", arguments: JSON.stringify({ operation: bulky }) },
+					{ name: "calculator", arguments: JSON.stringify({ operation: "mid" }) },
+					{ name: "calculator", arguments: JSON.stringify({ operation: "sub" }) },
+				])
+			})
 		})
 
 		it("returns the original registry name for a tool declared with an encoded name", async () => {
