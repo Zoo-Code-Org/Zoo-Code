@@ -2,8 +2,16 @@ import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from 
 import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
+import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+
+import * as fs from "fs/promises"
+
+import { computeVersionToken } from "../../../utils/versionToken"
+import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { ObservationRegistry } from "../../../core/task/observationRegistry"
+import type { Task } from "../../../core/task/Task"
 
 // Mock delay
 vi.mock("delay", () => ({
@@ -15,6 +23,20 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	mkdir: vi.fn().mockResolvedValue(undefined),
+	rename: vi.fn().mockResolvedValue(undefined),
+	unlink: vi.fn().mockResolvedValue(undefined),
+}))
+
+// Mock safeWriteText (used by saveDirectly)
+vi.mock("../../../services/file-safety/safeWriteText", () => ({
+	safeWriteText: vi.fn().mockResolvedValue(undefined),
+}))
+
+// Mock the S1 version token (used by the S4 guarded write); the real
+// computeVersionToken needs fs.stat, which is not part of the fs/promises mock above.
+vi.mock("../../../utils/versionToken", () => ({
+	computeVersionToken: vi.fn(),
 }))
 
 // Mock utils
@@ -25,7 +47,15 @@ vi.mock("../../../utils/fs", () => ({
 // Mock path
 vi.mock("path", () => ({
 	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
+	normalize: vi.fn((p: string) => p),
+	isAbsolute: vi.fn((p: string) => p.startsWith("/")),
 	basename: vi.fn((path) => path.split("/").pop()),
+	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
+	join: (...args: string[]) => args.join("/"),
+	// diagnosticsToProblemsString formats its output header via
+	// path.relative(cwd, uri.fsPath).toPosix(); the object-with-toPosix shape
+	// mirrors the repo's own diagnostics.spec.ts mock.
+	relative: vi.fn((cwd: string, p: string) => ({ toPosix: () => p.replace(`${cwd}/`, "") })),
 }))
 
 // Mock vscode
@@ -149,8 +179,11 @@ describe("DiffViewProvider", () => {
 			return mockWorkspaceEdit as any
 		})
 
-		// Create a mock Task instance
+		// Create a mock Task instance. The guarded write (S4b) consults the task's
+		// S2 observation registry, so the mock carries a real (in-memory) instance.
 		mockTask = {
+			cwd: mockCwd,
+			observationRegistry: new ObservationRegistry(),
 			providerRef: {
 				deref: vi.fn().mockReturnValue({
 					getState: vi.fn().mockResolvedValue({
@@ -164,6 +197,8 @@ describe("DiffViewProvider", () => {
 					}),
 				}),
 			},
+			// L1: saveDirectly's fire-and-forget diagnostics tail emits via say().
+			say: vi.fn().mockResolvedValue(true),
 		}
 
 		diffViewProvider = new DiffViewProvider(mockCwd, mockTask)
@@ -783,6 +818,13 @@ describe("DiffViewProvider", () => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+
+			// Baseline for the single-writer flow these tests encode: the file was read
+			// before the write, so the observation registry holds the version token the
+			// guarded write recomputes and compares, and the target exists on disk.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+			vi.mocked(fs.access).mockResolvedValue(undefined)
 		})
 
 		it("should write content directly to file without opening diff view", async () => {
@@ -791,9 +833,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -801,25 +843,31 @@ describe("DiffViewProvider", () => {
 				{ preview: false, preserveFocus: true },
 			)
 
-			// Verify diagnostics were checked after delay
+			// L1: saveDirectly resolves before the fire-and-forget diagnostics
+			// tail runs; flush one macrotask tick so the mocked delay (and the
+			// post-write getDiagnostics) have been reached before asserting.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// Verify the tail applied the configured write delay
 			expect(mockDelay).toHaveBeenCalledWith(2000)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 
-			// Verify result
-			expect(result.newProblemsMessage).toBe("")
+			// Verify result: L1 no longer returns a problems message
+			expect(result.newProblemsMessage).toBeUndefined()
 			expect(result.userEdits).toBeUndefined()
 			expect(result.finalContent).toBe("new content")
 		})
 
-		it("should not open file when openWithoutFocus is false", async () => {
+		it("should not open file when openWithoutFocus is false (focus not stolen: in-memory document only)", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
-			// Verify file was NOT opened
+			// Verify file was NOT opened in the editor, and the document is loaded in memory only
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(vscode.Uri.file(`${mockCwd}/test.ts`))
 		})
 
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {
@@ -829,14 +877,18 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
 			// getDiagnostics is called once for pre-diagnostics, but not for post-diagnostics
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(1)
+
+			// L1: no diagnostics tail is launched, so nothing is ever emitted
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(mockTask.say).not.toHaveBeenCalled()
 		})
 
 		it("should handle negative delay values", async () => {
@@ -845,6 +897,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, -500)
 
+			// L1: the tail runs after resolve; flush one macrotask tick first.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
 			// Verify delay was called with 0 (safe minimum)
 			expect(mockDelay).toHaveBeenCalledWith(0)
 		})
@@ -852,11 +907,234 @@ describe("DiffViewProvider", () => {
 		it("should store results for formatFileWriteResponse", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 1000)
 
-			// Verify internal state was updated
-			expect((diffViewProvider as any).newProblemsMessage).toBe("")
-			expect((diffViewProvider as any).userEdits).toBeUndefined()
-			expect((diffViewProvider as any).relPath).toBe("test.ts")
-			expect((diffViewProvider as any).newContent).toBe("new content")
+			// Verify internal state was updated (L1: the problems message is no
+			// longer stored; it is emitted asynchronously via say("error"))
+			expect(diffViewProvider["newProblemsMessage"]).toBeUndefined()
+			expect(diffViewProvider["userEdits"]).toBeUndefined()
+			expect(diffViewProvider["relPath"]).toBe("test.ts")
+			expect(diffViewProvider["newContent"]).toBe("new content")
+		})
+
+		it("resolves immediately and emits new problems via say('error') after the write delay", async () => {
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+
+			// Pre-write diagnostics are empty; the post-write snapshot (read by
+			// the fire-and-forget tail) reports one new Error-severity problem.
+			// vscode.workspace.fs.stat is an unimplemented vi.fn() mock, so
+			// diagnosticsToProblemsString takes its "(unavailable)" fallback
+			// branch and still formats the line.
+			const newDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "boom",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/test.ts`), [newDiag]]]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+
+			// L1: saveDirectly resolves before the tail emits anything.
+			expect(result.newProblemsMessage).toBeUndefined()
+			expect(mockTask.say).not.toHaveBeenCalled()
+
+			// Flush the fire-and-forget tail (the mocked delay resolves immediately).
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockDelay).toHaveBeenCalledWith(100)
+			expect(mockTask.say).toHaveBeenCalledTimes(1)
+			// The existing "error" ClineSay type is used, with the new-problems text.
+			expect(mockTask.say).toHaveBeenCalledWith(
+				"error",
+				expect.stringContaining("New problems detected after saving file: test.ts"),
+			)
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("boom")
+		})
+
+		it("attributes only the saved file's new problems to the saved file", async () => {
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+
+			// Multi-file write sequence: a later file's new error must not be
+			// attributed to this tail's relPath by the workspace-wide snapshot.
+			const ownDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "own-problem",
+			}
+			const otherDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "other-file-problem",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [
+				[makeUri(`${mockCwd}/test.ts`), [ownDiag]],
+				[makeUri(`${mockCwd}/other.ts`), [otherDiag]],
+			]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+
+			// Flush the fire-and-forget tail.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).toHaveBeenCalledTimes(1)
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("own-problem")
+			expect(mockTask.say.mock.calls[0]?.[1]).not.toContain("other-file-problem")
+		})
+
+		it("attributes diagnostics to the saved file when the URI casing differs (Windows)", async () => {
+			const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32")
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+
+			// The diagnostic URI uses different casing than the saved relPath:
+			// on Windows this is still the same file (arePathsEqual).
+			const newDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "case-mismatch-problem",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/Test.ts`), [newDiag]]]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+
+			// Flush the fire-and-forget tail.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).toHaveBeenCalledTimes(1)
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("case-mismatch-problem")
+			platformSpy.mockRestore()
+		})
+
+		it("does not block the save on a diagnostics settle delay when diagnostics are disabled", async () => {
+			// openFile=false used to await a 100 ms settle delay even when
+			// diagnostics were disabled; that delay now lives in the tail, which
+			// does not run at all when diagnosticsEnabled is false.
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockClear()
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", false, false)
+
+			expect(result.finalContent).toBe("new content")
+			expect(mockDelay).not.toHaveBeenCalled()
+			expect(mockTask.say).not.toHaveBeenCalled()
+		})
+
+		it("carries the in-memory settle delay in the tail for openFile=false saves", async () => {
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockClear()
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 100)
+
+			// writeDelayMs (100) + the 100 ms in-memory diagnostics settle, both
+			// applied by the tail instead of the save path.
+			expect(mockDelay).toHaveBeenCalledWith(200)
+		})
+
+		it("never calls say when there are no new problems", async () => {
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 50)
+
+			// Flush the fire-and-forget tail (pre/post snapshots are both empty,
+			// so diagnosticsToProblemsString returns "" and nothing is emitted).
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).not.toHaveBeenCalled()
+		})
+
+		it("logs a warning instead of an unhandled rejection when the post-save say() is aborted", async () => {
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+
+			// One new Error-severity problem so the tail reaches say().
+			const newDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "boom",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/test.ts`), [newDiag]]]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
+
+			// The task is aborted while the diagnostics tail is emitting: say() rejects.
+			mockTask.say.mockRejectedValueOnce(new Error("aborted"))
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 0)
+			// Flush the fire-and-forget tail.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// The method's outer catch swallows the rejection with a warning.
+			expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Post-save diagnostics emit failed:"))
+
+			consoleWarnSpy.mockRestore()
+		})
+
+		describe("guarded write (S4b, epic #1375)", () => {
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
+			it("rejects an unobserved write to an existing file with the read-first remediation", async () => {
+				mockTask.observationRegistry.clear()
+
+				await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
+					"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
+				)
+				expect(safeWriteText).not.toHaveBeenCalled()
+			})
+
+			it("creates an unobserved file when the target is absent", async () => {
+				mockTask.observationRegistry.clear()
+				vi.mocked(fs.access).mockRejectedValue(enoent())
+
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("rejects an observed write whose version token is stale", async () => {
+				// The file changed on disk after the read that recorded "v1".
+				vi.mocked(computeVersionToken).mockResolvedValue("v2")
+
+				const result = diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				await expect(result).rejects.toThrow("Stale version")
+				await expect(result).rejects.toThrow("re-read the file, then retry.")
+				expect(safeWriteText).not.toHaveBeenCalled()
+			})
+
+			it("rejects an unobserved edit-kind write before any I/O", async () => {
+				mockTask.observationRegistry.clear()
+
+				await expect(
+					diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0, "edit"),
+				).rejects.toThrow("File not read yet -- read the file, then retry.")
+				expect(safeWriteText).not.toHaveBeenCalled()
+				expect(fs.access).not.toHaveBeenCalled()
+			})
+
+			it("recreates an observed file that vanished after the read", async () => {
+				vi.mocked(fs.access).mockRejectedValue(enoent())
+
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("fails closed when the owning task has been collected", async () => {
+				// A real WeakRef cannot be forced to deref to undefined deterministically
+				// (GC timing), so a structural stub stands in for the collected reference.
+				diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
+
+				await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
+					"Cannot guard the write: the owning task is no longer available",
+				)
+				expect(safeWriteText).not.toHaveBeenCalled()
+			})
 		})
 	})
 
@@ -918,8 +1196,8 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges()
 
-			// Verify default behavior (enabled=true, delay=2000ms)
-			expect(mockDelay).toHaveBeenCalledWith(1000)
+			// Verify default behavior (enabled=true, delay falls back to DEFAULT_WRITE_DELAY_MS)
+			expect(mockDelay).toHaveBeenCalledWith(DEFAULT_WRITE_DELAY_MS)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 			expect(result.newProblemsMessage).toBe("")
 		})

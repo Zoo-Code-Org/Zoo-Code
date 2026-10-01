@@ -13,6 +13,9 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
+import { versionTokenOfStat } from "../../utils/versionToken"
+import { checkAutoApproval } from "../auto-approval"
+import { checkpointSave } from "../checkpoints"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
@@ -68,7 +71,21 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// S4b (trial addendum): apply_diff reads the file itself to apply the patch.
+			// Record that read as an S2 observation under the ReadFileTool contract
+			// (observed only when the pre- and post-read tokens agree) so the guarded
+			// edit publish in the prevent-focus-disruption branch can compare-and-swap
+			// against the token this tool observed, instead of being rejected as an
+			// unobserved edit.
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					task.observationRegistry.observe(absolutePath, preReadToken)
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
@@ -144,9 +161,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				diff: diffContent,
 			}
 
+			// Hoisted: both save branches build the same approval message, and the
+			// B3a per-write checkpoint (below) needs it for auto-approval parity.
+			let completeMessage = ""
+
 			if (isPreventFocusDisruptionEnabled) {
 				// Direct file write without diff view
-				const completeMessage = JSON.stringify({
+				completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					diff: diffContent,
 					content: unifiedPatch,
@@ -173,7 +194,8 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
+				// Save directly without showing diff view or opening the file. The diff is
+				// applied to an existing file, so edit-guard semantics require a prior read.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -182,6 +204,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"edit",
 				)
 			} else {
 				// Original behavior with diff view
@@ -191,7 +214,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				await task.diffViewProvider.update(diffResult.content, true)
 				task.diffViewProvider.scrollToFirstDiff()
 
-				const completeMessage = JSON.stringify({
+				completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					diff: diffContent,
 					content: unifiedPatch,
@@ -222,6 +245,36 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 				// Call saveChanges to update the DiffViewProvider properties
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			}
+
+			// B3a: per-write checkpoint + change card for the apply_diff write, with
+			// the same parity as write_to_file / edit_file / apply_patch (this tool
+			// previously wrote with no checkpoint and no card, so its edits had no
+			// per-file rollback surface in chat). The applied unified diff and its
+			// stats were already computed above for the tool message and are reused
+			// verbatim; auto-approved steps always get the compact card. Live setting
+			// with default-on semantics: skip only when explicitly false. apply_diff
+			// only ever modifies an existing file (a missing file errors out before
+			// the diff is applied), so the operation is always "update".
+			const perWriteCheckpoints = state?.perWriteCheckpoints
+			if (perWriteCheckpoints !== false) {
+				const autoApproved =
+					(
+						await checkAutoApproval({
+							state,
+							cwd: task.cwd,
+							ask: "tool",
+							text: completeMessage,
+							isProtected: isWriteProtected,
+						})
+					).decision === "approve"
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: "update",
+					...(diffStats ? { diffStats: { additions: diffStats.added, deletions: diffStats.removed } } : {}),
+					...(unifiedPatch ? { diff: unifiedPatch } : {}),
+					...(autoApproved ? { autoApproved: true } : {}),
+				}).catch(() => {})
 			}
 
 			// Track file edit operation

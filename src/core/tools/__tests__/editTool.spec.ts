@@ -59,6 +59,14 @@ vi.mock("../../diff/stats", () => ({
 	computeDiffStats: vi.fn(() => ({ additions: 1, deletions: 1 })),
 }))
 
+vi.mock("../../checkpoints", () => ({
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("../../auto-approval", () => ({
+	checkAutoApproval: vi.fn().mockResolvedValue({ decision: "ask" }),
+}))
+
 vi.mock("vscode", () => ({
 	window: {
 		showWarningMessage: vi.fn().mockResolvedValue(undefined),
@@ -111,7 +119,9 @@ describe("editTool", () => {
 				getState: vi.fn().mockResolvedValue({
 					diagnosticsEnabled: true,
 					writeDelayMs: 1000,
-					experiments: {},
+					// Pin the legacy diff-editor path explicitly: the PREVENT_FOCUS_DISRUPTION default
+					// flipped to true (L2, plan #33), so these tests must opt out.
+					experiments: { preventFocusDisruption: false } as Record<string, boolean>,
 				}),
 			}),
 		}
@@ -169,6 +179,10 @@ describe("editTool", () => {
 			fileContent?: string
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// so the helper's providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -179,6 +193,17 @@ describe("editTool", () => {
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockedFsReadFile.mockResolvedValue(fileContent)
 		mockTask.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockTask.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true. Tests exercising
+				// the chat-diff branch opt in via the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
+			}),
+		})
 
 		const defaultParams = {
 			file_path: testFilePath,
@@ -361,6 +386,33 @@ describe("editTool", () => {
 		})
 	})
 
+	describe("focus disruption default (L2: chat-diff is the default approval path)", () => {
+		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// No stored experiment value: the default (flipped to true in L2) resolves
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeEditTool({}, { experiments: {} })
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+		})
+
+		it("still uses the diff-editor path when the user has opted out (stored false)", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// Base mock pins experiments: { preventFocusDisruption: false } (legacy path).
+
+			await executeEditTool()
+
+			expect(mockTask.diffViewProvider.open).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("partial block handling", () => {
 		it("handles partial block without errors after path stabilizes", async () => {
 			// Path stabilization requires two consecutive calls with the same path
@@ -422,6 +474,44 @@ describe("editTool", () => {
 			await executeEditTool()
 
 			expect(mockTask.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+		})
+	})
+
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes through saveDirectly with edit kind", async () => {
+			const result = await executeEditTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"Line 1\nModified Line 2\nLine 3",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			expect(mockTask.didEditFile).toBe(true)
+			expect(result).toBe("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the unobserved edit remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error("File not read yet -- read the file, then retry.")
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(false)
 		})
 	})
 })
