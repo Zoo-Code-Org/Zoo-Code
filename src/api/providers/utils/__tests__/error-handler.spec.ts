@@ -46,6 +46,46 @@ describe("handleProviderError", () => {
 			expect(result).toBeInstanceOf(Error)
 			expect((result as any).status).toBeUndefined()
 		})
+
+		// AI SDK APICallError exposes the HTTP status as statusCode, not status — the same
+		// fallback applies to non-Error exceptions so a real 429 reaches the .status check in
+		// Task.backoffAndAnnounce regardless of how the provider threw it.
+		it("should fall back to a numeric statusCode for non-Error exceptions without status", () => {
+			const error = { statusCode: 429, message: "Rate limit exceeded" }
+
+			const result = handleProviderError(error, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect((result as { status?: number }).status).toBe(429)
+		})
+
+		it("should not add status for non-Error exceptions lacking status and statusCode", () => {
+			const error = { message: "Something went wrong" }
+
+			const result = handleProviderError(error, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect(result).not.toHaveProperty("status")
+		})
+
+		it("should not treat a non-numeric statusCode as a status", () => {
+			// Only numeric statusCode values are preserved: the typeof guard must reject strings.
+			const error = { message: "weird", statusCode: "429" }
+
+			const result = handleProviderError(error, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect(result).not.toHaveProperty("status")
+		})
+
+		it("should wrap a null throw gracefully instead of re-throwing", () => {
+			// Providers can throw non-object values (e.g. `throw null`): the optional chaining
+			// must keep the handler total over any thrown value.
+			const result = handleProviderError(null, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect(result.message).toContain("TestProvider completion error")
+		})
 	})
 
 	describe("errorDetails preservation", () => {

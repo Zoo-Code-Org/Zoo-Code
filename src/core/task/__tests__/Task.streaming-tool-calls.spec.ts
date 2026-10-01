@@ -991,5 +991,85 @@ describe("Task - Streaming Tool Call Handling", () => {
 			expect(content[0].nativeArgs).toBeUndefined()
 			expect((content[0] as { params?: unknown }).params).toEqual({})
 		})
+
+		// The ID guard is per-ID, not a global lock: distinct call IDs in the same stream must all
+		// be accepted, so the guard cannot collapse to "any prior entry rejects the start".
+		it("accepts distinct call IDs in the same stream", async () => {
+			const task = await createStreamingTask()
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "toolu_a",
+						name: "read_file",
+						arguments: '{"path":"a.ts"}',
+					},
+					{
+						type: "tool_call_partial",
+						index: 1,
+						id: "toolu_b",
+						name: "write_to_file",
+						arguments: '{"path":"b.ts","content":"hi"}',
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// Both calls are tracked, finalized, and cleaned up — no cross-ID rejection.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices.size).toBe(0)
+
+			const content = getTaskStreamingAccess(task).assistantMessageContent as FinalizedEntry[]
+			expect(content).toHaveLength(2)
+			expect(content.map((entry) => entry.name)).toEqual(["read_file", "write_to_file"])
+			expect(content.every((entry) => entry.partial === false)).toBe(true)
+		})
+
+		// The guard must also cover IDs that already appear in the history as an MCP tool use:
+		// the history builder dedupes tool_use blocks by ID, so a new start reusing an ID that a
+		// prior mcp_tool_use entry already occupies would orphan the later result.
+		it("rejects a reused ID that already appears as an mcp_tool_use entry", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					// A completed MCP tool call already occupies this call ID in the message content.
+					{
+						type: "tool_call",
+						id: "toolu_mcp1",
+						name: "mcp--test-server--do_thing",
+						arguments: '{"x":1}',
+					},
+					// A streaming start reusing the same ID under a native tool name:
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "toolu_mcp1",
+						name: "read_file",
+						arguments: '{"path":"a.ts"}',
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// The MCP entry is the only content block: the reused-ID start is rejected and no
+			// streaming tracking is left behind.
+			expect(getTaskStreamingAccess(task).streamingToolCallIndices.size).toBe(0)
+
+			const content = getTaskStreamingAccess(task).assistantMessageContent as {
+				type?: string
+				name?: string
+				id?: string
+			}[]
+			expect(content).toHaveLength(1)
+			expect(content[0].type).toBe("mcp_tool_use")
+			expect(content[0].id).toBe("toolu_mcp1")
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("reusing call ID toolu_mcp1"))
+			warnSpy.mockRestore()
+		})
 	})
 })

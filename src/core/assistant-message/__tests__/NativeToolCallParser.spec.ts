@@ -1055,4 +1055,45 @@ describe("NativeToolCallParser", () => {
 			NativeToolCallParser.clearRawChunkState(scope)
 		})
 	})
+
+	// The compound-key contract in isolation: the gate verifies the escape itself (a behavioral
+	// collision test cannot distinguish which escape substitution is wrong), plus the defensive
+	// lookups that must stay total over missing scopes/keys.
+	describe("compound key encoding and lookups", () => {
+		it("escapes backslashes and colons in both key segments", () => {
+			expect(NativeToolCallParser.makeStreamingKey("a\\b:c", "x::y")).toBe("a\\\\b\\:c::x\\:\\:y")
+		})
+
+		// These two pairs share one key under the naive `${id}::${name}` encoding — the escape must
+		// keep them separate so their accumulators and dedup tracking never fuse.
+		it("keeps (id, name) pairs that would collide under naive joining separate", () => {
+			const keyA = NativeToolCallParser.makeStreamingKey("t1", "a::b")
+			const keyB = NativeToolCallParser.makeStreamingKey("t1::a", "b")
+
+			expect(keyA).not.toBe(keyB)
+		})
+
+		it("returns undefined from getStreamingToolName for an untracked key in a live scope", () => {
+			// The scope's map exists (a call is tracked) but the queried key is absent: the inner
+			// optional chain must short-circuit to undefined instead of throwing.
+			const scope = NativeToolCallParser.createScope()
+			NativeToolCallParser.startStreamingToolCall("toolu_live", "read_file", scope)
+
+			expect(NativeToolCallParser.getStreamingToolName("toolu_other::read_file", scope)).toBeUndefined()
+			expect(
+				NativeToolCallParser.getStreamingToolName(
+					NativeToolCallParser.makeStreamingKey("toolu_live", "read_file"),
+					scope,
+				),
+			).toBe("read_file")
+		})
+
+		it("returns null from getStreamingToolCallById for a scope with no tracked calls", () => {
+			// A fresh scope has no streaming map at all: the guard must return null rather than
+			// throwing on the missing map.
+			const scope = NativeToolCallParser.createScope()
+
+			expect(NativeToolCallParser.getStreamingToolCallById("toolu_none", scope)).toBeNull()
+		})
+	})
 })

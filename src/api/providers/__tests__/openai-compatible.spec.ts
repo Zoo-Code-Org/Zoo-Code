@@ -395,6 +395,24 @@ describe("OpenAICompatibleHandler", () => {
 			)
 		})
 
+		// The configured temperature must reach generateText unchanged: the `?? 0` fallback must
+		// not degrade to a boolean-and (which would hand generateText 0 or undefined instead of the
+		// configured value).
+		it("passes the configured temperature through to generateText", async () => {
+			mockConfig.temperature = 0.7
+			const handlerWithTemp = new TestOpenAICompatibleHandler(mockOptions, mockConfig)
+			mockGenerateText.mockResolvedValue({ text: "ok" })
+
+			await handlerWithTemp.completePrompt("Test prompt")
+
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					prompt: "Test prompt",
+					temperature: 0.7,
+				}),
+			)
+		})
+
 		// Test 3: completePrompt() with mock 4xx/5xx → verify error carries .status and provider name
 		it("should throw error with .status and provider name when generateText throws 400", async () => {
 			const badRequestError = Object.assign(new Error("Bad Request"), { status: 400 })
