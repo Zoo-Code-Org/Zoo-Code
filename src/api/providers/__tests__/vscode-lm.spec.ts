@@ -494,15 +494,55 @@ describe("VsCodeLmHandler", () => {
 
 			it("does not recover an invoke block quoted inside a fenced code block", async () => {
 				const block = '<invoke name="calculator"><parameter name="operation">add</parameter></invoke>'
-				const chunks = await collect(["Do NOT do this:\n```\n" + block + "\n```\n"])
+				// Open the wrapper outside the fence so only the quoting guard prevents recovery.
+				const chunks = await collect(["<function_calls>\n```\n" + block + "\n```\n</function_calls>"])
 
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
 			})
 
+			it.each([
+				{ name: "write_to_file", parameter: "content" },
+				{ name: "update_todo_list", parameter: "todos" },
+			])(
+				"recovers a large $name call split across chunks without leaking markup",
+				async ({ name, parameter }) => {
+					const payload = "x".repeat(5000)
+					streamTextParts([
+						`<function_calls><invoke name="${name}"><parameter name="${parameter}">`,
+						payload,
+						"</parameter></invoke></function_calls>",
+					])
+					const chunks = []
+					for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }], {
+						taskId: "test-task",
+						tools: [
+							{
+								type: "function",
+								function: {
+									name,
+									parameters: { type: "object", properties: { [parameter]: { type: "string" } } },
+								},
+							},
+						],
+					})) {
+						chunks.push(chunk)
+					}
+
+					expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+						{
+							type: "tool_call",
+							id: expect.stringContaining("vscodelm-salvaged-"),
+							name,
+							arguments: JSON.stringify({ [parameter]: payload }),
+						},
+					])
+				},
+			)
+
 			it("flushes an over-long never-closing invoke as plain text before the stream ends", async () => {
 				// End-of-stream flushing produces identical text, so track production timing to
 				// prove the buffer releases text before the stream ends.
-				const filler = "x".repeat(5000)
+				const filler = "x".repeat(256 * 1024)
 				const parts = ['<invoke name="calculator">', filler, filler, filler, filler]
 				let partsProduced = 0
 

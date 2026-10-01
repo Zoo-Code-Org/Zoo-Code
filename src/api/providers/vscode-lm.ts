@@ -104,12 +104,9 @@ const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\
 /** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
 
-/**
- * Upper bound on buffered text held while waiting for a leaked `<invoke>` block to close. Markup
- * that never closes would otherwise withhold the whole response from the user until the stream
- * ended, so past this size the buffer is released as ordinary text.
- */
-const MAX_SALVAGE_BUFFER_CHARS = 64 * MAX_PARTIAL_INVOKE_CARRY
+// Allow substantial file contents and todo lists (256 Ki characters including markup), while
+// bounding how much never-closing markup can withhold from the user.
+const MAX_SALVAGE_BUFFER_CHARS = 256 * 1024
 
 /** True when `text` already contains a closed `<invoke>` block, so buffering is still productive. */
 function hasCompleteInvokeBlock(text: string): boolean {
@@ -1216,8 +1213,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					// stream so the full markup can be parsed and replayed as a structured call.
 					if (salvageBuffering) {
 						salvageBuffer += chunk.value
-						// Markup that never closes must not withhold the response indefinitely; past the
-						// cap the buffer is released as plain text and buffering stops for the turn.
+						// Release never-closing markup past the cap; a later fresh marker can re-arm recovery.
 						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS && !hasCompleteInvokeBlock(salvageBuffer)) {
 							const overflowed = salvageBuffer
 							salvageBuffering = false
