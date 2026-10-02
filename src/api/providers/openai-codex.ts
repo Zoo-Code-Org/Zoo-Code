@@ -140,8 +140,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	private lastResponseOutput: any[] | undefined
 	// Last top-level response id
 	private lastResponseId: string | undefined
-	// Abort controller for cancelling ongoing requests
-	private abortController?: AbortController
 	// Session ID for the Codex API (persists for the lifetime of the handler)
 	private readonly sessionId: string
 	/**
@@ -501,9 +499,8 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	): ApiStream {
 		// Request-local controller: a stale abort arriving after this request finishes must never
 		// reach the controller of a later request, so the bridge listener captures this controller
-		// directly instead of reading `this.abortController` at abort time.
+		// directly.
 		const abortController = new AbortController()
-		this.abortController = abortController
 
 		// A caller's signal has to be linked rather than used directly, since both transports below
 		// abort through the request controller. Without this the signal never reaches the wire.
@@ -600,11 +597,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}
 		} finally {
 			abortSignal?.removeEventListener("abort", abortFromCaller)
-			// Only clear the field if this request still owns it: a concurrent request may have
-			// installed its own controller after this one started.
-			if (this.abortController === abortController) {
-				this.abortController = undefined
-			}
 		}
 	}
 
