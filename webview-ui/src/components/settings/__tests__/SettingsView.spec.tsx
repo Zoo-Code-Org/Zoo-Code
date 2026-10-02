@@ -460,6 +460,75 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	it("saves the changeCardDetail full selection on save", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("checkpoints")
+		const content = getSettingsContent()
+		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
+		expect(checkbox).not.toBeChecked()
+
+		fireEvent.click(checkbox)
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "full" }),
+				}),
+			),
+		)
+	})
+
+	it("saves the changeCardDetail summary default when the value is unset", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("checkpoints")
+		const content = getSettingsContent()
+		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
+		expect(checkbox).not.toBeChecked()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "summary" }),
+				}),
+			),
+		)
+	})
+
+	it("reflects the saved changeCardDetail full value in the checkbox and saves summary when unchecked", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			changeCardDetail: "full",
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("checkpoints")
+		const content = getSettingsContent()
+		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
+		await waitFor(() => expect(checkbox).toBeChecked())
+
+		fireEvent.click(checkbox)
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "summary" }),
+				}),
+			),
+		)
+	})
+
 	it("shows tts slider when sound is enabled", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()
