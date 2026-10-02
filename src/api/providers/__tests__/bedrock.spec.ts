@@ -70,6 +70,9 @@ import { HttpsProxyAgent } from "https-proxy-agent"
 
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import type { ApiStreamChunk } from "../../transform/stream"
+import { OutputTokenLimitError } from "../utils/output-token-limit-error"
 
 // Get access to the mocked functions
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
@@ -92,6 +95,73 @@ describe("AwsBedrockHandler", () => {
 			awsSecretKey: "test-secret-key",
 			awsRegion: "us-east-1",
 		})
+	})
+
+	it.each(["max_tokens", "end_turn", "tool_use", "stop_sequence"])(
+		"reports truncation only for %s, after preserving usage",
+		async (stopReason) => {
+			handler["client"].send = vi.fn().mockResolvedValue({
+				stream: asyncStreamFrom([
+					{ contentBlockDelta: { delta: { reasoningContent: { text: "Still thinking" } } } },
+					{ messageStop: { stopReason } },
+					{ metadata: { usage: { inputTokens: 37, outputTokens: 16384 } } },
+				]),
+			})
+			const chunks: ApiStreamChunk[] = []
+			const consume = async () => {
+				for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hello" }])) {
+					chunks.push(chunk)
+				}
+			}
+			if (stopReason === "max_tokens") {
+				const error = await consume().then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toBeInstanceOf(OutputTokenLimitError)
+				expect((error as Error).message).toContain(
+					"Output token limit reached. Consider increasing Max Output Tokens",
+				)
+			} else {
+				await expect(consume()).resolves.toBeUndefined()
+			}
+			expect(chunks).toEqual(
+				expect.arrayContaining([
+					{ type: "reasoning", text: "Still thinking" },
+					expect.objectContaining({ type: "usage", inputTokens: 37, outputTokens: 16384 }),
+				]),
+			)
+		},
+	)
+
+	it.each([
+		["anthropic.claude-sonnet-4-5-20250929-v1:0", 64_000],
+		["anthropic.claude-sonnet-4-6", 64_000],
+		["anthropic.claude-sonnet-5", 128_000],
+		["anthropic.claude-opus-4-7", 128_000],
+		["anthropic.claude-opus-4-8", 128_000],
+		["anthropic.claude-opus-5", 128_000],
+	] as const)("exposes %s output ceiling without raising request defaults", async (apiModelId, ceiling) => {
+		for (const enableReasoningEffort of [true, false]) {
+			for (const modelMaxTokens of [undefined, ceiling]) {
+				const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort, modelMaxTokens })
+				expect(provider.getModel().info.maxTokens).toBe(ceiling)
+				provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
+				await collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }]))
+				const configurableWithoutReasoning = apiModelId.endsWith("-5")
+				const expected =
+					modelMaxTokens && (enableReasoningEffort || configurableWithoutReasoning)
+						? ceiling
+						: enableReasoningEffort
+							? 16_384
+							: 8192
+				expect(mockConverseStreamCommand).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						inferenceConfig: expect.objectContaining({ maxTokens: expected }),
+					}),
+				)
+			}
+		}
 	})
 
 	describe("getModel", () => {
@@ -937,6 +1007,41 @@ describe("AwsBedrockHandler", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe("global.anthropic.claude-opus-5")
 		})
+
+		it("should return Claude Opus 5.5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Opus 5.5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-opus-5-5")
+		})
 	})
 
 	describe("1M context beta feature", () => {
@@ -1700,23 +1805,51 @@ describe("AwsBedrockHandler", () => {
 		})
 
 		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
-			const opus48Handler = new AwsBedrockHandler({
+			const provider = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-4-8",
-				awsAccessKey: "test-access-key",
-				awsSecretKey: "test-secret-key",
-				awsRegion: "us-east-1",
 				enableReasoningEffort: false,
 			})
+			await collectStream(provider.createMessage("System prompt", messages))
 
-			const generator = opus48Handler.createMessage("System prompt", messages)
-			await generator.next()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).not.toHaveProperty("thinking")
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
 
-			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+		it.each(["anthropic.claude-sonnet-5", "anthropic.claude-opus-5", "us.anthropic.claude-opus-5"])(
+			"explicitly disables thinking for %s when reasoning is disabled",
+			async (apiModelId) => {
+				const provider = new AwsBedrockHandler({
+					apiModelId,
+					enableReasoningEffort: false,
+					modelMaxTokens: 32_000,
+				})
+				await collectStream(provider.createMessage("System prompt", messages))
 
-			// Without reasoning enabled, no adaptive thinking payload is sent.
-			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
-			// Temperature is still omitted for 4.8 because the API rejects sampling params.
+				const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+				expect(commandArg.additionalModelRequestFields).toEqual(
+					expect.objectContaining({ thinking: { type: "disabled" } }),
+				)
+				expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+			},
+		)
+
+		it.each([
+			"anthropic.claude-fable-5",
+			"anthropic.claude-fable-5-1",
+			"anthropic.claude-opus-5-5",
+			"global.anthropic.claude-opus-5-5",
+		])("omits thinking for adaptive-only %s when reasoning is disabled", async (apiModelId) => {
+			// These models reject thinking.type "disabled" with a 400.
+			const provider = new AwsBedrockHandler({
+				apiModelId,
+				enableReasoningEffort: false,
+				modelMaxTokens: 32_000,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields ?? {}).not.toHaveProperty("thinking")
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
@@ -1833,6 +1966,7 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5-5")).toBe(true)
 				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
@@ -1843,6 +1977,7 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
 			})

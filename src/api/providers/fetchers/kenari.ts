@@ -4,6 +4,8 @@ import { z } from "zod"
 import type { ModelInfo } from "@roo-code/types"
 import { kenariDefaultModelInfo, KENARI_BASE_URL } from "@roo-code/types"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 // The Kenari `/models` endpoint follows the OpenAI `/models` shape and is
 // public (no key required). The `id` is the only guaranteed field; metadata is
 // optional and best-effort, so the schema is intentionally permissive.
@@ -61,15 +63,19 @@ export const parseKenariModel = (model: KenariModel): ModelInfo => ({
  *
  * @param apiKey - Optional Bearer token; the endpoint is public but the key is
  *   sent when available.
+ * @param opts - Optional per-request controls; `signal` cancels the in-flight request.
  * @returns A record mapping model IDs to their normalised {@link ModelInfo}.
  */
-export async function getKenariModels(apiKey?: string): Promise<Record<string, ModelInfo>> {
+export async function getKenariModels(
+	apiKey?: string,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
 	try {
 		const response = await axios.get(`${KENARI_BASE_URL}/models`, {
 			headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-			timeout: 10_000,
+			signal: opts?.signal,
 		})
 
 		const result = kenariModelsResponseSchema.safeParse(response.data)
@@ -91,6 +97,10 @@ export async function getKenariModels(apiKey?: string): Promise<Record<string, M
 			models[parsed.data.id] = parseKenariModel(parsed.data)
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching Kenari models: ${error instanceof Error ? error.message : String(error)}`)
 	}
 
