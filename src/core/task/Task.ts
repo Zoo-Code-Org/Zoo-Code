@@ -573,11 +573,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * final, and every tool call has its matching result.
 	 */
 	private hasCompleteToolResultsForCurrentTurn(): boolean {
-		if (
-			!this.didCompleteReadingStream ||
-			this.presentAssistantMessageLocked ||
-			this.currentStreamingContentIndex < this.assistantMessageContent.length
-		) {
+		// Do not require currentStreamingContentIndex to reach the end here.
+		// A non-abort presenter rejection releases the lock and is logged, but
+		// nothing schedules another presentation pass. Gating on the index would
+		// strand this wait after exactly that failure.
+		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
 			return false
 		}
 
