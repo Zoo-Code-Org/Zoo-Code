@@ -8,6 +8,7 @@ import { getReadablePath } from "../../../utils/path"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
+import { checkpointSave } from "../../checkpoints"
 import { writeToFileTool } from "../WriteToFileTool"
 
 vi.mock("path", async () => {
@@ -87,6 +88,10 @@ vi.mock("../../ignore/RooIgnoreController", () => ({
 			return true
 		}
 	},
+}))
+
+vi.mock("../../checkpoints", () => ({
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
 }))
 
 describe("writeToFileTool", () => {
@@ -470,6 +475,78 @@ describe("writeToFileTool", () => {
 			// Second call with same path - path is now stabilized, error occurs
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", expect.any(Error))
+		})
+	})
+
+	describe("per-write checkpoints (B1)", () => {
+		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+
+		it("records one suppressed checkpoint after a successful write (default-on)", async () => {
+			await executeWriteFileTool({})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true)
+		})
+
+		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
+			mockCline.providerRef.deref = vi.fn().mockReturnValue({
+				getState: vi
+					.fn()
+					.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, perWriteCheckpoints: false }),
+			})
+
+			await executeWriteFileTool({})
+
+			expect(mockCline.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("does not record a checkpoint when the write fails", async () => {
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("write failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("waits for the per-write checkpoint before the tool completes", async () => {
+			let checkpointStarted = false
+			let releaseCheckpoint: () => void = () => {}
+			mockedCheckpointSave.mockImplementationOnce(() => {
+				checkpointStarted = true
+				return new Promise<undefined>((resolve) => {
+					releaseCheckpoint = () => resolve(undefined)
+				})
+			})
+			const processQueuedSpy = vi.fn()
+			mockCline.processQueuedMessages = processQueuedSpy
+
+			const toolPromise = executeWriteFileTool({})
+
+			// Advance microtasks until the tool reaches the checkpoint call (all
+			// preceding awaits are mocked resolutions, no real timers involved).
+			for (let i = 0; i < 50 && !checkpointStarted; i++) {
+				await Promise.resolve()
+			}
+			expect(checkpointStarted).toBe(true)
+
+			let settled = false
+			void toolPromise.then(() => {
+				settled = true
+			})
+
+			// The tool must not complete while the checkpoint is still
+			// staging/committing: a later write started by the task loop would
+			// otherwise collapse into the same (or a missing) commit.
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(settled).toBe(false)
+			expect(processQueuedSpy).not.toHaveBeenCalled()
+
+			releaseCheckpoint()
+			await toolPromise
+			expect(settled).toBe(true)
+			expect(processQueuedSpy).toHaveBeenCalledOnce()
 		})
 	})
 })
