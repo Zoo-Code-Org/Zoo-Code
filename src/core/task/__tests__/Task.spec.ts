@@ -602,8 +602,6 @@ describe("Cline", () => {
 			task.presentAssistantMessageLocked = true
 			expect(readiness()).toBe(false)
 			task.presentAssistantMessageLocked = false
-			expect(readiness()).toBe(false)
-			task.currentStreamingContentIndex = task.assistantMessageContent.length
 			task.assistantMessageContent[0].partial = true
 			expect(readiness()).toBe(false)
 			task.assistantMessageContent[0].partial = false
@@ -611,6 +609,31 @@ describe("Cline", () => {
 			expect(readiness()).toBe(false)
 			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
 			expect(readiness()).toBe(true)
+		})
+
+		it("does not strand a paired tool turn after a presenter failure", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "presenter failure readiness test",
+				startTask: false,
+			})
+			task.didCompleteReadingStream = true
+			task.presentAssistantMessageLocked = false
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_ready",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+				{ type: "text", content: "presenter failed here", partial: false },
+			]
+			task.currentStreamingContentIndex = 1
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+
+			expect(getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()).toBe(true)
 		})
 
 		it("requires an identifiable tool call and matches sanitized result IDs", () => {
@@ -621,13 +644,9 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
-			const finishPresentation = () => {
-				task.currentStreamingContentIndex = task.assistantMessageContent.length
-			}
 			task.didCompleteReadingStream = true
 
 			task.assistantMessageContent = [{ type: "text", content: "finished", partial: false }]
-			finishPresentation()
 			expect(readiness()).toBe(false)
 
 			task.assistantMessageContent = [
@@ -638,7 +657,6 @@ describe("Cline", () => {
 					partial: false,
 				},
 			]
-			finishPresentation()
 			expect(readiness()).toBe(false)
 
 			task.assistantMessageContent = [
@@ -652,7 +670,6 @@ describe("Cline", () => {
 					partial: false,
 				},
 			]
-			finishPresentation()
 			expect(readiness()).toBe(false)
 
 			const mcpToolUse = task.assistantMessageContent[0]
