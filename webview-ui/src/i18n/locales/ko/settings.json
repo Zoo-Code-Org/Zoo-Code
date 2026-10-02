@@ -975,6 +975,10 @@
 			"refreshSuccess": "도구가 성공적으로 새로고침되었습니다",
 			"refreshError": "도구 새로고침에 실패했습니다",
 			"toolParameters": "매개변수"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "동적 사고 노력",
+			"description": "set_thinking_effort 도구를 활성화하여 단계별로 모델이 사고 노력을 결정하도록 합니다. 채팅에서 수동 조정은 항상 사용 가능합니다. (실험적 기능)"
 		}
 	},
 	"promptCaching": {
