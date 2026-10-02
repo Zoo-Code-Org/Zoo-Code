@@ -4,7 +4,14 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "node:test"
 
-import { integerFlag, parseFlagArgs, resolveServedFile, validateRelativeDir, writeTaskAtomically } from "../lib.mjs"
+import {
+	integerFlag,
+	parseFlagArgs,
+	resolveBuildDir,
+	resolveServedFile,
+	validateRelativeDir,
+	writeTaskAtomically,
+} from "../lib.mjs"
 
 let tmp
 
@@ -43,6 +50,26 @@ describe("validateRelativeDir", () => {
 	it("rejects shell metacharacters, absolute paths, traversal, dot and option-like segments", () => {
 		const bad = ['safe"; touch /tmp/pwned; #', "a b", "$(id)", "/abs", "../x", "a/../b", ".", "a/./b", "-rf", "a/-rf", "", "a//b"]
 		for (const dir of bad) assert.throws(() => validateRelativeDir(dir), /Invalid --dir/, JSON.stringify(dir))
+	})
+})
+
+describe("resolveBuildDir", () => {
+	it("maps the documented modes to fixed directories under the temp root", () => {
+		assert.equal(resolveBuildDir("production", tmp), path.join(tmp, "zoo-webview-stress-build"))
+		assert.equal(resolveBuildDir("development", tmp), path.join(tmp, "zoo-webview-stress-build-development"))
+	})
+
+	it("rejects any other mode, including path traversal", () => {
+		for (const mode of ["../../../tmp/victim", "staging", "", "production/../x"]) {
+			assert.throws(() => resolveBuildDir(mode, tmp), /Invalid --build-mode/, mode)
+		}
+	})
+
+	it("refuses an output path that is a symlink", () => {
+		fs.mkdirSync(path.join(tmp, "elsewhere"))
+		fs.symlinkSync(path.join(tmp, "elsewhere"), path.join(tmp, "zoo-webview-stress-build"))
+
+		assert.throws(() => resolveBuildDir("production", tmp), /symlink/)
 	})
 })
 

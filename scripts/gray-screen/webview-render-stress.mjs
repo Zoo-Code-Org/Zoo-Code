@@ -28,7 +28,7 @@ import http from "node:http"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { resolveServedFile } from "./lib.mjs"
+import { resolveBuildDir, resolveServedFile } from "./lib.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const webviewDir = path.join(root, "webview-ui")
@@ -61,7 +61,7 @@ const cfg = {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const buildMode = args["build-mode"] ?? "production"
-const buildDir = "/tmp/zoo-webview-stress-build" + (buildMode === "production" ? "" : `-${buildMode}`)
+const buildDir = resolveBuildDir(buildMode)
 
 function run(cmd, cmdArgs, opts) {
 	return new Promise((resolve, reject) => {

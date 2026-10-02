@@ -38,6 +38,26 @@ export function validateRelativeDir(dir) {
 	return dir
 }
 
+const BUILD_MODES = ["production", "development"]
+
+/**
+ * The temp directory a stress-build of the given Vite mode is written to (Vite empties it first, so it must never
+ * be derived from unchecked input). Refuses modes other than the documented ones and a symlinked output path.
+ */
+export function resolveBuildDir(mode, tmpRoot = "/tmp") {
+	if (!BUILD_MODES.includes(mode)) throw new Error(`Invalid --build-mode "${mode}": use ${BUILD_MODES.join(" or ")}.`)
+
+	const dir = path.join(tmpRoot, "zoo-webview-stress-build" + (mode === "production" ? "" : `-${mode}`))
+
+	try {
+		if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing to build into a symlink: ${dir}`)
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error
+	}
+
+	return dir
+}
+
 /** Resolves a request path to a regular file inside `root` (after symlink resolution), or undefined. */
 export function resolveServedFile(root, rawPath) {
 	try {

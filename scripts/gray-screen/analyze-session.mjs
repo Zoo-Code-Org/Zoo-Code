@@ -101,7 +101,19 @@ console.log(`storage: ${storage}`)
 console.log(`tasks: ${ids.length} (excluded ${sizes.length - real.length} generated [LOAD TEST] tasks${includeGenerated ? " - included" : ""}); analyzed set: ${real.length}`)
 console.log(`ui_messages.json size: p50=${mb(pct(0.5))}MB p90=${mb(pct(0.9))}MB p99=${mb(pct(0.99))}MB max=${mb(sorted.at(-1) ?? 0)}MB; over 10MB: ${sorted.filter((s) => s > 10 * 1048576).length}, over 5MB: ${sorted.filter((s) => s > 5 * 1048576).length}`)
 
-const results = real.sort((a, b) => b.size - a.size).slice(0, top).map((s) => analyze(s.id))
+let unreadable = 0
+const results = real
+	.sort((a, b) => b.size - a.size)
+	.slice(0, top)
+	.flatMap((s) => {
+		try {
+			return [analyze(s.id)]
+		} catch {
+			unreadable++
+			return []
+		}
+	})
+if (unreadable) console.log(`skipped ${unreadable} task(s) whose ui_messages.json could not be parsed`)
 console.log(`\nTop ${results.length} tasks by ui_messages.json size (sizes only, no content):`)
 console.log("size(MB)  msgs  toolTxt(MB) editTools  topField(share)                 2byte%  imgMB  maxBatchRun(bytes MB)  task")
 for (const r of results) {
