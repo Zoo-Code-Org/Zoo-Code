@@ -129,6 +129,20 @@ function lastCompleteInvokeBlockEnd(text: string): number {
 }
 
 /**
+ * End of the decided span: the newline after the last closed `<invoke>`, or 0 while that line is
+ * still open. The quoting cue that suppresses recovery can trail the block on its own line, so
+ * cutting at the tag would hide it and replay narrated markup as a live call.
+ */
+function decidedSalvageEnd(text: string): number {
+	const blockEnd = lastCompleteInvokeBlockEnd(text)
+	if (blockEnd === 0) {
+		return 0
+	}
+	const lineEnd = text.indexOf("\n", blockEnd)
+	return lineEnd === -1 ? 0 : lineEnd + 1
+}
+
+/**
  * Left-to-right scan state behind the quoting heuristics: open code fence, current line start,
  * backticks seen on the current line, and whether a `<function_calls>` wrapper is open.
  *
@@ -1235,7 +1249,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS) {
 							// Past the cap, drain only the decided prefix: emitting the undecided tail as
 							// text would strand a call whose closing tag is still in flight.
-							const decidedEnd = lastCompleteInvokeBlockEnd(salvageBuffer)
+							const decidedEnd = decidedSalvageEnd(salvageBuffer)
 							if (decidedEnd > 0) {
 								const decided = salvageBuffer.slice(0, decidedEnd)
 								salvageBuffer = salvageBuffer.slice(decidedEnd)

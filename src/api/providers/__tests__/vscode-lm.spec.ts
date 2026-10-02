@@ -587,12 +587,45 @@ describe("VsCodeLmHandler", () => {
 				expect(streamedText).toContain(filler)
 			})
 
+			it("keeps a narrated block quoted when the cap splits the stream after its close tag", async () => {
+				// Cutting the drained span at `</invoke>` hid the trailing cue, so the streaming path
+				// recovered a call the one-shot path refuses.
+				const block = `<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">add</parameter></in${"voke"}>`
+				const narration = ` is what you must never emit`
+				const chunks = await collect([block + narration, "x".repeat(270 * 1024)])
+
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toEqual([])
+				expect(
+					extractLeakedToolCalls(
+						block + narration,
+						new Map([["calculator", salvageTools[0].function.parameters]]),
+					).calls,
+				).toEqual([])
+			})
+
+			it("gives each recovered call in one response a distinct id", async () => {
+				const chunks = await collect([
+					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">add</parameter></in${"voke"}>\n` +
+						`<in${"voke"} name="calculator"><parameter name="operation">sub</parameter></in${"voke"}></function${"_calls"}>`,
+				])
+
+				const ids = chunks
+					.filter((chunk) => chunk.type === "tool_call")
+					.map((chunk) => (chunk as { id: string }).id)
+
+				expect(ids).toHaveLength(2)
+				expect(new Set(ids).size).toBe(2)
+				expect(ids[0]).toMatch(/-0$/)
+				expect(ids[1]).toMatch(/-1$/)
+			})
+
 			it("recovers a completed call and releases text when the buffer passes the cap", async () => {
 				// The cap used to be bypassed whenever a complete block sat in the buffer, so both the
-				// call and 512 KB of trailing prose were withheld until the stream ended.
+				// call and 512 KB of trailing prose were withheld until the stream ended. The block
+				// ends its line: same-line trailing prose reads as narration and suppresses recovery.
 				const filler = "y".repeat(256 * 1024)
 				const parts = [
-					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>\n',
 					filler,
 					filler,
 				]
