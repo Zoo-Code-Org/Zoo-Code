@@ -1,23 +1,12 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
 import { expectContrast } from "../../../../playwright/contrast"
+import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import MermaidBlock from "../MermaidBlock"
-
-const diagram = `gantt
-    title Project plan
-    dateFormat YYYY-MM-DD
-    section Planning
-    Define scope :done, scope, 2026-08-01, 3d
-    section Delivery
-    Ship release :active, release, after scope, 3d`
 
 for (const theme of visualThemes) {
 	test(`renders Mermaid sections in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("mermaid-gantt"))
 		await applyVisualTheme(page, theme)
-
-		const component = await mount(<MermaidBlock code={diagram} />)
 		const svg = component.locator("svg")
 		await expect(svg).toBeVisible({ timeout: 10_000 })
 		await expect(svg.locator("..")).toHaveCSS("opacity", "1")

@@ -460,6 +460,8 @@
 		"headerName": "Tên tiêu đề",
 		"headerValue": "Giá trị tiêu đề",
 		"noCustomHeaders": "Chưa có tiêu đề tùy chỉnh nào được định nghĩa. Nhấp vào nút + để thêm.",
+		"extraBody": "Nội dung bổ sung",
+		"extraBodyDescription": "Đối tượng JSON tùy chọn được hợp nhất vào phần thân yêu cầu API. Không thể ghi đè các trường do Zoo Code quản lý như model, messages, tools và stream. Không bao gồm thông tin bí mật.",
 		"unboundApiKey": "Khóa API Unbound",
 		"getUnboundApiKey": "Lấy khóa API Unbound",
 		"requestyApiKey": "Khóa API Requesty",
@@ -1036,6 +1038,11 @@
 		"modelId": "Bạn phải cung cấp ID mô hình hợp lệ.",
 		"modelSelector": "Bạn phải cung cấp bộ chọn mô hình hợp lệ.",
 		"openAi": "Bạn phải cung cấp URL cơ sở, khóa API và ID mô hình hợp lệ.",
+		"openAiExtraBody": {
+			"invalidJson": "Nội dung bổ sung phải chứa JSON hợp lệ.",
+			"objectRequired": "Nội dung bổ sung phải là một đối tượng JSON.",
+			"reservedKeys": "Nội dung bổ sung không thể ghi đè các trường do Zoo Code quản lý: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Định dạng ARN không hợp lệ. Vui lòng kiểm tra yêu cầu về định dạng.",
 			"regionMismatch": "Cảnh báo: Vùng trong ARN của bạn ({{arnRegion}}) không khớp với vùng bạn đã chọn ({{region}}). Điều này có thể gây ra vấn đề truy cập. Nhà cung cấp sẽ sử dụng vùng từ ARN."

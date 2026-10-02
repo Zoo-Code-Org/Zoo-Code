@@ -460,6 +460,8 @@
 		"headerName": "Nazwa nagłówka",
 		"headerValue": "Wartość nagłówka",
 		"noCustomHeaders": "Brak zdefiniowanych niestandardowych nagłówków. Kliknij przycisk +, aby dodać.",
+		"extraBody": "Dodatkowa treść",
+		"extraBodyDescription": "Opcjonalny obiekt JSON scalany z treścią żądań API. Pola zarządzane przez Zoo Code, takie jak model, messages, tools i stream, nie mogą zostać nadpisane. Nie umieszczaj tu sekretów.",
 		"unboundApiKey": "Klucz API Unbound",
 		"getUnboundApiKey": "Uzyskaj klucz API Unbound",
 		"requestyApiKey": "Klucz API Requesty",
@@ -1036,6 +1038,11 @@
 		"modelId": "Musisz podać prawidłowe ID modelu.",
 		"modelSelector": "Musisz podać prawidłowy selektor modelu.",
 		"openAi": "Musisz podać prawidłowy bazowy URL, klucz API i ID modelu.",
+		"openAiExtraBody": {
+			"invalidJson": "Dodatkowa treść musi zawierać prawidłowy kod JSON.",
+			"objectRequired": "Dodatkowa treść musi być obiektem JSON.",
+			"reservedKeys": "Dodatkowa treść nie może nadpisywać pól zarządzanych przez Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Nieprawidłowy format ARN. Sprawdź wymagania dotyczące formatu.",
 			"regionMismatch": "Ostrzeżenie: Region w Twoim ARN ({{arnRegion}}) nie zgadza się z wybranym regionem ({{region}}). Może to powodować problemy z dostępem. Dostawca użyje regionu z ARN."

@@ -41,6 +41,7 @@ describe("SwitchModeTool", () => {
 		mockGetState = vi.fn().mockResolvedValue({ mode: "code", customModes: [] })
 
 		mockTask = {
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			didToolFailInCurrentTurn: false,
@@ -115,8 +116,8 @@ describe("SwitchModeTool", () => {
 
 	// ===== Already in mode tests =====
 
-	it("should handle switching to the same mode", async () => {
-		// Current mode is "code" (from mockGetState)
+	it("should reject switching to the task's current mode when provider state differs", async () => {
+		mockGetState.mockResolvedValue({ mode: "orchestrator", customModes: [] })
 		const block = createBlock({ mode_slug: "code", reason: "already here" })
 
 		await switchModeTool.handle(mockTask, block, mockCallbacks)
@@ -124,6 +125,7 @@ describe("SwitchModeTool", () => {
 		expect(mockTask.recordToolError).toHaveBeenCalledWith("switch_mode")
 		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith("Already in Code mode.")
+		expect(mockTask.getTaskMode).toHaveBeenCalledOnce()
 		// Should NOT ask approval or switch
 		expect(mockCallbacks.askApproval).not.toHaveBeenCalled()
 		expect(mockHandleModeSwitch).not.toHaveBeenCalled()
@@ -325,11 +327,9 @@ describe("SwitchModeTool", () => {
 		expect(mockCallbacks.askApproval).toHaveBeenCalledWith("tool", expectedMessage)
 	})
 
-	// ===== getState with custom modes =====
-
-	it("should read current mode from providerRef state", async () => {
-		// Set current mode to "architect"
-		mockGetState.mockResolvedValue({ mode: "architect", customModes: [] })
+	it("reads the current mode from the task when provider state differs", async () => {
+		vi.mocked(mockTask.getTaskMode).mockResolvedValue("architect")
+		mockGetState.mockResolvedValue({ mode: "orchestrator", customModes: [] })
 
 		const block = createBlock({ mode_slug: "code", reason: "switching back" })
 
@@ -338,20 +338,6 @@ describe("SwitchModeTool", () => {
 		expect(mockHandleModeSwitch).toHaveBeenCalledWith("code")
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
 			"Successfully switched from Architect mode to Code mode because: switching back.",
-		)
-	})
-
-	it("should use defaultModeSlug when getState returns no mode", async () => {
-		mockGetState.mockResolvedValue({})
-
-		const block = createBlock({ mode_slug: "ask", reason: "test" })
-
-		await switchModeTool.handle(mockTask, block, mockCallbacks)
-
-		// defaultModeSlug is "code" (from mock)
-		// Should report switching from Code mode
-		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
-			"Successfully switched from Code mode to Ask mode because: test.",
 		)
 	})
 })

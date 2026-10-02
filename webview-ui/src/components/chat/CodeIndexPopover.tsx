@@ -12,7 +12,12 @@ import {
 import * as ProgressPrimitive from "@radix-ui/react-progress"
 import { TriangleAlert } from "lucide-react"
 
-import { type IndexingStatus, type EmbedderProvider, CODEBASE_INDEX_DEFAULTS } from "@roo-code/types"
+import {
+	type IndexingStatus,
+	type EmbedderProvider,
+	CODEBASE_INDEX_DEFAULTS,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
@@ -83,8 +88,10 @@ interface LocalCodeIndexSettings {
 	codebaseIndexOpenRouterSpecificProvider?: string
 }
 
+type TranslationCallback = (key: string) => string
+
 // Validation schema for codebase index settings
-const createValidationSchema = (provider: EmbedderProvider, t: any) => {
+export const createValidationSchema = (provider: EmbedderProvider, t: TranslationCallback) => {
 	const baseSchema = z.object({
 		codebaseIndexEnabled: z.boolean(),
 		codebaseIndexQdrantUrl: z
@@ -95,7 +102,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 	})
 
 	switch (provider) {
-		case "openai":
+		case providerIdentifiers.openai:
 			return baseSchema.extend({
 				codeIndexOpenAiKey: z.string().min(1, t("settings:codeIndex.validation.openaiApiKeyRequired")),
 				codebaseIndexEmbedderModelId: z
@@ -103,7 +110,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelSelectionRequired")),
 			})
 
-		case "ollama":
+		case providerIdentifiers.ollama:
 			return baseSchema.extend({
 				codebaseIndexEmbedderBaseUrl: z
 					.string()
@@ -131,7 +138,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelDimensionRequired")),
 			})
 
-		case "gemini":
+		case providerIdentifiers.gemini:
 			return baseSchema.extend({
 				codebaseIndexGeminiApiKey: z.string().min(1, t("settings:codeIndex.validation.geminiApiKeyRequired")),
 				codebaseIndexEmbedderModelId: z
@@ -139,7 +146,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelSelectionRequired")),
 			})
 
-		case "mistral":
+		case providerIdentifiers.mistral:
 			return baseSchema.extend({
 				codebaseIndexMistralApiKey: z.string().min(1, t("settings:codeIndex.validation.mistralApiKeyRequired")),
 				codebaseIndexEmbedderModelId: z
@@ -147,7 +154,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelSelectionRequired")),
 			})
 
-		case "vercel-ai-gateway":
+		case providerIdentifiers.vercelAiGateway:
 			return baseSchema.extend({
 				codebaseIndexVercelAiGatewayApiKey: z
 					.string()
@@ -157,7 +164,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelSelectionRequired")),
 			})
 
-		case "bedrock":
+		case providerIdentifiers.bedrock:
 			return baseSchema.extend({
 				codebaseIndexBedrockRegion: z.string().min(1, t("settings:codeIndex.validation.bedrockRegionRequired")),
 				codebaseIndexBedrockProfile: z.string().optional(),
@@ -166,7 +173,7 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelSelectionRequired")),
 			})
 
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			return baseSchema.extend({
 				codebaseIndexOpenRouterApiKey: z
 					.string()
@@ -218,7 +225,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 	const getDefaultSettings = (): LocalCodeIndexSettings => ({
 		codebaseIndexEnabled: true,
 		codebaseIndexQdrantUrl: "",
-		codebaseIndexEmbedderProvider: "openai",
+		codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 		codebaseIndexEmbedderBaseUrl: "",
 		codebaseIndexEmbedderModelId: "",
 		codebaseIndexEmbedderModelDimension: undefined,
@@ -254,7 +261,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 			const settings = {
 				codebaseIndexEnabled: codebaseIndexConfig.codebaseIndexEnabled ?? true,
 				codebaseIndexQdrantUrl: codebaseIndexConfig.codebaseIndexQdrantUrl || "",
-				codebaseIndexEmbedderProvider: codebaseIndexConfig.codebaseIndexEmbedderProvider || "openai",
+				codebaseIndexEmbedderProvider:
+					codebaseIndexConfig.codebaseIndexEmbedderProvider || providerIdentifiers.openai,
 				codebaseIndexEmbedderBaseUrl: codebaseIndexConfig.codebaseIndexEmbedderBaseUrl || "",
 				codebaseIndexEmbedderModelId: codebaseIndexConfig.codebaseIndexEmbedderModelId || "",
 				codebaseIndexEmbedderModelDimension:
@@ -593,13 +601,13 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 
 	// Fetch OpenRouter model providers for embedding model
 	const { data: openRouterEmbeddingProviders } = useOpenRouterModelProviders(
-		currentSettings.codebaseIndexEmbedderProvider === "openrouter"
+		currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.openrouter
 			? currentSettings.codebaseIndexEmbedderModelId
 			: undefined,
 		undefined,
 		{
 			enabled:
-				currentSettings.codebaseIndexEmbedderProvider === "openrouter" &&
+				currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.openrouter &&
 				!!currentSettings.codebaseIndexEmbedderModelId,
 		},
 	)
@@ -719,8 +727,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 												// Auto-populate Region and Profile when switching to Bedrock
 												// if the main API provider is also configured for Bedrock
 												if (
-													value === "bedrock" &&
-													apiConfiguration?.apiProvider === "bedrock"
+													value === providerIdentifiers.bedrock &&
+													apiConfiguration?.apiProvider === providerIdentifiers.bedrock
 												) {
 													// Only populate if currently empty
 													if (
@@ -781,7 +789,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 									</div>
 
 									{/* Provider-specific settings */}
-									{currentSettings.codebaseIndexEmbedderProvider === "openai" && (
+									{currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.openai && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">
@@ -846,7 +854,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{currentSettings.codebaseIndexEmbedderProvider === "ollama" && (
+									{currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.ollama && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">
@@ -1038,7 +1046,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{currentSettings.codebaseIndexEmbedderProvider === "gemini" && (
+									{currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.gemini && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">
@@ -1103,7 +1111,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{currentSettings.codebaseIndexEmbedderProvider === "mistral" && (
+									{currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.mistral && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">
@@ -1168,7 +1176,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{currentSettings.codebaseIndexEmbedderProvider === "vercel-ai-gateway" && (
+									{currentSettings.codebaseIndexEmbedderProvider ===
+										providerIdentifiers.vercelAiGateway && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">
@@ -1238,7 +1247,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{currentSettings.codebaseIndexEmbedderProvider === "bedrock" && (
+									{currentSettings.codebaseIndexEmbedderProvider === providerIdentifiers.bedrock && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">
@@ -1331,7 +1340,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{currentSettings.codebaseIndexEmbedderProvider === "openrouter" && (
+									{currentSettings.codebaseIndexEmbedderProvider ===
+										providerIdentifiers.openrouter && (
 										<>
 											<div className="space-y-2">
 												<label className="text-sm font-medium">

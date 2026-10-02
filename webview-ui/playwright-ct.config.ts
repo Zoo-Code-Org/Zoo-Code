@@ -1,29 +1,20 @@
 import path from "path"
 import { fileURLToPath } from "url"
 
-import { defineConfig } from "@playwright/experimental-ct-react"
-import type { ReporterDescription } from "@playwright/test"
-import react from "@vitejs/plugin-react"
-import tailwindcss from "@tailwindcss/vite"
+import { defineConfig, type ReporterDescription } from "@playwright/test"
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
-const rooCodeTypesShim = path.resolve(dirname, "./playwright/roo-code-types.ts")
-const rooCodeTypesShimImporters = [
-	"/src/shared/modes.ts",
-	"/webview-ui/src/components/chat/CodeIndexPopover.tsx",
-	"/webview-ui/src/components/chat/ModeSelector.tsx",
-	"/webview-ui/src/components/settings/UISettings.tsx",
-]
+const galleryUrl = "http://127.0.0.1:4173"
 
 const monocartReporter: ReporterDescription = [
 	"monocart-reporter",
 	{
-		name: "Webview Playwright CT",
+		name: "Webview Playwright Gallery",
 		outputFile: path.resolve(dirname, "coverage-ct/index.html"),
 		coverage: {
 			outputDir: path.resolve(dirname, "coverage-ct"),
 			reports: ["lcovonly", "v8"],
-			// Entry URLs from Vite CT dev server or built bundle.
+			// Entry URLs from the Vite gallery dev server or built bundle.
 			entryFilter: (entry: { url: string }) => entry.url.includes("/src/") || entry.url.includes("/assets/"),
 			sourceFilter: (sourcePath: string) =>
 				sourcePath.includes("src/") &&
@@ -53,66 +44,7 @@ export default defineConfig({
 				monocartReporter,
 			],
 	use: {
-		ctTemplateDir: "./playwright",
-		ctViteConfig: {
-			plugins: [
-				{
-					name: "playwright-ct-roo-code-types-shim",
-					enforce: "pre",
-					resolveId(source, importer) {
-						if (
-							source === "@roo-code/types" &&
-							importer &&
-							rooCodeTypesShimImporters.some((suffix) => importer.endsWith(suffix))
-						) {
-							return rooCodeTypesShim
-						}
-					},
-				},
-				react({
-					babel: {
-						plugins: [["babel-plugin-react-compiler", { target: "18" }]],
-					},
-				}),
-				tailwindcss(),
-			],
-			resolve: {
-				alias: [
-					{
-						find: "@/context/ExtensionStateContext",
-						replacement: path.resolve(dirname, "./playwright/ExtensionStateContext.tsx"),
-					},
-					{
-						find: "@src/context/ExtensionStateContext",
-						replacement: path.resolve(dirname, "./playwright/ExtensionStateContext.tsx"),
-					},
-					{
-						find: "@src/i18n/TranslationContext",
-						replacement: path.resolve(dirname, "./playwright/TranslationContext.ts"),
-					},
-					{ find: "@", replacement: path.resolve(dirname, "./src") },
-					{ find: "@src", replacement: path.resolve(dirname, "./src") },
-					{ find: "@roo", replacement: path.resolve(dirname, "../src/shared") },
-					{
-						find: "@vscode/webview-ui-toolkit/react",
-						replacement: path.resolve(dirname, "./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx"),
-					},
-					{ find: "vscode", replacement: path.resolve(dirname, "../src/__mocks__/vscode.js") },
-				],
-			},
-			define: {
-				"process.platform": JSON.stringify(process.platform),
-				"process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "test"),
-				"process.env.PKG_NAME": JSON.stringify("zoo-code"),
-				"process.env.PKG_VERSION": JSON.stringify("0.0.0-test"),
-				"process.env.PKG_OUTPUT_CHANNEL": JSON.stringify("Zoo-Code"),
-				"process.env.PKG_RELEASE_CHANNEL": JSON.stringify("stable"),
-			},
-			optimizeDeps: {
-				exclude: ["@vscode/codicons"],
-			},
-			publicDir: path.resolve(dirname, "../src/assets/images"),
-		},
+		baseURL: galleryUrl,
 		viewport: { width: 520, height: 360 },
 		deviceScaleFactor: 1,
 		colorScheme: "dark",
@@ -128,4 +60,9 @@ export default defineConfig({
 			use: { browserName: "chromium" },
 		},
 	],
+	webServer: {
+		command: "pnpm exec vite --config playwright/vite.config.ts",
+		url: galleryUrl,
+		reuseExistingServer: !process.env.CI,
+	},
 })

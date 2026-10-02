@@ -148,6 +148,32 @@ describe("DeepSeekHandler", () => {
 		clearAllMocks()
 	})
 
+	describe("completePrompt reasoning", () => {
+		it.each([
+			{ apiModelId: "custom-deepseek-model", enableReasoningEffort: true, expected: undefined },
+			{ apiModelId: "deepseek-v4-flash", enableReasoningEffort: false, expected: undefined },
+			{ apiModelId: "deepseek-v4-flash", enableReasoningEffort: true, expected: "max" },
+		])("respects reasoning support for $apiModelId with enabled=$enableReasoningEffort", async (scenario) => {
+			const completionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: scenario.apiModelId,
+				enableReasoningEffort: scenario.enableReasoningEffort,
+				reasoningEffort: "max",
+			})
+
+			await completionHandler.completePrompt("Hello")
+
+			expect(mockCreate).toHaveBeenCalledOnce()
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.model).toBe(scenario.apiModelId)
+			if (scenario.expected === undefined) {
+				expect(request).not.toHaveProperty("reasoning_effort")
+			} else {
+				expect(request.reasoning_effort).toBe(scenario.expected)
+			}
+		})
+	})
+
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
 			expect(handler).toBeInstanceOf(DeepSeekHandler)
@@ -214,22 +240,22 @@ describe("DeepSeekHandler", () => {
 			expect(model.info).toBeDefined()
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(false)
+			expect(model.info.supportsImages).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true) // Should be true now
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 		})
 
-		it("should use deepseek-v4-flash as the default model ID for new configs", () => {
+		it("should use deepseek-flash as the default model ID for new configs", () => {
 			const handlerWithoutModel = new DeepSeekHandler({
 				...mockOptions,
 				apiModelId: undefined,
 			})
 			const model = handlerWithoutModel.getModel()
 			expect(model.id).toBe(deepSeekDefaultModelId)
-			expect(model.id).toBe("deepseek-v4-flash")
+			expect(model.id).toBe("deepseek-flash")
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(false)
+			expect(model.info.supportsImages).toBe(true)
 			expect((model.info as ModelInfo).supportsReasoningEffort).toContain("max")
 		})
 
@@ -247,6 +273,24 @@ describe("DeepSeekHandler", () => {
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")
+		})
+
+		it("should return vision metadata for deepseek-v4-flash-vision-exp", () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+			})
+			const model = visionHandler.getModel()
+
+			expect(model.id).toBe("deepseek-v4-flash-vision-exp")
+			expect(model.info).toMatchObject({
+				maxTokens: 384_000,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				preserveReasoning: true,
+				reasoningEffort: "high",
+			})
 		})
 
 		it("should return provided model ID with default model info if model does not exist", () => {
@@ -322,6 +366,63 @@ describe("DeepSeekHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it.each(["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] as const)(
+			"should send images and thinking controls to %s",
+			async (modelId) => {
+				const visionHandler = new DeepSeekHandler({
+					...mockOptions,
+					apiModelId: modelId,
+				})
+				const visionMessages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "Describe this image." },
+							{
+								type: "image",
+								source: { type: "base64", media_type: "image/png", data: "image-data" },
+							},
+						],
+					},
+				]
+
+				await collectStream(visionHandler.createMessage(systemPrompt, visionMessages))
+
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs).toMatchObject({
+					model: modelId,
+					thinking: { type: "enabled" },
+					reasoning_effort: "high",
+					max_completion_tokens: 200_000,
+				})
+				expect(callArgs.temperature).toBeUndefined()
+				expect(callArgs.messages).toContainEqual({
+					role: "user",
+					content: expect.arrayContaining([
+						{ type: "text", text: expect.stringContaining("Describe this image.") },
+						{ type: "image_url", image_url: { url: "data:image/png;base64,image-data" } },
+					]),
+				})
+			},
+		)
+
+		it("should use the provider default temperature when reasoning is disabled for the vision alias", async () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+				enableReasoningEffort: false,
+			})
+
+			await collectStream(visionHandler.createMessage(systemPrompt, messages))
+
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({
+				model: "deepseek-v4-flash-vision-exp",
+				thinking: { type: "disabled" },
+				temperature: 0,
+			})
+			expect(mockCreate.mock.calls[0][0].reasoning_effort).toBeUndefined()
 		})
 
 		it("should include usage information", async () => {
@@ -681,6 +782,36 @@ describe("DeepSeekHandler", () => {
 				},
 				{
 					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "medium",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
 					rawReasoningEffort: "max",
 					mappedReasoningEffort: "max",
 				},

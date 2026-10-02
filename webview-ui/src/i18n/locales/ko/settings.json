@@ -460,6 +460,8 @@
 		"headerName": "헤더 이름",
 		"headerValue": "헤더 값",
 		"noCustomHeaders": "정의된 사용자 정의 헤더가 없습니다. + 버튼을 클릭하여 추가하세요.",
+		"extraBody": "추가 본문",
+		"extraBodyDescription": "API 요청 본문에 병합되는 선택적 JSON 객체입니다. model, messages, tools, stream 등 Zoo Code에서 관리하는 필드는 재정의할 수 없습니다. 비밀 정보를 포함하지 마세요.",
 		"unboundApiKey": "Unbound API 키",
 		"getUnboundApiKey": "Unbound API 키 받기",
 		"requestyApiKey": "Requesty API 키",
@@ -1036,6 +1038,11 @@
 		"modelId": "유효한 모델 ID를 입력해야 합니다.",
 		"modelSelector": "유효한 모델 선택기를 입력해야 합니다.",
 		"openAi": "유효한 기본 URL, API 키, 모델 ID를 입력해야 합니다.",
+		"openAiExtraBody": {
+			"invalidJson": "추가 본문에는 유효한 JSON이 있어야 합니다.",
+			"objectRequired": "추가 본문은 JSON 객체여야 합니다.",
+			"reservedKeys": "추가 본문은 Zoo Code에서 관리하는 필드를 재정의할 수 없습니다: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "ARN 형식이 잘못되었습니다. 형식 요구사항을 확인하세요.",
 			"regionMismatch": "경고: ARN의 리전({{arnRegion}})이 선택한 리전({{region}})과 일치하지 않습니다. 접근 문제가 발생할 수 있습니다. 제공자는 ARN의 리전을 사용합니다."

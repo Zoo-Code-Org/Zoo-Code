@@ -46,11 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.80.0 में नया क्या है
+## v3.84.0 में नया क्या है
 
-- **ज़्यादा सुरक्षित file access** — Zoo Code किन paths को access कर सकता है, इसे नियंत्रित करने के लिए अलग-अलग Read और Write allowlists का उपयोग करें।
-- **Models के ज़्यादा विकल्प** — GLM 5.3 अब Z.ai के माध्यम से उपलब्ध है, और Gemini provider में Gemini 3.5 Flash Lite और Gemini 3.1 Flash Lite जोड़े गए हैं।
-- **रोज़मर्रा के ज़्यादा reliable workflows** — सुधार task recovery और history, provider streaming और tool use, settings imports तथा IDE themes में readability को बेहतर बनाते हैं।
+- ✨ **नए SOTA models जोड़े गए:** Supported providers पर GPT-6 Sol, GPT-6 Luna और Claude Opus 5.5 इस्तेमाल करें।
+- 🧭 **ज़्यादा भरोसेमंद tasks और subtasks:** Delegated modes को अलग रखें, बार-बार Stop करने के बाद भी subtask links बचाएं और slash commands से mode बदलते समय orchestrator settings को सुरक्षित रखें।
+- 🛠️ **ज़्यादा भरोसेमंद terminal, provider और code-search behavior:** Windows और non-English environments में terminal behavior बेहतर करें, provider responses और cancellation को मज़बूत बनाएं और code search में सही workspace का लगातार इस्तेमाल सुनिश्चित करें।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 
