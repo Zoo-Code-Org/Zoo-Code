@@ -134,6 +134,7 @@ export function isNonBlockingAsk(ask: ClineAsk): ask is NonBlockingAsk {
  * - `mcp_server_response`: Response received from MCP server
  * - `subtask_result`: Result of a completed subtask
  * - `checkpoint_saved`: Indicates a checkpoint has been saved
+ * - `change_card`: Per-step change card summarizing the files a completed tool step wrote (B3a)
  * - `rooignore_error`: Error related to .rooignore file processing
  * - `diff_error`: Error occurred while applying a diff/patch
  * - `condense_context`: Context condensation/summarization has started
@@ -162,6 +163,7 @@ export const clineSays = [
 	"mcp_server_response",
 	"subtask_result",
 	"checkpoint_saved",
+	"change_card",
 	"rooignore_error",
 	"diff_error",
 	"condense_context",
@@ -234,6 +236,49 @@ export const contextTruncationSchema = z.object({
 })
 
 export type ContextTruncation = z.infer<typeof contextTruncationSchema>
+
+/**
+ * ChangeCard
+ *
+ * Payload of the per-step change card (B3a). The extension host emits one
+ * `say: "change_card"` message per completed tool write step, keyed by the
+ * shadow-git checkpoint the step produced. The JSON payload (see
+ * {@link ChangeCardData}) is carried in the message `text` field, the same
+ * way tool approval messages carry their serialized ClineSayTool.
+ *
+ * `detail: "full"` carries the unified diff inline for every file so the UI
+ * can render it directly; `detail: "summary"` carries only the file list with
+ * +/− counts and the UI fetches diffs lazily (B3b). Auto-approved steps are
+ * always emitted with `detail: "summary"` regardless of the user setting.
+ */
+export const changeCardDetailSchema = z.enum(["full", "summary"])
+
+export type ChangeCardDetail = z.infer<typeof changeCardDetailSchema>
+
+export const changeCardFileSchema = z.object({
+	path: z.string(),
+	additions: z.number(),
+	deletions: z.number(),
+	/**
+	 * Unified diff for this file. Only present when the card was emitted with
+	 * `detail: "full"`; summary cards leave it out to stay compact.
+	 */
+	diff: z.string().optional(),
+})
+
+export type ChangeCardFile = z.infer<typeof changeCardFileSchema>
+
+export const changeCardSchema = z.object({
+	/** Opaque step identifier, reserved for future tool-step tracking. */
+	stepId: z.string().optional(),
+	/** Checkpoint commit SHAs produced by the step (one per per-write checkpoint). */
+	checkpointIds: z.array(z.string()),
+	files: z.array(changeCardFileSchema),
+	totalFiles: z.number(),
+	detail: changeCardDetailSchema,
+})
+
+export type ChangeCardData = z.infer<typeof changeCardSchema>
 
 /**
  * ClineMessage
