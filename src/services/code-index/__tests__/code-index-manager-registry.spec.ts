@@ -43,7 +43,19 @@ describe("CodeIndexManagerRegistry", () => {
 	it.each([{ folders: undefined }, { folders: [] }])("returns no manager with folders=$folders", ({ folders }) => {
 		Object.defineProperty(vscode.workspace, "workspaceFolders", { configurable: true, value: folders })
 		expect(CodeIndexManagerRegistry.getOrCreate(context)).toBeUndefined()
+		expect(CodeIndexManagerRegistry.getOrCreateScope(context)).toBeUndefined()
 		expect(CodeIndexManager).not.toHaveBeenCalled()
+	})
+
+	it("returns the complete cached scope shared with the manager API", () => {
+		const scope = CodeIndexManagerRegistry.getOrCreateScope(context)!
+		expect(scope).toBeInstanceOf(CodeIndexWorkspaceScope)
+		expect(scope.workspaceIndexingEnablementManager).toBeDefined()
+		expect(CodeIndexManagerRegistry.getOrCreateScope(context, "/first")).toBe(scope)
+		expect(CodeIndexManagerRegistry.getOrCreate(context)).toBe(scope.codeIndexManager)
+		expect(CodeIndexManagerRegistry.getOrCreateScope(context, "/second")).not.toBe(scope)
+		CodeIndexManagerRegistry.disposeAll()
+		expect(CodeIndexManagerRegistry.getOrCreateScope(context)).not.toBe(scope)
 	})
 
 	it("uses the first workspace when there is no active editor", () => {

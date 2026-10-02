@@ -48,7 +48,7 @@ type OpenAiCodexRequestServiceTier = typeof OpenAiCodexServiceTier.Priority
 const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
-const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([LUNA_MODEL_ID, "gpt-6-astra"])
+const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([LUNA_MODEL_ID, "gpt-6-astra", "gpt-6.1-sol"])
 
 /**
  * A refusal is streamed as text so the chat still shows why the model declined, but it is not part
