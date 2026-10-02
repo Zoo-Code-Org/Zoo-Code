@@ -107,9 +107,12 @@ export function createAbortError(providerName: string): Error {
  */
 export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
 	if (signal.aborted) {
+		// The caller has already cancelled, so this branch never consumes `pending`;
+		// attach a handler anyway so a rejecting `pending` cannot surface as an
+		// unhandled rejection.
+		void pending.catch(() => {})
 		return Promise.reject(createAbortError(providerName))
 	}
-
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
 		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
