@@ -1415,12 +1415,19 @@ describe("LiteLLMHandler", () => {
 		})
 
 		it("should pass timeout through to client", async () => {
-			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
-			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: expect.any(String) }),
-				expect.objectContaining({ timeout: 5000 }),
-			)
+			// The SDK call receives the remaining budget, so pin the clock: on a loaded runner
+			// real elapsed time between the deadline and the SDK call makes it 4999.
+			vi.useFakeTimers()
+			try {
+				mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+				await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String) }),
+					expect.objectContaining({ timeout: 5000 }),
+				)
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("should merge signal and timeoutMs together", async () => {
