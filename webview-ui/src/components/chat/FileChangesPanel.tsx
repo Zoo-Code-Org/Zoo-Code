@@ -38,7 +38,7 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 		pendingPathsRef.current = new Set()
 		setOriginalContentByKey({})
 		pendingOriginalKeysRef.current = new Set()
-	}, [clineMessages])
+	}, [clineMessages, taskId])
 
 	const fileChanges = useMemo(() => fileChangesFromMessages(clineMessages), [clineMessages])
 

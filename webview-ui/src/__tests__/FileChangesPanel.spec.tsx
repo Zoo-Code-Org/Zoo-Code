@@ -316,6 +316,24 @@ describe("FileChangesPanel", () => {
 			expect(b).toHaveTextContent("-old b")
 		})
 
+		it("requests the original again when the task id arrives after a request is already pending", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const { rerender } = renderPanel(messages)
+			expandRow()
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+
+			rerender(
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId="task-1" />
+				</TranslationProvider>,
+			)
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			const requests = requestsOfType("readOriginalContent")
+			expect(requests).toHaveLength(2)
+			expect(requests[1]).toMatchObject({ taskId: "task-1" })
+		})
+
 		it("ignores an original answered for a different task", () => {
 			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })], "task-1")
 			expandRow()
