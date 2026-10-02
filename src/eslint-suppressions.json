@@ -946,7 +946,7 @@
 	},
 	"core/tools/__tests__/executeCommand.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 11
 		}
 	},
 	"core/tools/__tests__/executeCommandTool.spec.ts": {
