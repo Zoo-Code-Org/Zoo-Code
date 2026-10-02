@@ -167,6 +167,24 @@
 			"claudeCodeNotAuthenticated": "Bạn cần đăng nhập để sử dụng Claude Code. Vào Cài đặt và nhấp vào \"Đăng nhập vào Claude Code\" để xác thực."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} tệp đã thay đổi trong bước này",
+		"rollbackFile": "Hoàn tác tệp này",
+		"rollbackFileWarning": "Khôi phục tệp này về nội dung trước bước này.",
+		"restoreLatest": "Khôi phục phiên bản mới nhất",
+		"restoreLatestWarning": "Khôi phục tệp này về phiên bản được ghi lại gần nhất.",
+		"restored": "Đã khôi phục phiên bản mới nhất",
+		"restoreFailed": "Khôi phục thất bại",
+		"rollbackStep": "Hoàn tác bước",
+		"rollbackWarning": "Khôi phục nội dung trước đó của các tệp trong bước này.",
+		"confirm": "Xác nhận",
+		"cancel": "Hủy",
+		"rollingBack": "Đang hoàn tác...",
+		"rolledBack": "Đã hoàn tác",
+		"stepRolledBack": "Đã hoàn tác bước",
+		"rollbackFailed": "Hoàn tác thất bại",
+		"openFile": "Mở tệp: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "Điểm kiểm tra",
 		"initializingWarning": "Đang khởi tạo điểm kiểm tra... Nếu quá trình này mất quá nhiều thời gian, bạn có thể vô hiệu hóa điểm kiểm tra trong <settingsLink>cài đặt</settingsLink> và khởi động lại tác vụ của bạn.",

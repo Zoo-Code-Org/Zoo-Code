@@ -162,6 +162,24 @@
 			"claudeCodeNotAuthenticated": "Je moet inloggen om Claude Code te gebruiken. Ga naar Instellingen en klik op \"Inloggen bij Claude Code\" om te authenticeren."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} bestand(en) gewijzigd in deze stap",
+		"rollbackFile": "Dit bestand terugzetten",
+		"rollbackFileWarning": "Stelt dit bestand terug naar de inhoud vóór deze stap.",
+		"restoreLatest": "Laatste versie herstellen",
+		"restoreLatestWarning": "Stelt dit bestand terug naar de laatst geregistreerde versie.",
+		"restored": "Laatste versie hersteld",
+		"restoreFailed": "Herstellen mislukt",
+		"rollbackStep": "Stap terugzetten",
+		"rollbackWarning": "Stelt de eerdere inhoud van de bestanden van deze stap weer in.",
+		"confirm": "Bevestigen",
+		"cancel": "Annuleren",
+		"rollingBack": "Terugzetten...",
+		"rolledBack": "Teruggezet",
+		"stepRolledBack": "Stap teruggezet",
+		"rollbackFailed": "Terugzetten mislukt",
+		"openFile": "Bestand openen: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "Checkpoint",
 		"initializingWarning": "Checkpoint wordt nog steeds geïnitialiseerd... Als dit te lang duurt, kun je checkpoints uitschakelen in de <settingsLink>instellingen</settingsLink> en je taak opnieuw starten.",

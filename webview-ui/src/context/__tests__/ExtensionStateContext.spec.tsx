@@ -410,6 +410,8 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
+			perWriteCheckpoints: true,
+			changeCardDetail: "summary",
 			writeDelayMs: 1000,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
@@ -440,12 +442,16 @@ describe("mergeExtensionState", () => {
 
 		const prevState: ExtensionState = {
 			...baseState,
+			// Non-default checkpoint keys so a merge regression that drops or
+			// resets them cannot hide behind the initial defaults.
+			perWriteCheckpoints: false,
+			changeCardDetail: "full",
 			apiConfiguration: { modelMaxTokens: 1234, modelMaxThinkingTokens: 123 },
 			experiments: {} as Record<ExperimentId, boolean>,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS - 5,
 		}
 
-		const newState: ExtensionState = {
+		const newState: Partial<ExtensionState> = {
 			...baseState,
 			apiConfiguration: { modelMaxThinkingTokens: 456, modelTemperature: 0.3 },
 			experiments: {
@@ -456,6 +462,11 @@ describe("mergeExtensionState", () => {
 			} as Record<ExperimentId, boolean>,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS + 5,
 		}
+
+		// A partial state push may omit the checkpoint keys entirely; the
+		// merge must preserve the previous non-default values.
+		delete newState.perWriteCheckpoints
+		delete newState.changeCardDetail
 
 		const result = mergeExtensionState(prevState, newState)
 
@@ -470,6 +481,11 @@ describe("mergeExtensionState", () => {
 			runSlashCommand: false,
 			customTools: false,
 		})
+
+		// A partial push that omits the checkpoint keys must keep the previous
+		// non-default values.
+		expect(result.perWriteCheckpoints).toBe(false)
+		expect(result.changeCardDetail).toBe("full")
 	})
 
 	describe("clineMessagesSeq protection", () => {
@@ -480,6 +496,8 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
+			perWriteCheckpoints: true,
+			changeCardDetail: "summary",
 			writeDelayMs: 1000,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,

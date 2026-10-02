@@ -167,6 +167,24 @@
 			"claudeCodeNotAuthenticated": "Vous devez vous connecter pour utiliser Claude Code. Allez dans les Paramètres et cliquez sur \"Se connecter à Claude Code\" pour vous authentifier."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} fichier(s) modifié(s) à cette étape",
+		"rollbackFile": "Réinitialiser ce fichier",
+		"rollbackFileWarning": "Restaure ce fichier à son contenu avant cette étape.",
+		"restoreLatest": "Restaurer la dernière version",
+		"restoreLatestWarning": "Restaure ce fichier à la dernière version enregistrée.",
+		"restored": "Dernière version restaurée",
+		"restoreFailed": "Échec de la restauration",
+		"rollbackStep": "Réinitialiser l'étape",
+		"rollbackWarning": "Restaure le contenu précédent des fichiers de cette étape.",
+		"confirm": "Confirmer",
+		"cancel": "Annuler",
+		"rollingBack": "Réinitialisation...",
+		"rolledBack": "Réinitialisé",
+		"stepRolledBack": "Étape réinitialisée",
+		"rollbackFailed": "Échec de la réinitialisation",
+		"openFile": "Ouvrir le fichier: {{path}}"
+	},
 	"checkpoint": {
 		"regular": "Point de contrôle",
 		"initializingWarning": "Initialisation du point de contrôle en cours... Si cela prend trop de temps, tu peux désactiver les points de contrôle dans les <settingsLink>paramètres</settingsLink> et redémarrer ta tâche.",
