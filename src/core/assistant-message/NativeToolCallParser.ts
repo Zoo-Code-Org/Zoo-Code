@@ -61,7 +61,17 @@ export class NativeToolCallParser {
 	// Raw chunk tracking state (keyed by index from one API stream)
 	private static rawChunkTrackersByScope = new WeakMap<
 		object,
-		Map<number, { id: string; name: string; hasStarted: boolean; deltaBuffer: string[] }>
+		Map<
+			number,
+			{
+				id?: string
+				name: string
+				// Track whether the provider sent a name, including an empty name.
+				nameSeen: boolean
+				hasStarted: boolean
+				deltaBuffer: string[]
+			}
+		>
 	>()
 
 	public static createScope(): object {
@@ -124,49 +134,54 @@ export class NativeToolCallParser {
 
 		let tracked = rawChunkTracker.get(index)
 
-		// Initialize new tool call tracking when we receive an id
-		if (id && !tracked) {
+		// Create the tracker on first sight of this index, independent of whether
+		// an id has arrived yet. Keying the lifecycle by index (not id) ensures any
+		// `arguments` that stream before the id is known are buffered rather than dropped.
+		if (!tracked) {
 			tracked = {
 				id,
 				name: name || "",
+				nameSeen: name !== undefined,
 				hasStarted: false,
 				deltaBuffer: [],
 			}
 			rawChunkTracker.set(index, tracked)
 		}
 
-		if (!tracked) {
-			return events
+		// Record id and name as they arrive (they may come in separate chunks).
+		if (id) {
+			tracked.id = id
 		}
-
-		// Update name if present in chunk and not yet set
-		if (name) {
+		if (name !== undefined) {
 			tracked.name = name
+			tracked.nameSeen = true
 		}
 
-		// Emit start event when we have the name
-		if (!tracked.hasStarted && tracked.name) {
+		// Emit start event only once both id and name are known. Using a local
+		// non-null id keeps emitted events typed as id: string.
+		if (!tracked.hasStarted && tracked.id && tracked.nameSeen) {
+			const startedId = tracked.id
 			events.push({
 				type: "tool_call_start",
-				id: tracked.id,
+				id: startedId,
 				name: tracked.name,
 			})
 			tracked.hasStarted = true
 
-			// Flush buffered deltas
+			// Flush buffered deltas accumulated during the pre-start window.
 			for (const bufferedDelta of tracked.deltaBuffer) {
 				events.push({
 					type: "tool_call_delta",
-					id: tracked.id,
+					id: startedId,
 					delta: bufferedDelta,
 				})
 			}
 			tracked.deltaBuffer = []
 		}
 
-		// Emit delta event for argument chunks
+		// Emit delta event for argument chunks, buffering until start is emitted.
 		if (args) {
-			if (tracked.hasStarted) {
+			if (tracked.hasStarted && tracked.id) {
 				events.push({
 					type: "tool_call_delta",
 					id: tracked.id,
@@ -190,7 +205,7 @@ export class NativeToolCallParser {
 
 		if (rawChunkTracker) {
 			for (const [, tracked] of rawChunkTracker.entries()) {
-				if (tracked.hasStarted) {
+				if (tracked.hasStarted && tracked.id) {
 					events.push({
 						type: "tool_call_end",
 						id: tracked.id,
