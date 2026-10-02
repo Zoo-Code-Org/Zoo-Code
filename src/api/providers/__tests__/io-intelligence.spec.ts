@@ -123,6 +123,11 @@ describe("IOIntelligenceHandler", () => {
 		)
 		expect(mockCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
+				model: "meta-llama/Llama-3.3-70B-Instruct",
+				messages: [
+					{ role: "system", content: "sys" },
+					{ role: "user", content: "Hello" },
+				],
 				stream: true,
 				stream_options: { include_usage: true },
 				max_tokens: 8192,
@@ -313,6 +318,29 @@ describe("IOIntelligenceHandler", () => {
 		} finally {
 			consoleErrorSpy.mockRestore()
 		}
+	})
+
+	it("completePrompt sends the prompt as a single user message with the model's max_tokens", async () => {
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { role: "assistant", content: "ok" } }],
+		})
+		const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+		expect(await handler.completePrompt("ping")).toBe("ok")
+		expect(mockCreate).toHaveBeenCalledWith(
+			{
+				model: "meta-llama/Llama-3.3-70B-Instruct",
+				messages: [{ role: "user", content: "ping" }],
+				max_tokens: 8192,
+				stream: false,
+			},
+			undefined,
+		)
+	})
+
+	it("completePrompt returns an empty string when the response has no choices", async () => {
+		mockCreate.mockResolvedValue({ choices: [] })
+		const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+		expect(await handler.completePrompt("ping")).toBe("")
 	})
 
 	it("completePrompt without options forwards no request options", async () => {
