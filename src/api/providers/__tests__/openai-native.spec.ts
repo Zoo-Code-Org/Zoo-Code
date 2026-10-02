@@ -713,6 +713,10 @@ describe("OpenAiNativeHandler", () => {
 					makeCreateMessageMetadata({ abortSignal: controller.signal }),
 				)
 				const collected = collectStream(stream)
+				// Attach the handler before the abort fires: the post-loop check rejects the stream
+				// as soon as the generator ends, so a late handler would surface as an unhandled
+				// rejection.
+				const settled = collected.catch((error) => error)
 				await tick()
 
 				expect(sdkSignal).toBeDefined()
@@ -724,8 +728,14 @@ describe("OpenAiNativeHandler", () => {
 				// ... but it must abort the request as soon as it fires.
 				expect(sdkSignal?.aborted).toBe(true)
 
-				const chunks = await collected
-				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one"])
+				// The SDK iterator returns normally when the abort lands while it awaits the
+				// next event, so the post-loop check must report the contract AbortError instead
+				// of resolving with the partial stream.
+				const error = await settled
+				expect(error).toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
 			})
 
 			it("should stop consuming the SDK stream once the external signal aborts the request", async () => {
@@ -748,18 +758,29 @@ describe("OpenAiNativeHandler", () => {
 					messages,
 					makeCreateMessageMetadata({ abortSignal: controller.signal }),
 				)
-				const collected = collectStream(stream)
+				const chunks: ApiStreamChunk[] = []
+				// Consume from before the abort so both halves of the contract are visible: the stream
+				// stops consuming before the post-abort event is processed, and it reports the
+				// cancellation as the contract AbortError.
+				const consumed = (async () => {
+					try {
+						for await (const chunk of stream) {
+							chunks.push(chunk)
+						}
+					} catch (error) {
+						return error
+					}
+					return undefined
+				})()
 				await tick()
 
 				controller.abort()
 
-				// The abort lands while the generator is parked, so the next iteration hands back
-				// the contract AbortError instead of the buffered "second" chunk: the stream stops
-				// consuming and reports the cancellation as an AbortError.
-				await expect(collected).rejects.toMatchObject({
+				expect(await consumed).toMatchObject({
 					name: "AbortError",
 					message: "The OpenAI Native request was aborted",
 				})
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["first"])
 			})
 
 			it("should detach the external abort listener on completion so a late abort cannot abort the request signal", async () => {
@@ -1203,13 +1224,16 @@ describe("OpenAiNativeHandler", () => {
 				expect(textChunks(chunks2).map((chunk) => chunk.text)).toEqual(["two-a", " two-b"])
 				expect(secondExternal.signal.aborted).toBe(false)
 
-				// Let the first request wind down; its stream simply ends.
+				// Let the first request wind down: it is the aborted one, so it hands back
+				// the contract AbortError rather than ending as a partial stream.
 				if (!firstGateOpen) {
 					throw new Error("expected the first stream gate to be ready")
 				}
 				firstGateOpen()
-				const chunks1 = await collected1
-				expect(textChunks(chunks1).map((chunk) => chunk.text)).toEqual(["one"])
+				await expect(collected1).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
 			})
 
 			it("should not issue a fallback POST when the SDK request was aborted by this request's own signal", async () => {

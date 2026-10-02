@@ -509,6 +509,14 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					yield outChunk
 				}
 			}
+
+			// The resolved openai SDK swallows the abort inside its iterator and returns
+			// normally, so a cancellation that lands while it awaits the next event never runs
+			// the in-loop check. Report the contract AbortError for that path too, otherwise
+			// createMessage resolves with a partial stream.
+			if (requestController.signal.aborted) {
+				throw createAbortError(this.providerName)
+			}
 		} catch (sdkErr: any) {
 			// If this request's own controller aborted and the SDK error is the
 			// cancellation itself — classified from the error alone via
