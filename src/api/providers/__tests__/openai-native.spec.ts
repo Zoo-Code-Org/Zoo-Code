@@ -753,8 +753,13 @@ describe("OpenAiNativeHandler", () => {
 
 				controller.abort()
 
-				const chunks = await collected
-				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["first"])
+				// The abort lands while the generator is parked, so the next iteration hands back
+				// the contract AbortError instead of the buffered "second" chunk: the stream stops
+				// consuming and reports the cancellation as an AbortError.
+				await expect(collected).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
 			})
 
 			it("should detach the external abort listener on completion so a late abort cannot abort the request signal", async () => {

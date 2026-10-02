@@ -498,9 +498,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			for await (const event of stream) {
-				// Check if request was aborted
+				// An abort observed mid-stream must hand back the contract AbortError instead of
+				// resolving with a partial stream: cancellation is identified through an error named
+				// "AbortError", the same way the inner loop and the SSE fallback path in this file do.
 				if (requestController.signal.aborted) {
-					break
+					throw createAbortError(this.providerName)
 				}
 
 				for await (const outChunk of this.processEvent(event, model)) {
