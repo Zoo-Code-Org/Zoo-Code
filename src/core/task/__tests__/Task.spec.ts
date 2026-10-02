@@ -630,12 +630,15 @@ describe("Cline", () => {
 				},
 			]
 			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			task.currentStreamingContentIndex = task.assistantMessageContent.length
 
 			expect(readiness()).toBe(false)
 			task.didCompleteReadingStream = true
+			expect(readiness()).toBe(true)
 			task.presentAssistantMessageLocked = true
 			expect(readiness()).toBe(false)
 			task.presentAssistantMessageLocked = false
+			expect(readiness()).toBe(true)
 			task.assistantMessageContent[0].partial = true
 			expect(readiness()).toBe(false)
 			task.assistantMessageContent[0].partial = false
