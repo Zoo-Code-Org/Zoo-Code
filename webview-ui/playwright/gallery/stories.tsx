@@ -12,6 +12,38 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"bedrock-output-budget": async ({ model = "anthropic.claude-opus-5" }) => {
+		const [{ AppProviders }, { ThinkingBudget }, { bedrockModels, providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ThinkingBudget"),
+			import("@roo-code/types"),
+		])
+		const apiModelId = model === "anthropic.claude-opus-4-8" ? model : "anthropic.claude-opus-5"
+		function Budget() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId,
+				enableReasoningEffort: true,
+			})
+			return (
+				<div className="w-[420px] p-4 flex flex-col gap-4 bg-vscode-editor-background">
+					<h2>{apiModelId}</h2>
+					<ThinkingBudget
+						apiConfiguration={config}
+						modelInfo={bedrockModels[apiModelId]}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<Budget />
+			</AppProviders>
+		)
+	},
 	"accessibility-contrast": async () => {
 		const { AccessibilityContrastGallery } =
 			await import("@/components/ui/__tests__/AccessibilityContrast.visual.fixture")

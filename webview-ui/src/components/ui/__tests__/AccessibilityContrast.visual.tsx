@@ -6,6 +6,7 @@ import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
 for (const theme of visualThemes) {
 	test(`audits representative controls in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
 		const component = mountedStory(await mount("accessibility-contrast"))
+		await page.addStyleTag({ content: "* { transition: none !important; }" })
 		await applyVisualTheme(page, theme)
 		const gallery = component
 
