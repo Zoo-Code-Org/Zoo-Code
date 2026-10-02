@@ -1680,6 +1680,54 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
 	})
 
+	describe("chat input effect and table striping settings", () => {
+		it("defaults to marquee and false when unset in getState and getStateToPostToWebview", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const state = await provider.getState()
+			const postedState = await provider.getStateToPostToWebview()
+
+			expect(state.chatInputEffect).toBe("marquee")
+			expect(state.tableStriped).toBe(false)
+			expect(postedState.chatInputEffect).toBe("marquee")
+			expect(postedState.tableStriped).toBe(false)
+		})
+
+		it("preserves an explicit marquee chat input effect", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("chatInputEffect", "marquee")
+
+			const state = await provider.getState()
+			const postedState = await provider.getStateToPostToWebview()
+
+			expect(state.chatInputEffect).toBe("marquee")
+			expect(postedState.chatInputEffect).toBe("marquee")
+		})
+
+		it("preserves a breathing chat input effect", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("chatInputEffect", "breathing")
+
+			const state = await provider.getState()
+			const postedState = await provider.getStateToPostToWebview()
+
+			expect(state.chatInputEffect).toBe("breathing")
+			expect(postedState.chatInputEffect).toBe("breathing")
+		})
+
+		it("preserves explicit true and false table striping", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.contextProxy.setValue("tableStriped", true)
+			expect((await provider.getState()).tableStriped).toBe(true)
+			expect((await provider.getStateToPostToWebview()).tableStriped).toBe(true)
+
+			await provider.contextProxy.setValue("tableStriped", false)
+			expect((await provider.getState()).tableStriped).toBe(false)
+			expect((await provider.getStateToPostToWebview()).tableStriped).toBe(false)
+		})
+	})
+
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"

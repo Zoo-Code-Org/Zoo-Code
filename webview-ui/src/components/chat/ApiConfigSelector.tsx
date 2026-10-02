@@ -97,14 +97,26 @@ export const ApiConfigSelector = ({
 			return (
 				<div
 					key={config.id}
-					onClick={() => handleSelect(config.id)}
 					className={cn(
-						"px-3 py-1.5 text-sm cursor-pointer flex items-center group",
-						"hover:bg-vscode-list-hoverBackground",
+						"px-3 py-1.5 text-sm flex items-center group",
 						isCurrentConfig &&
 							"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
 					)}>
-					<div className="flex-1 min-w-0 flex items-center gap-1 overflow-hidden">
+					<button
+						type="button"
+						aria-current={isCurrentConfig ? "true" : undefined}
+						onClick={() => handleSelect(config.id)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault()
+								handleSelect(config.id)
+							}
+						}}
+						className={cn(
+							"flex-1 min-w-0 flex items-center gap-1 overflow-hidden text-left bg-transparent border-0 p-0 font-[inherit] text-[inherit] cursor-pointer",
+							"hover:bg-vscode-list-hoverBackground",
+							"focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-vscode-focusBorder",
+						)}>
 						<span className="flex-shrink-0">{config.name}</span>
 						{config.modelId && (
 							<>
@@ -115,7 +127,7 @@ export const ApiConfigSelector = ({
 								</span>
 							</>
 						)}
-					</div>
+					</button>
 					<div className="flex items-center gap-1">
 						{isCurrentConfig && (
 							<div className="size-5 p-1 flex items-center justify-center">
@@ -180,8 +192,10 @@ export const ApiConfigSelector = ({
 							/>
 							{searchValue.length > 0 && (
 								<div className="absolute right-4 top-0 bottom-0 flex items-center justify-center">
-									<span
-										className="codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
+									<button
+										type="button"
+										aria-label={t("common:ui.clear_search")}
+										className="codicon codicon-close bg-transparent border-0 p-0 text-vscode-input-foreground opacity-50 hover:opacity-100 focus-visible:opacity-100 text-xs cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder rounded-sm"
 										onClick={() => setSearchValue("")}
 									/>
 								</div>
@@ -203,18 +217,18 @@ export const ApiConfigSelector = ({
 							{/* Pinned configs - sticky header */}
 							{pinnedConfigs.length > 0 && (
 								<div
+									data-testid="pinned-configs"
 									className={cn(
 										"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
 										unpinnedConfigs.length > 0 && "border-b border-vscode-dropdown-foreground/10",
-									)}
-									aria-label="Pinned configurations">
+									)}>
 									{pinnedConfigs.map((config) => renderConfigItem(config, true))}
 								</div>
 							)}
 
 							{/* Unpinned configs */}
 							{unpinnedConfigs.length > 0 && (
-								<div className="py-1" aria-label="All configurations">
+								<div data-testid="unpinned-configs" className="py-1">
 									{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
 								</div>
 							)}

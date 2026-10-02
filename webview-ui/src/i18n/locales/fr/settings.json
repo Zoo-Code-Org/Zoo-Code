@@ -1122,6 +1122,12 @@
 			"label": "Exiger {{primaryMod}}+Entrée pour envoyer les messages",
 			"description": "Lorsqu'activé, tu dois appuyer sur {{primaryMod}}+Entrée pour envoyer des messages au lieu de simplement Entrée"
 		},
+		"chatInputEffect": {
+			"label": "Effet de la zone de saisie pendant le travail de l'IA",
+			"marquee": "Défilement (bordure rotative)",
+			"breathing": "Respiration (lueur pulsante)",
+			"description": "Choisissez l'effet d'animation de la bordure de la zone de saisie pendant que l'IA travaille"
+		},
 		"chatFontSize": {
 			"label": "Taille de police du chat",
 			"description": "Définissez la taille de police (en pixels) du chat Zoo Code. Laissez la valeur par défaut pour correspondre à la taille de police de VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Fermer automatiquement les nouveaux fichiers créés",
 			"description": "Quand cette option est activée, les onglets des fichiers que Zoo a créés (plutôt que modifiés) sont également fermés automatiquement après l'acceptation de la modification."
+		},
+		"tableStriped": {
+			"label": "Lignes de tableau alternées",
+			"description": "Appliquer des couleurs d'arrière-plan alternées aux lignes des tableaux markdown"
 		}
 	},
 	"skills": {

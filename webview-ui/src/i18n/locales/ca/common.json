@@ -21,6 +21,7 @@
 	},
 	"ui": {
 		"search_placeholder": "Cerca...",
+		"clear_search": "Neteja la cerca",
 		"no_results": "No s'han trobat resultats"
 	},
 	"mermaid": {

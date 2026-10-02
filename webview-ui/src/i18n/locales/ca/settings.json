@@ -1122,6 +1122,12 @@
 			"label": "Requereix {{primaryMod}}+Intro per enviar missatges",
 			"description": "Quan estigui activat, has de prémer {{primaryMod}}+Intro per enviar missatges en lloc de només Intro"
 		},
+		"chatInputEffect": {
+			"label": "Efecte de la caixa d'entrada mentre l'IA treballa",
+			"marquee": "Efecte marquesina (vora giratòria)",
+			"breathing": "Efecte de respiració (brillantor pulsant)",
+			"description": "Tria l'efecte d'animació de la vora de la caixa d'entrada mentre l'IA treballa"
+		},
 		"chatFontSize": {
 			"label": "Mida de lletra del xat",
 			"description": "Defineix la mida de la lletra (en píxels) del xat de Zoo Code. Deixa-ho al valor per defecte per coincidir amb la mida de lletra del VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Tanca automaticament els fitxers nous creats",
 			"description": "Quan esta activat, les pestanyes dels fitxers que Zoo ha creat (en lloc de modificar) tambe es tanquen automaticament despres d'acceptar el canvi."
+		},
+		"tableStriped": {
+			"label": "Files de taula ratllades",
+			"description": "Aplica colors de fons alterns a les files de les taules de markdown"
 		}
 	},
 	"skills": {

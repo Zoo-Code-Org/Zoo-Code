@@ -1122,6 +1122,12 @@
 			"label": "Vereist {{primaryMod}}+Enter om berichten te versturen",
 			"description": "Wanneer ingeschakeld, moet je {{primaryMod}}+Enter indrukken om berichten te versturen in plaats van alleen Enter"
 		},
+		"chatInputEffect": {
+			"label": "Invoervak-effect terwijl AI werkt",
+			"marquee": "Marquee (draaiende rand)",
+			"breathing": "Ademen (pulserende gloed)",
+			"description": "Kies het randanimatie-effect op het chat-invoervak terwijl AI werkt"
+		},
 		"chatFontSize": {
 			"label": "Lettergrootte van chat",
 			"description": "Stel de lettergrootte (in pixels) in voor de Zoo Code-chat. Laat op de standaardwaarde staan om overeen te komen met de lettergrootte van VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Automatisch sluiten van nieuw gemaakte bestanden",
 			"description": "Wanneer ingeschakeld, worden tabbladen van bestanden die Zoo heeft aangemaakt (in plaats van gewijzigd) ook automatisch gesloten nadat de wijziging is geaccepteerd."
+		},
+		"tableStriped": {
+			"label": "Gestreepte tabelrijen",
+			"description": "Pas afwisselende achtergrondkleuren toe op rijen in markdown-tabellen"
 		}
 	},
 	"skills": {

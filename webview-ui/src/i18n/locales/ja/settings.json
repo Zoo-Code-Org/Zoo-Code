@@ -1122,6 +1122,12 @@
 			"label": "メッセージを送信するには{{primaryMod}}+Enterが必要",
 			"description": "有効にすると、Enterだけでなく{{primaryMod}}+Enterを押してメッセージを送信する必要があります"
 		},
+		"chatInputEffect": {
+			"label": "AI作業中の入力ボックスエフェクト",
+			"marquee": "マーキー（回転する枠線）",
+			"breathing": "ブリージング（脈動する光）",
+			"description": "AI作業中にチャット入力ボックスの枠線アニメーション効果を選択"
+		},
 		"chatFontSize": {
 			"label": "チャットのフォントサイズ",
 			"description": "Zoo Code チャットのフォントサイズ（ピクセル単位）を設定します。VS Code のフォントサイズに合わせるには既定値のままにしてください。",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "新しく作成されたファイルを自動的に閉じる",
 			"description": "有効にすると、Zooが作成した（変更ではなく）ファイルのタブも、変更を承認した後に自動的に閉じられます。"
+		},
+		"tableStriped": {
+			"label": "表の行を縞模様にする",
+			"description": "Markdown テーブルの行に交互の背景色を適用します"
 		}
 	},
 	"skills": {

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
+import { render, screen, fireEvent, waitFor, within } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
 import { providerIdentifiers } from "@roo-code/types"
 
@@ -237,11 +237,10 @@ describe("ApiConfigSelector", () => {
 
 		expect(searchInput.value).toBe("test")
 
-		// Find and click the X button
-		const clearButton = screen.getByTestId("popover-content").querySelector(".cursor-pointer")
-		if (clearButton) {
-			fireEvent.click(clearButton)
-		}
+		// Find and click the clear (X) button, which is now a semantic button
+		const clearButton = screen.getByLabelText("common:ui.clear_search")
+		expect(clearButton.tagName).toBe("BUTTON")
+		fireEvent.click(clearButton)
 
 		await waitFor(() => {
 			expect(searchInput.value).toBe("")
@@ -257,6 +256,39 @@ describe("ApiConfigSelector", () => {
 		const config2 = screen.getByText("Config 2")
 		fireEvent.click(config2)
 
+		expect(mockOnChange).toHaveBeenCalledWith("config2")
+	})
+
+	test("renders each config with a dedicated, keyboard-operable selection button", () => {
+		render(<ApiConfigSelector {...defaultProps} />)
+		fireEvent.click(screen.getByTestId("dropdown-trigger"))
+
+		const content = screen.getByTestId("popover-content")
+
+		// Selection is a dedicated, keyboard-focusable button (not a bare div/span).
+		const selectedButton = within(content).getByText("Config 1").closest("button") as HTMLButtonElement
+		expect(selectedButton).toBeTruthy()
+		expect(selectedButton.tagName).toBe("BUTTON")
+		// The selected state is announced on the control.
+		expect(selectedButton.getAttribute("aria-current")).toBe("true")
+
+		const otherButton = within(content).getByText("Config 2").closest("button") as HTMLButtonElement
+		expect(otherButton).toBeTruthy()
+		expect(otherButton.getAttribute("aria-current")).toBeNull()
+	})
+
+	test("selects a config with the keyboard", () => {
+		render(<ApiConfigSelector {...defaultProps} />)
+		fireEvent.click(screen.getByTestId("dropdown-trigger"))
+
+		const content = screen.getByTestId("popover-content")
+		const selectionButton = within(content).getByText("Config 2").closest("button") as HTMLButtonElement
+		expect(selectionButton).toBeTruthy()
+
+		// The selection control is keyboard-focusable (native button tab order).
+		expect(selectionButton.tabIndex).toBe(0)
+
+		fireEvent.keyDown(selectionButton, { key: "Enter" })
 		expect(mockOnChange).toHaveBeenCalledWith("config2")
 	})
 
@@ -428,9 +460,11 @@ describe("ApiConfigSelector", () => {
 		const searchInput = screen.getByPlaceholderText("common:ui.search_placeholder") as HTMLInputElement
 		fireEvent.change(searchInput, { target: { value: "Config" } })
 
-		// Pin a config
-		const config2Row = screen.getByText("Config 2").closest("div")
-		const pinButton = config2Row?.querySelector("button")
+		// Pin a config (target the pin button, not the selection button)
+		const config2Row = screen.getByText("Config 2").closest('[role="group"]') as HTMLElement | null
+		const pinButton = Array.from(config2Row?.querySelectorAll("button") ?? []).find((btn) =>
+			btn.querySelector(".codicon-pin"),
+		)
 		if (pinButton) {
 			fireEvent.click(pinButton)
 		}
@@ -471,7 +505,6 @@ describe("ApiConfigSelector", () => {
 		// Check for pinned configs sticky header
 		const pinnedStickyHeader = scrollContainer?.querySelector(".sticky.top-0.z-10.bg-vscode-dropdown-background")
 		expect(pinnedStickyHeader).toBeInTheDocument()
-		expect(pinnedStickyHeader).toHaveAttribute("aria-label", "Pinned configurations")
 
 		// Check for Config 1, 2, 3 being visible in the sticky header (pinned)
 		expect(screen.getAllByText("Config 1").length).toBeGreaterThan(0)
@@ -491,7 +524,7 @@ describe("ApiConfigSelector", () => {
 		}
 
 		// Check for unpinned configs section
-		const unpinnedSection = scrollContainer?.querySelector('[aria-label="All configurations"]')
+		const unpinnedSection = scrollContainer?.querySelector('[data-testid="unpinned-configs"]')
 		expect(unpinnedSection).toBeInTheDocument()
 
 		// Verify separator exists as border on pinned section when unpinned configs exist
@@ -527,7 +560,7 @@ describe("ApiConfigSelector", () => {
 		expect(pinnedSection).not.toBeInTheDocument()
 
 		// Should have unpinned configs section with all configs
-		const unpinnedSection = scrollContainer?.querySelector('[aria-label="All configurations"]')
+		const unpinnedSection = scrollContainer?.querySelector('[data-testid="unpinned-configs"]')
 		expect(unpinnedSection).toBeInTheDocument()
 
 		// All configs should be in the unpinned section

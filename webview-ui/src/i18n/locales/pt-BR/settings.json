@@ -1122,6 +1122,12 @@
 			"label": "Requer {{primaryMod}}+Enter para enviar mensagens",
 			"description": "Quando ativado, você deve pressionar {{primaryMod}}+Enter para enviar mensagens em vez de apenas Enter"
 		},
+		"chatInputEffect": {
+			"label": "Efeito da caixa de entrada enquanto a IA trabalha",
+			"marquee": "Marquee (borda giratória)",
+			"breathing": "Respiração (brilho pulsante)",
+			"description": "Escolha o efeito de animação da borda na caixa de entrada do chat enquanto a IA trabalha"
+		},
 		"chatFontSize": {
 			"label": "Tamanho da fonte do chat",
 			"description": "Defina o tamanho da fonte (em pixels) do chat do Zoo Code. Deixe no padrão para corresponder ao tamanho da fonte do VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Fechar automaticamente novos arquivos criados",
 			"description": "Quando ativada, as abas de arquivos que o Zoo criou (em vez de modificar) tambem sao fechadas automaticamente apos aceitar a modificacao."
+		},
+		"tableStriped": {
+			"label": "Linhas de tabela listradas",
+			"description": "Aplica cores de fundo alternadas às linhas em tabelas markdown"
 		}
 	},
 	"skills": {

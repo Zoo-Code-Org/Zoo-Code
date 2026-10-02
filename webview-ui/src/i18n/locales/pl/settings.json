@@ -1122,6 +1122,12 @@
 			"label": "Wymagaj {{primaryMod}}+Enter do wysyłania wiadomości",
 			"description": "Po włączeniu musisz nacisnąć {{primaryMod}}+Enter, aby wysłać wiadomości, zamiast tylko Enter"
 		},
+		"chatInputEffect": {
+			"label": "Efekt pola wprowadzania podczas pracy AI",
+			"marquee": "Marquee (obracająca się ramka)",
+			"breathing": "Oddychanie (pulsująca poświata)",
+			"description": "Wybierz efekt animacji ramki pola wprowadzania czatu podczas pracy AI"
+		},
 		"chatFontSize": {
 			"label": "Rozmiar czcionki czatu",
 			"description": "Ustaw rozmiar czcionki (w pikselach) dla czatu Zoo Code. Pozostaw wartość domyślną, aby dopasować ją do rozmiaru czcionki VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Automatycznie zamykaj nowo utworzone pliki",
 			"description": "Gdy wlaczone, karty plikow, ktore Zoo utworzylo (zamiast zmodyfikowalo), sa rowniez automatycznie zamykane po zaakceptowaniu zmiany."
+		},
+		"tableStriped": {
+			"label": "Pasiaste wiersze tabeli",
+			"description": "Zastosuj naprzemienne kolory tła do wierszy w tabelach markdown"
 		}
 	},
 	"skills": {

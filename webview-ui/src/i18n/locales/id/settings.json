@@ -1122,6 +1122,12 @@
 			"label": "Memerlukan {{primaryMod}}+Enter untuk mengirim pesan",
 			"description": "Ketika diaktifkan, kamu harus menekan {{primaryMod}}+Enter untuk mengirim pesan alih-alih hanya Enter"
 		},
+		"chatInputEffect": {
+			"label": "Efek kotak input saat AI bekerja",
+			"marquee": "Marquee (batas berputar)",
+			"breathing": "Bernapas (cahaya berdenyut)",
+			"description": "Pilih efek animasi batas pada kotak input chat saat AI bekerja"
+		},
 		"chatFontSize": {
 			"label": "Ukuran font obrolan",
 			"description": "Atur ukuran font (dalam piksel) untuk obrolan Zoo Code. Biarkan pada nilai default agar sesuai dengan ukuran font VS Code.",
@@ -1138,6 +1144,10 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Tutup otomatis file baru yang dibuat",
 			"description": "Saat diaktifkan, tab untuk file yang dibuat Zoo (bukan dimodifikasi) juga ditutup secara otomatis setelah perubahan diterima."
+		},
+		"tableStriped": {
+			"label": "Baris tabel bergaris",
+			"description": "Terapkan warna latar belakang bergantian pada baris di tabel markdown"
 		}
 	},
 	"skills": {
