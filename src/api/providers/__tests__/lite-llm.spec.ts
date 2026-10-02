@@ -1424,6 +1424,9 @@ describe("LiteLLMHandler", () => {
 		})
 
 		it("should merge signal and timeoutMs together", async () => {
+			// The SDK call receives the remaining budget, so pin the clock: without
+			// fake timers instrumentation drift makes the remaining timeout 9999.
+			vi.useFakeTimers()
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
@@ -1431,6 +1434,7 @@ describe("LiteLLMHandler", () => {
 				expect.objectContaining({ model: expect.any(String) }),
 				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
 			)
+			vi.useRealTimers()
 		})
 
 		it("should work without options (backward compatible)", async () => {
