@@ -1904,21 +1904,28 @@ describe("LiteLLMHandler", () => {
 
 		it("passes only the remaining timeout budget to the SDK after discovery", async () => {
 			// Discovery consumes part of the configured timeout: the SDK call
-			// must receive the remaining budget, not the full timeoutMs.
-			vi.mocked(getModels).mockImplementationOnce(
-				() =>
-					new Promise<ModelRecord>((resolve) => {
-						setTimeout(() => resolve({ [litellmDefaultModelId]: litellmDefaultModelInfo }), 50)
-					}),
-			)
-			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+			// must receive the remaining budget, not the full timeoutMs. Pin the clock
+			// so coverage or Stryker instrumentation drift cannot move the measured budget.
+			vi.useFakeTimers()
+			try {
+				vi.mocked(getModels).mockImplementationOnce(
+					() =>
+						new Promise<ModelRecord>((resolve) => {
+							setTimeout(() => resolve({ [litellmDefaultModelId]: litellmDefaultModelInfo }), 50)
+						}),
+				)
+				mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
 
-			const result = await handler.completePrompt("test prompt", { timeoutMs: 500 })
+				const pending = handler.completePrompt("test prompt", { timeoutMs: 500 })
+				await vi.advanceTimersByTimeAsync(50)
+				const result = await pending
 
-			expect(result).toBe("ok")
-			const createOptions = mockCreate.mock.calls[0]?.[1] as { timeout?: number } | undefined
-			expect(createOptions?.timeout).toBeGreaterThan(400)
-			expect(createOptions?.timeout).toBeLessThan(500)
+				expect(result).toBe("ok")
+				const createOptions = mockCreate.mock.calls[0]?.[1] as { timeout?: number } | undefined
+				expect(createOptions?.timeout).toBe(450)
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("preserves the model-fetch error when completePrompt's discovery fails without a signal", async () => {
