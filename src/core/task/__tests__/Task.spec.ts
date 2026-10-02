@@ -636,12 +636,72 @@ describe("Cline", () => {
 			task.presentAssistantMessageLocked = true
 			expect(readiness()).toBe(false)
 			task.presentAssistantMessageLocked = false
+			expect(readiness()).toBe(false)
+			task.currentStreamingContentIndex = task.assistantMessageContent.length
 			task.assistantMessageContent[0].partial = true
 			expect(readiness()).toBe(false)
 			task.assistantMessageContent[0].partial = false
 			task.userMessageContent = [{ type: "tool_result", tool_use_id: "different_call", content: "finished" }]
 			expect(readiness()).toBe(false)
 			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			expect(readiness()).toBe(true)
+		})
+
+		it("requires an identifiable tool call and matches sanitized result IDs", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "tool turn identity test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			const finishPresentation = () => {
+				task.currentStreamingContentIndex = task.assistantMessageContent.length
+			}
+			task.didCompleteReadingStream = true
+
+			task.assistantMessageContent = [{ type: "text", content: "finished", partial: false }]
+			finishPresentation()
+			expect(readiness()).toBe(false)
+
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+			]
+			finishPresentation()
+			expect(readiness()).toBe(false)
+
+			task.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "",
+					name: "mcp_server_tool",
+					serverName: "server",
+					toolName: "tool",
+					arguments: {},
+					partial: false,
+				},
+			]
+			finishPresentation()
+			expect(readiness()).toBe(false)
+
+			const mcpToolUse = task.assistantMessageContent[0]
+			if (mcpToolUse.type !== "mcp_tool_use") {
+				throw new Error("Expected MCP tool use fixture")
+			}
+			mcpToolUse.id = "functions.read_file:0"
+			task.userMessageContent = [
+				{ type: "tool_result", tool_use_id: "functions.read_file:0", content: "finished" },
+			]
+			expect(readiness()).toBe(false)
+
+			task.userMessageContent = [
+				{ type: "tool_result", tool_use_id: "functions_read_file_0", content: "finished" },
+			]
 			expect(readiness()).toBe(true)
 		})
 
@@ -667,11 +727,13 @@ describe("Cline", () => {
 					content: "File: README.md\nfinished",
 				})
 				// Reproduce the persisted field symptom: the tool result exists and
-				// presentation is no longer running, but the one-shot readiness latch
-				// never flips, so the old loop waits forever before the next request.
+				// presentation consumed the completed block, but the one-shot readiness
+				// latch never flips, so the old loop waits forever before the next request.
+				task.currentStreamingContentIndex = task.assistantMessageContent.length
 				task.userMessageContentReady = false
 			})
 
+			let continuationUserContent: Anthropic.Messages.ContentBlockParam[] | undefined
 			const attemptApiRequestSpy = vi
 				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
@@ -681,6 +743,11 @@ describe("Cline", () => {
 					]),
 				)
 				.mockImplementationOnce(() => {
+					const continuationMessage = task.apiConversationHistory.at(-1)
+					continuationUserContent =
+						continuationMessage?.role === "user" && Array.isArray(continuationMessage.content)
+							? continuationMessage.content
+							: undefined
 					throw new Error("continuation request reached")
 				})
 
@@ -693,6 +760,15 @@ describe("Cline", () => {
 			try {
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(continuationUserContent).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "tool_result",
+							tool_use_id: "call_read",
+							content: "File: README.md\nfinished",
+						}),
+					]),
+				)
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
 			}

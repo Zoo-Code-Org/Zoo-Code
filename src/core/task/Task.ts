@@ -573,7 +573,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * final, and every tool call has its matching result.
 	 */
 	private hasCompleteToolResultsForCurrentTurn(): boolean {
-		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+		if (
+			!this.didCompleteReadingStream ||
+			this.presentAssistantMessageLocked ||
+			this.currentStreamingContentIndex < this.assistantMessageContent.length
+		) {
 			return false
 		}
 
