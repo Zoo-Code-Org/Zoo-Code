@@ -460,6 +460,8 @@
 		"headerName": "Nome do cabeçalho",
 		"headerValue": "Valor do cabeçalho",
 		"noCustomHeaders": "Nenhum cabeçalho personalizado definido. Clique no botão + para adicionar um.",
+		"extraBody": "Corpo adicional",
+		"extraBodyDescription": "Objeto JSON opcional mesclado aos corpos das solicitações de API. Os campos gerenciados pelo Zoo Code, como model, messages, tools e stream, não podem ser sobrescritos. Não inclua segredos.",
 		"unboundApiKey": "Chave de API Unbound",
 		"getUnboundApiKey": "Obter chave de API Unbound",
 		"requestyApiKey": "Chave de API Requesty",
@@ -1036,6 +1038,11 @@
 		"modelId": "Você deve fornecer um ID de modelo válido.",
 		"modelSelector": "Você deve fornecer um seletor de modelo válido.",
 		"openAi": "Você deve fornecer uma URL base, chave de API e ID de modelo válidos.",
+		"openAiExtraBody": {
+			"invalidJson": "O corpo adicional deve conter um JSON válido.",
+			"objectRequired": "O corpo adicional deve ser um objeto JSON.",
+			"reservedKeys": "O corpo adicional não pode sobrescrever os campos gerenciados pelo Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Formato de ARN inválido. Por favor, verifique os requisitos de formato.",
 			"regionMismatch": "Aviso: A região em seu ARN ({{arnRegion}}) não corresponde à região selecionada ({{region}}). Isso pode causar problemas de acesso. O provedor usará a região do ARN."

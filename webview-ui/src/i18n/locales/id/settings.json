@@ -460,6 +460,8 @@
 		"headerName": "Nama header",
 		"headerValue": "Nilai header",
 		"noCustomHeaders": "Tidak ada header kustom yang didefinisikan. Klik tombol + untuk menambahkan satu.",
+		"extraBody": "Body Tambahan",
+		"extraBodyDescription": "Objek JSON opsional yang digabungkan ke body permintaan API. Field yang dikelola Zoo Code seperti model, messages, tools, dan stream tidak dapat ditimpa. Jangan sertakan rahasia.",
 		"unboundApiKey": "Unbound API Key",
 		"getUnboundApiKey": "Dapatkan Unbound API Key",
 		"requestyApiKey": "Requesty API Key",
@@ -1036,6 +1038,11 @@
 		"modelId": "Kamu harus menyediakan model ID yang valid.",
 		"modelSelector": "Kamu harus menyediakan model selector yang valid.",
 		"openAi": "Kamu harus menyediakan base URL, API key, dan model ID yang valid.",
+		"openAiExtraBody": {
+			"invalidJson": "Body Tambahan harus berisi JSON yang valid.",
+			"objectRequired": "Body Tambahan harus berupa objek JSON.",
+			"reservedKeys": "Body Tambahan tidak dapat menimpa field yang dikelola Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Format ARN tidak valid. Silakan periksa persyaratan format.",
 			"regionMismatch": "Peringatan: Region di ARN kamu ({{arnRegion}}) tidak cocok dengan region yang kamu pilih ({{region}}). Ini dapat menyebabkan masalah akses. Provider akan menggunakan region dari ARN."

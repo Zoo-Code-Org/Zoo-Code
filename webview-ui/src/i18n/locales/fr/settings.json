@@ -460,6 +460,8 @@
 		"headerName": "Nom de l'en-tête",
 		"headerValue": "Valeur de l'en-tête",
 		"noCustomHeaders": "Aucun en-tête personnalisé défini. Cliquez sur le bouton + pour en ajouter un.",
+		"extraBody": "Corps supplémentaire",
+		"extraBodyDescription": "Objet JSON facultatif fusionné avec le corps des requêtes API. Les champs gérés par Zoo Code, tels que model, messages, tools et stream, ne peuvent pas être remplacés. N'incluez pas de secrets.",
 		"unboundApiKey": "Clé API Unbound",
 		"getUnboundApiKey": "Obtenir la clé API Unbound",
 		"requestyApiKey": "Clé API Requesty",
@@ -1036,6 +1038,11 @@
 		"modelId": "Vous devez fournir un ID de modèle valide.",
 		"modelSelector": "Vous devez fournir un sélecteur de modèle valide.",
 		"openAi": "Vous devez fournir une URL de base, une clé API et un ID de modèle valides.",
+		"openAiExtraBody": {
+			"invalidJson": "Le corps supplémentaire doit contenir un JSON valide.",
+			"objectRequired": "Le corps supplémentaire doit être un objet JSON.",
+			"reservedKeys": "Le corps supplémentaire ne peut pas remplacer les champs gérés par Zoo Code : {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Format ARN invalide. Veuillez vérifier les exigences de format.",
 			"regionMismatch": "Attention : La région dans votre ARN ({{arnRegion}}) ne correspond pas à votre région sélectionnée ({{region}}). Cela peut causer des problèmes d'accès. Le fournisseur utilisera la région de l'ARN."
