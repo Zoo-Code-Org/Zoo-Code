@@ -1339,7 +1339,7 @@ describe("OpenAiNativeHandler", () => {
 				// already-aborted signal (so a real fetch would reject instead of issuing a
 				// second POST) and the stream yields nothing after cancellation.
 				const chunks = await collected
-				expect(mockFetch).toHaveBeenCalled()
+				expect(mockFetch).toHaveBeenCalledTimes(1)
 				const fetchOptions = mockFetch.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
 				expect(fetchOptions?.signal).toBeInstanceOf(AbortSignal)
 				expect(fetchOptions?.signal?.aborted).toBe(true)
