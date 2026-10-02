@@ -1,9 +1,9 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
-import * as lockfile from "proper-lockfile"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import { acquireFileLock } from "./fileLock"
 import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../services/file-safety/safeWriteText"
 
 /**
@@ -60,40 +60,21 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	}
 
 	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
-	// the lock by the given path (realpath is false below because the file may
-	// not exist yet), so a symlink alias and its referent would otherwise take
-	// two distinct locks for one underlying file — a concurrent merge through
+	// the lock by the given path (realpath is false in acquireFileLock because the
+	// file may not exist yet), so a symlink alias and its referent would otherwise
+	// take two distinct locks for one underlying file — a concurrent merge through
 	// both aliases could then read the same JSON and overwrite one update.
-	// Locking the resolved referent coordinates every alias through one lock.
+	// Locking the resolved referent coordinates every alias through one lock, and
+	// acquireFileLock keeps the staleness/retry protocol identical to every other
+	// holder of the same advisory lock (for example task-history deletion).
 	// resolvePublishTarget tolerates a not-yet-existing file (it returns the
 	// given path on ENOENT), preserving the previous create-from-absent flow.
 	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 
-	// Acquire the lock before any file operations
-	try {
-		releaseLock = await lockfile.lock(resolvedTargetPath, {
-			stale: LOCK_STALE_MS,
-			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
-			realpath: false, // resolvedTargetPath is already the referent; the file may still not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
-			onCompromised: (err) => {
-				console.error(`Lock at ${resolvedTargetPath} was compromised:`, err)
-				throw err
-			},
-		})
-	} catch (lockError) {
-		// If lock acquisition fails, we throw immediately.
-		// The releaseLock remains a no-op, so the finally block in the main file operations
-		// try-catch-finally won't try to release an unacquired lock if this path is taken.
-		console.error(`Failed to acquire lock for ${resolvedTargetPath}:`, lockError)
-		throw lockError
-	}
+	// Acquire the lock before any file operations. If acquisition fails it throws
+	// immediately, and releaseLock stays a no-op so the finally block does not try
+	// to release an unacquired lock.
+	releaseLock = await acquireFileLock(resolvedTargetPath)
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
@@ -201,7 +182,5 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		stringifyStream.pipe(fileWriteStream)
 	})
 }
-
-export const LOCK_STALE_MS = 31_000
 
 export { safeWriteJson }

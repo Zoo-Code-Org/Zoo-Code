@@ -218,6 +218,13 @@ type AssistantMessagePersistenceCancellation = {
 	resolve: () => void
 }
 
+export class PendingActionSettlementError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
+		this.name = "PendingActionSettlementError"
+	}
+}
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -612,7 +619,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
-		this.initialStatus = initialStatus
+		this.initialStatus = initialStatus ?? historyItem?.status
 		this.pendingAction = historyItem?.pendingAction
 
 		// Store the task's mode and API config name when it's created.
@@ -995,6 +1002,84 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} else if (storedPendingAction.actionId !== actionId) {
 			this.pendingAction = storedPendingAction
 		}
+	}
+
+	/**
+	 * An interrupted task cannot legally delegate, so a staged create-subtask
+	 * action is a durable rejection marker rather than replayable work. The
+	 * constructor-injected history item can be stale, so the persisted record
+	 * is refreshed first and the refreshed action is the one settled. A failed
+	 * refresh, lookup, or settlement stops replay instead of risking another
+	 * doomed child. A refreshed action kept for replay must also appear in the
+	 * loaded conversation, because a replayed acknowledgment without a matching
+	 * tool use could answer the wrong tool call.
+	 */
+	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
+		if (this.initialStatus !== "interrupted") {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
+			)
+		}
+
+		try {
+			await provider.taskHistoryStore.reconcile({ forceRefresh: true })
+		} catch (error) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to refresh task history for task ${this.taskId}`,
+				{ cause: error },
+			)
+		}
+
+		const refreshedItem = provider.taskHistoryStore.get(this.taskId)
+		if (!refreshedItem) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} not found in refreshed task history`,
+			)
+		}
+		this.pendingAction = refreshedItem.pendingAction
+
+		const action = refreshedItem.pendingAction
+		if (action?.kind === "create_subtask") {
+			let authoritative: HistoryItem
+			try {
+				authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(
+					this.taskId,
+					action.actionId,
+				)
+			} catch (error) {
+				throw new PendingActionSettlementError(
+					`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
+					{ cause: error },
+				)
+			}
+			this.pendingAction = authoritative.pendingAction
+		}
+
+		const replayAction = this.pendingAction
+		if (replayAction && !this.loadedConversationContainsToolUse(replayAction.actionId)) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Refreshed action ${replayAction.actionId} for task ${this.taskId} is missing from the loaded conversation`,
+			)
+		}
+	}
+
+	/**
+	 * A replayed acknowledgment is safe only when its tool call is part of the
+	 * conversation the task just loaded. A tool result for an unmatched action
+	 * id could otherwise answer a tool call the model never made here.
+	 */
+	private loadedConversationContainsToolUse(actionId: string): boolean {
+		return this.apiConversationHistory.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "tool_use" && block.id === actionId),
+		)
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
@@ -2386,6 +2471,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This is important in case the user deletes messages without resuming
 			// the task first.
 			this.hydrateApiConversationHistory(savedApiConversationHistory)
+			await this.settleInterruptedCreateSubtaskBeforeReplay()
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(
