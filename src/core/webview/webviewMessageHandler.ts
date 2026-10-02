@@ -1625,9 +1625,19 @@ export const webviewMessageHandler = async (
 				break
 			}
 
+			const task = provider.getCurrentTask()
+			// A request made for another task must not be answered from the current one.
+			const isRequestedTask = message.taskId === undefined || message.taskId === task?.taskId
+			const id = { messageId: message.messageId, ts }
+
 			await provider.postMessageToWebview({
 				type: "originalContent",
-				originalContentInfo: { ts, content: findOriginalContent(provider.getCurrentTask()?.clineMessages, ts) },
+				originalContentInfo: {
+					ts,
+					messageId: message.messageId,
+					taskId: message.taskId,
+					content: isRequestedTask ? findOriginalContent(task?.clineMessages, id) : null,
+				},
 			})
 			break
 		}

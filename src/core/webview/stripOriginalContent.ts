@@ -1,7 +1,8 @@
 import type { ClineMessage, ExtensionMessage } from "@roo-code/types"
 
-// Keyed by message object; only valid while the text is unchanged (partial messages are updated in place).
-const cache = new WeakMap<ClineMessage, { source: string; result: ClineMessage }>()
+// Keyed by message object; only the transformed text is cached (valid while the source text is unchanged), so
+// metadata such as `isAnswered` and `partial` is always taken from the current message.
+const cache = new WeakMap<ClineMessage, { source: string; strippedText: string | undefined }>()
 
 function isToolMessage(message: ClineMessage): boolean {
 	return (message.type === "ask" && message.ask === "tool") || (message.type === "say" && message.say === "tool")
@@ -15,32 +16,42 @@ export function omitOriginalContent(message: ClineMessage): ClineMessage {
 		return message
 	}
 
-	const cached = cache.get(message)
+	let entry = cache.get(message)
 
-	if (cached && cached.source === text) {
-		return cached.result
+	if (!entry || entry.source !== text) {
+		entry = { source: text, strippedText: stripOriginalContentFromText(text) }
+		cache.set(message, entry)
 	}
 
-	let result = message
+	return entry.strippedText === undefined ? message : { ...message, text: entry.strippedText }
+}
 
+function stripOriginalContentFromText(text: string): string | undefined {
 	try {
 		const { originalContent, ...rest } = JSON.parse(text) as Record<string, unknown>
 
 		// An empty original (new file) is free and still means "has an original" to the webview, so it stays.
 		if (typeof originalContent === "string" && originalContent.length > 0) {
-			result = { ...message, text: JSON.stringify({ ...rest, originalContentLength: originalContent.length }) }
+			return JSON.stringify({ ...rest, originalContentLength: originalContent.length })
 		}
 	} catch {
 		// Not valid JSON (e.g. a truncated partial message): leave it untouched.
 	}
 
-	cache.set(message, { source: text, result })
-	return result
+	return undefined
 }
 
-/** The `originalContent` of the tool message with this `ts`, or null when there is none. */
-export function findOriginalContent(messages: ClineMessage[] | undefined, ts: number): string | null {
-	const message = messages?.find((m) => m.ts === ts && isToolMessage(m))
+/**
+ * The `originalContent` of a tool message, or null when there is none. `ts` is not unique (two messages can be
+ * created in the same millisecond), so `messageId` is preferred; `ts` only serves messages persisted without one.
+ */
+export function findOriginalContent(
+	messages: ClineMessage[] | undefined,
+	id: { messageId?: string; ts: number },
+): string | null {
+	const message = messages?.find(
+		(m) => isToolMessage(m) && (id.messageId !== undefined ? m.messageId === id.messageId : m.ts === id.ts),
+	)
 
 	if (!message?.text) {
 		return null

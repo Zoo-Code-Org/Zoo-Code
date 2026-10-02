@@ -112,8 +112,8 @@ export interface ExtensionMessage {
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
-	/** For originalContent: the pre-edit file content of the tool message with this ts (null when unavailable) */
-	originalContentInfo?: { ts: number; content: string | null }
+	/** For originalContent: the pre-edit file content of the requested tool message (null when unavailable) */
+	originalContentInfo?: { ts: number; messageId?: string; taskId?: string; content: string | null }
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
 		type: "WAIT_TIMEOUT" | "INIT_TIMEOUT"
@@ -700,6 +700,7 @@ export interface WebviewMessage {
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
+	messageId?: string
 	restoreCheckpoint?: boolean
 	historyPreviewCollapsed?: boolean
 	filters?: { type?: string; search?: string; tags?: string[] }

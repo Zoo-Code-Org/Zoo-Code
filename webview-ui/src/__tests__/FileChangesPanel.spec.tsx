@@ -68,10 +68,10 @@ function createFileEditMessage(
 	}
 }
 
-function renderPanel(messages: ClineMessage[] | undefined) {
+function renderPanel(messages: ClineMessage[] | undefined, taskId?: string) {
 	return render(
 		<TranslationProvider>
-			<FileChangesPanel clineMessages={messages} />
+			<FileChangesPanel clineMessages={messages} taskId={taskId} />
 		</TranslationProvider>,
 	)
 }
@@ -242,7 +242,9 @@ describe("FileChangesPanel", () => {
 			fireEvent.click(screen.getByTestId("accordian-toggle"))
 
 			expect(requestsOfType("readFileContent")).toEqual([{ type: "readFileContent", text: "src/foo.ts" }])
-			expect(requestsOfType("readOriginalContent")).toEqual([{ type: "readOriginalContent", messageTs: TS }])
+			expect(requestsOfType("readOriginalContent")).toEqual([
+				{ type: "readOriginalContent", messageTs: TS, messageId: undefined, taskId: undefined },
+			])
 		})
 
 		it("shows the merged diff once both the original and the final content arrive", () => {
@@ -286,6 +288,45 @@ describe("FileChangesPanel", () => {
 			expandRow()
 
 			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("requests and matches originals by messageId when messages share a ts", () => {
+			const edit = (path: string, messageId: string): ClineMessage => ({
+				...createEditWithOriginal({ path, originalContentLength: 5000 }),
+				messageId,
+			})
+			renderPanel([edit("src/a.ts", "id-a"), edit("src/b.ts", "id-b")], "task-1")
+			fireEvent.click(screen.getByText("2 file(s) changed in this conversation").closest("button")!)
+			screen.getAllByTestId("accordian-toggle").forEach((toggle) => fireEvent.click(toggle))
+
+			expect(requestsOfType("readOriginalContent")).toEqual([
+				{ type: "readOriginalContent", messageTs: TS, messageId: "id-a", taskId: "task-1" },
+				{ type: "readOriginalContent", messageTs: TS, messageId: "id-b", taskId: "task-1" },
+			])
+
+			respond({ type: "fileContent", fileContent: { path: "src/a.ts", content: "new a\n" } })
+			respond({ type: "fileContent", fileContent: { path: "src/b.ts", content: "new b\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, messageId: "id-b", taskId: "task-1", content: "old b\n" },
+			})
+
+			const [a, b] = screen.getAllByTestId("accordian-code")
+			expect(a).toHaveTextContent("the recorded diff")
+			expect(b).toHaveTextContent("-old b")
+		})
+
+		it("ignores an original answered for a different task", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })], "task-1")
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-2", content: "old line\n" },
+			})
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
 		})
 
 		it("ignores an original for a different message", () => {

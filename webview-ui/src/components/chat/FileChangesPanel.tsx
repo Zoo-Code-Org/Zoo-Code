@@ -14,26 +14,30 @@ import CodeAccordion from "../common/CodeAccordion"
 
 interface FileChangesPanelProps {
 	clineMessages: ClineMessage[] | undefined
+	taskId?: string
 	className?: string
 }
 
-const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelProps) => {
+// `ts` is not unique, so the message's own id identifies it; `ts` only covers messages persisted without one.
+const originalKey = (entry: { messageId?: string; ts: number }) => entry.messageId ?? `ts:${entry.ts}`
+
+const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChangesPanelProps) => {
 	const { t } = useTranslation()
 	const [panelExpanded, setPanelExpanded] = useState(false)
 	const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 	const [finalContentByPath, setFinalContentByPath] = useState<Record<string, string | null>>({})
 	const pendingPathsRef = useRef<Set<string>>(new Set())
 	// The extension omits `originalContent` from the messages it posts; it is requested when a row is expanded.
-	const [originalContentByTs, setOriginalContentByTs] = useState<Record<number, string | null>>({})
-	const pendingOriginalTsRef = useRef<Set<number>>(new Set())
+	const [originalContentByKey, setOriginalContentByKey] = useState<Record<string, string | null>>({})
+	const pendingOriginalKeysRef = useRef<Set<string>>(new Set())
 
 	// Reset expanded file rows and final content cache when switching to a different task
 	useEffect(() => {
 		setExpandedPaths(new Set())
 		setFinalContentByPath({})
 		pendingPathsRef.current = new Set()
-		setOriginalContentByTs({})
-		pendingOriginalTsRef.current = new Set()
+		setOriginalContentByKey({})
+		pendingOriginalKeysRef.current = new Set()
 	}, [clineMessages])
 
 	const fileChanges = useMemo(() => fileChangesFromMessages(clineMessages), [clineMessages])
@@ -88,14 +92,19 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 			if (
 				first.hasOriginalContent &&
 				first.originalContent === undefined &&
-				!(first.ts in originalContentByTs) &&
-				!pendingOriginalTsRef.current.has(first.ts)
+				!(originalKey(first) in originalContentByKey) &&
+				!pendingOriginalKeysRef.current.has(originalKey(first))
 			) {
-				pendingOriginalTsRef.current.add(first.ts)
-				vscode.postMessage({ type: "readOriginalContent", messageTs: first.ts })
+				pendingOriginalKeysRef.current.add(originalKey(first))
+				vscode.postMessage({
+					type: "readOriginalContent",
+					messageTs: first.ts,
+					messageId: first.messageId,
+					taskId,
+				})
 			}
 		}
-	}, [expandedPaths, byPath, finalContentByPath, originalContentByTs])
+	}, [expandedPaths, byPath, finalContentByPath, originalContentByKey, taskId])
 
 	// Listen for fileContent and originalContent responses
 	useEffect(() => {
@@ -106,14 +115,17 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 				pendingPathsRef.current.delete(fc.path)
 				setFinalContentByPath((prev) => ({ ...prev, [fc.path]: fc.content ?? null }))
 			} else if (message.type === "originalContent" && message.originalContentInfo) {
-				const { ts, content } = message.originalContentInfo
-				pendingOriginalTsRef.current.delete(ts)
-				setOriginalContentByTs((prev) => ({ ...prev, [ts]: content }))
+				const { taskId: responseTaskId, content, ...id } = message.originalContentInfo
+				// A late response for another task must not populate this task's cache.
+				if (responseTaskId !== taskId) return
+				const key = originalKey(id)
+				pendingOriginalKeysRef.current.delete(key)
+				setOriginalContentByKey((prev) => ({ ...prev, [key]: content }))
 			}
 		}
 		window.addEventListener("message", handler)
 		return () => window.removeEventListener("message", handler)
-	}, [])
+	}, [taskId])
 
 	if (fileChanges.length === 0) return null
 
@@ -152,7 +164,7 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 				<div className="flex flex-col gap-1 pb-2 pl-6">
 					{Array.from(byPath.entries()).map(([path, entries]) => {
 						const originalContent =
-							entries[0].originalContent ?? originalContentByTs[entries[0].ts] ?? undefined
+							entries[0].originalContent ?? originalContentByKey[originalKey(entries[0])] ?? undefined
 						const lookupPath = path.startsWith("./") ? path.slice(2) : path
 						const finalContent = finalContentByPath[lookupPath]
 						const hasMergedDiff =

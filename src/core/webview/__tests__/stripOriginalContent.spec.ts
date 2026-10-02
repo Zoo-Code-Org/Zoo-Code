@@ -101,7 +101,7 @@ describe("omitOriginalContent", () => {
 		const first = omitOriginalContent(message)
 		const second = omitOriginalContent(message)
 
-		expect(second).toBe(first)
+		expect(second).toEqual(first)
 		expect(parse).toHaveBeenCalledTimes(1)
 		parse.mockRestore()
 
@@ -110,6 +110,24 @@ describe("omitOriginalContent", () => {
 		const third = omitOriginalContent(message)
 
 		expect(JSON.parse(third.text!)).toMatchObject({ path: "b.ts", originalContentLength: bigOriginal.length + 4 })
+	})
+
+	it("takes metadata from the current message when the cached text is reused", () => {
+		const message = toolAsk(
+			{ tool: "appliedDiff", path: "a.ts", originalContent: bigOriginal },
+			{ partial: false, isAnswered: false },
+		)
+
+		expect(omitOriginalContent(message).isAnswered).toBe(false)
+
+		// approval only flips metadata; the text is unchanged
+		message.isAnswered = true
+		message.partial = true
+		const result = omitOriginalContent(message)
+
+		expect(result).toMatchObject({ isAnswered: true, partial: true })
+		expect(JSON.parse(result.text!)).toMatchObject({ originalContentLength: bigOriginal.length })
+		expect(result.text).not.toContain(bigOriginal.slice(0, 50))
 	})
 
 	it("is idempotent", () => {
@@ -126,8 +144,23 @@ describe("findOriginalContent", () => {
 			toolAsk({ tool: "appliedDiff", path: "b.ts", originalContent: "other" }),
 		]
 
-		expect(findOriginalContent(messages, messages[0]!.ts)).toBe(bigOriginal)
-		expect(findOriginalContent(messages, messages[1]!.ts)).toBe("other")
+		expect(findOriginalContent(messages, { ts: messages[0]!.ts })).toBe(bigOriginal)
+		expect(findOriginalContent(messages, { ts: messages[1]!.ts })).toBe("other")
+	})
+
+	it("tells messages created in the same millisecond apart by messageId", () => {
+		const first = toolAsk({ tool: "appliedDiff", path: "a.ts", originalContent: "first" }, { messageId: "id-1" })
+		const second = toolAsk(
+			{ tool: "appliedDiff", path: "b.ts", originalContent: "second" },
+			{ messageId: "id-2", ts: first.ts },
+		)
+		const messages = [first, second]
+
+		expect(findOriginalContent(messages, { messageId: "id-2", ts: first.ts })).toBe("second")
+		expect(findOriginalContent(messages, { messageId: "id-1", ts: first.ts })).toBe("first")
+		expect(findOriginalContent(messages, { messageId: "missing", ts: first.ts })).toBeNull()
+		// messages persisted without an id are still found by ts
+		expect(findOriginalContent(messages, { ts: first.ts })).toBe("first")
 	})
 
 	it("finds say tool messages too", () => {
@@ -138,7 +171,7 @@ describe("findOriginalContent", () => {
 			text: JSON.stringify({ tool: "editedExistingFile", originalContent: bigOriginal }),
 		}
 
-		expect(findOriginalContent([message], message.ts)).toBe(bigOriginal)
+		expect(findOriginalContent([message], { ts: message.ts })).toBe(bigOriginal)
 	})
 
 	it("returns null when there is nothing to return", () => {
@@ -155,17 +188,17 @@ describe("findOriginalContent", () => {
 		const all = [noOriginal, notTool, unparsable, notAString, noText]
 
 		for (const message of all) {
-			expect(findOriginalContent(all, message.ts)).toBeNull()
+			expect(findOriginalContent(all, { ts: message.ts })).toBeNull()
 		}
 
-		expect(findOriginalContent(all, -1)).toBeNull()
-		expect(findOriginalContent(undefined, 1)).toBeNull()
+		expect(findOriginalContent(all, { ts: -1 })).toBeNull()
+		expect(findOriginalContent(undefined, { ts: 1 })).toBeNull()
 	})
 
 	it("returns an empty original as an empty string", () => {
 		const message = toolAsk({ tool: "newFileCreated", content: "x", originalContent: "" })
 
-		expect(findOriginalContent([message], message.ts)).toBe("")
+		expect(findOriginalContent([message], { ts: message.ts })).toBe("")
 	})
 })
 

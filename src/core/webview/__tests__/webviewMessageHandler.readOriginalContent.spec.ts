@@ -65,17 +65,17 @@ import type { ClineMessage } from "@roo-code/types"
 
 const originalFile = "const a = 1\nconst b = 2\n"
 
-const toolMessage = (ts: number, payload: unknown, type: "ask" | "say" = "ask"): ClineMessage =>
+const toolMessage = (ts: number, payload: unknown, type: "ask" | "say" = "ask", messageId?: string): ClineMessage =>
 	type === "ask"
-		? { ts, type: "ask", ask: "tool", text: JSON.stringify(payload) }
-		: { ts, type: "say", say: "tool", text: JSON.stringify(payload) }
+		? { ts, type: "ask", ask: "tool", text: JSON.stringify(payload), ...(messageId && { messageId }) }
+		: { ts, type: "say", say: "tool", text: JSON.stringify(payload), ...(messageId && { messageId }) }
 
 function createProvider(clineMessages: ClineMessage[] | undefined) {
 	const postMessageToWebview = vi.fn()
 	// Only the members the handler touches for this message type.
 	const provider = {
 		postMessageToWebview,
-		getCurrentTask: vi.fn().mockReturnValue(clineMessages ? { clineMessages } : undefined),
+		getCurrentTask: vi.fn().mockReturnValue(clineMessages ? { taskId: "task-1", clineMessages } : undefined),
 	} as unknown as ClineProvider
 
 	return { provider, postMessageToWebview }
@@ -96,7 +96,7 @@ describe("webviewMessageHandler - readOriginalContent", () => {
 
 		expect(postMessageToWebview).toHaveBeenCalledWith({
 			type: "originalContent",
-			originalContentInfo: { ts: 10, content: originalFile },
+			originalContentInfo: { ts: 10, messageId: undefined, taskId: undefined, content: originalFile },
 		})
 	})
 
@@ -105,14 +105,56 @@ describe("webviewMessageHandler - readOriginalContent", () => {
 		await webviewMessageHandler(unknown.provider, { type: "readOriginalContent", messageTs: 999 })
 		expect(unknown.postMessageToWebview).toHaveBeenCalledWith({
 			type: "originalContent",
-			originalContentInfo: { ts: 999, content: null },
+			originalContentInfo: { ts: 999, messageId: undefined, taskId: undefined, content: null },
 		})
 
 		const noTask = createProvider(undefined)
 		await webviewMessageHandler(noTask.provider, { type: "readOriginalContent", messageTs: 10 })
 		expect(noTask.postMessageToWebview).toHaveBeenCalledWith({
 			type: "originalContent",
-			originalContentInfo: { ts: 10, content: null },
+			originalContentInfo: { ts: 10, messageId: undefined, taskId: undefined, content: null },
+		})
+	})
+
+	it("picks the message by messageId when two messages share a ts", async () => {
+		const { provider, postMessageToWebview } = createProvider([
+			toolMessage(10, { tool: "appliedDiff", path: "a.ts", originalContent: "first" }, "ask", "id-1"),
+			toolMessage(10, { tool: "appliedDiff", path: "b.ts", originalContent: "second" }, "ask", "id-2"),
+		])
+
+		await webviewMessageHandler(provider, { type: "readOriginalContent", messageTs: 10, messageId: "id-2" })
+
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "originalContent",
+			originalContentInfo: { ts: 10, messageId: "id-2", taskId: undefined, content: "second" },
+		})
+	})
+
+	it("echoes the task id and answers null for a request made for another task", async () => {
+		const { provider, postMessageToWebview } = createProvider([
+			toolMessage(10, { tool: "appliedDiff", originalContent: originalFile }, "ask", "id-1"),
+		])
+
+		await webviewMessageHandler(provider, {
+			type: "readOriginalContent",
+			messageTs: 10,
+			messageId: "id-1",
+			taskId: "task-1",
+		})
+		await webviewMessageHandler(provider, {
+			type: "readOriginalContent",
+			messageTs: 10,
+			messageId: "id-1",
+			taskId: "task-2",
+		})
+
+		expect(postMessageToWebview).toHaveBeenNthCalledWith(1, {
+			type: "originalContent",
+			originalContentInfo: { ts: 10, messageId: "id-1", taskId: "task-1", content: originalFile },
+		})
+		expect(postMessageToWebview).toHaveBeenNthCalledWith(2, {
+			type: "originalContent",
+			originalContentInfo: { ts: 10, messageId: "id-1", taskId: "task-2", content: null },
 		})
 	})
 
