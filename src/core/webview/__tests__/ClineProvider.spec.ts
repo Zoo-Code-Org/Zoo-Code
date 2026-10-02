@@ -838,6 +838,60 @@ describe("ClineProvider", () => {
 		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
 	})
 
+	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const originalFile = "line of the original file\n".repeat(500)
+		const toolText = JSON.stringify({
+			tool: "appliedDiff",
+			path: "a.ts",
+			diff: "@@ d",
+			originalContent: originalFile,
+		})
+		// Only the field under test is populated; the rest of ExtensionState is irrelevant here.
+		const message = {
+			type: "state",
+			state: { clineMessages: [{ ts: 1, type: "ask", ask: "tool", text: toolText }] },
+		} as unknown as ExtensionMessage
+
+		await provider.postMessageToWebview(message)
+
+		const posted = mockPostMessage.mock.calls.at(-1)![0] as ExtensionMessage
+		const postedText = posted.state!.clineMessages![0]!.text!
+
+		expect(JSON.parse(postedText)).toEqual({
+			tool: "appliedDiff",
+			path: "a.ts",
+			diff: "@@ d",
+			originalContentLength: originalFile.length,
+		})
+		// the extension's own message (and so the persisted task) keeps the full content
+		expect(message.state!.clineMessages![0]!.text).toBe(toolText)
+	})
+
+	test("postMessageToWebview leaves originalContent out of messageUpdated", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const toolText = JSON.stringify({
+			tool: "appliedDiff",
+			path: "a.ts",
+			originalContent: "original file\n".repeat(100),
+		})
+
+		await provider.postMessageToWebview({
+			type: "messageUpdated",
+			clineMessage: { ts: 2, type: "ask", ask: "tool", text: toolText },
+		})
+
+		const posted = mockPostMessage.mock.calls.at(-1)![0] as ExtensionMessage
+
+		expect(JSON.parse(posted.clineMessage!.text!)).toEqual({
+			tool: "appliedDiff",
+			path: "a.ts",
+			originalContentLength: "original file\n".length * 100,
+		})
+	})
+
 	describe("theme fixture probes", () => {
 		const fixture = {
 			themeId: "Default Dark Modern",
