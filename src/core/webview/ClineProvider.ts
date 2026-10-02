@@ -111,7 +111,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { Task } from "../task/Task"
+import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
@@ -125,6 +125,7 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	LifecycleTransitionError,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -175,10 +176,16 @@ function scheduleTask(
 	task: Task,
 	source: string,
 	run: () => Promise<void> = () => task.run(),
+	onError?: (error: unknown) => void | Promise<void>,
 ): void {
-	void scheduler
-		.schedule(task, run)
-		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+	void scheduler.schedule(task, run).catch(async (error) => {
+		console.error(`[${source}] taskScheduler.schedule failed:`, error)
+		try {
+			await onError?.(error)
+		} catch (cleanupError) {
+			console.error(`[${source}] task failure cleanup failed:`, cleanupError)
+		}
+	})
 }
 
 type GetStateOptions = {
@@ -607,6 +614,33 @@ export class ClineProvider
 			// Make sure no reference kept, once promises end it will be
 			// garbage collected.
 			task = undefined
+		}
+	}
+
+	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
+		if (!(error instanceof PendingActionSettlementError)) {
+			return
+		}
+
+		if (this.taskRegistry.getById(task.taskId) !== task) {
+			return
+		}
+
+		this.taskRegistry.remove(task.taskId)
+		task.emit(RooCodeEventName.TaskUnfocused)
+
+		const cleanupFunctions = this.taskEventListeners.get(task)
+		if (cleanupFunctions) {
+			cleanupFunctions.forEach((cleanup) => cleanup())
+			this.taskEventListeners.delete(task)
+		}
+
+		try {
+			await task.dispose()
+		} catch (error) {
+			this.log(
+				`[cleanupFailedHistoryTask] dispose() failed for ${task.taskId}.${task.instanceId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
 	}
 
@@ -1361,7 +1395,9 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, (error) =>
+					this.cleanupFailedHistoryTask(task, error),
+				)
 			}
 		} else {
 			await this.addClineToStack(task)
@@ -1371,7 +1407,9 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, (error) =>
+					this.cleanupFailedHistoryTask(task, error),
+				)
 			}
 		}
 
@@ -3928,6 +3966,31 @@ export class ClineProvider
 					(err as Error)?.message ?? String(err)
 				}`,
 			)
+			// The authoritative parent record rejected this delegation (#1714).
+			// Settle the matching pending create_subtask action durably through
+			// the disk-authoritative compare-and-clear so a retry cannot replay
+			// a rejected action and a replacement action from another host is
+			// never cleared, then propagate the original error.
+			let settlementFailed = false
+			if (pendingActionId && err instanceof LifecycleTransitionError) {
+				try {
+					const authoritative = await this.taskHistoryStore.clearPendingActionIfMatching(
+						parentTaskId,
+						pendingActionId,
+					)
+					settlementFailed =
+						authoritative.pendingAction?.kind === "create_subtask" &&
+						authoritative.pendingAction.actionId === pendingActionId
+					this.recentTasksCache = undefined
+				} catch (settlementError) {
+					settlementFailed = true
+					this.log(
+						`[delegateParentAndOpenChild] Failed to settle pending action ${pendingActionId} for parent ${parentTaskId}: ${
+							(settlementError as Error)?.message ?? String(settlementError)
+						}`,
+					)
+				}
+			}
 			try {
 				// Only pop the stack if the child we just created is still on top.
 				// A concurrent delegation could have pushed another child since we created ours.
@@ -3951,8 +4014,14 @@ export class ClineProvider
 				)
 			}
 			try {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
-				await this.createTaskWithHistoryItem(parentHistory)
+				// A failed settlement write leaves the rejected pending action in
+				// durable storage. Restoring the stored parent would replay it in
+				// this process, so leave the parent unrestored. Restart recovery also
+				// settles interrupted create-subtask actions before allowing replay.
+				if (!settlementFailed) {
+					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					await this.createTaskWithHistoryItem(parentHistory)
+				}
 			} catch (rollbackError) {
 				this.log(
 					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
