@@ -17,6 +17,51 @@ export const OPENAI_API_PROTOCOL = "openai"
 export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.6-sol"
 
 export const openAiNativeModels = {
+	// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+	"gpt-6.1-sol": {
+		maxTokens: 128000,
+		contextWindow: 1_050_000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "medium",
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheWritesPrice: 2.5,
+		cacheReadsPrice: 0.1,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+			appliesToServiceTiers: ["default", "flex", "priority"],
+		},
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		tiers: [
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 1.0,
+				outputPrice: 5.0,
+				cacheWritesPrice: 1.25,
+				cacheReadsPrice: 0.05,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 4.0,
+				outputPrice: 20.0,
+				cacheWritesPrice: 5.0,
+				cacheReadsPrice: 0.2,
+			},
+		],
+		description: "GPT-6.1 Sol: Near-Astra performance for complex coding and professional work at a lower cost",
+	},
 	"gpt-6-astra": {
 		maxTokens: 128000,
 		contextWindow: 1_050_000,
