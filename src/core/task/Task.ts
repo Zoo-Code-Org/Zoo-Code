@@ -1292,8 +1292,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
 		// Unanswered asks must reach the webview before Message listeners can respond against its state.
-		const requiresImmediateState =
-			message.partial === true || (message.type === "ask" && message.isAnswered !== true)
+		//
+		// Partial `say` messages deliberately do NOT flush. `flushPostStateToWebviewThrottled()`
+		// invoked right after a leading-edge debounce call has no pending trailing invocation to
+		// run, so it only cancels the trailing timer — which makes the *next* call hit the leading
+		// edge and post immediately. Flushing on every partial therefore defeated the debounce
+		// entirely (one full-state post per message, the very behaviour #1078 set out to remove).
+		// They are safe on the throttled path: the trailing/maxWait post carries the message's
+		// current text, so a `messageUpdated` dropped for a not-yet-known `ts` is superseded
+		// rather than lost.
+		//
+		// Partial *asks* still flush, via the clause below — `Task#ask` adds them without
+		// `isAnswered`, so they keep the ordering guarantee that unanswered asks depend on.
+		const requiresImmediateState = message.type === "ask" && message.isAnswered !== true
 		try {
 			await provider?.postStateToWebviewThrottled()
 		} catch (error) {
@@ -3245,6 +3256,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.didFinishAbortingStream = false
 				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
@@ -3724,8 +3736,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// User cancelled - abort the entire task
-							this.abortReason = cancelReason
+							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
+							this.abortReason ??= "user_cancelled"
 							await this.abortTask()
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
@@ -3760,8 +3772,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
+									this.abortReason ??= "user_cancelled"
 									await this.abortTask()
 									break
 								}
