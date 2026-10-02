@@ -340,6 +340,53 @@ describe("GeminiHandler", () => {
 			})
 		})
 
+		it("generates request-unique tool call IDs across requests (#1714)", async () => {
+			const metadata = {
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "new_task", description: "", parameters: {} } }],
+			} satisfies ApiHandlerCreateMessageMetadata
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Delegate" }]
+
+			// Each request restarts the tool-call counter at zero, so the
+			// synthesized ID must carry a request-unique component to keep
+			// persisted pending-action IDs distinct across requests.
+			const firstCallIds: string[] = []
+			for (let request = 0; request < 2; request++) {
+				mockGenerateContentStream.mockResolvedValueOnce(
+					asyncStreamFrom([
+						{
+							candidates: [{ content: { parts: [{ functionCall: { name: "new_task", args: {} } }] } }],
+						},
+					]),
+				)
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages, metadata))
+				const partials = chunks
+					.filter((chunk) => chunk.type === "tool_call_partial")
+					.map((chunk) => chunk as { id: string; name?: string; arguments?: string })
+				// The handler emits one name partial and one arguments partial
+				// for the synthesized call. Assert both semantic halves so a
+				// duplicate name partial cannot satisfy the ID comparison.
+				expect(partials).toHaveLength(2)
+				expect(
+					partials.filter(({ name, arguments: args }) => name === "new_task" && args === undefined),
+				).toHaveLength(1)
+				expect(
+					partials.filter(({ name, arguments: args }) => name === undefined && args === "{}"),
+				).toHaveLength(1)
+
+				const partialIds = partials.map(({ id }) => id)
+				expect(new Set(partialIds).size).toBe(1)
+				firstCallIds.push(partialIds[0])
+			}
+
+			// The first call of each request must not collide.
+			expect(firstCallIds[0]).not.toBe(firstCallIds[1])
+			for (const id of firstCallIds) {
+				expect(id).toMatch(/^new_task-.+-0$/)
+				expect(id).not.toBe("new_task-0")
+			}
+		})
+
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
 			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
