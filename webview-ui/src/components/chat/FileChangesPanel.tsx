@@ -29,7 +29,9 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 	const pendingPathsRef = useRef<Set<string>>(new Set())
 	// The extension omits `originalContent` from the messages it posts; it is requested when a row is expanded.
 	const [originalContentByKey, setOriginalContentByKey] = useState<Record<string, string | null>>({})
-	const pendingOriginalKeysRef = useRef<Set<string>>(new Set())
+	// In-flight requests, keyed by task and message. Deliberately not reset with the caches below: a request cannot
+	// be cancelled, so a reset would let a task switch (A -> B -> A) send a duplicate while the first is still open.
+	const pendingOriginalRequestsRef = useRef<Set<string>>(new Set())
 
 	// Reset expanded file rows and final content cache when switching to a different task
 	useEffect(() => {
@@ -37,7 +39,6 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 		setFinalContentByPath({})
 		pendingPathsRef.current = new Set()
 		setOriginalContentByKey({})
-		pendingOriginalKeysRef.current = new Set()
 	}, [clineMessages, taskId])
 
 	const fileChanges = useMemo(() => fileChangesFromMessages(clineMessages), [clineMessages])
@@ -89,13 +90,14 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 				pendingPathsRef.current.add(lookupPath)
 				vscode.postMessage({ type: "readFileContent", text: lookupPath })
 			}
+			const requestKey = `${taskId ?? ""}|${originalKey(first)}`
 			if (
 				first.hasOriginalContent &&
 				first.originalContent === undefined &&
 				!(originalKey(first) in originalContentByKey) &&
-				!pendingOriginalKeysRef.current.has(originalKey(first))
+				!pendingOriginalRequestsRef.current.has(requestKey)
 			) {
-				pendingOriginalKeysRef.current.add(originalKey(first))
+				pendingOriginalRequestsRef.current.add(requestKey)
 				vscode.postMessage({
 					type: "readOriginalContent",
 					messageTs: first.ts,
@@ -116,10 +118,10 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 				setFinalContentByPath((prev) => ({ ...prev, [fc.path]: fc.content ?? null }))
 			} else if (message.type === "originalContent" && message.originalContentInfo) {
 				const { taskId: responseTaskId, content, ...id } = message.originalContentInfo
+				const key = originalKey(id)
+				pendingOriginalRequestsRef.current.delete(`${responseTaskId ?? ""}|${key}`)
 				// A late response for another task must not populate this task's cache.
 				if (responseTaskId !== taskId) return
-				const key = originalKey(id)
-				pendingOriginalKeysRef.current.delete(key)
 				setOriginalContentByKey((prev) => ({ ...prev, [key]: content }))
 			}
 		}

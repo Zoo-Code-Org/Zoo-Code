@@ -334,6 +334,52 @@ describe("FileChangesPanel", () => {
 			expect(requests[1]).toMatchObject({ taskId: "task-1" })
 		})
 
+		it("does not send a duplicate request when switching A -> B -> A before the first response arrives", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const panel = (taskId: string) => (
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId={taskId} />
+				</TranslationProvider>
+			)
+			const { rerender } = renderPanel(messages, "task-A")
+			expandRow()
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+
+			rerender(panel("task-B"))
+			rerender(panel("task-A"))
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			expect(requestsOfType("readOriginalContent").filter((m) => m.taskId === "task-A")).toHaveLength(1)
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-A", content: "old line\n" },
+			})
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+		})
+
+		it("requests again after a response that arrived for a task that is no longer current", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const panel = (taskId: string) => (
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId={taskId} />
+				</TranslationProvider>
+			)
+			const { rerender } = renderPanel(messages, "task-A")
+			expandRow()
+
+			rerender(panel("task-B"))
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-A", content: "old line\n" },
+			})
+			rerender(panel("task-A"))
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			expect(requestsOfType("readOriginalContent").filter((m) => m.taskId === "task-A")).toHaveLength(2)
+		})
+
 		it("ignores an original answered for a different task", () => {
 			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })], "task-1")
 			expandRow()

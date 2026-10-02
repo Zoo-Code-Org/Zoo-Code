@@ -104,9 +104,20 @@ const historyItem = {
 	status: "completed",
 }
 
-fs.writeFileSync(path.join(taskDir, "ui_messages.json"), JSON.stringify(messages))
-fs.writeFileSync(path.join(taskDir, "api_conversation_history.json"), JSON.stringify(apiHistory))
-fs.writeFileSync(path.join(taskDir, "history_item.json"), JSON.stringify(historyItem))
+// Write every file under a temporary name and rename only after all writes succeeded, so an interrupted run
+// (or a full disk) never leaves a truncated or partial task; history_item.json goes last.
+const taskFiles = [
+	["ui_messages.json", messages],
+	["api_conversation_history.json", apiHistory],
+	["history_item.json", historyItem],
+]
+try {
+	for (const [name, value] of taskFiles) fs.writeFileSync(path.join(taskDir, `${name}.tmp`), JSON.stringify(value))
+	for (const [name] of taskFiles) fs.renameSync(path.join(taskDir, `${name}.tmp`), path.join(taskDir, name))
+} catch (error) {
+	fs.rmSync(taskDir, { recursive: true, force: true })
+	throw error
+}
 
 const mb = (f) => (fs.statSync(path.join(taskDir, f)).size / 1048576).toFixed(1)
 console.log(`Task ${taskId}: ${messages.length} messages, ui_messages.json ${mb("ui_messages.json")} MB`)

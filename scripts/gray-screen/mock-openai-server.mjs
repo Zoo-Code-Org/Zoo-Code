@@ -60,6 +60,12 @@ const cfg = {
 	dir: (args["dir"] ?? ".mock-session").replace(/\/+$/, ""),
 }
 
+// cfg.dir is interpolated into the shell commands the mock asks the extension to run, so only plain relative paths are allowed.
+if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(cfg.dir) || cfg.dir.split("/").some((part) => part === "..")) {
+	console.error(`Invalid --dir "${cfg.dir}": use a relative path of letters, digits, ".", "_" and "-" without ".." segments.`)
+	process.exit(1)
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let requestCount = 0
 
