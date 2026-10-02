@@ -33,13 +33,21 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 	// be cancelled, so a reset would let a task switch (A -> B -> A) send a duplicate while the first is still open.
 	const pendingOriginalRequestsRef = useRef<Set<string>>(new Set())
 
-	// Reset expanded file rows and final content cache when switching to a different task
+	// Task the expanded rows belong to; the reset below only lands after the render in which `taskId` changed, so
+	// the request effect must not act on rows expanded under the previous task.
+	const expandedTaskIdRef = useRef(taskId)
+
+	// Reset expanded file rows and final content cache when the messages change
 	useEffect(() => {
 		setExpandedPaths(new Set())
 		setFinalContentByPath({})
 		pendingPathsRef.current = new Set()
-		setOriginalContentByKey({})
 	}, [clineMessages, taskId])
+
+	// Originals are keyed by message id, which is stable across message updates, so they only reset per task
+	useEffect(() => {
+		setOriginalContentByKey({})
+	}, [taskId])
 
 	const fileChanges = useMemo(() => fileChangesFromMessages(clineMessages), [clineMessages])
 
@@ -66,17 +74,22 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 		)
 	}, [fileChanges])
 
-	const togglePath = useCallback((path: string) => {
-		setExpandedPaths((prev) => {
-			const next = new Set(prev)
-			if (next.has(path)) next.delete(path)
-			else next.add(path)
-			return next
-		})
-	}, [])
+	const togglePath = useCallback(
+		(path: string) => {
+			expandedTaskIdRef.current = taskId
+			setExpandedPaths((prev) => {
+				const next = new Set(prev)
+				if (next.has(path)) next.delete(path)
+				else next.add(path)
+				return next
+			})
+		},
+		[taskId],
+	)
 
 	// Request the final file content (and the omitted original content) when a row is expanded and the edit has an original
 	useEffect(() => {
+		if (expandedTaskIdRef.current !== taskId) return
 		for (const path of expandedPaths) {
 			const entries = byPath.get(path)
 			if (!entries?.length) continue

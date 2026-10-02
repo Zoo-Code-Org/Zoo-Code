@@ -9,22 +9,19 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import crypto from "node:crypto"
+import { integerFlag, parseFlagArgs, writeTaskAtomically } from "./lib.mjs"
 
-const args = Object.fromEntries(
-	process.argv.slice(2).reduce((acc, cur, i, all) => {
-		if (cur.startsWith("--")) acc.push([cur.slice(2), all[i + 1]])
-		return acc
-	}, []),
-)
+const args = parseFlagArgs(process.argv.slice(2))
 
-const messageCount = Number(args["messages"] ?? 5000)
-const textBytes = Number(args["text-bytes"] ?? 800)
-const toolBytes = Number(args["tool-bytes"] ?? textBytes)
+// Validate every numeric flag up front, before anything is written.
+const messageCount = integerFlag("messages", args["messages"] ?? 5000, 1)
+const textBytes = integerFlag("text-bytes", args["text-bytes"] ?? 800, 1)
+const toolBytes = integerFlag("tool-bytes", args["tool-bytes"] ?? textBytes, 1)
 const toolKind = args["tool-kind"] ?? "mixed"
 const batchable = args["batchable"] === "true"
 const twoByte = args["two-byte"] === "true" // Korean chars in tool text -> UTF-16 strings (2 bytes/char) in V8
-const imageEvery = Number(args["image-every"] ?? 0)
-const imageKb = Number(args["image-kb"] ?? 200)
+const imageEvery = integerFlag("image-every", args["image-every"] ?? 0, 0)
+const imageKb = integerFlag("image-kb", args["image-kb"] ?? 200, 1)
 const workspace = args["workspace"] ?? process.cwd()
 const storageCandidates = [
 	path.join(os.homedir(), ".vscode-server", "data", "User", "globalStorage", "codemate.zoo-code"),
@@ -33,8 +30,6 @@ const storageCandidates = [
 const storage = args["storage"] ?? storageCandidates.find((p) => fs.existsSync(p)) ?? storageCandidates[1]
 
 const taskId = crypto.randomUUID()
-const taskDir = path.join(storage, "tasks", taskId)
-fs.mkdirSync(taskDir, { recursive: true })
 
 const filler = (n, seed) => {
 	const base = `line ${seed}: ${twoByte ? "\uD55C\uAE00 " : ""}The quick brown fox jumps over the lazy dog. `
@@ -104,20 +99,12 @@ const historyItem = {
 	status: "completed",
 }
 
-// Write every file under a temporary name and rename only after all writes succeeded, so an interrupted run
-// (or a full disk) never leaves a truncated or partial task; history_item.json goes last.
-const taskFiles = [
-	["ui_messages.json", messages],
-	["api_conversation_history.json", apiHistory],
-	["history_item.json", historyItem],
-]
-try {
-	for (const [name, value] of taskFiles) fs.writeFileSync(path.join(taskDir, `${name}.tmp`), JSON.stringify(value))
-	for (const [name] of taskFiles) fs.renameSync(path.join(taskDir, `${name}.tmp`), path.join(taskDir, name))
-} catch (error) {
-	fs.rmSync(taskDir, { recursive: true, force: true })
-	throw error
-}
+// The task becomes visible under tasks/<id> only once all three files are written.
+const taskDir = writeTaskAtomically(storage, taskId, {
+	"ui_messages.json": messages,
+	"api_conversation_history.json": apiHistory,
+	"history_item.json": historyItem,
+})
 
 const mb = (f) => (fs.statSync(path.join(taskDir, f)).size / 1048576).toFixed(1)
 console.log(`Task ${taskId}: ${messages.length} messages, ui_messages.json ${mb("ui_messages.json")} MB`)

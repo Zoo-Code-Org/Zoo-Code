@@ -1738,7 +1738,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							atBottomThreshold={10}
 						/>
 					</div>
-					<FileChangesPanel clineMessages={messages} taskId={currentTaskItem?.id} />
+					<FileChangesPanel clineMessages={messages} taskId={currentTaskId} />
 					{areButtonsVisible && (
 						<div
 							className={`flex h-9 items-center mb-1 px-[15px] ${

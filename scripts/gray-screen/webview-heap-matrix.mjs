@@ -11,6 +11,7 @@ import http from "node:http"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolveServedFile } from "./lib.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const require = createRequire(path.join(root, "webview-ui", "package.json"))
@@ -68,21 +69,8 @@ const EXPERIMENTS = [
 ]
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".map": "application/json", ".woff2": "font/woff2", ".ttf": "font/ttf" }
-const serveRoot = fs.realpathSync(buildDir)
-// Resolves a request path to a regular file inside serveRoot (after symlink resolution), or undefined.
-const resolveServedFile = (rawPath) => {
-	try {
-		const decoded = decodeURIComponent(rawPath)
-		const real = fs.realpathSync(path.resolve(serveRoot, "." + (decoded === "/" ? "/index.html" : decoded)))
-		const rel = path.relative(serveRoot, real)
-		if (rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return undefined
-		return fs.statSync(real).isFile() ? real : undefined
-	} catch {
-		return undefined
-	}
-}
 const httpServer = http.createServer((req, res) => {
-	const file = resolveServedFile(new URL(req.url, "http://x").pathname)
+	const file = resolveServedFile(buildDir, new URL(req.url, "http://x").pathname)
 	if (!file) return void res.writeHead(404).end()
 	res.writeHead(200, {
 		"content-type": types[path.extname(file)] ?? "application/octet-stream",

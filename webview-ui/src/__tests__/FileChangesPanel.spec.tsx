@@ -380,6 +380,44 @@ describe("FileChangesPanel", () => {
 			expect(requestsOfType("readOriginalContent").filter((m) => m.taskId === "task-A")).toHaveLength(2)
 		})
 
+		it("does not request for rows expanded under the previous task when the task id changes", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const { rerender } = renderPanel(messages, "task-A")
+			expandRow()
+			mockPostMessage.mockClear()
+
+			rerender(
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId="task-B" />
+				</TranslationProvider>,
+			)
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("keeps a loaded original when the messages are replaced by an update of the same task", () => {
+			const first = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const { rerender } = renderPanel(first, "task-A")
+			expandRow()
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-A", content: "old line\n" },
+			})
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+
+			rerender(
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={[...first]} taskId="task-A" />
+				</TranslationProvider>,
+			)
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+		})
+
 		it("ignores an original answered for a different task", () => {
 			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })], "task-1")
 			expandRow()

@@ -33,6 +33,7 @@
 // Zoo Code settings: provider "OpenAI Compatible", base URL http://127.0.0.1:<port>/v1, any API key, model id "mock",
 // context window 1000000 (avoid condensing); auto-approve read/write/execute with allowed command "*".
 import http from "node:http"
+import { validateRelativeDir } from "./lib.mjs"
 
 const args = Object.fromEntries(
 	process.argv.slice(2).reduce((acc, cur, i, all) => {
@@ -61,8 +62,10 @@ const cfg = {
 }
 
 // cfg.dir is interpolated into the shell commands the mock asks the extension to run, so only plain relative paths are allowed.
-if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(cfg.dir) || cfg.dir.split("/").some((part) => part === "..")) {
-	console.error(`Invalid --dir "${cfg.dir}": use a relative path of letters, digits, ".", "_" and "-" without ".." segments.`)
+try {
+	validateRelativeDir(cfg.dir)
+} catch (error) {
+	console.error(error.message)
 	process.exit(1)
 }
 
