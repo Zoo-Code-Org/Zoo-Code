@@ -55,16 +55,22 @@ describe("rejectOnAbort", () => {
 		const unhandled: unknown[] = []
 		const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
 		process.on("unhandledRejection", onUnhandledRejection)
+		try {
+			await expect(
+				withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider")),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The TestProvider request was aborted",
+			})
 
-		await expect(withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider"))).rejects.toMatchObject({
-			name: "AbortError",
-			message: "The TestProvider request was aborted",
-		})
-
-		// Node reports an unhandled rejection only after the microtask queue drains.
-		await new Promise((resolve) => setTimeout(resolve, 0))
-		process.off("unhandledRejection", onUnhandledRejection)
-		expect(unhandled).toHaveLength(0)
+			// Node reports an unhandled rejection only after the microtask queue drains.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(unhandled).toHaveLength(0)
+		} finally {
+			// Remove the process-level listener on every exit path: a failed assertion
+			// must not leak it into the remaining tests in this file.
+			process.off("unhandledRejection", onUnhandledRejection)
+		}
 	})
 
 	it("propagates the pending rejection when the signal stays active", async () => {
