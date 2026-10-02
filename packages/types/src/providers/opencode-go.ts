@@ -465,6 +465,22 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model supporting thinking and non-thinking modes. Available via the Opencode Go plan.",
 	},
+	"deepseek-v4.1-flash": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
+		preserveReasoning: true,
+		reasoningEffort: "high",
+		// Go has weekday peak/off-peak pricing; use peak rates until ModelInfo can express schedules.
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheReadsPrice: 0.006,
+		description:
+			"DeepSeek V4.1 Flash is a fast, cost-efficient reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
 	"deepseek-v4-flash-vision-exp": {
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
