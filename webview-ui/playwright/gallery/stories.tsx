@@ -73,6 +73,39 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"io-intelligence-settings": async () => {
+		const [{ AppProviders }, { IOIntelligence }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/IOIntelligence"),
+			import("@roo-code/types"),
+		])
+		type ProviderSettings = React.ComponentProps<typeof IOIntelligence>["apiConfiguration"]
+
+		function IOIntelligenceSettingsStory() {
+			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>({
+				apiProvider: providerIdentifiers.ioIntelligence,
+			})
+			return (
+				<div className="w-full p-4 bg-vscode-editor-background" data-testid="io-intelligence-settings-story">
+					<div className="flex flex-col gap-3">
+						<IOIntelligence
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={(field, value) =>
+								setApiConfiguration((current) => ({ ...current, [field]: value }))
+							}
+							organizationAllowList={{ allowAll: true, providers: {} }}
+						/>
+					</div>
+				</div>
+			)
+		}
+
+		return (
+			<AppProviders initialState={{ apiConfiguration: { apiProvider: providerIdentifiers.ioIntelligence } }}>
+				<IOIntelligenceSettingsStory />
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
