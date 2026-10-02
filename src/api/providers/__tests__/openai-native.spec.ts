@@ -1294,6 +1294,83 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockFetch).not.toHaveBeenCalled()
 			})
 
+			it("should take the fallback when the request's own signal aborted but the SDK error is not a cancellation", async () => {
+				// Regression guard for the catch-path condition: a terminal SDK error that
+				// merely races the abort must not be reclassified as a cancellation, so the
+				// fallback still runs instead of throwing an AbortError.
+				const mockFetch = vitest.fn().mockImplementation((_url: unknown, options: { signal?: AbortSignal }) => {
+					const body = new ReadableStream<Uint8Array>({
+						start: (startController) => {
+							startController.enqueue(
+								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"fallback"}\n\n'),
+							);
+							startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+							startController.close();
+						},
+					});
+					return Promise.resolve({ ok: true, body });
+				});
+				global.fetch = mockFetch as typeof fetch;
+				const controller = new AbortController();
+				const terminalError = new Error("SDK connection reset");
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						if (options?.signal?.aborted) {
+							reject(terminalError);
+							return;
+						}
+						options?.signal?.addEventListener("abort", () => reject(terminalError), { once: true });
+					});
+				});
+			
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				);
+				await tick();
+				controller.abort();
+			
+				// The fallback is entered (the fetch is issued) rather than an AbortError
+				// being thrown; the loop's own aborted check then breaks before reading.
+				await collected;
+				expect(mockFetch).toHaveBeenCalled();
+			})
+			
+			it("should rethrow a native AbortError from the SDK as-is instead of normalizing it", async () => {
+				// Regression guard for the name check: a native AbortError from the SDK must
+				// be rethrown as-is, not replaced by the normalized contract error.
+				const mockFetch = vitest.fn();
+				global.fetch = mockFetch as typeof fetch;
+				const controller = new AbortController();
+				const nativeError = new Error("socket closed by abort");
+				nativeError.name = "AbortError";
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						if (options?.signal?.aborted) {
+							reject(nativeError);
+							return;
+						}
+						options?.signal?.addEventListener("abort", () => reject(nativeError), { once: true });
+					});
+				});
+			
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				);
+				await tick();
+				controller.abort();
+			
+				await expect(collected).rejects.toBe(nativeError);
+				expect(mockFetch).not.toHaveBeenCalled();
+			})
+			
 			it("should cancel only the aborted fallback body when overlapping requests share a handler", async () => {
 				// Regression: the SSE loop gated on the shared this.abortController
 				// field, so with two overlapping fallback reads an abort of one
