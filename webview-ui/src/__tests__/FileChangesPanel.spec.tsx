@@ -1,4 +1,5 @@
 import React from "react"
+import { act } from "@testing-library/react"
 import { fireEvent, render, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
 import { TranslationProvider } from "@/i18n/__mocks__/TranslationContext"
@@ -28,15 +29,18 @@ vi.mock("react-i18next", () => ({
 vi.mock("@src/components/common/CodeAccordion", () => ({
 	default: ({
 		path,
+		code,
 		isExpanded,
 		onToggleExpand,
 	}: {
 		path?: string
+		code?: string
 		isExpanded: boolean
 		onToggleExpand: () => void
 	}) => (
 		<div data-testid="code-accordian">
 			<span data-testid="accordian-path">{path}</span>
+			<pre data-testid="accordian-code">{code}</pre>
 			<button type="button" onClick={onToggleExpand} data-testid="accordian-toggle">
 				{isExpanded ? "expanded" : "collapsed"}
 			</button>
@@ -195,5 +199,103 @@ describe("FileChangesPanel", () => {
 
 		expect(screen.getByTestId("total-added")).toHaveTextContent("+5")
 		expect(screen.getByTestId("total-removed")).toHaveTextContent("-6")
+	})
+	describe("original content omitted by the extension", () => {
+		const TS = 1234
+
+		function createEditWithOriginal(payload: Record<string, unknown>): ClineMessage {
+			return {
+				type: "ask",
+				ask: "tool",
+				ts: TS,
+				partial: false,
+				isAnswered: true,
+				text: JSON.stringify({
+					tool: "appliedDiff",
+					path: "src/foo.ts",
+					diff: "the recorded diff",
+					...payload,
+				}),
+			}
+		}
+
+		function expandRow() {
+			fireEvent.click(screen.getByText("1 file(s) changed in this conversation").closest("button")!)
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+		}
+
+		function respond(message: Record<string, unknown>) {
+			act(() => {
+				window.dispatchEvent(new MessageEvent("message", { data: message }))
+			})
+		}
+
+		const requestsOfType = (type: string) =>
+			mockPostMessage.mock.calls.map(([m]) => m).filter((m: { type: string }) => m.type === type)
+
+		it("requests nothing until a row is expanded, then asks for the final and the original content", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			fireEvent.click(screen.getByText("1 file(s) changed in this conversation").closest("button")!)
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			expect(requestsOfType("readFileContent")).toEqual([{ type: "readFileContent", text: "src/foo.ts" }])
+			expect(requestsOfType("readOriginalContent")).toEqual([{ type: "readOriginalContent", messageTs: TS }])
+		})
+
+		it("shows the merged diff once both the original and the final content arrive", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			expandRow()
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+
+			respond({ type: "originalContent", originalContentInfo: { ts: TS, content: "old line\n" } })
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("+new line")
+		})
+
+		it("keeps the recorded diff when the original cannot be loaded", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({ type: "originalContent", originalContentInfo: { ts: TS, content: null } })
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+		})
+
+		it("does not request the original when it is already inline", () => {
+			renderPanel([createEditWithOriginal({ originalContent: "old line\n" })])
+			expandRow()
+
+			expect(requestsOfType("readOriginalContent")).toHaveLength(0)
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("+new line")
+		})
+
+		it("requests nothing for an edit that has no original", () => {
+			renderPanel([createEditWithOriginal({})])
+			expandRow()
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("ignores an original for a different message", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({ type: "originalContent", originalContentInfo: { ts: TS + 1, content: "old line\n" } })
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+		})
 	})
 })

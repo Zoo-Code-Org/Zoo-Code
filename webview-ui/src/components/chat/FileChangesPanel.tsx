@@ -23,12 +23,17 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 	const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 	const [finalContentByPath, setFinalContentByPath] = useState<Record<string, string | null>>({})
 	const pendingPathsRef = useRef<Set<string>>(new Set())
+	// The extension omits `originalContent` from the messages it posts; it is requested when a row is expanded.
+	const [originalContentByTs, setOriginalContentByTs] = useState<Record<number, string | null>>({})
+	const pendingOriginalTsRef = useRef<Set<number>>(new Set())
 
 	// Reset expanded file rows and final content cache when switching to a different task
 	useEffect(() => {
 		setExpandedPaths(new Set())
 		setFinalContentByPath({})
 		pendingPathsRef.current = new Set()
+		setOriginalContentByTs({})
+		pendingOriginalTsRef.current = new Set()
 	}, [clineMessages])
 
 	const fileChanges = useMemo(() => fileChangesFromMessages(clineMessages), [clineMessages])
@@ -65,25 +70,34 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 		})
 	}, [])
 
-	// Request final file content when a row is expanded and we have originalContent
+	// Request the final file content (and the omitted original content) when a row is expanded and the edit has an original
 	useEffect(() => {
 		for (const path of expandedPaths) {
 			const entries = byPath.get(path)
 			if (!entries?.length) continue
-			const originalContent = entries[0].originalContent
+			const first = entries[0]
 			const lookupPath = path.startsWith("./") ? path.slice(2) : path
 			if (
-				originalContent !== undefined &&
+				first.hasOriginalContent &&
 				!(lookupPath in finalContentByPath) &&
 				!pendingPathsRef.current.has(lookupPath)
 			) {
 				pendingPathsRef.current.add(lookupPath)
 				vscode.postMessage({ type: "readFileContent", text: lookupPath })
 			}
+			if (
+				first.hasOriginalContent &&
+				first.originalContent === undefined &&
+				!(first.ts in originalContentByTs) &&
+				!pendingOriginalTsRef.current.has(first.ts)
+			) {
+				pendingOriginalTsRef.current.add(first.ts)
+				vscode.postMessage({ type: "readOriginalContent", messageTs: first.ts })
+			}
 		}
-	}, [expandedPaths, byPath, finalContentByPath])
+	}, [expandedPaths, byPath, finalContentByPath, originalContentByTs])
 
-	// Listen for fileContent responses
+	// Listen for fileContent and originalContent responses
 	useEffect(() => {
 		const handler = (event: MessageEvent) => {
 			const message: ExtensionMessage = event.data
@@ -91,6 +105,10 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 				const fc = message.fileContent
 				pendingPathsRef.current.delete(fc.path)
 				setFinalContentByPath((prev) => ({ ...prev, [fc.path]: fc.content ?? null }))
+			} else if (message.type === "originalContent" && message.originalContentInfo) {
+				const { ts, content } = message.originalContentInfo
+				pendingOriginalTsRef.current.delete(ts)
+				setOriginalContentByTs((prev) => ({ ...prev, [ts]: content }))
 			}
 		}
 		window.addEventListener("message", handler)
@@ -133,7 +151,8 @@ const FileChangesPanel = memo(({ clineMessages, className }: FileChangesPanelPro
 			<CollapsibleContent>
 				<div className="flex flex-col gap-1 pb-2 pl-6">
 					{Array.from(byPath.entries()).map(([path, entries]) => {
-						const originalContent = entries[0].originalContent
+						const originalContent =
+							entries[0].originalContent ?? originalContentByTs[entries[0].ts] ?? undefined
 						const lookupPath = path.startsWith("./") ? path.slice(2) : path
 						const finalContent = finalContentByPath[lookupPath]
 						const hasMergedDiff =

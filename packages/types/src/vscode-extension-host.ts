@@ -106,11 +106,14 @@ export interface ExtensionMessage {
 		| "skills"
 		| "rules"
 		| "fileContent"
+		| "originalContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
+	/** For originalContent: the pre-edit file content of the tool message with this ts (null when unavailable) */
+	originalContentInfo?: { ts: number; content: string | null }
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
 		type: "WAIT_TIMEOUT" | "INIT_TIMEOUT"
@@ -498,6 +501,7 @@ export interface WebviewMessage {
 		| "saveImage"
 		| "openFile"
 		| "readFileContent"
+		| "readOriginalContent"
 		| "openMention"
 		| "cancelTask"
 		| "cancelAutoApproval"
@@ -858,6 +862,8 @@ export interface ClineSayTool {
 	content?: string
 	// Original file content before first edit (for merged diff display in FileChangesPanel)
 	originalContent?: string
+	// Length of the originalContent the extension left out of the webview state (request it with readOriginalContent)
+	originalContentLength?: number
 	// Unified diff statistics computed by the extension
 	diffStats?: { added: number; removed: number }
 	regex?: string

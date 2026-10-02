@@ -40,6 +40,7 @@ import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -1615,6 +1616,19 @@ export const webviewMessageHandler = async (
 					fileContent: { path: relPath, content: null, error: errorMsg },
 				})
 			}
+			break
+		}
+		case "readOriginalContent": {
+			const ts = message.messageTs
+
+			if (typeof ts !== "number") {
+				break
+			}
+
+			await provider.postMessageToWebview({
+				type: "originalContent",
+				originalContentInfo: { ts, content: findOriginalContent(provider.getCurrentTask()?.clineMessages, ts) },
+			})
 			break
 		}
 		case "openMention":
