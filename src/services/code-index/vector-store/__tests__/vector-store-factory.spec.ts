@@ -43,14 +43,14 @@ describe("VectorStoreFactory", () => {
 	})
 
 	it.each([undefined, 0, -1])("rejects an unavailable or invalid manual dimension: %s", (dimension) => {
-		config.modelDimension = dimension
+		config = { ...config, modelDimension: dimension }
 
 		expect(() => factory.create(config, "/workspace")).toThrow("serviceFactory.vectorDimensionNotDetermined")
 		expect(QdrantVectorStore).not.toHaveBeenCalled()
 	})
 
 	it("rejects Semble before resolving dimensions or creating a store", () => {
-		config.embedderProvider = "semble"
+		config = { ...config, embedderProvider: "semble" }
 
 		expect(() => factory.create(config, "/workspace")).toThrow("Semble provider handles its own vector storage")
 		expect(getModelDimension).not.toHaveBeenCalled()
@@ -68,8 +68,7 @@ describe("VectorStoreFactory", () => {
 	})
 
 	it("reports the dimension error before a missing Qdrant URL", () => {
-		config.modelDimension = undefined
-		config.qdrantUrl = undefined
+		config = { ...config, modelDimension: undefined, qdrantUrl: undefined }
 
 		expect(() => factory.create(config, "/workspace")).toThrow("serviceFactory.vectorDimensionNotDetermined")
 	})
