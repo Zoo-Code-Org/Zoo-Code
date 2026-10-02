@@ -1303,74 +1303,81 @@ describe("OpenAiNativeHandler", () => {
 						start: (startController) => {
 							startController.enqueue(
 								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"fallback"}\n\n'),
-							);
-							startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-							startController.close();
+							)
+							startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							startController.close()
 						},
-					});
-					return Promise.resolve({ ok: true, body });
-				});
-				global.fetch = mockFetch as typeof fetch;
-				const controller = new AbortController();
-				const terminalError = new Error("SDK connection reset");
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				const terminalError = new Error("SDK connection reset")
 				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
 					return new Promise((_resolve, reject) => {
 						if (options?.signal?.aborted) {
-							reject(terminalError);
-							return;
+							reject(terminalError)
+							return
 						}
-						options?.signal?.addEventListener("abort", () => reject(terminalError), { once: true });
-					});
-				});
-			
+						options?.signal?.addEventListener("abort", () => reject(terminalError), { once: true })
+					})
+				})
+
 				const collected = collectStream(
 					handler.createMessage(
 						systemPrompt,
 						messages,
 						makeCreateMessageMetadata({ abortSignal: controller.signal }),
 					),
-				);
-				await tick();
-				controller.abort();
-			
+				)
+				await tick()
+				controller.abort()
+
 				// The fallback is entered (the fetch is issued) rather than an AbortError
 				// being thrown; the loop's own aborted check then breaks before reading.
-				await collected;
-				expect(mockFetch).toHaveBeenCalled();
+				// Both halves of the contract must hold: the fallback request carries an
+				// already-aborted signal (so a real fetch would reject instead of issuing a
+				// second POST) and the stream yields nothing after cancellation.
+				const chunks = await collected
+				expect(mockFetch).toHaveBeenCalled()
+				const fetchOptions = mockFetch.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+				expect(fetchOptions?.signal).toBeInstanceOf(AbortSignal)
+				expect(fetchOptions?.signal?.aborted).toBe(true)
+				expect(chunks).toHaveLength(0)
 			})
-			
+
 			it("should rethrow a native AbortError from the SDK as-is instead of normalizing it", async () => {
 				// Regression guard for the name check: a native AbortError from the SDK must
 				// be rethrown as-is, not replaced by the normalized contract error.
-				const mockFetch = vitest.fn();
-				global.fetch = mockFetch as typeof fetch;
-				const controller = new AbortController();
-				const nativeError = new Error("socket closed by abort");
-				nativeError.name = "AbortError";
+				const mockFetch = vitest.fn()
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				const nativeError = new Error("socket closed by abort")
+				nativeError.name = "AbortError"
 				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
 					return new Promise((_resolve, reject) => {
 						if (options?.signal?.aborted) {
-							reject(nativeError);
-							return;
+							reject(nativeError)
+							return
 						}
-						options?.signal?.addEventListener("abort", () => reject(nativeError), { once: true });
-					});
-				});
-			
+						options?.signal?.addEventListener("abort", () => reject(nativeError), { once: true })
+					})
+				})
+
 				const collected = collectStream(
 					handler.createMessage(
 						systemPrompt,
 						messages,
 						makeCreateMessageMetadata({ abortSignal: controller.signal }),
 					),
-				);
-				await tick();
-				controller.abort();
-			
-				await expect(collected).rejects.toBe(nativeError);
-				expect(mockFetch).not.toHaveBeenCalled();
+				)
+				await tick()
+				controller.abort()
+
+				await expect(collected).rejects.toBe(nativeError)
+				expect(mockFetch).not.toHaveBeenCalled()
 			})
-			
+
 			it("should cancel only the aborted fallback body when overlapping requests share a handler", async () => {
 				// Regression: the SSE loop gated on the shared this.abortController
 				// field, so with two overlapping fallback reads an abort of one
