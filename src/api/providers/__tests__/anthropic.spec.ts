@@ -487,7 +487,6 @@ describe("AnthropicHandler", () => {
 				apiKey: "test-api-key",
 				apiModelId: "claude-opus-5-5",
 				enableReasoningEffort: true,
-				modelMaxTokens: 32768,
 			})
 
 			const stream = opusHandler.createMessage(systemPrompt, [
@@ -503,7 +502,7 @@ describe("AnthropicHandler", () => {
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
 			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
 			expect(requestBody?.temperature).toBeUndefined()
-			expect(requestBody?.max_tokens).toBe(32768)
+			expect(requestBody?.max_tokens).toBe(128_000)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
 
@@ -1098,9 +1097,9 @@ describe("AnthropicHandler", () => {
 			expect(model.info.outputPrice).toBe(20.0)
 			expect(model.info.cacheWritesPrice).toBe(5.0)
 			expect(model.info.cacheReadsPrice).toBe(0.2)
-			expect(model.maxTokens).toBe(8192)
+			expect(model.maxTokens).toBe(128000)
 			expect(model.info.supportsReasoningBinary).toBe(true)
-			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBeUndefined()
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect(model.info.supportsTemperature).toBe(false)
 			expect(model.reasoningBudget).toBeUndefined()
