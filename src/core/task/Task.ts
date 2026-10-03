@@ -1236,7 +1236,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
-		if (resolution.requiresDurableAck) {
+		if (resolution.requiresDurableAck || this.queuedFeedbackRows.has(message.id)) {
+			// A registered feedback row means an earlier delivery attempt left
+			// history behind: hand the ID back so the consumer reconciles that
+			// row through the durable ack instead of appending a duplicate via
+			// the say("user_feedback") fallback.
 			return message.id
 		}
 		this.messageQueueService.removeMessage(message.id)

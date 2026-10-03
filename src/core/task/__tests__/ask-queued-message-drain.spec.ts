@@ -1045,4 +1045,92 @@ describe("Task.ask queued message drain", () => {
 			vi.useRealTimers()
 		}
 	})
+	it("hands the queued ID back through a non-durable claim when a feedback row is registered", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		task.messageQueueService.addMessage("dedupe me")
+		// First delivery: the durable interception leaves a registered row and
+		// a re-queued entry when persistence fails.
+		const result = await task.ask("completion_result", "Done", false)
+		const messageId = result.queuedMessageId!
+		const access = getQueueTaskTestAccess(task)
+		access.addToClineMessages = vi.fn(async (message?: ClineMessage) => {
+			access.clineMessages.push(message!)
+			return true
+		})
+		access.saveClineMessages = vi.fn(async () => false)
+		access.say = vi.fn().mockResolvedValue(undefined)
+
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(access.queuedFeedbackRows.has(messageId)).toBe(true)
+
+		// Redelivery consumed by a non-durable ask (followup): the registered
+		// row must route the consumer through the durable ack so it reconciles
+		// the same row instead of appending a duplicate via the
+		// say("user_feedback") fallback.
+		const followup = await task.ask("followup", "Q?", false)
+		expect(followup).toMatchObject({ response: "messageResponse", text: "dedupe me" })
+		expect(followup.queuedMessageId).toBe(messageId)
+		// The entry is not removed inline; the durable ack owns its removal.
+		expect(task.messageQueueService.messages).toHaveLength(1)
+
+		access.saveClineMessages = vi.fn(async () => true)
+		await task.sayUserFeedbackAndAckQueued(followup.text, followup.images, followup.queuedMessageId)
+		expect(access.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("releases the queued message when the reconciled row update fails", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("completion_result", "Done", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("dedupe me")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+		const messageId = result.queuedMessageId!
+
+		const taskAccess = getQueueTaskTestAccess(task)
+		const updateClineMessage = vi.fn(async () => {})
+		taskAccess.updateClineMessage = updateClineMessage
+		taskAccess.addToClineMessages = async (message) => {
+			taskAccess.clineMessages.push(message!)
+			return true
+		}
+		// First ack: all saves fail, releasing the entry queued while the row
+		// association is retained for a later redelivery.
+		const saveClineMessages = vi.fn().mockResolvedValue(false)
+		taskAccess.saveClineMessages = saveClineMessages
+
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(task.messageQueueService.messages).toHaveLength(1)
+
+		// Redelivery: the reconciled row update fails. The failure must
+		// propagate and release the entry — it must NOT be acked/removed.
+		updateClineMessage.mockRejectedValueOnce(new Error("webview update failed"))
+		saveClineMessages.mockResolvedValue(true)
+
+		await expect(task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)).rejects.toThrow(
+			"webview update failed",
+		)
+		expect(saveClineMessages).toHaveBeenCalledTimes(4)
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["dedupe me"])
+	})
 })
