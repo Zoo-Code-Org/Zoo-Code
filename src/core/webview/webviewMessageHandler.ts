@@ -908,7 +908,16 @@ export const webviewMessageHandler = async (
 			await provider.showTaskWithId(message.text!)
 			break
 		case "condenseTaskContextRequest":
-			await provider.condenseTaskContext(message.text!)
+			try {
+				await provider.condenseTaskContext(message.text!)
+			} catch (error) {
+				// condenseContext drains queued messages after summarizing, and a
+				// failed submission rejects: surface it in the log instead of
+				// leaking an unhandled rejection from the message handler.
+				provider.log(
+					`[condenseTaskContextRequest] Failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 			break
 		case "deleteTaskWithId":
 			await provider.deleteTaskWithId(message.text!)
@@ -3812,7 +3821,10 @@ export const webviewMessageHandler = async (
 		case "editQueuedMessage": {
 			if (message.payload) {
 				const { id, text, images } = message.payload as EditQueuedMessagePayload
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
+				// Edits can attach images too, so they go through the same
+				// size/mention validation as fresh queued messages.
+				const resolved = await resolveIncomingImages({ text, images })
+				provider.getCurrentTask()?.messageQueueService.updateMessage(id, resolved.text, resolved.images)
 			}
 
 			break

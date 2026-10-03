@@ -2273,3 +2273,49 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
 	})
 })
+
+describe("webviewMessageHandler - chat message queue", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.getState).mockResolvedValue({} as never)
+	})
+
+	it("routes editQueuedMessage through the same image validation as fresh queued messages", async () => {
+		const { MessageQueueService } = await import("../../message-queue/MessageQueueService")
+		const queue = new MessageQueueService()
+		const added = queue.addMessage("original")!
+		const updateSpy = vi.spyOn(queue, "updateMessage")
+		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
+			cwd: "/mock/workspace",
+			rooIgnoreController: undefined,
+			messageQueueService: queue,
+		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "editQueuedMessage",
+			payload: { id: added.id, text: "edited", images: [] },
+		})
+
+		// resolveImageMentions is mocked to tag validated payloads; the edited
+		// message must carry the validated images, proving the edit path no
+		// longer bypasses the size/mention validation applied to queueMessage.
+		expect(resolveImageMentions).toHaveBeenCalled()
+		expect(updateSpy).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
+	})
+
+	it("logs instead of leaking when condenseTaskContext rejects", async () => {
+		const condenseError = new Error("queued submission failed")
+		const providerWithCondense = mockClineProvider as unknown as {
+			condenseTaskContext: ReturnType<typeof vi.fn>
+		}
+		providerWithCondense.condenseTaskContext = vi.fn().mockRejectedValue(condenseError)
+
+		await expect(
+			webviewMessageHandler(mockClineProvider, { type: "condenseTaskContextRequest", text: "task-1" }),
+		).resolves.toBeUndefined()
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			"[condenseTaskContextRequest] Failed: queued submission failed",
+		)
+	})
+})
