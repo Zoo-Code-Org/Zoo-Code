@@ -332,7 +332,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				return
 			}
 
-			await currentTask.submitUserMessage(text ?? "", images)
+			const submitted = await currentTask.submitUserMessage(text ?? "", images)
+			if (!submitted) {
+				// The task refused the write (it is stopping or an approval ask
+				// is in flight): reject so headless callers see the message was
+				// not delivered instead of it vanishing silently.
+				throw new Error(
+					"[API#sendMessage] message was not delivered to the task (task stopping or an approval ask is pending)",
+				)
+			}
 			return
 		}
 

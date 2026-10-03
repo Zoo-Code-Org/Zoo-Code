@@ -153,4 +153,26 @@ describe("API - SendMessage Command", () => {
 		})
 		expect(mockPostMessageToWebview).toHaveBeenCalledTimes(1)
 	})
+
+	it("rejects in headless mode when the task refuses the delivery", async () => {
+		// Arrange: headless flow with an in-flight approval ask — the task
+		// refuses the slot write, and the API caller must see the failure.
+		const submitUserMessage = vi.fn().mockResolvedValue(false)
+		const headlessProvider = {
+			context: {} as vscode.ExtensionContext,
+			postMessageToWebview: mockPostMessageToWebview,
+			on: vi.fn(),
+			getCurrentTaskStack: vi.fn().mockReturnValue([]),
+			getCurrentTask: vi.fn().mockReturnValue({ submitUserMessage }),
+			viewLaunched: false,
+		} as unknown as ClineProvider
+		const headlessApi = new API(mockOutputChannel, headlessProvider, undefined, true)
+
+		// Act + Assert
+		await expect(headlessApi.sendMessage("Hello from headless")).rejects.toThrow(
+			"[API#sendMessage] message was not delivered",
+		)
+		expect(submitUserMessage).toHaveBeenCalledWith("Hello from headless", undefined)
+		expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+	})
 })
