@@ -3,7 +3,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import type { ModelInfo } from "@roo-code/types"
+import { type ModelInfo, openAiModelInfoSaneDefaults } from "@roo-code/types"
 
 import { BaseOpenAiCompatibleProvider } from "../base-openai-compatible-provider"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -25,18 +25,20 @@ vi.mock("openai", () => ({
 	}),
 }))
 
+const TEST_MODEL_INFO: ModelInfo = {
+	maxTokens: 4096,
+	contextWindow: 128000,
+	supportsImages: false,
+	supportsPromptCache: false,
+	inputPrice: 0.5,
+	outputPrice: 1.5,
+}
+
 // Create a concrete test implementation of the abstract base class
 class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-model"> {
-	constructor(apiKey: string) {
+	constructor(apiKey: string, options?: { apiModelId?: string; modelMaxTokens?: number }) {
 		const testModels: Record<"test-model", ModelInfo> = {
-			"test-model": {
-				maxTokens: 4096,
-				contextWindow: 128000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				inputPrice: 0.5,
-				outputPrice: 1.5,
-			},
+			"test-model": TEST_MODEL_INFO,
 		}
 
 		super({
@@ -45,6 +47,7 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 			defaultProviderModelId: "test-model",
 			providerModels: testModels,
 			apiKey,
+			...options,
 		})
 	}
 }
@@ -294,6 +297,64 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			expect(firstChunk.done).toBe(false)
 			expect(firstChunk.value).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 50 })
+		})
+	})
+
+	describe("getModel", () => {
+		it("returns the provider default when no model id is configured", () => {
+			const model = handler.getModel()
+			expect(model.id).toBe("test-model")
+			expect(model.info).toEqual(TEST_MODEL_INFO)
+		})
+
+		it("returns the predefined metadata for a known model id", () => {
+			const knownHandler = new TestOpenAiCompatibleProvider("test-api-key", { apiModelId: "test-model" })
+			const model = knownHandler.getModel()
+			expect(model.id).toBe("test-model")
+			expect(model.info).toEqual(TEST_MODEL_INFO)
+		})
+
+		it("honors a custom model id that is not in the predefined list", () => {
+			// Regression: a user-supplied custom id must not be silently swapped for the
+			// provider default (which previously caused wrong-model requests / 404s).
+			const customHandler = new TestOpenAiCompatibleProvider("test-api-key", {
+				apiModelId: "some/custom-model-not-in-list",
+			})
+			const model = customHandler.getModel()
+			expect(model.id).toBe("some/custom-model-not-in-list")
+			expect(model.id).not.toBe("test-model")
+			// Falls back to sane default metadata so the rest of the pipeline works.
+			expect(model.info).toEqual(openAiModelInfoSaneDefaults)
+		})
+
+		it("sends the custom model id verbatim to the API", async () => {
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const customHandler = new TestOpenAiCompatibleProvider("test-api-key", {
+				apiModelId: "some/custom-model-not-in-list",
+			})
+
+			const stream = customHandler.createMessage("system prompt", [])
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "some/custom-model-not-in-list" }),
+				undefined,
+			)
+		})
+
+		it("completePrompt sends the custom model id verbatim to the API", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+
+			const customHandler = new TestOpenAiCompatibleProvider("test-api-key", {
+				apiModelId: "some/custom-model-not-in-list",
+			})
+
+			await customHandler.completePrompt("hello")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "some/custom-model-not-in-list" }),
+			)
 		})
 	})
 
