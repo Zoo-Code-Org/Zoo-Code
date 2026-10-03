@@ -19,7 +19,10 @@ interface ExperimentConfig {
 }
 
 export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
-	PREVENT_FOCUS_DISRUPTION: { enabled: false },
+	// Chat-diff is the default approval path (plan issue #33, L2): writes are saved
+	// without opening/refocusing the diff editor. The diff-editor path remains
+	// available by toggling this experiment off (storage key unchanged).
+	PREVENT_FOCUS_DISRUPTION: { enabled: true },
 	IMAGE_GENERATION: { enabled: false },
 	RUN_SLASH_COMMAND: { enabled: false },
 	CUSTOM_TOOLS: { enabled: false },
