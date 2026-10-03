@@ -785,17 +785,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (startTask) {
 			this._started = true
 			this.startIdleTelemetryCheck()
+			// Validate BEFORE starting the liveness heartbeat: the throw branch
+			// is unreachable in production (the constructor guard above fires
+			// first), but if it ever did fire it must not leak the unref'd
+			// heartbeat interval.
+			if (!task && !images && !historyItem) {
+				throw new Error("Either historyItem or task/images must be provided")
+			}
 			this.startLivenessHeartbeat()
 			if (task || images) {
 				void this.startTask(task, images).catch((error) => {
 					console.error("[Task#constructor] startTask failed:", error)
 				})
-			} else if (historyItem) {
+			} else {
 				void this.resumeTaskFromHistory().catch((error) => {
 					console.error("[Task#constructor] resumeTaskFromHistory failed:", error)
 				})
-			} else {
-				throw new Error("Either historyItem or task/images must be provided")
 			}
 		}
 	}
@@ -3095,6 +3100,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Mark as initialized and active
 		this.isInitialized = true
 		this.emit(RooCodeEventName.TaskActive, this.taskId)
+
+		// This is a launch entry like start()/run(): a nested-delegation resume
+		// re-activates a delegated parent that may itself be an awaited child,
+		// and the whole-lifetime liveness heartbeat must cover it from this
+		// point on. Idempotent — a task that never stopped heartbeating keeps
+		// its interval.
+		this.startLivenessHeartbeat()
 
 		// Load conversation history if not already loaded
 		if (this.apiConversationHistory.length === 0) {

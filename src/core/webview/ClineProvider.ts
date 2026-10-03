@@ -4015,8 +4015,17 @@ export class ClineProvider
 		} catch (err) {
 			// The child will never start: release the ownership claim createTask
 			// installed for it (the rollback delete also drops it, but that path
-			// is best-effort).
-			this.taskHistoryStore.markLocallyInactive(child.taskId)
+			// is best-effort). Best-effort like every cleanup in this catch: a
+			// minimal store must not mask the original rollback error.
+			try {
+				this.taskHistoryStore.markLocallyInactive(child.taskId)
+			} catch (releaseError) {
+				this.log(
+					`[delegateParentAndOpenChild] Failed to release child ${child.taskId} ownership claim during rollback: ${
+						(releaseError as Error)?.message ?? String(releaseError)
+					}`,
+				)
+			}
 			this.log(
 				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${
 					(err as Error)?.message ?? String(err)

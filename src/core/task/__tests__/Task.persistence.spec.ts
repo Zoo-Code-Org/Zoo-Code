@@ -2528,6 +2528,41 @@ describe("Task persistence", () => {
 			}
 		})
 
+		it("resumeAfterDelegation starts the liveness heartbeat (nested-delegation resume entry)", async () => {
+			// resumeAfterDelegation ends by continuing the full task loop; stub the
+			// loop and the history save so this test exercises only the resume
+			// prologue. Fake timers keep the started interval from leaking.
+			const parent = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				parentTask: parent,
+				startTask: false,
+			})
+			const access = child as unknown as {
+				initiateTaskLoop: (userContent: unknown[]) => Promise<void>
+				saveApiConversationHistory: (merge?: boolean) => Promise<boolean>
+				livenessHeartbeatInterval: ReturnType<typeof setInterval> | undefined
+			}
+			access.initiateTaskLoop = vi.fn().mockResolvedValue(undefined)
+			access.saveApiConversationHistory = vi.fn().mockResolvedValue(true)
+			// Pre-seed history so the hydrate path is skipped and the
+			// environment-details prologue has a user message to annotate.
+			child.apiConversationHistory.push({
+				role: "user",
+				content: [{ type: "text", text: "parent question" }],
+			})
+
+			vi.useFakeTimers()
+			try {
+				expect(access.livenessHeartbeatInterval).toBeUndefined()
+				await child.resumeAfterDelegation()
+				expect(access.livenessHeartbeatInterval).toBeDefined()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("dispose releases the local session ownership claim", async () => {
 			const releaseSpy = vi.spyOn(mockProvider.taskHistoryStore, "markLocallyInactive")
 			const task = new Task({
