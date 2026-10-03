@@ -282,6 +282,46 @@ describe("Task.ask queued message drain", () => {
 		}
 	})
 
+	it("releases the drain tracker when a claimed durable ack keeps failing", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		task.messageQueueService.addMessage("Do not lose me")
+		// Between-turns drain: submits the message and tracks it as pending.
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+
+		// A completion ask claims the retained entry through the durable path;
+		// the drain-side tracker is still set while the ack runs.
+		const result = await task.ask("completion_result", "Done", false)
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.runAllTimersAsync()
+			await expect(persistence).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(access.saveClineMessages).toHaveBeenCalledTimes(4)
+		expect(task.messageQueueService.messages).toHaveLength(1)
+
+		// The tracker must be cleared even though the message was re-queued, so
+		// this drain resubmits it instead of stalling on the stale pending ID
+		// (which would also starve every message behind it).
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).toHaveBeenCalledTimes(2)
+	})
+
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")

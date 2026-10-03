@@ -1019,27 +1019,39 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.messageQueueService.releaseMessage(messageId)
 			throw error
 		}
-		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
-			if (this.abort || this.abandoned) {
-				this.messageQueueService.releaseMessage(messageId)
-				return false
+		try {
+			for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
+				if (this.abort || this.abandoned) {
+					this.messageQueueService.releaseMessage(messageId)
+					return false
+				}
+				if (await this.saveClineMessages()) {
+					this.queuedFeedbackRows.delete(messageId)
+					return this.messageQueueService.removeMessage(messageId)
+				}
+				if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
+					// Interruptible backoff: an abort or abandonment during the wait
+					// resolves promptly (releasing the claim at the loop-top check)
+					// instead of retaining the task through the full delay.
+					await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+				}
 			}
-			if (await this.saveClineMessages()) {
-				this.queuedFeedbackRows.delete(messageId)
-				return this.messageQueueService.removeMessage(messageId)
-			}
-			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
-				// Interruptible backoff: an abort or abandonment during the wait
-				// resolves promptly (releasing the claim at the loop-top check)
-				// instead of retaining the task through the full delay.
-				await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+			console.error(
+				`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
+			)
+			this.messageQueueService.releaseMessage(messageId)
+			return false
+		} finally {
+			// The drain-side tracker only guards a submitted message against
+			// re-submission while an ask has not consumed it yet. Once persistence
+			// settles — success (entry removed), failure (entry re-queued), abort,
+			// or a failed row write — a stale tracker would block every later
+			// drain from resubmitting this message (and starve the messages
+			// behind it), so release it on every exit path.
+			if (this.pendingSubmittedQueuedMessageId === messageId) {
+				this.pendingSubmittedQueuedMessageId = undefined
 			}
 		}
-		console.error(
-			`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
-		)
-		this.messageQueueService.releaseMessage(messageId)
-		return false
 	}
 
 	private waitForQueuedFeedbackBackoff(ms: number): Promise<void> {
