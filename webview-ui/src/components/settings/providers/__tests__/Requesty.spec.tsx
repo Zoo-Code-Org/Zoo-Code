@@ -16,11 +16,10 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 }))
 
 vi.mock("@src/components/ui", () => ({
-	Button: ({ children, onClick }: React.ComponentProps<"button">) => (
-		<button data-testid="refresh-button" onClick={onClick}>
-			{children}
-		</button>
-	),
+	Button: ({ children, onClick }: React.ComponentProps<"button">) => <button onClick={onClick}>{children}</button>,
+	Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
 vi.mock("../../ModelPicker", () => ({ ModelPicker: () => null }))
@@ -48,7 +47,7 @@ describe("Requesty", () => {
 		expect(callbackUrl).not.toBeNull()
 		expect(new URL(callbackUrl!).pathname).toMatch(new RegExp(`/${providerIdentifiers.requesty}$`))
 
-		fireEvent.click(screen.getByTestId("refresh-button"))
+		fireEvent.click(screen.getByRole("button", { name: "settings:providers.refreshModels.label" }))
 		expect(postMessage).toHaveBeenCalledWith({
 			type: "requestRouterModels",
 			values: { provider: providerIdentifiers.requesty, refresh: true },
