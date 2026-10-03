@@ -345,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "🔑 Zoo Gateway API anahtarını her yerde kullan—anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Sınırlı bir süre için Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.",
-			"highlight3": "✨ Şimdi kullanıma sunuldu: yepyeni GPT-6 Astra ve Claude Fable 5.1 modelleri."
+			"highlight1": "✨ Yeni model desteği: GPT-6.1 Sol kullan, Claude Opus 5.5'in düzeltilmiş çıktı sınırından yararlan ve OpenCode Go'da DeepSeek V4.1 Flash'ı seç.",
+			"highlight2": "🧭 Güvenilir görev iptalleri ve kesintiler: İlk iptal nedenini koru, her istek için akış iptal durumunu sıfırla ve kesintiye uğrayan görevlerin reddedilen alt görevleri yeniden çalıştırmasını önle.",
+			"highlight3": "🛠️ Güvenilir araçlar, Prompt'lar ve arayüz akışı: Akışla gelen araç argümanlarını eksiksiz koru, MCP araç politikasını uygula, uydurma satır numaralarını önle ve sohbet güncellemelerini akıcı hâle getir."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

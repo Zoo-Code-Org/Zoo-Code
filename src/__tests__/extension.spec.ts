@@ -12,7 +12,7 @@ vi.mock("vscode", () => ({
 		tabGroups: {
 			onDidChangeTabs: vi.fn(),
 		},
-		onDidChangeActiveTextEditor: vi.fn(),
+		onDidChangeActiveTextEditor: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 	},
 	workspace: {
 		registerTextDocumentContentProvider: vi.fn(),
@@ -205,6 +205,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 			{
 				// Static method used by extension.ts
 				getVisibleInstance: vi.fn().mockReturnValue(mockInstance),
+				getAllInstances: vi.fn().mockReturnValue([]),
 				sideBarId: "zoo-code.SidebarProvider",
 			},
 		),
@@ -237,6 +238,141 @@ describe("extension.ts", () => {
 
 		settingsUpdatedHandler = undefined
 	})
+
+	test("initializes the code index scope and registers it for extension cleanup", async () => {
+		vi.resetModules()
+		const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+		const init = vi.spyOn(CodeIndexScope.prototype, "init")
+		const dispose = vi.spyOn(CodeIndexScope.prototype, "dispose")
+		try {
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			const scopes = mockContext.subscriptions.filter((entry) => entry instanceof CodeIndexScope)
+			expect(scopes).toHaveLength(1)
+			expect(init).toHaveBeenCalledExactlyOnceWith()
+			expect(init.mock.contexts[0]).toBe(scopes[0])
+			expect(dispose).not.toHaveBeenCalled()
+			scopes[0].dispose()
+			expect(dispose).toHaveBeenCalledExactlyOnceWith()
+		} finally {
+			init.mockRestore()
+			dispose.mockRestore()
+		}
+	})
+
+	test("publishes indexing status to matching providers and logs delivery failures", async () => {
+		vi.resetModules()
+		const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const log = vi.spyOn(console, "error").mockImplementation(() => {})
+		const provider = ClineProvider.getVisibleInstance()!
+		Object.defineProperty(provider, "workspacePath", { configurable: true, value: "/workspace" })
+		const getAll = vi.mocked(ClineProvider.getAllInstances)
+		const post = vi.mocked(provider.postMessageToWebview)
+		getAll.mockReturnValue([provider, provider])
+		post.mockRejectedValueOnce(new Error("delivery failed")).mockResolvedValue(undefined)
+		try {
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+			const scope = mockContext.subscriptions.find((entry) => entry instanceof CodeIndexScope)!
+			const status = {
+				systemStatus: "Standby" as const,
+				message: "Ready",
+				processedItems: 0,
+				totalItems: 0,
+				currentItemUnit: "blocks",
+				workspacePath: "/workspace",
+				workspaceEnabled: true,
+				autoEnableDefault: true,
+			}
+			scope["statusManager"]!["publishStatus"](status)
+			await Promise.resolve()
+			expect(post).toHaveBeenCalledTimes(2)
+			expect(post).toHaveBeenCalledWith({ type: "indexingStatusUpdate", values: status })
+			expect(log).toHaveBeenCalledWith(
+				"[CodeIndexStatusManager] Failed to publish indexing status:",
+				expect.objectContaining({ message: "delivery failed" }),
+			)
+			scope.dispose()
+		} finally {
+			log.mockRestore()
+			getAll.mockReturnValue([])
+			post.mockReset()
+			Reflect.deleteProperty(provider, "workspacePath")
+		}
+	})
+
+	test.each([
+		{ workspacePath: "/other-workspace", receivesStatus: false },
+		{ workspacePath: "/workspace", receivesStatus: true },
+		{ workspacePath: undefined, receivesStatus: true },
+		{ workspacePath: "", receivesStatus: true },
+	])(
+		"routes status for provider workspace=$workspacePath with receivesStatus=$receivesStatus",
+		async ({ workspacePath, receivesStatus }) => {
+			vi.resetModules()
+			const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const provider = ClineProvider.getVisibleInstance()!
+			Object.defineProperty(provider, "workspacePath", { configurable: true, value: workspacePath })
+			const getAll = vi.mocked(ClineProvider.getAllInstances)
+			getAll.mockReturnValue([provider])
+			try {
+				const { activate } = await import("../extension")
+				await activate(mockContext)
+				const scope = mockContext.subscriptions.find((entry) => entry instanceof CodeIndexScope)!
+				const status = {
+					systemStatus: "Indexing" as const,
+					message: "Processing confidential.ts",
+					processedItems: 1,
+					totalItems: 2,
+					currentItemUnit: "files",
+					workspacePath: "/workspace",
+					workspaceEnabled: true,
+					autoEnableDefault: true,
+				}
+				scope["statusManager"]!["publishStatus"](status)
+				await Promise.resolve()
+				if (receivesStatus) {
+					expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+						type: "indexingStatusUpdate",
+						values: status,
+					})
+				} else {
+					expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+				}
+				scope.dispose()
+			} finally {
+				getAll.mockReturnValue([])
+				Reflect.deleteProperty(provider, "workspacePath")
+			}
+		},
+	)
+
+	test.each([new Error("scope initialization failed"), "scope initialization failed"])(
+		"continues activation and logs code index scope initialization failure: %s",
+		async (error) => {
+			vi.resetModules()
+			const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+			const init = vi.spyOn(CodeIndexScope.prototype, "init").mockImplementationOnce(() => {
+				throw error
+			})
+			try {
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).resolves.toBeDefined()
+
+				const vscode = await import("vscode")
+				const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+				expect(channel?.appendLine).toHaveBeenCalledWith(
+					"[CodeIndexScope] Failed to initialize: scope initialization failed",
+				)
+				expect(mockContext.subscriptions.filter((entry) => entry instanceof CodeIndexScope)).toHaveLength(1)
+			} finally {
+				init.mockRestore()
+			}
+		},
+	)
 
 	test("does not call dotenv.config when optional .env does not exist", async () => {
 		vi.resetModules()

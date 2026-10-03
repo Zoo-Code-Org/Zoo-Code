@@ -362,6 +362,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			let finalResponse: { responseId?: string } | undefined
 			let finishReason: string | undefined
 
+			// Gemini provides no call ID, so one is synthesized here. The
+			// request-unique component keeps persisted pending-action IDs (#1714)
+			// distinct across requests even though the counter restarts at zero.
+			const toolCallRequestId = crypto.randomUUID()
 			let toolCallCounter = 0
 			let hasContent = false
 			let hasReasoning = false
@@ -406,7 +410,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 								hasContent = true
 								// Gemini sends complete function calls in a single chunk
 								// Emit as partial chunks for consistent handling with NativeToolCallParser
-								const callId = `${part.functionCall.name}-${toolCallCounter}`
+								const callId = `${part.functionCall.name}-${toolCallRequestId}-${toolCallCounter}`
 								const args = JSON.stringify(part.functionCall.args)
 
 								// Emit name first
