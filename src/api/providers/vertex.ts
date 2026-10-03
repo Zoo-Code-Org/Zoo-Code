@@ -29,16 +29,14 @@ export class VertexHandler extends GeminiHandler implements SingleCompletionHand
 			info = vertexModels[baseModelId]
 		} else if (modelId && modelId.toLowerCase().startsWith("gemini-")) {
 			id = modelId
-			const baseModelId = modelId.endsWith(":thinking") ? modelId.slice(0, -":thinking".length) : modelId
-			const fallbackModelId: VertexModelId = (
-				Object.hasOwn(vertexModels, baseModelId)
-					? baseModelId
-					: "gemini-3.7-flash" in vertexModels
-						? "gemini-3.7-flash"
-						: "gemini-3.1-pro-preview" in vertexModels
-							? "gemini-3.1-pro-preview"
-							: vertexDefaultModelId
-			) as VertexModelId
+			// Arms above guarantee the id (and its :thinking base, if any) is NOT a
+			// vertexModels key, so resolve params from the newest Gemini entry.
+			const fallbackModelId: VertexModelId =
+				"gemini-3.7-flash" in vertexModels
+					? "gemini-3.7-flash"
+					: "gemini-3.1-pro-preview" in vertexModels
+						? "gemini-3.1-pro-preview"
+						: vertexDefaultModelId
 			const baseInfo = vertexModels[fallbackModelId] || vertexModels[vertexDefaultModelId]
 			info = {
 				...baseInfo,
