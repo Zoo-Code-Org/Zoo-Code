@@ -3,6 +3,7 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 
 import { BedrockEmbedder } from "../bedrock"
 import { MAX_ITEM_TOKENS, INITIAL_RETRY_DELAY_MS } from "../../constants"
+import { createProxyRoutingRequestHandler } from "../../../../utils/networkProxy"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
@@ -24,6 +25,10 @@ vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
 vitest.mock("@aws-sdk/credential-providers", () => ({
 	fromEnv: vitest.fn().mockReturnValue(Promise.resolve({})),
 	fromIni: vitest.fn().mockReturnValue(Promise.resolve({})),
+}))
+
+vitest.mock("../../../../utils/networkProxy", () => ({
+	createProxyRoutingRequestHandler: vitest.fn().mockReturnValue(undefined),
 }))
 
 // Mock TelemetryService
@@ -92,6 +97,11 @@ describe("BedrockEmbedder", () => {
 	})
 
 	describe("constructor", () => {
+		afterEach(() => {
+			// clearAllMocks() keeps implementations, so a stub would leak into later tests.
+			vitest.mocked(createProxyRoutingRequestHandler).mockReturnValue(undefined)
+		})
+
 		it("should initialize with provided region, profile and model", () => {
 			expect(embedder.embedderInfo.name).toBe("bedrock")
 		})
@@ -112,6 +122,34 @@ describe("BedrockEmbedder", () => {
 				expect.objectContaining({
 					userAgentAppId: expect.stringMatching(/^ZooCode#/),
 				}),
+			)
+		})
+
+		it("should route requests through the proxy-aware handler when one is built", () => {
+			const handler = {
+				handle: vitest.fn(),
+				updateHttpClientConfig: vitest.fn(),
+				httpHandlerConfigs: vitest.fn(),
+				destroy: vitest.fn(),
+			}
+			vitest.mocked(createProxyRoutingRequestHandler).mockReturnValue(handler)
+
+			new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0")
+
+			const clientConfig = vitest.mocked(BedrockRuntimeClient).mock.calls.at(-1)?.[0]
+			expect(clientConfig?.requestHandler).toBe(handler)
+			// Pinning an endpoint here would break FIPS, dualstack and non-default partitions,
+			// and would take the routing decision away from the handler.
+			expect(clientConfig).not.toHaveProperty("endpoint")
+		})
+
+		it("should keep the client default handler when no proxy is configured", () => {
+			vitest.mocked(createProxyRoutingRequestHandler).mockReturnValue(undefined)
+
+			new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0")
+
+			expect(BedrockRuntimeClient).toHaveBeenLastCalledWith(
+				expect.not.objectContaining({ requestHandler: expect.anything() }),
 			)
 		})
 	})
