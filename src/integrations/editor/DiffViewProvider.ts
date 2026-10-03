@@ -1305,7 +1305,7 @@ export class DiffViewProvider {
 	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
 	 *   Defaults to "create" because this method always publishes a complete file
 	 *   content: an unobserved target may only be created when absent, and an
-	 *   observed target must still carry the version token recorded at read time.
+	 *   observed target must still carry the current observation token.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1348,13 +1348,11 @@ export class DiffViewProvider {
 				preserveFocus: true,
 			})
 		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
-
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
-			}
+			// Just open the document in memory to trigger diagnostics without showing it.
+			// Do not save here: the guarded publish already committed the accepted content,
+			// and saving a dirty buffer would republish its stale bytes through VS Code's
+			// unguarded save path, over what the guard wrote.
+			await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
 			// Force a small delay to ensure diagnostics are triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))

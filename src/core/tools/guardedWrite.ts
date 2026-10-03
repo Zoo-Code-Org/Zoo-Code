@@ -7,14 +7,18 @@
  * - an unobserved target may only be created when it is absent
  *   (createIfAbsent);
  * - an observed target is published only when the on-disk version token still
- *   matches the token recorded at read time (replaceIfVersion);
+ *   matches the current observation token (replaceIfVersion);
  * - an edit-style write requires a prior observation (unobservedEditGuard).
  *
  * A per-absolute-path FIFO chain of tail promises orders concurrent
  * in-process writes to the same path. Each publish refreshes the observation to
  * the token it wrote when the new token can be computed, so same-task writes
- * apply last-write-wins; when that refresh fails the observation keeps the token
- * recorded at read time. A write that goes through replaceIfVersion fails stale
+ * apply last-write-wins; when that refresh fails the observation keeps the
+ * previous observation token. A write that goes through replaceIfVersion fails
+ * stale when the on-disk token differs from the token the observation currently
+ * holds; an observed "create" whose target has disappeared instead uses
+ * createIfAbsent and can recreate it. Observations come from the task's S2
+ * ObservationRegistry and authorize the write as well as the version check.
  * when the on-disk token differs from the token the observation currently holds;
  * an observed "create" whose target has disappeared instead uses createIfAbsent
  * and can recreate it. Observations come from the task's S2 ObservationRegistry

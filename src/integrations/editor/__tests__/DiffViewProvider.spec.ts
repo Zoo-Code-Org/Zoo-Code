@@ -885,6 +885,24 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("does not save a dirty buffer in the memory-only diagnostics path", async () => {
+			// The guarded publish already committed the accepted content. Saving a dirty
+			// buffer here would republish its stale bytes through VS Code's unguarded save
+			// path, over what the guard wrote.
+			const dirtyDoc = {
+				isDirty: true,
+				save: vi.fn().mockResolvedValue(undefined),
+			} as unknown as vscode.TextDocument
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(dirtyDoc)
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 0)
+
+			expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(
+				expect.objectContaining({ fsPath: `${mockCwd}/test.ts` }),
+			)
+			expect(dirtyDoc.save).not.toHaveBeenCalled()
+		})
+
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {
 			const mockDelay = vi.mocked(delay)
 			mockDelay.mockClear()
