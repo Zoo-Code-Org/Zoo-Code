@@ -14,7 +14,7 @@ describe("getMimoModels", () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: vi.fn().mockResolvedValue({
-				data: [{ id: "mimo-v2.6-pro" }, { id: "mimo-v2.6-flash" }],
+				data: [{ id: "mimo-v2.6-pro" }, { id: "mimo-v2.6-flash" }, { id: "mimo-v3-future" }],
 			}),
 		}) as unknown as typeof fetch
 
@@ -26,6 +26,18 @@ describe("getMimoModels", () => {
 		)
 		expect(models["mimo-v2.6-pro"]).toEqual(mimoModels["mimo-v2.6-pro"])
 		expect(models["mimo-v2.6-flash"]).toEqual(mimoModels["mimo-v2.6-flash"])
+
+		// mimo-v3-future exists only in the API response, so it must surface with
+		// MiMo-family defaults: a mutation that returned the static map directly
+		// (ignoring the response) would leave it undefined.
+		expect(models["mimo-v3-future"]).toEqual({
+			maxTokens: 16_000,
+			contextWindow: 262_144,
+			supportsImages: false,
+			supportsPromptCache: false,
+			preserveReasoning: true,
+			description: "MiMo model: mimo-v3-future",
+		})
 
 		// mimo-v2.5-pro is still served today, but this mock response omits it
 		// (post-EOL world): a model absent from the API response must stay absent
