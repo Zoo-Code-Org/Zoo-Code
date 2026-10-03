@@ -37,23 +37,6 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 }
 
 /**
- * Throw an AbortError if the given signal is already aborted.
- *
- * Use as a fast-fail guard at the top of request-building code paths so
- * callers receive a consistent `name === "AbortError"` when the operation
- * was cancelled before it started, without building or issuing the request.
- */
-export function throwIfAborted(signal?: AbortSignal): void {
-	if (!signal?.aborted) {
-		return
-	}
-
-	const abortError = new Error("This operation was aborted")
-	abortError.name = "AbortError"
-	throw abortError
-}
-
-/**
  * Request options this series passes to the OpenAI SDK call. The SDK's
  * `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
  * which does not satisfy the builder's base constraint, so the builder is
@@ -66,19 +49,20 @@ export type OpenAiRequestOptions = {
 
 /**
  * Whether a failure indicates an aborted request: the caller's signal fired,
- * the SDK raised a native abort error, or the error carries the OpenAI SDK
- * abort error message (exactly "Request was aborted."). The message check
- * is an exact match on purpose: a substring match would misclassify
- * unrelated errors that merely mention aborting.
+ * an `Error` carries a native abort error name (`AbortError`,
+ * `APIUserAbortError`), or an `Error` carries the OpenAI SDK abort error
+ * message (exactly "Request was aborted.").
+ *
+ * The name and message checks require an `Error` instance on purpose: a
+ * plain object that merely looks like an abort must propagate unchanged so
+ * callers can inspect the real failure shape. The message check is an exact
+ * match on purpose: a substring match would misclassify unrelated errors
+ * that merely mention aborting.
  */
 export function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
-	const candidate = error as { name?: string; message?: string }
-	return (
-		Boolean(signal?.aborted) ||
-		candidate?.name === "AbortError" ||
-		candidate?.name === "APIUserAbortError" ||
-		candidate?.message === "Request was aborted."
-	)
+	const hasAbortName = error instanceof Error && (error.name === "AbortError" || error.name === "APIUserAbortError")
+	const hasSdkAbortMessage = error instanceof Error && error.message === "Request was aborted."
+	return Boolean(signal?.aborted) || hasAbortName || hasSdkAbortMessage
 }
 
 /**
@@ -92,4 +76,71 @@ export function createAbortError(providerName: string): Error {
 	const abortError = new Error(`The ${providerName} request was aborted`)
 	abortError.name = "AbortError"
 	return abortError
+}
+
+/**
+ * Await `pending` but reject with the provider's abort error when `signal`
+ * aborts first. For async phases that have no native signal support (model
+ * discovery) yet must still settle promptly on cancellation. The underlying
+ * promise keeps running (its settlement is ignored) — cancellation is
+ * cooperative at this boundary.
+ *
+ * The abort listener is detached once `pending` settles (success or
+ * failure), so repeated calls on one signal do not accumulate listeners.
+ */
+export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+	if (signal.aborted) {
+		return Promise.reject(createAbortError(providerName))
+	}
+
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(createAbortError(providerName))
+		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
+		signal.addEventListener("abort", onAbort, { once: true })
+		void pending.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}
+
+/**
+ * Resolve a provider's model metadata inside a cancellation scope.
+ *
+ * A pre-aborted signal rejects immediately with the standardized AbortError
+ * before any lookup starts; a signal that fires while the lookup is pending
+ * settles via {@link rejectOnAbort} instead of waiting for the catalog to
+ * resolve. Abort failures from the lookup itself are normalized to the
+ * provider AbortError; any other resolution failure propagates unchanged.
+ *
+ * Providers pass their own resolution step, so the entry guard, the race, and
+ * the normalization logic exist once and are exercised through every
+ * provider's spec.
+ */
+export async function resolveModelWithAbort<T>(
+	fetchModel: () => Promise<T>,
+	abortSignal: AbortSignal | undefined,
+	providerName: string,
+): Promise<T> {
+	if (abortSignal?.aborted) {
+		throw createAbortError(providerName)
+	}
+
+	try {
+		if (abortSignal) {
+			return await rejectOnAbort(fetchModel(), abortSignal, providerName)
+		}
+		return await fetchModel()
+	} catch (error) {
+		if (isRequestAborted(error, abortSignal)) {
+			throw createAbortError(providerName)
+		}
+		throw error
+	}
 }
