@@ -323,7 +323,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "sep-2026-v3.84.0-models-task-tool-reliability" // v3.84.0 new models, task reliability, and terminal/provider/code-search fixes
+	public readonly latestAnnouncementId = "oct-2026-v3.86.0-models-aborts-tool-streaming" // v3.86.0 models, aborts, and tool/UI streaming fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
