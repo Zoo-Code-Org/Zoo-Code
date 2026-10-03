@@ -7,7 +7,7 @@ import * as os from "os"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../../shared/globalFileNames"
-import { LOCK_STALE_MS } from "../../../utils/safeWriteJson"
+import { LOCK_STALE_MS } from "../../../utils/fileLock"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 
 vi.mock("../../../utils/storage", () => ({
