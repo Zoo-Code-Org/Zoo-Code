@@ -553,10 +553,7 @@ export class TaskHistoryStore {
 						// quiet, so the next pass repairs it. An unreadable/absent
 						// parent mtime stays conservative and repairs immediately.
 						if (this.locallyActiveTaskIds.has(item.awaitingChildId)) {
-							console.warn(
-								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: child ${item.awaitingChildId} ` +
-									`claimed by a live session in this window`,
-							)
+							console.warn(`[TaskHistoryStore] Skipping repair for delegation ${item.id}: child ${item.awaitingChildId} claimed by a live session in this window`)
 							continue
 						}
 						const parentMtimeMs = await this.getChildFileMtimeMs(item.id)
@@ -568,49 +565,33 @@ export class TaskHistoryStore {
 								TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
 							)
 						) {
-							console.warn(
-								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: parent record freshly written ` +
-									`(child ${item.awaitingChildId} may still be starting)`,
-							)
+							console.warn(`[TaskHistoryStore] Skipping repair for delegation ${item.id}: parent record freshly written (child ${item.awaitingChildId} may still be starting)`)
 							continue
 						}
-						const repairedParent: HistoryItem = {
-							...item,
-							status: "active",
-							awaitingChildId: undefined,
-							delegatedToId: undefined,
-						}
+						const repairedParent: HistoryItem = { ...item, status: "active", awaitingChildId: undefined, delegatedToId: undefined }
 						// The repair write re-validates under the parent's advisory lock
 						// (same cross-process guard as the active-child repair): the parent
 						// must still be delegated to the same child, and the child's file
 						// must still be absent — a peer that landed the child record in the
 						// gap wins.
 						const childFilePath = await this.getTaskFilePath(item.awaitingChildId!)
-						let missingChildRepairCommitted = false
 						try {
-							missingChildRepairCommitted = await this.writeAdministrativeRepair(
-								repairedParent,
-								(existing) => this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
+							await this.writeAdministrativeRepair(repairedParent, (existing) =>
+								this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
 							)
 						} catch (error) {
 							if (!(error instanceof RepairAbortedError)) {
 								throw error
 							}
+							console.warn(`[TaskHistoryStore] Aborting repair for delegation ${item.id}: repair raced a peer write`)
+							continue
 						}
-						if (missingChildRepairCommitted) {
-							this.cache.set(repairedParent.id, repairedParent)
-							if (this.onWrite) {
-								await this.onWrite(this.getAll())
-							}
-							console.warn(
-								`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
-							)
-							repairsInThisPass++
-						} else {
-							console.warn(
-								`[TaskHistoryStore] Aborting repair for delegation ${item.id}: repair raced a peer write`,
-							)
+						this.cache.set(repairedParent.id, repairedParent)
+						if (this.onWrite) {
+							await this.onWrite(this.getAll())
 						}
+						console.warn(`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`)
+						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
 						// Cross-instance liveness guard: a child whose history file was written
 						// recently, or whose owning session heartbeats a fresh `lastActivityAt`,
@@ -887,12 +868,7 @@ export class TaskHistoryStore {
 			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
 			const repairedParent = parentMatchesTargetState
 				? parent
-				: {
-						...parent,
-						status: intent.target.parentStatus,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-					}
+				: { ...parent, status: intent.target.parentStatus, awaitingChildId: undefined, delegatedToId: undefined }
 
 			// Same cross-process guard as the in-pass repair: each write
 			// re-validates its preconditions under the target file's advisory
@@ -901,14 +877,10 @@ export class TaskHistoryStore {
 			// for a later pass, and replay skips sides already at target).
 			try {
 				if (!childAtTarget) {
-					await this.writeAdministrativeRepair(repairedChild, (existing, filePath) =>
-						this.assertChildRepairPreconditions(existing, filePath, child.id),
-					)
+					await this.writeAdministrativeRepair(repairedChild, (existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id))
 				}
 				if (!parentMatchesTargetState) {
-					await this.writeAdministrativeRepair(repairedParent, (existing) =>
-						this.assertParentRepairPreconditions(existing, child.id),
-					)
+					await this.writeAdministrativeRepair(repairedParent, (existing) => this.assertParentRepairPreconditions(existing, child.id))
 				}
 			} catch (error) {
 				if (error instanceof RepairAbortedError) {
@@ -974,28 +946,18 @@ export class TaskHistoryStore {
 		// the child while the intent journal was being written.
 		if (this.locallyActiveTaskIds.has(child.id)) {
 			await this.removeDelegationRepairIntent()
-			console.warn(
-				`[TaskHistoryStore] Aborting repair for child ${child.id}: claimed by a live session in this window`,
-			)
+			console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: claimed by a live session in this window`)
 			return false
 		}
 		const mtimeMs = await this.getChildFileMtimeMs(child.id)
 		if (isDelegatedChildLive(child, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS, mtimeMs)) {
 			await this.removeDelegationRepairIntent()
-			console.warn(
-				`[TaskHistoryStore] Aborting repair for live child ${child.id} ` +
-					`(${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`,
-			)
+			console.warn(`[TaskHistoryStore] Aborting repair for live child ${child.id} (${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`)
 			return false
 		}
 
 		const repairedChild = { ...child, status: intent.target.childStatus }
-		const repairedParent = {
-			...parent,
-			status: intent.target.parentStatus,
-			awaitingChildId: undefined,
-			delegatedToId: undefined,
-		}
+		const repairedParent = { ...parent, status: intent.target.parentStatus, awaitingChildId: undefined, delegatedToId: undefined }
 
 		// The authoritative writes carry an under-lock re-validation: the merge
 		// callback runs inside the target file's advisory lock (the same
@@ -1006,16 +968,12 @@ export class TaskHistoryStore {
 		// at target and completes only the missing side.
 		let childWritten = false
 		try {
-			await this.writeAdministrativeRepair(repairedChild, (existing, filePath) =>
-				this.assertChildRepairPreconditions(existing, filePath, child.id),
-			)
+			await this.writeAdministrativeRepair(repairedChild, (existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id))
 			childWritten = true
-			await this.writeAdministrativeRepair(repairedParent, (existing) =>
-				this.assertParentRepairPreconditions(existing, child.id),
-			)
+			await this.writeAdministrativeRepair(repairedParent, (existing) => this.assertParentRepairPreconditions(existing, child.id))
 		} catch (error) {
 			if (error instanceof RepairAbortedError) {
-					console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
+				console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
 				if (childWritten) {
 					this.cache.set(repairedChild.id, repairedChild)
 				}
@@ -1045,7 +1003,7 @@ export class TaskHistoryStore {
 	private async writeAdministrativeRepair(
 		target: HistoryItem,
 		guard: (existing: unknown, filePath: string) => void,
-	): Promise<boolean> {
+	): Promise<void> {
 		const filePath = await this.getTaskFilePath(target.id)
 		await safeWriteJson(filePath, target, {
 			merge: (existing) => {
@@ -1055,7 +1013,6 @@ export class TaskHistoryStore {
 		})
 		// No cache update here: multi-file repairs must publish cache state
 		// atomically after ALL writes commit (see applyDelegationRepairIntent).
-		return true
 	}
 
 	/**
