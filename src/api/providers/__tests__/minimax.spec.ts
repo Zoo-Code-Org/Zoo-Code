@@ -12,7 +12,9 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
 
+import { type ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { MiniMaxHandler } from "../minimax"
+import { calculateApiCostAnthropic } from "../../../shared/cost"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -279,6 +281,48 @@ describe("MiniMaxHandler", () => {
 
 			expect(firstChunk.done).toBe(false)
 			expect(firstChunk.value).toEqual({ type: "usage", inputTokens: 10, outputTokens: 20 })
+		})
+
+		it("createMessage should adopt cumulative message_delta output tokens for the final totalCost", async () => {
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 1,
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						delta: { type: "stop_reason", stop_reason: "end_turn" },
+						usage: { output_tokens: 20 },
+					},
+					{
+						// A delta without a usable count (e.g. 0) must keep the
+						// previously adopted cumulative value.
+						type: "message_delta",
+						delta: { type: "stop_reason", stop_reason: "end_turn" },
+						usage: { output_tokens: 0 },
+					},
+					{
+						type: "message_stop",
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.totalCost !== undefined,
+			)
+			expect(usageChunks).toHaveLength(1)
+
+			const { info } = handler.getModel()
+			expect(usageChunks[0]?.totalCost).toBe(calculateApiCostAnthropic(info, 10, 20).totalCost)
+			expect(usageChunks[0]?.totalCost).not.toBe(calculateApiCostAnthropic(info, 10, 1).totalCost)
 		})
 
 		it("createMessage should pass correct parameters to MiniMax client", async () => {
