@@ -1051,6 +1051,9 @@ describe("DiffViewProvider", () => {
 
 		beforeEach(() => {
 			// Private members are set via bracket notation (spec convention).
+			// Reset the focus the revert helper reads: a test that sets it must not leak
+			// into the next one, where cleanup could restore a stale editor.
+			vi.mocked(vscode.window).activeTextEditor = undefined
 			diffViewProvider["relPath"] = "test.ts"
 			diffViewProvider["newContent"] = "new content"
 			diffViewProvider["activeDiffEditor"] = mockTextEditor(`${mockCwd}/test.ts`, "new content")
