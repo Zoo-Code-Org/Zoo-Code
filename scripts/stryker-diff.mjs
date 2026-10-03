@@ -53,7 +53,14 @@ export const PACKAGE_CONFIGS = [
 		vitestConfig: "vitest.config.ts",
 		vitestRelated: false,
 		discoverRelatedTests: true,
-		excludedPaths: ["src/esbuild.mjs", "src/eslint.config.mjs", "src/utils/vitest-verbosity.ts"],
+		// CI build/coverage tooling under src/scripts is excluded like the other build scripts:
+		// it is not shipped runtime code and is covered by src/scripts/__tests__/merge-lcov.spec.mjs.
+		excludedPaths: [
+			"src/esbuild.mjs",
+			"src/eslint.config.mjs",
+			"src/utils/vitest-verbosity.ts",
+			"src/scripts/merge-lcov.mjs",
+		],
 	},
 ]
 

@@ -262,6 +262,7 @@ describe("buildManifest", () => {
 				{ status: "M", path: "webview-ui/src/value.visual.tsx" },
 				{ status: "M", path: "webview-ui/src/main.tsx" },
 				{ status: "M", path: "src/utils/vitest-verbosity.ts" },
+				{ status: "M", path: "src/scripts/merge-lcov.mjs" },
 				{ status: "M", path: "apps/cli/src/value.ts" },
 				{ status: "M", path: "packages/cloud/src/types.ts" },
 			],

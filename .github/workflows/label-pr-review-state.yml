@@ -14,7 +14,7 @@ on:
   # This workflow only reads PR metadata and never checks out or executes PR code.
   # pull_request_target gives fork PRs a token that can update labels and comments.
   pull_request_target:
-    types: [opened, reopened, ready_for_review, synchronize, review_requested, review_request_removed, labeled, unlabeled]
+    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, review_requested, review_request_removed, labeled, unlabeled]
   pull_request_review:
     types: [submitted, dismissed]
   # Fork review events have a read-only token. CodeRabbit's status-comment update
@@ -81,6 +81,11 @@ jobs:
                 color: '5319e7',
                 description: 'Required CI passed; CodeRabbit review is active',
               },
+              {
+                name: 'community-approved',
+                color: 'c2e0c6',
+                description: 'Fresh community approval on the current head; maintainer review still required',
+              },
             ];
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
             const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
@@ -88,6 +93,9 @@ jobs:
             const codeRabbitLogins = new Set([codeRabbitLogin, 'coderabbitai']);
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const codeRabbitEligibleBotLogins = new Set(['zoomote[bot]']);
+            // Advisory priority signal only — kept outside stateLabels so it never
+            // replaces or blocks the review-state queue labels.
+            const communityApprovedLabel = 'community-approved';
             const reviewGateName = 'Zoo Code / PR review gate';
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
 
@@ -310,6 +318,48 @@ jobs:
               }
             }
 
+            // Reconciles the advisory community-approved label. The label means
+            // "fresh community code approval for the current head; maintainer
+            // review still required" — it is a priority signal only and never
+            // grants merge authority. Every reconciliation branch routes through
+            // this one helper with a single decision:
+            //   'add'      — stable head, maintainer queue, qualifying fresh approval
+            //   'remove'   — known non-maintainer phase, known head change, or
+            //                invalidated approval (known invalidation beats uncertainty)
+            //   'preserve' — unknown mergeability, or a permission lookup that
+            //                fails only in the community check, with no known
+            //                invalidation. A lookup failure that also blocks
+            //                maintainer classification fails the PR and removes
+            //                the label through the outer catch instead.
+            // A failed community label update is advisory: it must not clear the
+            // queue label or fail the review gate, so errors are logged, not thrown.
+            async function reconcileCommunityApproval(pr, decision) {
+              if (isReadOnlyRun && isForkPR(pr)) return;
+              if (decision === 'preserve') return;
+              const hasLabel = pr.labels.some(label => label.name === communityApprovedLabel);
+              try {
+                if (decision === 'add' && !hasLabel) {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [communityApprovedLabel],
+                  });
+                  pr.labels.push({ name: communityApprovedLabel });
+                } else if (decision === 'remove' && hasLabel) {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: communityApprovedLabel,
+                  });
+                  pr.labels = pr.labels.filter(label => label.name !== communityApprovedLabel);
+                }
+              } catch (error) {
+                if (decision === 'remove' && error.status === 404) {
+                  pr.labels = pr.labels.filter(label => label.name !== communityApprovedLabel);
+                  return;
+                }
+                core.warning(
+                  `PR #${pr.number}: could not ${decision} ${communityApprovedLabel}: ${error.message}`
+                );
+              }
+            }
+
             function codeRabbitLabelHead(comment) {
               const markerPattern = new RegExp(`${codeRabbitLabelMarkerPrefix}([a-f0-9]{40}) -->`);
               const match = comment?.body?.match(markerPattern);
@@ -419,7 +469,10 @@ jobs:
 
               return `${guideMarker}\n### Review status\n\n${authorNote}\n\n` +
                 `**Current step:** ${phaseMessage(phase)}${phaseHelp}\n\n` +
-                'Review-state labels are managed by this workflow; do not edit them manually.' +
+                'Review-state labels are managed by this workflow; do not edit them manually. ' +
+                '`community-approved` is managed the same way — do not add or remove it manually. ' +
+                'It signals a fresh community code approval for the current head as an advisory ' +
+                'priority only; maintainer review is still required.' +
                 labelMarker;
             }
 
@@ -497,6 +550,7 @@ jobs:
                   const existingGuide = await findReviewGuide(pr);
                   await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, null);
+                  await reconcileCommunityApproval(pr, 'remove');
                   await updateReviewGuide(pr, 'configuration-error', existingGuide);
                   continue;
                 }
@@ -518,6 +572,7 @@ jobs:
                   await updateReviewGate(pr, 'conflict', false);
                   await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, 'has-conflicts');
+                  await reconcileCommunityApproval(pr, 'remove');
                   await updateReviewGuide(pr, 'conflict', existingGuide);
                   continue;
                 }
@@ -623,6 +678,7 @@ jobs:
                   await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                   await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, null);
+                  await reconcileCommunityApproval(pr, 'remove');
                   await updateReviewGuide(
                     pr,
                     ciPending ? 'ci-pending' : 'ci-failed',
@@ -642,7 +698,10 @@ jobs:
                 // block the PR or indicate the author needs to act.
                 const latest = new Map();
                 for (const r of reviews) {
-                  const reviewer = r.user.login.toLowerCase();
+                  // Ghost accounts have no usable identity; their reviews carry
+                  // no actionable state for either review loop.
+                  const reviewer = r.user?.login?.toLowerCase();
+                  if (!reviewer) continue;
                   const reviewerKey = codeRabbitLogins.has(reviewer) ? codeRabbitLogin : reviewer;
                   if (r.state === 'DISMISSED') {
                     latest.delete(reviewerKey);
@@ -742,6 +801,43 @@ jobs:
                     freshMaintainerReviews.push(review);
                   }
                 }
+                // Community approval eligibility reuses the decisive per-reviewer
+                // reduction above: the reviewer's latest decisive review (selected
+                // by review id, not array order) must be an approval on the current
+                // head. Ghost accounts, bots, CodeRabbit, and the PR author are
+                // already excluded there; comments are neutral. Permission results
+                // are shared with maintainer classification through permissionFor:
+                // a 404 qualifies an otherwise valid reviewer, while a lookup
+                // failure is unknown permission and never counts as community
+                // eligibility. One eligible approval is enough; bot-authored PRs
+                // follow the same rule. A known invalidation — an approval that
+                // was dismissed, replaced, or left behind by a head change —
+                // takes priority over any lookup uncertainty.
+                const approvedByReviewer = new Set();
+                for (const r of reviews) {
+                  const reviewer = r.user?.login?.toLowerCase();
+                  if (reviewer && r.state === 'APPROVED') approvedByReviewer.add(reviewer);
+                }
+                let communityApprovalFresh = false;
+                let communityPermissionUncertain = false;
+                let communityApprovalInvalidated = false;
+                for (const [reviewer, review] of latestHumanReview) {
+                  if (review.state === 'APPROVED' && review.commit_id === pr.head.sha) {
+                    let permission;
+                    try {
+                      permission = await permissionFor(review.user.login);
+                    } catch (error) {
+                      communityPermissionUncertain = true;
+                      continue;
+                    }
+                    if (!['admin', 'maintain', 'write'].includes(permission)) {
+                      communityApprovalFresh = true;
+                      break;
+                    }
+                  } else if (approvedByReviewer.has(reviewer)) {
+                    communityApprovalInvalidated = true;
+                  }
+                }
                 const automatedAuthor = pr.user?.type === 'Bot';
                 const codeRabbitEligibleAuthor = !automatedAuthor ||
                   codeRabbitEligibleBotLogins.has(pr.user?.login.toLowerCase());
@@ -793,15 +889,24 @@ jobs:
                   phase = 'approved';
                 }
 
+                // Advisory community label decision for the branches below.
+                // Non-maintainer phases always remove it; the maintainer queue
+                // refines the decision after the head/mergeability refetch.
+                let communityDecision = 'remove';
                 if (desiredLabel === 'awaiting-maintainer') {
                   const { data: latestPrDetail } = await github.rest.pulls.get({
                     owner, repo, pull_number: pr.number,
                   });
+                  // A head change since the event fetch invalidates every
+                  // approval, even if another check is uncertain.
+                  const headChanged = Boolean(latestPrDetail.head?.sha) &&
+                    latestPrDetail.head.sha !== pr.head.sha;
                   if (latestPrDetail.mergeable === false && latestPrDetail.mergeable_state === 'dirty') {
                     core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
                     await updateReviewGate(pr, 'conflict', false);
                     await setCodeRabbitReviewActive(pr, false);
                     await reconcileLabels(pr, 'has-conflicts');
+                    await reconcileCommunityApproval(pr, 'remove');
                     await updateReviewGuide(pr, 'conflict', existingGuide);
                     continue;
                   }
@@ -815,8 +920,23 @@ jobs:
                       error.preserveStateLabels = true;
                       throw error;
                     }
+                    // Unknown mergeability alone, with an unchanged head and no
+                    // known invalidation, preserves an existing label and never adds it.
+                    await reconcileCommunityApproval(
+                      pr,
+                      headChanged || communityApprovalInvalidated ? 'remove' : 'preserve'
+                    );
                     continue;
                   }
+                  communityDecision = headChanged
+                    ? 'remove'
+                    : communityApprovalFresh
+                      ? 'add'
+                      : communityApprovalInvalidated
+                        ? 'remove'
+                        : communityPermissionUncertain
+                          ? 'preserve'
+                          : 'remove';
                 }
 
                 core.info(
@@ -842,6 +962,7 @@ jobs:
                   await updateReviewGuide(pr, phase, existingGuide);
                 }
                 await reconcileLabels(pr, desiredLabel);
+                await reconcileCommunityApproval(pr, communityDecision);
                 if (readyForMaintainer) {
                   await updateReviewGate(pr, phase, true);
                 }
@@ -864,6 +985,9 @@ jobs:
                   } catch (cleanupError) {
                     metadataErrors.push(cleanupError);
                   }
+                  // A global failure that clears the maintainer queue clears the
+                  // advisory community signal too.
+                  await reconcileCommunityApproval(pr, 'remove');
                 }
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
