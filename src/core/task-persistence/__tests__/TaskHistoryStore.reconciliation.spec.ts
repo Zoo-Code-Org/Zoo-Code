@@ -151,8 +151,26 @@ async function flushUntil(
 	)
 }
 
+// Under-lock mtime probe companion: the round-3 repair guards re-read the
+// child mtime synchronously UNDER the per-file advisory lock
+// (`statChildFileMtimeMsSync`). When a test injects an async
+// `getChildFileMtimeMs` age, the sync probe must inject the SAME age:
+// otherwise the under-lock precondition re-check reads the real (fresh) seeded
+// mtime and aborts the repair the test is exercising. Restored per describe
+// alongside `mtimeSpy`.
 let syncMtimeSpy: { mockRestore(): void } | undefined
 
+function spySyncMtimeProbe(
+	impl: (filePath: string, real: (fp: string) => number | undefined) => number | undefined,
+): void {
+	const probe = TaskHistoryStore.prototype as unknown as {
+		statChildFileMtimeMsSync: (filePath: string) => number | undefined
+	}
+	const original = probe.statChildFileMtimeMsSync
+	syncMtimeSpy = vi.spyOn(probe, "statChildFileMtimeMsSync").mockImplementation((fp: string) =>
+		impl(fp, (realFp) => original.call(probe, realFp)),
+	)
+}
 
 /**
  * Write history items to `<dir>/tasks/<id>/history_item.json` so a freshly
@@ -319,6 +337,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			.mockImplementation((childId: string) =>
 				childId === taskId ? Promise.resolve(FIXED_NOW - ageMs) : original.call(store, childId),
 			)
+		spySyncMtimeProbe((fp, real) => (fp === filePath ? FIXED_NOW - ageMs : real(fp)))
 	}
 
 	beforeEach(async () => {
@@ -649,6 +668,87 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(internals.locallyActiveTaskIds.has("ghost-claim")).toBe(true)
 	})
 
+	it("aborts the orphan repair under the lock when the child's disk record shows a peer transition", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const child = makeItem({
+			id: "child-lock-toctou",
+			status: "active",
+			parentTaskId: "parent-lock-toctou",
+			rootTaskId: "parent-lock-toctou",
+		})
+		const parent = makeItem({
+			id: "parent-lock-toctou",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+			childIds: [child.id],
+		})
+		await seedItems(tmpDir, [parent, child])
+		// Fresh seed mtimes: the startup pass treats the child as live and
+		// leaves the pair untouched, so the cache still says "active" when
+		// the peer transition below lands on disk.
+		await store.initialize()
+		// A peer transitions the child on disk WITHOUT this store's cache
+		// knowing. Only the under-lock status guard can catch this: the mtime
+		// is aged so the freshness check passes.
+		const childFilePath = path.join(tmpDir, "tasks", "child-lock-toctou", GlobalFileNames.historyItem)
+		await fs.writeFile(childFilePath, JSON.stringify({ ...child, status: "interrupted" }, null, "\t"))
+		await markStaleMtime("child-lock-toctou")
+		const internals = store as unknown as {
+			repairActiveDelegation: (parent: HistoryItem, child: HistoryItem) => Promise<boolean>
+		}
+		const repaired = await internals.repairActiveDelegation(
+			store.get("parent-lock-toctou")!,
+			store.get("child-lock-toctou")!,
+		)
+		expect(repaired).toBe(false)
+		expect(store.get("parent-lock-toctou")?.status).toBe("delegated")
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", "parent-lock-toctou", GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedParent.status).toBe("delegated")
+		// The durable intent stays for a later pass; nothing was stomped.
+		await expect(fs.access(path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent))).resolves.toBeUndefined()
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Aborting repair for child child-lock-toctou"))
+		warnSpy.mockRestore()
+	})
+
+	it("aborts the missing-child repair under the lock when the child's file appears (peer landed it)", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const parent = makeItem({
+			id: "parent-mc-lock",
+			status: "delegated",
+			awaitingChildId: "child-mc-lock",
+			delegatedToId: "child-mc-lock",
+			childIds: ["child-mc-lock"],
+		})
+		await store.upsert(parent)
+		await markStaleMtime("parent-mc-lock")
+		// The child record lands on disk (a peer) while this store's cache has
+		// no child entry — the repair must re-verify absence under the lock.
+		const childDir = path.join(tmpDir, "tasks", "child-mc-lock")
+		await fs.mkdir(childDir, { recursive: true })
+		await fs.writeFile(
+			path.join(childDir, GlobalFileNames.historyItem),
+			JSON.stringify(
+				makeItem({ id: "child-mc-lock", status: "active", parentTaskId: "parent-mc-lock", rootTaskId: "parent-mc-lock" }),
+				null,
+				"\t",
+			),
+		)
+		const internals = store as unknown as {
+			reconcileDelegationStateCore: (persistedActiveIds: ReadonlySet<string>) => Promise<void>
+		}
+		await internals.reconcileDelegationStateCore(new Set(["child-mc-lock"]))
+		expect(store.get("parent-mc-lock")?.status).toBe("delegated")
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", "parent-mc-lock", GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedParent.status).toBe("delegated")
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Aborting repair for delegation parent-mc-lock"))
+		warnSpy.mockRestore()
+	})
+
 	it("repairs interrupted handoff: delegated parent with completed child → active", async () => {
 		const child = makeItem({
 			id: "child-2",
@@ -886,6 +986,10 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 					: originalGetChildFileMtimeMs.call(store, childId),
 			)
 		try {
+			// The under-lock guard's sync probe must see the same undefined signal.
+			spySyncMtimeProbe((fp, real) =>
+				fp === path.join(tmpDir, "tasks", "child-undef-mtime", GlobalFileNames.historyItem) ? undefined : real(fp),
+			)
 			const child = makeItem({
 				id: "child-undef-mtime",
 				status: "active",
@@ -1628,6 +1732,8 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
 		}
 		mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockResolvedValue(undefined)
+		// The under-lock guard's sync probe must see the same unreadable signal.
+		spySyncMtimeProbe(() => undefined)
 
 		const child = makeItem({
 			id: "child-replay-unreadable",
@@ -2189,6 +2295,8 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 			.mockImplementation((childId: string) =>
 				childId === CHILD_ID ? Promise.resolve(Date.now() - childAgeMs) : original.call(store!, childId),
 			)
+		const childFilePath = path.join(tmpDir, "tasks", CHILD_ID, GlobalFileNames.historyItem)
+		spySyncMtimeProbe((fp, real) => (fp === childFilePath ? Date.now() - childAgeMs : real(fp)))
 	}
 
 	function makeDelegatedPair(): HistoryItem[] {
@@ -2569,6 +2677,8 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 			.mockImplementation((id: string) =>
 				id === childId ? Promise.resolve(Date.now() - 10 * 60 * 1000) : original.call(store!, id),
 			)
+		const childFilePath = path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem)
+		spySyncMtimeProbe((fp, real) => (fp === childFilePath ? Date.now() - 10 * 60 * 1000 : real(fp)))
 	}
 
 	function delegatedPair(parentId: string, childId: string): HistoryItem[] {
@@ -3055,6 +3165,17 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 				// First call = the replayDelegationRepairIntent guard (line 627): exactly threshold.
 				// Later calls = the startup reconcile guard (line 506): recent -> child stays live.
 				return Promise.resolve(probeCalls === 1 ? FIXED_NOW - LIVE_CHILD_MTIME_THRESHOLD_MS : FIXED_NOW - 1_000)
+			})
+			// The under-lock guard's sync probe must mirror the same sequencing:
+			// the replay's child write re-checks exactly-threshold (NOT live ->
+			// proceed); any later sync read (startup reconcile) sees recent.
+			let syncCalls = 0
+			spySyncMtimeProbe((fp, real) => {
+				if (!fp.endsWith(path.join(child.id, GlobalFileNames.historyItem))) {
+					return real(fp)
+				}
+				syncCalls++
+				return syncCalls === 1 ? FIXED_NOW - LIVE_CHILD_MTIME_THRESHOLD_MS : FIXED_NOW - 1_000
 			})
 
 			const s = (store = new TaskHistoryStore(tmpDir))
