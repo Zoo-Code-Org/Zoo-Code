@@ -1,4 +1,4 @@
-import { HTMLAttributes, useState } from "react"
+import { FormEvent, HTMLAttributes, useState } from "react"
 import { X } from "lucide-react"
 import { Trans } from "react-i18next"
 import { Package } from "@roo/package"
@@ -32,6 +32,7 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	alwaysAllowSubtasks?: boolean
 	alwaysAllowExecute?: boolean
 	destructiveCommandGuardEnabled?: boolean
+	alwaysDenyUnapprovedCommands?: boolean
 	alwaysAllowFollowupQuestions?: boolean
 	followupAutoApproveTimeoutMs?: number
 	allowedCommands?: string[]
@@ -51,6 +52,7 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "alwaysAllowSubtasks"
 		| "alwaysAllowExecute"
 		| "destructiveCommandGuardEnabled"
+		| "alwaysDenyUnapprovedCommands"
 		| "alwaysAllowFollowupQuestions"
 		| "followupAutoApproveTimeoutMs"
 		| "allowedCommands"
@@ -59,6 +61,13 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "deniedCommands"
 	>
 }
+
+// The toolkit checkbox delivers change events retargeted to its custom-element host, which mirrors
+// `checked` without being an HTMLInputElement; a directly rendered input is one. Match on the
+// property so both target shapes update the setting, and decline targets that carry no boolean
+// `checked` rather than writing `undefined` through the guard.
+const isCheckboxTarget = (target: EventTarget | null): target is EventTarget & { checked: boolean } =>
+	target !== null && "checked" in target && typeof target.checked === "boolean"
 
 export const AutoApproveSettings = ({
 	alwaysAllowReadOnly,
@@ -73,6 +82,7 @@ export const AutoApproveSettings = ({
 	alwaysAllowSubtasks,
 	alwaysAllowExecute,
 	destructiveCommandGuardEnabled,
+	alwaysDenyUnapprovedCommands,
 	alwaysAllowFollowupQuestions,
 	followupAutoApproveTimeoutMs = 60000,
 	allowedCommands,
@@ -337,6 +347,28 @@ export const AutoApproveSettings = ({
 							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm mt-1">
 								{t("settings:autoApprove.execute.destructiveCommandGuard.description")}
+							</div>
+						</SearchableSetting>
+
+						{/* Visible in both DCG modes: it replaces the hidden command
+							   lists as the fail-closed policy in hands-free setups. */}
+						<SearchableSetting
+							settingId="auto-approve-auto-deny-unapproved"
+							section="autoApprove"
+							label={t("settings:autoApprove.execute.autoDeny.label")}>
+							<VSCodeCheckbox
+								checked={alwaysDenyUnapprovedCommands}
+								onChange={(e: Event | FormEvent<HTMLElement>) => {
+									if (!isCheckboxTarget(e.target)) {
+										return
+									}
+									setCachedStateField("alwaysDenyUnapprovedCommands", e.target.checked)
+								}}
+								data-testid="auto-deny-unapproved-checkbox">
+								<span className="font-medium">{t("settings:autoApprove.execute.autoDeny.label")}</span>
+							</VSCodeCheckbox>
+							<div className="text-vscode-descriptionForeground text-sm mt-1">
+								{t("settings:autoApprove.execute.autoDeny.description")}
 							</div>
 						</SearchableSetting>
 
