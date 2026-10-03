@@ -404,7 +404,7 @@ export class DiffViewProvider {
 	 * the target first so only this document is reverted, then give the user
 	 * their focus back.
 	 */
-	private async revertDocument(document: vscode.TextDocument): Promise<void> {
+	private async revertDocument(document: vscode.TextDocument): Promise<boolean> {
 		const previous = vscode.window.activeTextEditor
 		try {
 			await vscode.window.showTextDocument(document, { preserveFocus: false, preview: false })
@@ -420,6 +420,10 @@ export class DiffViewProvider {
 				// best-effort: the focus cannot always be restored
 			}
 		}
+		// The caller must know whether the discard actually completed: a document
+		// that stays dirty can still be saved by VS Code's ordinary file service,
+		// which would recreate a placeholder the cleanup removed.
+		return !document.isDirty
 	}
 
 	async saveChanges(
@@ -486,10 +490,11 @@ export class DiffViewProvider {
 				this.disposeActiveEditorListener()
 				this.cancelDeferredScroll()
 
+				let discardSucceeded = !updatedDocument.isDirty
 				if (updatedDocument.isDirty) {
-					await this.revertDocument(updatedDocument)
+					discardSucceeded = await this.revertDocument(updatedDocument)
 				}
-				if (this.editType === "create" && this.placeholderVersion) {
+				if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
 					const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 					if (placeholderStats && versionTokenOfStat(placeholderStats) === this.placeholderVersion) {
 						let unlinked = false

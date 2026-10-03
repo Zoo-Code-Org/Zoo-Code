@@ -1662,7 +1662,11 @@ describe("ReadFileTool", () => {
 				expect(reg.size).toBe(0)
 				// The read still succeeds — a stat failure never fails the read.
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
-				expect(callbacks.pushToolResult).toHaveBeenCalled()
+				// Assert the pushed payload, not just that something was pushed.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: stat-fail.ts")
+				expect(pushed).toContain("test content")
+				expect(pushed).not.toContain("Error:")
 			})
 
 			it("leaves the target unobserved without failing the read when the post-read stat fails", async () => {
@@ -1695,7 +1699,11 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).not.toHaveBeenCalled()
 				expect(reg.size).toBe(0)
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
-				expect(callbacks.pushToolResult).toHaveBeenCalled()
+				// Assert the pushed payload, not just that something was pushed.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: post-stat-fail.ts")
+				expect(pushed).toContain("test content")
+				expect(pushed).not.toContain("Error:")
 			})
 
 			it("legacy format: does not observe when the file mutates between the pre-read and post-read stats", async () => {
@@ -1761,7 +1769,11 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).not.toHaveBeenCalled()
 				expect(reg.size).toBe(0)
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
-				expect(callbacks.pushToolResult).toHaveBeenCalled()
+				// Assert the pushed payload, not just that something was pushed.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: legacy-stat-fail.ts")
+				expect(pushed).toContain("test content")
+				expect(pushed).not.toContain("Error:")
 			})
 			it("legacy format: leaves the target unobserved when the post-read stat fails", async () => {
 				const mockTask = createMockTask({
@@ -1798,7 +1810,11 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).not.toHaveBeenCalled()
 				expect(reg.size).toBe(0)
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
-				expect(callbacks.pushToolResult).toHaveBeenCalled()
+				// Assert the pushed payload, not just that something was pushed.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: legacy-post-stat-fail.ts")
+				expect(pushed).toContain("test content")
+				expect(pushed).not.toContain("Error:")
 			})
 			it("two separate Task-owned registries are independent", async () => {
 				const regA = new ObservationRegistry()

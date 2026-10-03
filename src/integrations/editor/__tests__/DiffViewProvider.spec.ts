@@ -1037,6 +1037,17 @@ describe("DiffViewProvider", () => {
 		// Structural TextDocument double for the onDidOpenTextDocument callback.
 		const mockTextDocument = (fsPath: string): vscode.TextDocument =>
 			({ uri: { fsPath, scheme: "file" } }) as unknown as vscode.TextDocument
+		// The workbench revert clears the model's dirty flag; the double must model
+		// that so the cleanup can tell a completed discard from a failed one.
+		const revertClearsDirty = (document: { isDirty: boolean }, onRevert?: () => void): void => {
+			vi.mocked(vscode.commands.executeCommand).mockImplementation((command: string) => {
+				if (command === "workbench.action.files.revert") {
+					document.isDirty = false
+					onRevert?.()
+				}
+				return Promise.resolve(undefined)
+			})
+		}
 
 		beforeEach(() => {
 			// Private members are set via bracket notation (spec convention).
@@ -1487,6 +1498,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 
 			const result = await diffViewProvider.saveChanges(false)
 
@@ -1519,6 +1531,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			// open() wrote and observed the empty placeholder; the on-disk token
 			// then moved past it, so the guard rejects the publish.
@@ -1569,12 +1582,7 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["disposeActiveEditorListener"] = vi.fn(() => {
 				order.push("dispose")
 			})
-			vi.mocked(vscode.commands.executeCommand).mockImplementation((command: string) => {
-				if (command === "workbench.action.files.revert") {
-					order.push("revert")
-				}
-				return Promise.resolve(undefined)
-			})
+			revertClearsDirty(dirtyEditor.document, () => order.push("revert"))
 
 			await diffViewProvider.saveChanges(false)
 
@@ -1597,6 +1605,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
@@ -1613,12 +1622,7 @@ describe("DiffViewProvider", () => {
 				order.push("closeTab")
 				return Promise.resolve()
 			})
-			vi.mocked(vscode.commands.executeCommand).mockImplementation((command: string) => {
-				if (command === "workbench.action.files.revert") {
-					order.push("revert")
-				}
-				return Promise.resolve(undefined)
-			})
+			revertClearsDirty(dirtyEditor.document, () => order.push("revert"))
 
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
 
@@ -1643,6 +1647,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
@@ -1675,6 +1680,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
@@ -1712,6 +1718,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
@@ -1751,6 +1758,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 
 			await diffViewProvider.saveChanges(false)
 
@@ -1780,6 +1788,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 
 			await diffViewProvider.saveChanges(false)
 
@@ -1805,6 +1814,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 
 			await diffViewProvider.saveChanges(false)
 
@@ -1836,6 +1846,40 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledTimes(1)
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
 		})
+		it("keeps the placeholder when the discard fails, so a later save cannot recreate the rejected content", async () => {
+			// The revert command can fail (a locked or orphaned model). While the buffer
+			// is still dirty, VS Code's ordinary file service can save it back to the path,
+			// so the placeholder open() wrote must survive and the tab must stay open.
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			vi.mocked(vscode.commands.executeCommand).mockRejectedValue(new Error("revert failed"))
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved-past-placeholder")
+			diffViewProvider["placeholderVersion"] = placeholderToken
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(closeFileTab).not.toHaveBeenCalled()
+		})
 
 		it("does not reload a clean buffer when the guard rejects - only dirty buffers are discarded", async () => {
 			// The buffer was never touched (isDirty is falsy): there is nothing
@@ -1844,12 +1888,22 @@ describe("DiffViewProvider", () => {
 			const cleanEditor = mockTextEditor(`${mockCwd}/test.ts`, "new content")
 			diffViewProvider["activeDiffEditor"] = cleanEditor
 			vi.mocked(computeVersionToken).mockResolvedValue("v2")
+			// The placeholder on disk is still exactly what open() wrote, so the cleanup
+			// can still remove it.
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider["placeholderVersion"] = placeholderToken
 
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
 
 			expect(safeWriteText).not.toHaveBeenCalled()
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
 			expect(vi.mocked(vscode.commands.executeCommand)).not.toHaveBeenCalled()
+			// A clean buffer has nothing that can be saved back, so the placeholder
+			// cleanup still runs even though no revert was needed.
+			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 
@@ -1872,6 +1926,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "modify"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
@@ -1906,6 +1961,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
@@ -1940,6 +1996,7 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
 			diffViewProvider.editType = "create"
 			const placeholderToken = versionTokenOfStat(previewStats)
 			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
