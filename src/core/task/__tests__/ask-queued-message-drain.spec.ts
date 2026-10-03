@@ -420,6 +420,43 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("stranded no more")
 	})
 
+	it("reserves a consumed drain submission through its durable ack", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		// Interception: the ask is blocked before the drain submits, so the
+		// pending-slot consumption path hands the ID back.
+		const askPromise = task.ask("completion_result", "Done", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		task.messageQueueService.addMessage("Reserve me")
+		await task.processQueuedMessages()
+		const result = await askPromise
+		const entry = task.messageQueueService.messages.at(0)
+		if (!entry) throw new Error("queued message missing")
+		expect(result.queuedMessageId).toBe(entry.id)
+
+		// While the durable ack has not settled, the entry stays reserved:
+		// neither a later ask nor a background drain can claim it again and
+		// persist the same message twice.
+		expect(task.messageQueueService.claimNextMessage()).toBeUndefined()
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+		await expect(task.processQueuedMessages()).resolves.toBe(false)
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		// A failed ack releases the reservation for redelivery.
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn(async () => false)
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(entry.id, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(persistence).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Reserve me")
+	})
+
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")

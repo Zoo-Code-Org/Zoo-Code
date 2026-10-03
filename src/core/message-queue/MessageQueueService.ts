@@ -114,6 +114,23 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	}
 
 	/**
+	 * Reserve a specific queued message by ID when it is still present and
+	 * unclaimed. Lets a consumer hold a consumed entry through its durable ack
+	 * so neither another ask nor a background drain can claim it again
+	 * mid-persistence.
+	 */
+	public claimMessage(id: string): boolean {
+		if (this.claimedMessageIds.has(id)) {
+			return false
+		}
+		if (!this._messages.some((message) => message.id === id)) {
+			return false
+		}
+		this.claimedMessageIds.add(id)
+		return true
+	}
+
+	/**
 	 * Whether at least one queued message is still available to be claimed.
 	 *
 	 * `isEmpty()` measures the queue's length and is blind to claims, so a

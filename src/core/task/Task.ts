@@ -2529,6 +2529,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// cannot lose a message that was already dequeued.
 					queuedMessageId = this.pendingSubmittedQueuedMessageId
 					this.pendingSubmittedQueuedMessageId = undefined
+					// Reserve the entry through the durable ack: while persistence
+					// retries (which can take seconds), neither a second ask nor a
+					// background drain may claim it again and persist the same
+					// message twice. Persistence settles the reservation itself —
+					// removeMessage on success, releaseMessage on failure/abort.
+					this.messageQueueService.claimMessage(queuedMessageId)
 				} else if (
 					!this.messageQueueService.messages.some(
 						(message) => message.id === this.pendingSubmittedQueuedMessageId,
