@@ -18,7 +18,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 
-import { convertAnthropicMessageToGemini } from "../transform/gemini-format"
+import { closeDanglingFunctionCalls, convertAnthropicMessageToGemini } from "../transform/gemini-format"
 import { t } from "i18next"
 import type { ApiStream, GroundingSource } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -27,6 +27,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
+import { handleProviderError } from "./utils/error-handler"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -269,6 +270,19 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			.map((message) => convertAnthropicMessageToGemini(message, { includeThoughtSignatures, toolIdToName }))
 			.flat()
 
+		// A crash between the model's functionCall emit and tool execution leaves a
+		// trailing model turn whose functionCall parts have no matching functionResponse;
+		// Gemini and Vertex AI reject such a resumed request outright. Synthesize the
+		// closing responses first so the history ends on a completed tool turn.
+		closeDanglingFunctionCalls(contents)
+
+		// Gemini and Vertex AI reject requests that end with a model turn, which can occur when
+		// resuming after an interrupted response. Preserve that turn and explicitly
+		// ask the model to continue rather than dropping conversation history.
+		if (contents.at(-1)?.role === "model") {
+			contents.push({ role: "user", parts: [{ text: "Continue." }] })
+		}
+
 		// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS).
 		// Google built-in tools (Grounding, URL Context) are mutually exclusive
 		// with function declarations in the Gemini API, so we always use
@@ -485,11 +499,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
 			TelemetryService.instance.captureException(apiError)
 
-			if (error instanceof Error) {
-				throw new Error(t("common:errors.gemini.generate_stream", { error: error.message }))
-			}
-
-			throw error
+			throw handleProviderError(error, "Gemini", {
+				messageTransformer: (msg) => t("common:errors.gemini.generate_stream", { error: msg }),
+			})
 		}
 	}
 
@@ -543,8 +555,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		// The `:thinking` suffix indicates that the model is a "Hybrid"
 		// reasoning model and that reasoning is required to be enabled.
 		// The actual model ID honored by Gemini's API does not have this
-		// suffix.
-		return { id: id.endsWith(":thinking") ? id.replace(":thinking", "") : id, info, ...params }
+		// suffix. Strip only a TRAILING suffix (endsWith + slice) so a mid-ID
+		// occurrence such as "gemini-:thinking-flash:thinking" survives intact.
+		return { id: id.endsWith(":thinking") ? id.slice(0, -":thinking".length) : id, info, ...params }
 	}
 
 	private extractGroundingSources(groundingMetadata?: GroundingMetadata): GroundingSource[] {
@@ -621,11 +634,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
 
-			if (error instanceof Error) {
-				throw new Error(t("common:errors.gemini.generate_complete_prompt", { error: error.message }))
-			}
-
-			throw error
+			throw handleProviderError(error, "Gemini", {
+				messageTransformer: (msg) => t("common:errors.gemini.generate_complete_prompt", { error: msg }),
+			})
 		}
 	}
 
