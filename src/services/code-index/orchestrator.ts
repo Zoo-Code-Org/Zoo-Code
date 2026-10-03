@@ -1,8 +1,9 @@
 import * as vscode from "vscode"
-import * as path from "path"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager, IndexingState } from "./state-manager"
-import { IFileWatcher, IVectorStore, BatchProcessingSummary } from "./interfaces"
+import { IVectorStore } from "./interfaces"
+import type { IFileWatcherFactory } from "./interfaces/file-watcher-factory"
+import { CodeIndexWatcherSession } from "./code-index-watcher-session"
 import { DirectoryScanner } from "./processors"
 import { CacheManager } from "./cache-manager"
 import { CodeIndexScanExecutor } from "./code-index-scan-executor"
@@ -14,7 +15,7 @@ import { t } from "../../i18n"
  * Manages the code indexing workflow, coordinating between different services and managers.
  */
 export class CodeIndexOrchestrator {
-	private _fileWatcherSubscriptions: vscode.Disposable[] = []
+	private readonly watcherSession: CodeIndexWatcherSession
 	private _isProcessing: boolean = false
 	private _abortController: AbortController | null = null
 	private readonly scanExecutor: CodeIndexScanExecutor
@@ -26,9 +27,10 @@ export class CodeIndexOrchestrator {
 		private readonly cacheManager: CacheManager,
 		private readonly vectorStore: IVectorStore,
 		scanner: DirectoryScanner,
-		private readonly fileWatcher: IFileWatcher,
+		fileWatcherFactory: IFileWatcherFactory,
 	) {
 		this.scanExecutor = new CodeIndexScanExecutor(workspacePath, scanner, vectorStore, stateManager)
+		this.watcherSession = new CodeIndexWatcherSession(fileWatcherFactory, stateManager)
 	}
 
 	/**
@@ -42,45 +44,7 @@ export class CodeIndexOrchestrator {
 		this.stateManager.setSystemState("Indexing", "Initializing file watcher...")
 
 		try {
-			await this.fileWatcher.initialize()
-
-			this._fileWatcherSubscriptions = [
-				this.fileWatcher.onDidStartBatchProcessing((filePaths: string[]) => {}),
-				this.fileWatcher.onBatchProgressUpdate(({ processedInBatch, totalInBatch, currentFile }) => {
-					if (totalInBatch > 0 && this.stateManager.state !== "Indexing") {
-						this.stateManager.setSystemState("Indexing", "Processing file changes...")
-					}
-					this.stateManager.reportFileQueueProgress(
-						processedInBatch,
-						totalInBatch,
-						currentFile ? path.basename(currentFile) : undefined,
-					)
-					if (processedInBatch === totalInBatch) {
-						// Covers (N/N) and (0/0)
-						if (totalInBatch > 0) {
-							// Batch with items completed
-							this.stateManager.setSystemState("Indexed", "File changes processed. Index up-to-date.")
-						} else {
-							if (this.stateManager.state === "Indexing") {
-								// Only transition if it was "Indexing"
-								this.stateManager.setSystemState("Indexed", "Index up-to-date. File queue empty.")
-							}
-						}
-					}
-				}),
-				this.fileWatcher.onDidFinishBatchProcessing((summary: BatchProcessingSummary) => {
-					if (summary.batchError) {
-						console.error(`[CodeIndexOrchestrator] Batch processing failed:`, summary.batchError)
-					} else {
-						const successCount = summary.processedFiles.filter(
-							(f: { status: string }) => f.status === "success",
-						).length
-						const errorCount = summary.processedFiles.filter(
-							(f: { status: string }) => f.status === "error" || f.status === "local_error",
-						).length
-					}
-				}),
-			]
+			await this.watcherSession.start()
 		} catch (error) {
 			console.error("[CodeIndexOrchestrator] Failed to start file watcher:", error)
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
@@ -157,9 +121,11 @@ export class CodeIndexOrchestrator {
 				}
 
 				await this._startWatcher()
+				signal.throwIfAborted()
 
 				// Mark indexing as complete after successful incremental scan
 				await this.vectorStore.markIndexingComplete()
+				signal.throwIfAborted()
 
 				this.stateManager.setSystemState("Indexed", t("embeddings:orchestrator.fileWatcherStarted"))
 			} else {
@@ -171,9 +137,11 @@ export class CodeIndexOrchestrator {
 				}
 
 				await this._startWatcher()
+				signal.throwIfAborted()
 
 				// Mark indexing as complete after successful full scan
 				await this.vectorStore.markIndexingComplete()
+				signal.throwIfAborted()
 
 				this.stateManager.setSystemState("Indexed", t("embeddings:orchestrator.fileWatcherStarted"))
 			}
@@ -250,9 +218,7 @@ export class CodeIndexOrchestrator {
 	 * Stops the file watcher and cleans up resources.
 	 */
 	public stopWatcher(): void {
-		this.fileWatcher.dispose()
-		this._fileWatcherSubscriptions.forEach((sub) => sub.dispose())
-		this._fileWatcherSubscriptions = []
+		this.watcherSession.stop()
 
 		if (this.stateManager.state !== "Error" && this.stateManager.state !== "Stopping") {
 			this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.fileWatcherStopped"))

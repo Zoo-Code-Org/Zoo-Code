@@ -4,15 +4,11 @@ import { FileWatcher } from "./file-watcher"
 import { getEmbeddingBatchSize } from "./get-embedding-batch-size"
 
 export class FileWatcherFactory implements IFileWatcherFactory {
-	public create({
-		workspacePath,
-		context,
-		cacheManager,
-		embedder,
-		vectorStore,
-		ignoreInstance,
-		rooIgnoreController,
-	}: FileWatcherFactoryOptions): IFileWatcher {
+	constructor(private readonly options: FileWatcherFactoryOptions) {}
+
+	public create(): IFileWatcher {
+		const { workspacePath, context, cacheManager, embedder, vectorStore, ignoreInstance, rooIgnoreController } =
+			this.options
 		return new FileWatcher(
 			workspacePath,
 			context,

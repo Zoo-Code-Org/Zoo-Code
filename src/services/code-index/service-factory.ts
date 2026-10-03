@@ -11,7 +11,8 @@ import { VectorStoreFactory } from "./vector-store/vector-store-factory"
 import { codeParser, DirectoryScanner } from "./processors"
 import { DirectoryScannerFactory } from "./processors/directory-scanner-factory"
 import { FileWatcherFactory } from "./processors/file-watcher-factory"
-import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
+import { ICodeParser, IEmbedder, IVectorStore } from "./interfaces"
+import type { IFileWatcherFactory } from "./interfaces/file-watcher-factory"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 
@@ -25,7 +26,6 @@ export class CodeIndexServiceFactory {
 	private readonly embedderFactory = new EmbedderFactory()
 	private readonly vectorStoreFactory = new VectorStoreFactory()
 	private readonly directoryScannerFactory = new DirectoryScannerFactory()
-	private readonly fileWatcherFactory = new FileWatcherFactory()
 	private readonly embedderValidationManager = new EmbedderValidationManager()
 
 	constructor(
@@ -59,7 +59,7 @@ export class CodeIndexServiceFactory {
 		vectorStore: IVectorStore
 		parser: ICodeParser
 		scanner: DirectoryScanner
-		fileWatcher: IFileWatcher
+		fileWatcherFactory: IFileWatcherFactory
 	} {
 		if (!this.configManager.isFeatureConfigured) {
 			throw new Error(t("embeddings:serviceFactory.codeIndexingNotConfigured"))
@@ -76,7 +76,7 @@ export class CodeIndexServiceFactory {
 			cacheManager: this.cacheManager,
 			ignoreInstance,
 		})
-		const fileWatcher = this.fileWatcherFactory.create({
+		const fileWatcherFactory = new FileWatcherFactory({
 			workspacePath: this.workspacePath,
 			context,
 			embedder,
@@ -91,7 +91,7 @@ export class CodeIndexServiceFactory {
 			vectorStore,
 			parser,
 			scanner,
-			fileWatcher,
+			fileWatcherFactory,
 		}
 	}
 }

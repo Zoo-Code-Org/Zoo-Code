@@ -55,7 +55,7 @@ describe("processor factories", () => {
 			const options = dependencies()
 
 			const scanner = new DirectoryScannerFactory().create(options)
-			const watcher = new FileWatcherFactory().create(options)
+			const watcher = new FileWatcherFactory(options).create()
 
 			expect(scanner).toBeInstanceOf(DirectoryScanner)
 			expect(watcher).toBeInstanceOf(FileWatcher)
@@ -92,10 +92,10 @@ describe("processor factories", () => {
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(configuration)
 		const options = dependencies()
 		const scanners = new DirectoryScannerFactory()
-		const watchers = new FileWatcherFactory()
+		const watchers = new FileWatcherFactory(options)
 
 		expect(scanners.create(options)).not.toBe(scanners.create(options))
-		expect(watchers.create(options)).not.toBe(watchers.create(options))
+		expect(watchers.create()).not.toBe(watchers.create())
 		expect(vi.mocked(DirectoryScanner).mock.calls.map((args) => args[5])).toEqual([32, 64])
 		expect(vi.mocked(FileWatcher).mock.calls.map((args) => args[7])).toEqual([128, 256])
 	})
@@ -159,8 +159,10 @@ describe("processor factories", () => {
 			vectorStore: options.vectorStore,
 			parser: codeParser,
 			scanner: vi.mocked(DirectoryScanner).mock.instances[0],
-			fileWatcher: vi.mocked(FileWatcher).mock.instances[0],
+			fileWatcherFactory: expect.any(FileWatcherFactory),
 		})
+		expect(FileWatcher).not.toHaveBeenCalled()
+		expect(services.fileWatcherFactory.create()).not.toBe(services.fileWatcherFactory.create())
 		expect(vi.mocked(DirectoryScanner).mock.calls[0][3]).toBe(options.cacheManager)
 		expect(vi.mocked(FileWatcher).mock.calls[0][2]).toBe(watcherCache)
 		expect(vi.mocked(FileWatcher).mock.calls[0][0]).toBe(options.workspacePath)

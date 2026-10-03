@@ -15,5 +15,5 @@ export interface FileWatcherFactoryOptions {
 }
 
 export interface IFileWatcherFactory {
-	create(options: FileWatcherFactoryOptions): IFileWatcher
+	create(): IFileWatcher
 }
