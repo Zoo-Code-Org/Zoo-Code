@@ -4061,7 +4061,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.
-							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+							const { response, queuedMessageId } = await this.ask("api_req_failed", rawErrorMessage)
+							// Only the button response is inspected; a consumed queued
+							// message is dropped without inventing a history write (same
+							// as the sibling api_req_failed asks below). The retry gate
+							// stays answerable by a queued message: unlike command_output
+							// asks it does not gate execution, and a typed "no" that
+							// aborts the task destroys the queue either way.
+							this.discardConsumedQueuedMessage(queuedMessageId)
 
 							if (response !== "yesButtonClicked") {
 								throw new Error("API request failed")
