@@ -729,8 +729,15 @@ describe("closeDanglingFunctionCalls", () => {
 			{ role: "user", parts: [{ text: "Hello" }] },
 			{ role: "model", parts: [{ text: "Hi there!" }] },
 		]
+		// The helper mutates in place and returns the same array, so a
+		// self-comparison against `contents` would be tautological. Snapshot
+		// first, then pin both the returned parts and the untouched input.
+		const snapshot = structuredClone(contents)
 
-		expect(closeDanglingFunctionCalls(contents)).toEqual(contents)
+		const result = closeDanglingFunctionCalls(contents)
+
+		expect(result).toEqual(snapshot)
+		expect(contents).toEqual(snapshot)
 	})
 
 	it("leaves a completed tool turn unchanged", () => {
@@ -749,7 +756,11 @@ describe("closeDanglingFunctionCalls", () => {
 				],
 			},
 		]
+		const snapshot = structuredClone(contents)
 
-		expect(closeDanglingFunctionCalls(contents)).toEqual(contents)
+		const result = closeDanglingFunctionCalls(contents)
+
+		expect(result).toEqual(snapshot)
+		expect(contents).toEqual(snapshot)
 	})
 })
