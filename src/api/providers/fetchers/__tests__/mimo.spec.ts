@@ -65,6 +65,44 @@ describe("getMimoModels", () => {
 		})
 	})
 
+	it("keeps the static spec authoritative for known IDs while still surfacing API-only models", async () => {
+		// Negative precedence: the /models payload may carry fields that conflict
+		// with the curated static spec (stale prices, wrong windows, injected
+		// text). For a known ID every emitted field must come from mimoModels,
+		// never from the wire payload; an API-only ID must still appear.
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				data: [
+					{
+						id: "mimo-v2.6-pro",
+						description: "CONFLICTING payload description",
+						contextWindow: 999,
+						maxTokens: 999,
+						inputPrice: 999,
+						outputPrice: 999,
+						supportsImages: false,
+					},
+					{ id: "mimo-v9-only-in-api", description: "CONFLICTING payload description", contextWindow: 12345 },
+				],
+			}),
+		}) as unknown as typeof fetch
+
+		const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+		expect(models["mimo-v2.6-pro"]).toEqual(mimoModels["mimo-v2.6-pro"])
+		expect(models["mimo-v2.6-pro"].description).not.toContain("CONFLICTING")
+
+		expect(models["mimo-v9-only-in-api"]).toEqual({
+			maxTokens: 16_000,
+			contextWindow: 262_144,
+			supportsImages: false,
+			supportsPromptCache: false,
+			preserveReasoning: true,
+			description: "MiMo model: mimo-v9-only-in-api",
+		})
+	})
+
 	it("throws for HTTP errors", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: false,
