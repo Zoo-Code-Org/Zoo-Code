@@ -31,6 +31,14 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 }
 
 /**
+ * Control-flow signal: a liveness heartbeat merged under the per-file
+ * advisory lock found the disk record absent, non-active, or already current.
+ * The beat must skip (never recreate or rewrite), so the merge aborts the
+ * write by throwing; `recordTaskActivity` catches this class and stays quiet.
+ */
+class HeartbeatSkipError extends Error {}
+
+/**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
@@ -705,23 +713,75 @@ export class TaskHistoryStore {
 	 * extension-host restart.
 	 *
 	 * Callers are expected to throttle (see Task's liveness heartbeat, one
-	 * beat per minute over the whole active lifetime); each call writes only
-	 * the `lastActivityAt` delta. Best-effort by design:
-	 * a missing record, a non-active status, or a transient write failure
-	 * never rejects — a heartbeat must never disturb the turn it reports on.
+	 * beat per minute over the whole active lifetime). The write is scoped to
+	 * the periodic refresh path: a record whose cached status is not active
+	 * (or is unknown) writes NOTHING — a completed, interrupted, or delegated
+	 * task must not have history_item.json and globalState rewritten every
+	 * minute while it lingers before disposal. Under the per-file advisory
+	 * lock the merge re-validates the disk record and NEVER recreates a file
+	 * another host deleted (a heartbeat is a refresh, not a creation — the
+	 * normal task-start write path still creates files). Best-effort by
+	 * design: a missing record, a non-active status, or a transient write
+	 * failure never rejects — a heartbeat must never disturb the turn it
+	 * reports on.
 	 */
 	public async recordTaskActivity(taskId: string, at: number = Date.now()): Promise<void> {
 		try {
-			await this.atomicReadAndUpdate(taskId, (historyItem) => {
-				if ((historyItem.status ?? "active") !== "active" || historyItem.lastActivityAt === at) {
-					return historyItem
+			const cached = this.cache.get(taskId)
+			if (!cached || (cached.status ?? "active") !== "active") {
+				return
+			}
+			await this.withLock(async () => {
+				const filePath = await this.getTaskFilePath(taskId)
+				let written: HistoryItem | undefined
+				try {
+					await safeWriteJson(filePath, cached, {
+						merge: (existing) => {
+							if (!existing || typeof existing !== "object" || !("id" in existing)) {
+								// Confirmed absent under the lock: a peer deleted the
+								// record. A heartbeat must never recreate it — that
+								// ghost would carry fresh liveness signals and
+								// suppress orphan repair. Drop the stale cache and
+								// claim with it.
+								this.cache.delete(taskId)
+								this.locallyActiveTaskIds.delete(taskId)
+								this.releasedLocalOwnershipIds.delete(taskId)
+								throw new HeartbeatSkipError(`record ${taskId} deleted by another host`)
+							}
+							const disk = existing as HistoryItem
+							if ((disk.status ?? "active") !== "active") {
+								this.cache.set(taskId, disk)
+								throw new HeartbeatSkipError(`record ${taskId} no longer active on disk`)
+							}
+							if (disk.lastActivityAt === at) {
+								this.cache.set(taskId, disk)
+								throw new HeartbeatSkipError(`record ${taskId} already at ${at}`)
+							}
+							written = { ...disk, lastActivityAt: at }
+							return written
+						},
+					})
+				} catch (error) {
+					if (error instanceof HeartbeatSkipError) {
+						if (error.message.includes("deleted by another host")) {
+							console.warn(`[TaskHistoryStore] Skipping liveness heartbeat for ${taskId}: ${error.message}`)
+						}
+						return
+					}
+					throw error
 				}
-				return { ...historyItem, lastActivityAt: at }
+				if (written) {
+					this.cache.set(taskId, written)
+					if (this.onWrite) {
+						await this.onWrite(this.getAll())
+					}
+				}
 			})
 		} catch (error) {
 			console.warn(`[TaskHistoryStore] Failed to record activity heartbeat for ${taskId}:`, error)
 		}
 	}
+
 	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side

@@ -14,9 +14,26 @@ vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
 }))
 
-const writeJson = async (filePath: string, data: unknown): Promise<void> => {
+const writeJson = async (
+	filePath: string,
+	data: unknown,
+	options?: { merge?: (existing: unknown, incoming: unknown) => unknown },
+): Promise<void> => {
 	await fs.mkdir(path.dirname(filePath), { recursive: true })
-	await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
+	let outgoing = data
+	if (options?.merge) {
+		// Mirror safeWriteJson's contract: read the current file and let the
+		// caller's merge decide what is written (a throwing merge aborts the
+		// write). Missing or unparseable content reads as null.
+		let existing: unknown = null
+		try {
+			existing = JSON.parse(await fs.readFile(filePath, "utf8"))
+		} catch {
+			existing = null
+		}
+		outgoing = options.merge(existing, data)
+	}
+	await fs.writeFile(filePath, JSON.stringify(outgoing, null, "\t"), "utf8")
 }
 
 const safeWriteJsonMock = vi.hoisted(() => vi.fn())
@@ -568,6 +585,45 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await fs.rmdir(filePath)
 		await store.invalidate("transient-read-claim")
 		expect(internals.locallyActiveTaskIds.has("transient-read-claim")).toBe(false)
+	})
+
+	it("a liveness beat never recreates a record another host deleted (no ghost resurrection)", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const item = makeItem({ id: "ghost-beat", status: "active" })
+		await store.upsert(item)
+		const filePath = path.join(tmpDir, "tasks", "ghost-beat", GlobalFileNames.historyItem)
+		await expect(fs.access(filePath)).resolves.toBeUndefined()
+		// Peer deletes the record; the stale cache entry still says active.
+		await fs.rm(filePath)
+		const callsBefore = safeWriteJsonMock.mock.calls.length
+		await store.recordTaskActivity("ghost-beat")
+		// The beat attempted the locked write but the merge aborted it: the
+		// file must stay deleted, and the stale cache/claim went with it.
+		expect(safeWriteJsonMock.mock.calls.length).toBe(callsBefore + 1)
+		await expect(fs.access(filePath)).rejects.toThrow()
+		expect(store.get("ghost-beat")).toBeUndefined()
+		// A later beat has no cached record to refresh and writes nothing.
+		await store.recordTaskActivity("ghost-beat")
+		expect(safeWriteJsonMock.mock.calls.length).toBe(callsBefore + 1)
+		await expect(fs.access(filePath)).rejects.toThrow()
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping liveness heartbeat for ghost-beat"))
+		warnSpy.mockRestore()
+	})
+
+	it("a liveness beat writes nothing for a non-active task", async () => {
+		const item = makeItem({ id: "quiet-completed", status: "active" })
+		await store.upsert(item)
+		await store.upsert({ ...item, status: "completed" })
+		const filePath = path.join(tmpDir, "tasks", "quiet-completed", GlobalFileNames.historyItem)
+		const before = await fs.readFile(filePath, "utf8")
+		const callsBefore = safeWriteJsonMock.mock.calls.length
+		await store.recordTaskActivity("quiet-completed")
+		// No write of any kind: history_item.json and globalState stay untouched
+		// for records that merely linger before disposal.
+		expect(safeWriteJsonMock.mock.calls.length).toBe(callsBefore)
+		expect(await fs.readFile(filePath, "utf8")).toBe(before)
+		const persisted = JSON.parse(before) as HistoryItem
+		expect(persisted.lastActivityAt).toBeUndefined()
 	})
 
 	it("a dispose-style ownership release is not re-claimed by a late active-status teardown write", async () => {
