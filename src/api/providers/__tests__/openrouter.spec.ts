@@ -44,8 +44,27 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(function () {
-		return Promise.resolve({
+	getModels: vitest.fn().mockImplementation(async function () {
+		// Shape for google/gemini-2.5-pro-preview mirrors the real fetcher output
+		// (parseOpenRouterModel) so the exclusion-guard test tracks the catalog contract.
+		const { parseOpenRouterModel } = await import("../fetchers/openrouter")
+
+		const gemini25ProPreview = parseOpenRouterModel({
+			id: "google/gemini-2.5-pro-preview",
+			model: {
+				name: "Gemini 2.5 Pro Preview",
+				description: "Google Gemini 2.5 Pro Preview",
+				context_length: 1048576,
+				max_completion_tokens: 65535,
+				pricing: { prompt: "0.00000125", completion: "0.00001" },
+			},
+			inputModality: ["text", "image"],
+			outputModality: ["text"],
+			maxTokens: 65535,
+			supportedParameters: ["max_tokens", "temperature", "reasoning", "include_reasoning"],
+		})
+
+		return {
 			"anthropic/claude-sonnet-4": {
 				maxTokens: 8192,
 				contextWindow: 200000,
@@ -101,7 +120,8 @@ vitest.mock("../fetchers/modelCache", () => ({
 				excludedTools: ["existing_excluded"],
 				includedTools: ["existing_included"],
 			},
-		})
+			"google/gemini-2.5-pro-preview": gemini25ProPreview,
+		}
 	}),
 	refreshModels: vitest.fn(async (options) => {
 		const { getModels } = await import("../fetchers/modelCache")
@@ -338,6 +358,43 @@ describe("OpenRouterHandler", () => {
 					]),
 				}),
 				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+			)
+		})
+
+		it("applies the reasoning exclusion guard for gemini-2.5-pro-preview when reasoning is not configured", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-pro-preview",
+				}),
+			)
+
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: { content: "test response" } }],
+				},
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 20, cost: 0.001 },
+				},
+			])
+
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			// Install the mock without `as any` so this file's suppression count stays flat.
+			Object.assign(OpenAI.prototype, { chat: { completions: { create: mockCreate } } })
+
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "test message" }]
+
+			await collectStream(handler.createMessage("test system prompt", messages))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "google/gemini-2.5-pro-preview",
+					reasoning: { exclude: true },
+				}),
+				undefined,
 			)
 		})
 
