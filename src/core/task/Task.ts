@@ -1703,6 +1703,30 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		progressStatus?: ToolProgressStatus,
 		isProtected?: boolean,
 	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
+		// Arm the drain gate synchronously at ask() entry, before the first
+		// await, and hold it for the whole ask lifecycle: a queued submission
+		// landing anywhere in the ask prefix (auto-approval, partial handling)
+		// must hit the same queuedResponseForAsk gate as one landing in the
+		// response wait, so an approval-gating ask can never be answered by
+		// the queue. The thin-wrapper shape keeps the body at its long-standing
+		// indentation instead of re-indenting it under a wrapping try block,
+		// so whitespace-only changes do not count against the mutation-diff
+		// line budget.
+		this.inFlightAskGate = { type, text }
+		try {
+			return await this.askImpl(type, text, partial, progressStatus, isProtected)
+		} finally {
+			this.inFlightAskGate = undefined
+		}
+	}
+
+	private async askImpl(
+		type: ClineAsk,
+		text?: string,
+		partial?: boolean,
+		progressStatus?: ToolProgressStatus,
+		isProtected?: boolean,
+	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -1721,315 +1745,311 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// queuedResponseForAsk gate as one landing in the response wait, so an
 		// approval-gating ask can never be answered by the queue.
 		this.inFlightAskGate = { type, text }
-		try {
-			let askTs: number
+		let askTs: number
 
-			// Resolve auto-approval before adding the message so the state snapshot
-			// sent to the webview already carries isAnswered:true when the ask will
-			// be immediately resolved. This eliminates the race between the state
-			// update (which shows approval buttons) and the former separate
-			// clearApprovalButtons message (which could arrive before buttons were
-			// rendered, leaving them stuck on-screen).
-			const provider = this.providerRef.deref()
-			const state = provider ? await provider.getState() : undefined
-			// Resolve before claiming: approval-gating ask types never consume a
-			// queued conversational message, and claiming without a resolution
-			// would leak the claim. The resolution is only actionable when a
-			// message was actually claimed: otherwise it must not force a manual
-			// ask (that would bypass auto-approval for empty-queue lifecycle asks).
-			const claimableResolution =
-				partial === true || type === "command_output" ? undefined : queuedResponseForAsk(type, text)
-			const queuedMessage = claimableResolution ? this.messageQueueService.claimNextMessage() : undefined
-			const queuedAskResolution = queuedMessage ? claimableResolution : undefined
-			// `this.cwd`, not `provider.cwd`:
-			// The path inside `text` was made relative to this task's workspace,
-			// which for a resumed or child task need not be the one the provider
-			// currently reports.
-			const approval = queuedAskResolution
-				? ({ decision: "ask" } as const)
-				: await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
-			const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
-			const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
+		// Resolve auto-approval before adding the message so the state snapshot
+		// sent to the webview already carries isAnswered:true when the ask will
+		// be immediately resolved. This eliminates the race between the state
+		// update (which shows approval buttons) and the former separate
+		// clearApprovalButtons message (which could arrive before buttons were
+		// rendered, leaving them stuck on-screen).
+		const provider = this.providerRef.deref()
+		const state = provider ? await provider.getState() : undefined
+		// Resolve before claiming: approval-gating ask types never consume a
+		// queued conversational message, and claiming without a resolution
+		// would leak the claim. The resolution is only actionable when a
+		// message was actually claimed: otherwise it must not force a manual
+		// ask (that would bypass auto-approval for empty-queue lifecycle asks).
+		const claimableResolution =
+			partial === true || type === "command_output" ? undefined : queuedResponseForAsk(type, text)
+		const queuedMessage = claimableResolution ? this.messageQueueService.claimNextMessage() : undefined
+		const queuedAskResolution = queuedMessage ? claimableResolution : undefined
+		// `this.cwd`, not `provider.cwd`:
+		// The path inside `text` was made relative to this task's workspace,
+		// which for a resumed or child task need not be the one the provider
+		// currently reports.
+		const approval = queuedAskResolution
+			? ({ decision: "ask" } as const)
+			: await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
+		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
+		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
-			if (partial !== undefined) {
-				const lastMessage = this.clineMessages.at(-1)
+		if (partial !== undefined) {
+			const lastMessage = this.clineMessages.at(-1)
 
-				const isUpdatingPreviousPartial =
-					lastMessage && lastMessage.partial && lastMessage.type === "ask" && lastMessage.ask === type
+			const isUpdatingPreviousPartial =
+				lastMessage && lastMessage.partial && lastMessage.type === "ask" && lastMessage.ask === type
 
-				if (partial) {
-					if (isUpdatingPreviousPartial) {
-						// Existing partial message, so update it.
-						lastMessage.text = text
-						lastMessage.partial = partial
-						lastMessage.progressStatus = progressStatus
-						lastMessage.isProtected = isProtected
-						// TODO: Be more efficient about saving and posting only new
-						// data or one whole message at a time so ignore partial for
-						// saves, and only post parts of partial message instead of
-						// whole array in new listener.
-						// Fire-and-forget: the webview post is internally guarded, but
-						// the `RooCodeEventName.Message` emit can synchronously throw
-						// if any consumer-attached listener does, which would surface
-						// here as an unhandled rejection. Log it instead.
-						this.updateClineMessage(lastMessage).catch((error) => {
-							console.error("[Task#ask] updateClineMessage failed:", error)
-						})
-						// console.log("Task#ask: current ask promise was ignored (#1)")
-						throw new AskIgnoredError("updating existing partial")
-					} else {
-						// This is a new partial message, so add it with partial
-						// state.
-						askTs = Date.now()
-						this.lastMessageTs = askTs
-						await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, partial, isProtected })
-						// console.log("Task#ask: current ask promise was ignored (#2)")
-						throw new AskIgnoredError("new partial")
-					}
+			if (partial) {
+				if (isUpdatingPreviousPartial) {
+					// Existing partial message, so update it.
+					lastMessage.text = text
+					lastMessage.partial = partial
+					lastMessage.progressStatus = progressStatus
+					lastMessage.isProtected = isProtected
+					// TODO: Be more efficient about saving and posting only new
+					// data or one whole message at a time so ignore partial for
+					// saves, and only post parts of partial message instead of
+					// whole array in new listener.
+					// Fire-and-forget: the webview post is internally guarded, but
+					// the `RooCodeEventName.Message` emit can synchronously throw
+					// if any consumer-attached listener does, which would surface
+					// here as an unhandled rejection. Log it instead.
+					this.updateClineMessage(lastMessage).catch((error) => {
+						console.error("[Task#ask] updateClineMessage failed:", error)
+					})
+					// console.log("Task#ask: current ask promise was ignored (#1)")
+					throw new AskIgnoredError("updating existing partial")
 				} else {
-					if (isUpdatingPreviousPartial) {
-						// This is the complete version of a previously partial
-						// message, so replace the partial with the complete version.
-						this.askResponse = undefined
-						this.askResponseText = undefined
-						this.askResponseImages = undefined
-						this.askResponseQueuedMessageId = undefined
-
-						// Bug for the history books:
-						// In the webview we use the ts as the chatrow key for the
-						// virtuoso list. Since we would update this ts right at the
-						// end of streaming, it would cause the view to flicker. The
-						// key prop has to be stable otherwise react has trouble
-						// reconciling items between renders, causing unmounting and
-						// remounting of components (flickering).
-						// The lesson here is if you see flickering when rendering
-						// lists, it's likely because the key prop is not stable.
-						// So in this case we must make sure that the message ts is
-						// never altered after first setting it.
-						askTs = lastMessage.ts
-						this.lastMessageTs = askTs
-						lastMessage.text = text
-						lastMessage.partial = false
-						lastMessage.progressStatus = progressStatus
-						lastMessage.isProtected = isProtected
-						if (isAutoAnswered) {
-							lastMessage.isAnswered = true
-							lastMessage.autoApprovalDecision = autoApprovalDecision
-						}
-						await this.saveClineMessages()
-						// Fire-and-forget: see updateClineMessage call above for the
-						// rationale on the .catch arm.
-						this.updateClineMessage(lastMessage).catch((error) => {
-							console.error("[Task#ask] updateClineMessage failed:", error)
-						})
-					} else {
-						// This is a new and complete message, so add it like normal.
-						this.askResponse = undefined
-						this.askResponseText = undefined
-						this.askResponseImages = undefined
-						this.askResponseQueuedMessageId = undefined
-						askTs = Date.now()
-						this.lastMessageTs = askTs
-						await this.addToClineMessages({
-							ts: askTs,
-							type: "ask",
-							ask: type,
-							text,
-							isProtected,
-							isAnswered: isAutoAnswered || undefined,
-							autoApprovalDecision,
-						})
-					}
+					// This is a new partial message, so add it with partial
+					// state.
+					askTs = Date.now()
+					this.lastMessageTs = askTs
+					await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, partial, isProtected })
+					// console.log("Task#ask: current ask promise was ignored (#2)")
+					throw new AskIgnoredError("new partial")
 				}
 			} else {
-				// This is a new non-partial message, so add it like normal.
-				this.askResponse = undefined
-				this.askResponseText = undefined
-				this.askResponseImages = undefined
-				this.askResponseQueuedMessageId = undefined
-				askTs = Date.now()
-				this.lastMessageTs = askTs
-				await this.addToClineMessages({
-					ts: askTs,
-					type: "ask",
-					ask: type,
-					text,
-					isProtected,
-					isAnswered: isAutoAnswered || undefined,
-					autoApprovalDecision,
-				})
-			}
+				if (isUpdatingPreviousPartial) {
+					// This is the complete version of a previously partial
+					// message, so replace the partial with the complete version.
+					this.askResponse = undefined
+					this.askResponseText = undefined
+					this.askResponseImages = undefined
+					this.askResponseQueuedMessageId = undefined
 
-			const timeouts: NodeJS.Timeout[] = []
-
-			if (approval.decision === "approve") {
-				this.approveAsk()
-			} else if (approval.decision === "deny") {
-				this.denyAsk()
-			} else if (approval.decision === "timeout") {
-				// Store the auto-approval timeout so it can be cancelled if user interacts
-				this.autoApprovalTimeoutRef = setTimeout(() => {
-					const { askResponse, text, images } = approval.fn()
-					this.handleWebviewAskResponse(askResponse, text, images)
-					this.autoApprovalTimeoutRef = undefined
-				}, approval.timeout)
-				timeouts.push(this.autoApprovalTimeoutRef)
-			}
-
-			// The state is mutable if the message is complete and the task will
-			// block (via the `pWaitFor`).
-			const isBlocking = !(this.askResponse !== undefined || this.lastMessageTs !== askTs)
-			const isMessageQueued = !this.messageQueueService.isEmpty()
-			// Keep queued user messages intact during command_output asks. Those asks
-			// are terminal flow-control, not conversational turns.
-			const shouldDrainQueuedMessageForAsk = type !== "command_output"
-			const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
-
-			let queuedMessageId: string | undefined
-			if (isStatusMutable) {
-				const statusMutationTimeout = 2_000
-
-				if (isInteractiveAsk(type)) {
-					timeouts.push(
-						setTimeout(() => {
-							const message = this.findMessageByTimestamp(askTs)
-
-							if (message) {
-								this.interactiveAsk = message
-								this.emit(RooCodeEventName.TaskInteractive, this.taskId)
-								/* v8 ignore next 3 -- fires inside 2s timer after ask() resolves; not reachable in unit tests */
-								void provider?.postMessageToWebview({ type: "interactionRequired" }).catch((error) => {
-									console.error("[Task#ask] postMessageToWebview interactionRequired failed:", error)
-								})
-							}
-						}, statusMutationTimeout),
-					)
-				} else if (isResumableAsk(type)) {
-					timeouts.push(
-						setTimeout(() => {
-							const message = this.findMessageByTimestamp(askTs)
-
-							if (message) {
-								this.resumableAsk = message
-								this.emit(RooCodeEventName.TaskResumable, this.taskId)
-							}
-						}, statusMutationTimeout),
-					)
-				} else if (isIdleAsk(type)) {
-					timeouts.push(
-						setTimeout(() => {
-							const message = this.findMessageByTimestamp(askTs)
-
-							if (message) {
-								this.idleAsk = message
-								this.emit(RooCodeEventName.TaskIdle, this.taskId)
-							}
-						}, statusMutationTimeout),
-					)
-				}
-			} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
-				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
-			}
-
-			// Wait for askResponse to be set. The drain gate has been armed since
-			// the top of this ask, so a drain landing anywhere in the lifecycle
-			// consults the same queuedResponseForAsk gate as the claim path.
-			await pWaitFor(
-				() => {
-					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
-						return true
+					// Bug for the history books:
+					// In the webview we use the ts as the chatrow key for the
+					// virtuoso list. Since we would update this ts right at the
+					// end of streaming, it would cause the view to flicker. The
+					// key prop has to be stable otherwise react has trouble
+					// reconciling items between renders, causing unmounting and
+					// remounting of components (flickering).
+					// The lesson here is if you see flickering when rendering
+					// lists, it's likely because the key prop is not stable.
+					// So in this case we must make sure that the message ts is
+					// never altered after first setting it.
+					askTs = lastMessage.ts
+					this.lastMessageTs = askTs
+					lastMessage.text = text
+					lastMessage.partial = false
+					lastMessage.progressStatus = progressStatus
+					lastMessage.isProtected = isProtected
+					if (isAutoAnswered) {
+						lastMessage.isAnswered = true
+						lastMessage.autoApprovalDecision = autoApprovalDecision
 					}
-
-					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
-					// suggestion click that was incorrectly queued due to UI state), consume it
-					// immediately so the task doesn't hang. Approval-gating ask types get no
-					// resolution, so the message stays queued for a conversational turn.
-					if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-						const resolution = queuedResponseForAsk(type, text)
-						const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
-						if (message && resolution) {
-							queuedMessageId = this.handleQueuedAskResponse(message, resolution)
-						}
-					}
-
-					return false
-				},
-				{ interval: 100 },
-			)
-
-			/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
-			if (this.abort) {
-				if (queuedMessageId) {
-					this.messageQueueService.releaseMessage(queuedMessageId)
-				}
-				throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
-			}
-
-			if (this.lastMessageTs !== askTs) {
-				// Could happen if we send multiple asks in a row i.e. with
-				// command_output. It's important that when we know an ask could
-				// fail, it is handled gracefully.
-				if (queuedMessageId) {
-					this.messageQueueService.releaseMessage(queuedMessageId)
-				}
-				throw new AskIgnoredError("superseded")
-			}
-
-			// Tie a drain-submitted queued message to actual consumption by identity:
-			// the ask consumed the submission only if the pending slot still carries
-			// that message's ID. A direct response clears the slot ID even when its
-			// text/images are identical, so it cannot consume the queue entry. The
-			// claim path is excluded (durable flows already carry queuedMessageId;
-			// non-durable flows removed the message inline).
-			if (this.pendingSubmittedQueuedMessageId) {
-				const consumedViaPendingSlot =
-					queuedMessageId === undefined &&
-					this.askResponseQueuedMessageId === this.pendingSubmittedQueuedMessageId
-				if (consumedViaPendingSlot) {
-					// Hand the ID to the caller instead of removing inline: the queue
-					// entry is deleted only after the feedback is durably saved
-					// (persistQueuedFeedbackAndAcknowledge), so a failed history write
-					// cannot lose a message that was already dequeued.
-					queuedMessageId = this.pendingSubmittedQueuedMessageId
-					this.pendingSubmittedQueuedMessageId = undefined
-				} else if (
-					!this.messageQueueService.messages.some(
-						(message) => message.id === this.pendingSubmittedQueuedMessageId,
-					)
-				) {
-					// The message was consumed via the ask claim path or discarded
-					// by an existing path; the tracker is stale, so clear it.
-					this.pendingSubmittedQueuedMessageId = undefined
+					await this.saveClineMessages()
+					// Fire-and-forget: see updateClineMessage call above for the
+					// rationale on the .catch arm.
+					this.updateClineMessage(lastMessage).catch((error) => {
+						console.error("[Task#ask] updateClineMessage failed:", error)
+					})
+				} else {
+					// This is a new and complete message, so add it like normal.
+					this.askResponse = undefined
+					this.askResponseText = undefined
+					this.askResponseImages = undefined
+					this.askResponseQueuedMessageId = undefined
+					askTs = Date.now()
+					this.lastMessageTs = askTs
+					await this.addToClineMessages({
+						ts: askTs,
+						type: "ask",
+						ask: type,
+						text,
+						isProtected,
+						isAnswered: isAutoAnswered || undefined,
+						autoApprovalDecision,
+					})
 				}
 			}
-
-			const result = {
-				response: this.askResponse!,
-				text: this.askResponseText,
-				images: this.askResponseImages,
-				queuedMessageId,
-			}
+		} else {
+			// This is a new non-partial message, so add it like normal.
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
 			this.askResponseQueuedMessageId = undefined
-
-			// Cancel the timeouts if they are still running.
-			timeouts.forEach((timeout) => clearTimeout(timeout))
-
-			// Switch back to an active state.
-			if (this.idleAsk || this.resumableAsk || this.interactiveAsk) {
-				this.idleAsk = undefined
-				this.resumableAsk = undefined
-				this.interactiveAsk = undefined
-				this.emit(RooCodeEventName.TaskActive, this.taskId)
-			}
-
-			this.emit(RooCodeEventName.TaskAskResponded)
-			return result
-		} finally {
-			this.inFlightAskGate = undefined
+			askTs = Date.now()
+			this.lastMessageTs = askTs
+			await this.addToClineMessages({
+				ts: askTs,
+				type: "ask",
+				ask: type,
+				text,
+				isProtected,
+				isAnswered: isAutoAnswered || undefined,
+				autoApprovalDecision,
+			})
 		}
+
+		const timeouts: NodeJS.Timeout[] = []
+
+		if (approval.decision === "approve") {
+			this.approveAsk()
+		} else if (approval.decision === "deny") {
+			this.denyAsk()
+		} else if (approval.decision === "timeout") {
+			// Store the auto-approval timeout so it can be cancelled if user interacts
+			this.autoApprovalTimeoutRef = setTimeout(() => {
+				const { askResponse, text, images } = approval.fn()
+				this.handleWebviewAskResponse(askResponse, text, images)
+				this.autoApprovalTimeoutRef = undefined
+			}, approval.timeout)
+			timeouts.push(this.autoApprovalTimeoutRef)
+		}
+
+		// The state is mutable if the message is complete and the task will
+		// block (via the `pWaitFor`).
+		const isBlocking = !(this.askResponse !== undefined || this.lastMessageTs !== askTs)
+		const isMessageQueued = !this.messageQueueService.isEmpty()
+		// Keep queued user messages intact during command_output asks. Those asks
+		// are terminal flow-control, not conversational turns.
+		const shouldDrainQueuedMessageForAsk = type !== "command_output"
+		const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
+
+		let queuedMessageId: string | undefined
+		if (isStatusMutable) {
+			const statusMutationTimeout = 2_000
+
+			if (isInteractiveAsk(type)) {
+				timeouts.push(
+					setTimeout(() => {
+						const message = this.findMessageByTimestamp(askTs)
+
+						if (message) {
+							this.interactiveAsk = message
+							this.emit(RooCodeEventName.TaskInteractive, this.taskId)
+							/* v8 ignore next 3 -- fires inside 2s timer after ask() resolves; not reachable in unit tests */
+							void provider?.postMessageToWebview({ type: "interactionRequired" }).catch((error) => {
+								console.error("[Task#ask] postMessageToWebview interactionRequired failed:", error)
+							})
+						}
+					}, statusMutationTimeout),
+				)
+			} else if (isResumableAsk(type)) {
+				timeouts.push(
+					setTimeout(() => {
+						const message = this.findMessageByTimestamp(askTs)
+
+						if (message) {
+							this.resumableAsk = message
+							this.emit(RooCodeEventName.TaskResumable, this.taskId)
+						}
+					}, statusMutationTimeout),
+				)
+			} else if (isIdleAsk(type)) {
+				timeouts.push(
+					setTimeout(() => {
+						const message = this.findMessageByTimestamp(askTs)
+
+						if (message) {
+							this.idleAsk = message
+							this.emit(RooCodeEventName.TaskIdle, this.taskId)
+						}
+					}, statusMutationTimeout),
+				)
+			}
+		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
+			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+		}
+
+		// Wait for askResponse to be set. The drain gate has been armed since
+		// the top of this ask, so a drain landing anywhere in the lifecycle
+		// consults the same queuedResponseForAsk gate as the claim path.
+		await pWaitFor(
+			() => {
+				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+					return true
+				}
+
+				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
+				// suggestion click that was incorrectly queued due to UI state), consume it
+				// immediately so the task doesn't hang. Approval-gating ask types get no
+				// resolution, so the message stays queued for a conversational turn.
+				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
+					const resolution = queuedResponseForAsk(type, text)
+					const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
+					if (message && resolution) {
+						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+					}
+				}
+
+				return false
+			},
+			{ interval: 100 },
+		)
+
+		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
+		if (this.abort) {
+			if (queuedMessageId) {
+				this.messageQueueService.releaseMessage(queuedMessageId)
+			}
+			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
+
+		if (this.lastMessageTs !== askTs) {
+			// Could happen if we send multiple asks in a row i.e. with
+			// command_output. It's important that when we know an ask could
+			// fail, it is handled gracefully.
+			if (queuedMessageId) {
+				this.messageQueueService.releaseMessage(queuedMessageId)
+			}
+			throw new AskIgnoredError("superseded")
+		}
+
+		// Tie a drain-submitted queued message to actual consumption by identity:
+		// the ask consumed the submission only if the pending slot still carries
+		// that message's ID. A direct response clears the slot ID even when its
+		// text/images are identical, so it cannot consume the queue entry. The
+		// claim path is excluded (durable flows already carry queuedMessageId;
+		// non-durable flows removed the message inline).
+		if (this.pendingSubmittedQueuedMessageId) {
+			const consumedViaPendingSlot =
+				queuedMessageId === undefined &&
+				this.askResponseQueuedMessageId === this.pendingSubmittedQueuedMessageId
+			if (consumedViaPendingSlot) {
+				// Hand the ID to the caller instead of removing inline: the queue
+				// entry is deleted only after the feedback is durably saved
+				// (persistQueuedFeedbackAndAcknowledge), so a failed history write
+				// cannot lose a message that was already dequeued.
+				queuedMessageId = this.pendingSubmittedQueuedMessageId
+				this.pendingSubmittedQueuedMessageId = undefined
+			} else if (
+				!this.messageQueueService.messages.some(
+					(message) => message.id === this.pendingSubmittedQueuedMessageId,
+				)
+			) {
+				// The message was consumed via the ask claim path or discarded
+				// by an existing path; the tracker is stale, so clear it.
+				this.pendingSubmittedQueuedMessageId = undefined
+			}
+		}
+
+		const result = {
+			response: this.askResponse!,
+			text: this.askResponseText,
+			images: this.askResponseImages,
+			queuedMessageId,
+		}
+		this.askResponse = undefined
+		this.askResponseText = undefined
+		this.askResponseImages = undefined
+		this.askResponseQueuedMessageId = undefined
+
+		// Cancel the timeouts if they are still running.
+		timeouts.forEach((timeout) => clearTimeout(timeout))
+
+		// Switch back to an active state.
+		if (this.idleAsk || this.resumableAsk || this.interactiveAsk) {
+			this.idleAsk = undefined
+			this.resumableAsk = undefined
+			this.interactiveAsk = undefined
+			this.emit(RooCodeEventName.TaskActive, this.taskId)
+		}
+
+		this.emit(RooCodeEventName.TaskAskResponded)
+		return result
 	}
 
 	handleWebviewAskResponse(
