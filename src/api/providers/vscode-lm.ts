@@ -139,7 +139,12 @@ function decidedSalvageEnd(text: string): number {
 		return 0
 	}
 	const lineEnd = text.indexOf("\n", blockEnd)
-	return lineEnd === -1 ? 0 : lineEnd + 1
+	if (lineEnd === -1) {
+		return 0
+	}
+	// A newline inside a later, still-open block must not drain that block's opener as text.
+	const nextOpen = text.slice(blockEnd, lineEnd).search(/<(?:antml:)?invoke\s+name="/i)
+	return nextOpen === -1 ? lineEnd + 1 : blockEnd + nextOpen
 }
 
 /**

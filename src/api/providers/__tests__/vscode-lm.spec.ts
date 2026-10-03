@@ -603,6 +603,27 @@ describe("VsCodeLmHandler", () => {
 				).toEqual([])
 			})
 
+			it("keeps an incomplete invoke buffered when the cap passes a newline inside it", async () => {
+				// The drain boundary was the first newline after the last closed block, even inside a
+				// later open block. The filler trips the cap before that block's closing tag arrives.
+				const padding = "p".repeat(20 * 1024)
+				const filler = "x".repeat(240 * 1024)
+				const openBody = `sub\n${filler}`
+				const chunks = await collect([
+					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">${padding}</parameter></in${"voke"}> ` +
+						`<in${"voke"} name="calculator"><parameter name="operation">sub\n`,
+					filler,
+					`</parameter></in${"voke"}></function${"_calls"}>`,
+				])
+
+				// Prose between the blocks is part of the decided span, so it precedes the first call.
+				expect(chunks.filter((chunk) => chunk.type !== "usage")).toMatchObject([
+					{ type: "text", text: " " },
+					{ type: "tool_call", name: "calculator", arguments: JSON.stringify({ operation: padding }) },
+					{ type: "tool_call", name: "calculator", arguments: JSON.stringify({ operation: openBody }) },
+				])
+			})
+
 			it("gives each recovered call in one response a distinct id", async () => {
 				const chunks = await collect([
 					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">add</parameter></in${"voke"}>\n` +
