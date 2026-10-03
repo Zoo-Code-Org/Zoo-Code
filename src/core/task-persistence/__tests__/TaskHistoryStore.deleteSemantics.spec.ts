@@ -97,12 +97,15 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "locked-delete" }))
 			onWrite.mockClear()
 
+			// The lock key is the resolved publish target, so the expected key is
+			// captured through realpath before the delete: on Windows os.tmpdir()
+			// can be an 8.3 short path (C:\Users\RUNNER~1) that realpath expands
+			// to the long form, and the file is gone after the unlink.
+			const lockKey = await fs.realpath(historyFilePath(storagePath, "locked-delete"))
+
 			await expect(store.delete("locked-delete")).resolves.toBeUndefined()
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(
-				historyFilePath(storagePath, "locked-delete"),
-				expect.any(Function),
-			)
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(lockKey, expect.any(Function))
 			await expect(fs.access(historyFilePath(storagePath, "locked-delete"))).rejects.toMatchObject({
 				code: "ENOENT",
 			})
@@ -173,6 +176,28 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(store.get("never-existed")).toBeUndefined()
 			expect(onWrite).toHaveBeenCalledTimes(1)
 		})
+
+		it("locks the resolved publish target while unlinking the path it was given", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-del" }))
+			const aliasPath = historyFilePath(storagePath, "alias-del")
+			const referentPath = path.join(storagePath, "tasks", "alias-del", "referent-history.json")
+
+			// Real symlinks are unavailable in this CI lane, so the alias is
+			// simulated through realpath, as in the safeWriteJson lock test.
+			const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+			try {
+				await expect(store.delete("alias-del")).resolves.toBeUndefined()
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			// One lock for the underlying file, keyed by the referent; the unlink
+			// still targets the path the store named.
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
+		})
 	})
 
 	describe("deleteMany()", () => {
@@ -238,6 +263,24 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(onWrite).toHaveBeenCalledTimes(1)
 			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
 			expect(writtenIds).toEqual([])
+		})
+
+		it("locks the resolved publish target for every item while unlinking the given paths", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-batch", ts: 1000 }))
+			const aliasPath = historyFilePath(storagePath, "alias-batch")
+			const referentPath = path.join(storagePath, "tasks", "alias-batch", "referent-history.json")
+
+			const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+			try {
+				await expect(store.deleteMany(["alias-batch"])).resolves.toBeUndefined()
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
 		})
 	})
 })
