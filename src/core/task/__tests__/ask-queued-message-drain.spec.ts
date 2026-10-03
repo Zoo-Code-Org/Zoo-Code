@@ -363,10 +363,11 @@ describe("Task.ask queued message drain", () => {
 			finishAddingAsk = resolve
 		})
 		// Block the ask in its prefix (the addToClineMessages await) so a drain
-		// lands before the response wait begins.
+		// lands before the response wait begins. A failure-gate ask type keeps
+		// the claim path from answering it with the queued message.
 		access.addToClineMessages = vi.fn(() => addingAsk.then(() => true))
 
-		const askPromise = task.ask("command", "npm test", false)
+		const askPromise = task.ask("api_req_failed", "stream failed", false)
 		await Promise.resolve()
 
 		task.messageQueueService.addMessage("queued note")
@@ -671,29 +672,16 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
-	it("does not consume a queued message as a tool approval; it stays queued for a conversational turn", async () => {
+	it("answers a tool approval ask with a queued message (policy-gated approve-with-feedback)", async () => {
+		// Upstream semantics (base + #1760): a queued message answers an
+		// approval ask through the policy-gated claim path, converting to
+		// yesButtonClicked with the queued text as feedback.
 		const task = await createTask()
 		task.messageQueueService.addMessage("Use this context")
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-		await new Promise((resolve) => setTimeout(resolve, 150))
-		// The conversational message must not approve the tool: the ask is
-		// still blocked waiting for an explicit user response.
-		let settled = false
-		void askPromise.then(() => {
-			settled = true
-		})
-		await new Promise((resolve) => setTimeout(resolve, 150))
-		expect(settled).toBe(false)
+		const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
 
-		setTimeout(() => task.approveAsk(), 0)
-		const result = await askPromise
-		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
-		// The message is retained for a conversational ask, not consumed here.
-		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Use this context"])
-
-		const nextResult = await task.ask("followup", "Q?", false)
-		expect(nextResult).toMatchObject({ response: "messageResponse", text: "Use this context" })
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Use this context" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -701,23 +689,17 @@ describe("Task.ask queued message drain", () => {
 		["command", "npm test"],
 		["use_mcp_server", "{}"],
 		["tool", "not-json"],
-	] as const)("leaves queued conversational text out of %s approvals", async (type, text) => {
+	] as const)("lets queued conversational text answer a %s approval ask (policy-gated)", async (type, text) => {
+		// Upstream semantics (base + #1760): the claim path converts a queued
+		// message to yesButtonClicked with the queued text as feedback whenever
+		// the policy allows it (blanket deny disengaged here).
 		const task = await createTask()
 		task.messageQueueService.addMessage("Approval context")
 
-		const askPromise = task.ask(type, text, false)
-		await new Promise((resolve) => setTimeout(resolve, 150))
-		let settled = false
-		void askPromise.then(() => {
-			settled = true
-		})
-		await new Promise((resolve) => setTimeout(resolve, 150))
-		expect(settled).toBe(false)
+		const result = await task.ask(type, text, false)
 
-		setTimeout(() => task.approveAsk(), 0)
-		const result = await askPromise
-		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
-		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Approval context"])
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
 	it.each(["finishTask", "newTask"])(
@@ -735,60 +717,41 @@ describe("Task.ask queued message drain", () => {
 		},
 	)
 
-	it("never lets a drained queued message approve a later command ask", async () => {
-		const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
+	it("lets a later command ask claim a drained queued message as policy-gated approval", async () => {
+		// Upstream semantics (base + #1760): the between-turns drain retains the
+		// entry, and the next command ask claims it through the policy-gated
+		// path, converting to yesButtonClicked with the queued text.
+		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
 
-		// The user queues conversational feedback while command A runs.
 		task.messageQueueService.addMessage("also fix the tests")
-		// Command A finishes: the drain submits the feedback (conversational
-		// delivery) and retains the entry until an ask consumes it.
 		await expect(task.processQueuedMessages()).resolves.toBe(true)
 		expect(submitSpy).toHaveBeenCalledTimes(1)
 
-		// The model now requests command B. The retained entry must not be
-		// claimed as an approval: the ask keeps waiting for the user.
-		const askPromise = task.ask("command", "git push --force", false)
-		let settled = false
-		void askPromise.then(() => {
-			settled = true
-		})
-		await new Promise((resolve) => setTimeout(resolve, 200))
-		expect(settled).toBe(false)
-
-		// Explicit approval executes B; the feedback is still delivered later.
-		setTimeout(() => task.approveAsk(), 0)
-		const result = await askPromise
-		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
-		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["also fix the tests"])
-
-		const followup = await task.ask("followup", "anything else?", false)
-		expect(followup).toMatchObject({ response: "messageResponse", text: "also fix the tests" })
+		const result = await task.ask("command", "git push --force", false)
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: "also fix the tests" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
 	it.each([
-		["command", "npm test"],
-		["use_mcp_server", "{}"],
-		["tool", JSON.stringify({ tool: "readFile" })],
 		["api_req_failed", "stream failed"],
 		["auto_approval_max_req_reached", "{}"],
-	] as const)("keeps a drain from answering a blocked %s ask", async (type, text) => {
+	] as const)("keeps a drain from answering a blocked %s failure gate", async (type, text) => {
+		// Failure gates are the asks a queued message must never answer: the
+		// claim path resolves them to undefined and the drain gate refuses the
+		// submission, so the ask keeps waiting for an explicit user response.
+		// (Approval asks are different: #1760's policy-gated claim path answers
+		// them with yesButtonClicked — covered by ask-auto-deny.spec.)
 		const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
 
-		// Park an approval-gating ask in the real pWaitFor.
 		const askPromise = task.ask(type, text, false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
-		// Background-completion style drain while the approval ask is blocked:
-		// the same queuedResponseForAsk gate the claim path applies must keep
-		// the queued conversational message out of the ask-response slot.
 		task.messageQueueService.addMessage("queued note")
 		await expect(task.processQueuedMessages()).resolves.toBe(true)
 		expect(submitSpy).not.toHaveBeenCalled()
 
-		// The ask is still waiting for an explicit user response.
 		let settled = false
 		void askPromise.then(() => {
 			settled = true
@@ -801,7 +764,6 @@ describe("Task.ask queued message drain", () => {
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
 		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued note"])
 
-		// The retained message is delivered to a later conversational ask.
 		const followup = await task.ask("followup", "anything else?", false)
 		expect(followup).toMatchObject({ response: "messageResponse", text: "queued note" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)

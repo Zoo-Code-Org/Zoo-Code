@@ -1310,6 +1310,40 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	})
 })
 
+// A plain boolean needs no normalization branch in the updateSettings loop,
+// so this pins the generic persistence path: every polarity, including an
+// explicit unset (undefined), must reach ContextProxy verbatim rather than
+// being defaulted away.
+it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loop", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { alwaysDenyUnapprovedCommands: true },
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+
+	vi.clearAllMocks()
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { alwaysDenyUnapprovedCommands: false },
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", false)
+	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+
+	vi.clearAllMocks()
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { alwaysDenyUnapprovedCommands: undefined },
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", undefined)
+	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+})
+
 // Both allowlists are normalized by the same branch, so both are held to the
 // same contract.
 describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {

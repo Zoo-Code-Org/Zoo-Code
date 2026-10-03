@@ -6107,6 +6107,11 @@ describe("Cline", () => {
 
 describe("Queued message processing after condense", () => {
 	function createProvider(): ClineProvider {
+		// The provider constructor reads TelemetryService.instance; suites that
+		// construct a real provider must ensure the singleton exists.
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
 		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
 		const ctx = {
 			globalState: {
@@ -6260,7 +6265,7 @@ describe("Queued message processing after condense", () => {
 				startTask: false,
 			})
 
-		it("submits the next queued message and retains it until a conversational ask consumes it", async () => {
+		it("submits the next queued message and retains it until an ask consumes it", async () => {
 			const task = createQueueTask()
 			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
 			task.messageQueueService.addMessage("queued text", ["img1.png"])
@@ -6271,17 +6276,11 @@ describe("Queued message processing after condense", () => {
 			// the message stays queued until an ask claims it.
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
 
-			// An approval-gating tool ask must not consume the conversational
-			// message (this file mocks p-wait-for, so the ask resolves without a
-			// response; the explicit-approval blocking flow is covered in
-			// ask-queued-message-drain.spec.ts).
+			// The retained message answers the approval ask through the
+			// policy-gated claim path (base + #1760 semantics): yesButtonClicked
+			// with the queued text as feedback, consumed inline (non-durable).
 			const approval = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-			expect(approval.text).toBeUndefined()
-			expect(approval.queuedMessageId).toBeUndefined()
-			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
-
-			const result = await task.ask("followup", "Anything else?", false)
-			expect(result).toMatchObject({ response: "messageResponse", text: "queued text", images: ["img1.png"] })
+			expect(approval).toMatchObject({ response: "yesButtonClicked", text: "queued text", images: ["img1.png"] })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
 		})
 
