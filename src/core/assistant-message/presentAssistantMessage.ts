@@ -40,6 +40,7 @@ import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { buildToolRequirements } from "../prompts/tools/effective-tool-policy"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
+import { fetchWebContentTool } from "../tools/FetchWebContentTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
@@ -496,6 +497,8 @@ export async function presentAssistantMessage(cline: Task) {
 						return `[${block.name} for '${block.params.skill}'${block.params.args ? ` with args: ${block.params.args}` : ""}]`
 					case "generate_image":
 						return `[${block.name} for '${block.params.path}']`
+					case "fetch_web_content":
+						return `[${block.name} for '${block.params.url}']`
 					default:
 						return `[${block.name}]`
 				}
@@ -1000,6 +1003,13 @@ export async function presentAssistantMessage(cline: Task) {
 				case "generate_image":
 					await checkpointSaveAndMark(cline)
 					await generateImageTool.handle(cline, block as ToolUse<"generate_image">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case "fetch_web_content":
+					await fetchWebContentTool.handle(cline, block as ToolUse<"fetch_web_content">, {
 						askApproval,
 						handleError,
 						pushToolResult,
