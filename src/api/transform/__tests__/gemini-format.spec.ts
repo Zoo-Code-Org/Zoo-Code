@@ -1,8 +1,9 @@
 // npx vitest run src/api/transform/__tests__/gemini-format.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
+import type { Content } from "@google/genai"
 
-import { convertAnthropicMessageToGemini } from "../gemini-format"
+import { closeDanglingFunctionCalls, convertAnthropicMessageToGemini } from "../gemini-format"
 
 describe("convertAnthropicMessageToGemini", () => {
 	it("should convert a simple text message", () => {
@@ -653,5 +654,102 @@ describe("convertAnthropicMessageToGemini", () => {
 				parts: [{ text: "Here's my answer" }],
 			},
 		])
+	})
+})
+
+describe("closeDanglingFunctionCalls", () => {
+	it("synthesizes an '(empty)' functionResponse for a trailing dangling functionCall", () => {
+		const contents: Content[] = [
+			{ role: "user", parts: [{ text: "Read foo.ts" }] },
+			{
+				role: "model",
+				parts: [{ functionCall: { name: "read_file", args: { path: "foo.ts" } } }],
+			},
+		]
+
+		const result = closeDanglingFunctionCalls(contents)
+
+		// The synthesized response reuses the empty/null tool-result convention:
+		// identical part shape, "(empty)" sentinel content.
+		expect(result).toEqual([
+			{ role: "user", parts: [{ text: "Read foo.ts" }] },
+			{
+				role: "model",
+				parts: [{ functionCall: { name: "read_file", args: { path: "foo.ts" } } }],
+			},
+			{
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "read_file",
+							response: { name: "read_file", content: "(empty)" },
+						},
+					},
+				],
+			},
+		])
+	})
+
+	it("synthesizes one response per call for parallel dangling functionCalls", () => {
+		const contents: Content[] = [
+			{ role: "user", parts: [{ text: "Run both tools" }] },
+			{
+				role: "model",
+				parts: [
+					{ functionCall: { name: "tool_a", args: { a: 1 } } },
+					{ functionCall: { name: "tool_b", args: { b: 2 } } },
+				],
+			},
+		]
+
+		const result = closeDanglingFunctionCalls(contents)
+
+		expect(result.at(-1)).toEqual({
+			role: "user",
+			parts: [
+				{
+					functionResponse: {
+						name: "tool_a",
+						response: { name: "tool_a", content: "(empty)" },
+					},
+				},
+				{
+					functionResponse: {
+						name: "tool_b",
+						response: { name: "tool_b", content: "(empty)" },
+					},
+				},
+			],
+		})
+	})
+
+	it("leaves a text-only trailing model turn unchanged", () => {
+		const contents: Content[] = [
+			{ role: "user", parts: [{ text: "Hello" }] },
+			{ role: "model", parts: [{ text: "Hi there!" }] },
+		]
+
+		expect(closeDanglingFunctionCalls(contents)).toEqual(contents)
+	})
+
+	it("leaves a completed tool turn unchanged", () => {
+		const contents: Content[] = [
+			{ role: "user", parts: [{ text: "Run the tool" }] },
+			{ role: "model", parts: [{ functionCall: { name: "read_file", args: { path: "foo.ts" } } }] },
+			{
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "read_file",
+							response: { name: "read_file", content: "file contents" },
+						},
+					},
+				],
+			},
+		]
+
+		expect(closeDanglingFunctionCalls(contents)).toEqual(contents)
 	})
 })

@@ -242,3 +242,36 @@ export function convertAnthropicMessageToGemini(
 		},
 	]
 }
+
+// Gemini and Vertex AI reject contents that end on a model turn whose functionCall
+// parts have no matching functionResponse — the exact shape left behind when a task
+// crashes between the model's functionCall emit and tool execution. Synthesize a
+// closing functionResponse per dangling call so the history ends on a completed tool
+// turn and the role-based continuation logic in the Gemini handler applies as usual.
+// Uses the same "(empty)" sentinel as empty/null tool results above: the tool never
+// ran, so there is no real output to report.
+export function closeDanglingFunctionCalls(contents: Content[]): Content[] {
+	const last = contents.at(-1)
+	if (!last || last.role !== "model" || !last.parts) {
+		return contents
+	}
+
+	const danglingCalls = last.parts.flatMap((part) => (part.functionCall?.name ? [part.functionCall] : []))
+	if (danglingCalls.length === 0) {
+		return contents
+	}
+
+	// The dangling turn is the final content, so none of its calls can have a
+	// response anywhere later in the history.
+	contents.push({
+		role: "user",
+		parts: danglingCalls.map((call) => ({
+			functionResponse: {
+				name: call.name,
+				response: { name: call.name, content: "(empty)" },
+			},
+		})),
+	})
+
+	return contents
+}

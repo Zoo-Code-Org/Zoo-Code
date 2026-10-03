@@ -350,6 +350,58 @@ describe("GeminiHandler", () => {
 			)
 		})
 
+		it("synthesizes an empty function response when history ends with an unanswered function call", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			// Crash-resume shape: the model emitted a functionCall but the task was
+			// interrupted before the tool ran, so no tool_result exists for it.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read foo.ts" },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } }],
+				},
+			]
+			const metadata = {
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "read_file", description: "", parameters: {} } }],
+			} satisfies ApiHandlerCreateMessageMetadata
+
+			await collectStream(handler.createMessage(systemPrompt, messages, metadata))
+
+			// Without the synthesized functionResponse the request would end on an
+			// unanswered model functionCall turn and Gemini/Vertex would reject it.
+			const expectedBypassToken = Buffer.from("skip_thought_signature_validator").toString("base64")
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Read foo.ts" }] },
+						{
+							role: "model",
+							parts: [
+								{
+									functionCall: { name: "read_file", args: { path: "foo.ts" } },
+									thoughtSignature: expectedBypassToken,
+								},
+							],
+						},
+						{
+							role: "user",
+							parts: [
+								{
+									functionResponse: {
+										name: "read_file",
+										response: { name: "read_file", content: "(empty)" },
+									},
+								},
+							],
+						},
+					],
+				}),
+			)
+		})
+
 		it("does not append a continuation when history ends with a user turn", async () => {
 			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
 			generateContentStream.mockResolvedValue(asyncStreamFrom([]))

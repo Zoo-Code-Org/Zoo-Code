@@ -18,7 +18,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 
-import { convertAnthropicMessageToGemini } from "../transform/gemini-format"
+import { closeDanglingFunctionCalls, convertAnthropicMessageToGemini } from "../transform/gemini-format"
 import { t } from "i18next"
 import type { ApiStream, GroundingSource } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -269,6 +269,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		const contents = geminiMessages
 			.map((message) => convertAnthropicMessageToGemini(message, { includeThoughtSignatures, toolIdToName }))
 			.flat()
+
+		// A crash between the model's functionCall emit and tool execution leaves a
+		// trailing model turn whose functionCall parts have no matching functionResponse;
+		// Gemini and Vertex AI reject such a resumed request outright. Synthesize the
+		// closing responses first so the history ends on a completed tool turn.
+		closeDanglingFunctionCalls(contents)
 
 		// Gemini and Vertex AI reject requests that end with a model turn, which can occur when
 		// resuming after an interrupted response. Preserve that turn and explicitly
