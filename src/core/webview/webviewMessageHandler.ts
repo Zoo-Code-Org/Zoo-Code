@@ -854,6 +854,28 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "mimoBaseUrl") {
+						// Persistence-boundary gate. The settings schema pins this key to
+						// the four allowed Xiaomi endpoints, but ContextProxy fails open on
+						// a schema rejection and returns raw stored values — so validate
+						// again here, at the only place an off-list value could newly enter
+						// storage. Empty string means "unset" (mirroring the handler and
+						// router fallbacks) and is normalized to undefined; an off-list
+						// non-empty value is dropped with a warning so it can never reach
+						// the chat-completion client via persisted state. Trailing slashes
+						// are tolerated for the check and canonicalized away on save.
+						if (typeof value === "string" && value !== "") {
+							const normalized = value.replace(/\/+$/, "")
+							if (!ALLOWED_BASE_URLS.has(normalized)) {
+								console.warn(
+									"[webviewMessageHandler] Rejected mimoBaseUrl outside the allowed Xiaomi MiMo endpoints; the value was not persisted.",
+								)
+								continue
+							}
+							newValue = normalized
+						} else {
+							newValue = undefined
+						}
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
@@ -1274,7 +1296,17 @@ export const webviewMessageHandler = async (
 			// (cn/sgp/ams token-plan or pay-as-you-go), so unsaved form values are
 			// honored the same way as DeepSeek/Moonshot above.
 			const mimoApiKey = message?.values?.mimoApiKey ?? apiConfiguration.mimoApiKey
-			const mimoBaseUrl = message?.values?.mimoBaseUrl ?? apiConfiguration.mimoBaseUrl
+
+			// An unsaved empty string means "unset" (the form's cleared state),
+			// matching the handler-side fallback: it must not override the stored
+			// cluster value and silently reroute the stored key to the default
+			// Singapore endpoint.
+			const unsavedMimoBaseUrlValue = message?.values?.mimoBaseUrl
+			const unsavedMimoBaseUrl =
+				typeof unsavedMimoBaseUrlValue === "string" && unsavedMimoBaseUrlValue !== ""
+					? unsavedMimoBaseUrlValue
+					: undefined
+			const mimoBaseUrl = unsavedMimoBaseUrl ?? apiConfiguration.mimoBaseUrl
 
 			// Unsaved form values bypass the settings-schema validation that pins
 			// stored mimoBaseUrl to the four allowed Xiaomi endpoints, so gate them
@@ -1282,11 +1314,8 @@ export const webviewMessageHandler = async (
 			// modelCache. The exact match subsumes credential-bearing URLs (no
 			// allowlisted literal contains userinfo), and the raw value is never
 			// echoed since an unsaved one may embed credentials.
-			const unsavedMimoBaseUrl = message?.values?.mimoBaseUrl
 			const mimoBaseUrlRejected =
-				typeof unsavedMimoBaseUrl === "string" &&
-				unsavedMimoBaseUrl !== "" &&
-				!ALLOWED_BASE_URLS.has(unsavedMimoBaseUrl.replace(/\/+$/, ""))
+				unsavedMimoBaseUrl !== undefined && !ALLOWED_BASE_URLS.has(unsavedMimoBaseUrl.replace(/\/+$/, ""))
 
 			if (mimoApiKey) {
 				if (mimoBaseUrlRejected) {
@@ -1310,7 +1339,7 @@ export const webviewMessageHandler = async (
 						baseUrl: mimoBaseUrl,
 					}
 
-					if (message?.values?.mimoApiKey || message?.values?.mimoBaseUrl) {
+					if (message?.values?.mimoApiKey || unsavedMimoBaseUrl) {
 						// Unsaved form values win over stored config: flush refreshes the cache
 						// with them before the aggregate fetch (same pattern as DeepSeek/Moonshot).
 						await flushModels(mimoOptions, true)

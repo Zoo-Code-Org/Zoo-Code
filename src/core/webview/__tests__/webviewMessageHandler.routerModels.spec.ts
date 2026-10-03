@@ -822,6 +822,55 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(response[0].routerModels.mimo).toEqual({})
 	})
 
+	it("treats an unsaved empty mimoBaseUrl as unset and keeps using the stored cluster", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { mimoBaseUrl: "" },
+		})
+
+		// Empty means unset: the stored China cluster must keep applying instead
+		// of being silently rerouted to the default Singapore endpoint.
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+		})
+
+		// No rejection is posted and no refresh is flushed for the empty value.
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse,
+		)
+		expect(errorCall).toBeUndefined()
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+	})
+
+	it("falls back to an undefined base URL when an empty unsaved value has no stored cluster", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { mimoBaseUrl: "" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: undefined,
+		})
+	})
+
 	it("posts a Moonshot provider error and keeps an empty aggregate entry when fetch fails", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
