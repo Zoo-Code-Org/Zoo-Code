@@ -1694,6 +1694,26 @@ describe("convertToOpenAiMessages lone surrogate sanitization (#461)", () => {
 		expect(result[0]).toEqual({ role: "assistant", content: sanitized, reasoning_content: sanitized })
 	})
 
+	it("sanitizes reasoning_content extracted from a reasoning content block", () => {
+		// No top-level reasoning_content is set, so the outgoing value can only come from
+		// getReasoningBlockText extracting the { type: "reasoning" } block, not from the
+		// top-level pass-through covered by the test above.
+		// The "reasoning" block is a DeepSeek / Z.ai shape outside Anthropic's
+		// ContentBlockParam union, so the array needs one explicit widening. Double
+		// assertion (not `any`) keeps this file's lint suppression count unchanged.
+		const anthropicMessages = [
+			{
+				role: "assistant" as const,
+				content: [
+					{ type: "reasoning", text: lone, summary: [] },
+					{ type: "text", text: "answer" },
+				],
+			},
+		] as unknown as Anthropic.Messages.MessageParam[]
+		const result = convertToOpenAiMessages(anthropicMessages)
+		expect(result[0]).toEqual({ role: "assistant", content: "answer", reasoning_content: sanitized })
+	})
+
 	it("sanitizes text merged into the last tool message after tool_result blocks", () => {
 		const result = convertToOpenAiMessages(
 			[
