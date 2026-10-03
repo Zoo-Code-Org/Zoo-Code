@@ -1916,6 +1916,8 @@ describe("ReadFileTool", () => {
 				const pushed = callbacks.pushToolResult.mock.calls[0][0]
 				expect(pushed).toContain("clipped in this view")
 				expect(pushed).not.toContain("To read more")
+				// The notice is added on top of the read, it does not replace it.
+				expect(pushed).toContain("1 | a")
 			})
 
 			it("native: an offset read that is not truncated still records a partial observation", async () => {

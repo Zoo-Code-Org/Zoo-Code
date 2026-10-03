@@ -248,7 +248,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				"create",
 			)
 		} else {
-			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			// The add path publishes a whole new file, so create-guard semantics
+			// apply here as well.
+			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "create")
 		}
 
 		// Track file edit operation
@@ -479,7 +481,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					"edit",
 				)
 			} else {
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				// The diff-view save is the same targeted hunk as the guarded save above:
+				// it must select the same edit guard, otherwise a partial read is
+				// rejected and the approved patch is thrown away.
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
 			}
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)

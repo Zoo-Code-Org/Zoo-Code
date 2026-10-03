@@ -146,6 +146,8 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "observationRegistry"
 	>
 	let mockSaveDirectly: MockedFunction<(...args: unknown[]) => Promise<unknown>>
+	let mockSaveChanges: MockedFunction<(...args: unknown[]) => Promise<unknown>>
+	let mockGetState: MockedFunction<() => Promise<unknown>>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
 	let mockHandleError: MockedFunction<(...args: unknown[]) => Promise<void>>
 	let mockPushToolResult: MockedFunction<(...args: unknown[]) => void>
@@ -181,6 +183,17 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			userEdits: undefined,
 			finalContent: "new content",
 		})
+		mockSaveChanges = vi.fn().mockResolvedValue({
+			newProblemsMessage: "",
+			userEdits: undefined,
+			finalContent: "new content",
+		})
+		mockGetState = vi.fn().mockResolvedValue({
+			diagnosticsEnabled: true,
+			writeDelayMs: 1000,
+			// Exercise the focus-disruption (saveDirectly) save path.
+			experiments: { preventFocusDisruption: true },
+		})
 
 		// Structural stubs for the guarded-write path: the real DiffViewProvider is
 		// out of scope here, so vi.fn() doubles stand in for the members the tool
@@ -189,6 +202,10 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			editType: undefined as "create" | "modify" | undefined,
 			originalContent: undefined as string | undefined,
 			saveDirectly: mockSaveDirectly,
+			saveChanges: mockSaveChanges,
+			open: vi.fn().mockResolvedValue(undefined),
+			update: vi.fn().mockResolvedValue(undefined),
+			scrollToFirstDiff: vi.fn(),
 			pushToolWriteResult: vi.fn().mockResolvedValue("Saved file"),
 			reset: vi.fn().mockResolvedValue(undefined),
 		}
@@ -209,12 +226,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			diffViewProvider: diffViewProviderStub as unknown as Task["diffViewProvider"],
 			providerRef: {
 				deref: vi.fn().mockReturnValue({
-					getState: vi.fn().mockResolvedValue({
-						diagnosticsEnabled: true,
-						writeDelayMs: 1000,
-						// Exercise the focus-disruption (saveDirectly) save path.
-						experiments: { preventFocusDisruption: true },
-					}),
+					getState: mockGetState,
 				}),
 			} as unknown as Task["providerRef"],
 			fileContextTracker: {
@@ -432,5 +444,34 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
 		expect(vi.mocked(mockTask.diffViewProvider.reset)).toHaveBeenCalled()
 		expect(mockTask.didEditFile).toBe(false)
+	})
+
+	it("update: the diff-view save selects the same edit guard as the guarded save", async () => {
+		// With focus-disruption prevention off the tool saves through the diff view.
+		// A partial read must not be rejected there, otherwise the patch the user
+		// approved is thrown away.
+		mockGetState.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} })
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+	})
+
+	it("add: the diff-view save uses the create guard for a new file", async () => {
+		mockedFileExistsAtPath.mockResolvedValueOnce(false)
+		mockGetState.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} })
+
+		await tool.execute({ patch: addPatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "create")
 	})
 })
