@@ -320,6 +320,70 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await expect(fs.readFile(untrackedFile, "utf-8")).rejects.toThrow()
 			})
 
+			describe("restore with changed ignore rules (#1832)", () => {
+				it("keeps files that were ignored at checkpoint time when .gitignore was overwritten", async () => {
+					// The reported setup: .gitignore ignores itself, so it is never in a checkpoint.
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					const secret = path.join(service.workspaceDir, "secrets", "key.txt")
+					await fs.writeFile(gitignore, ".gitignore\nsecrets/\n")
+					await fs.mkdir(path.dirname(secret), { recursive: true })
+					await fs.writeFile(secret, "untracked and ignored")
+					const checkpoint = await service.saveCheckpoint("before write", { allowEmpty: true })
+
+					// An agent overwrites .gitignore, so secrets/ is no longer ignored, and creates a file.
+					await fs.writeFile(gitignore, "dist/\n")
+					const createdAfter = path.join(service.workspaceDir, "created-after.txt")
+					await fs.writeFile(createdAfter, "new")
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					expect(await fs.readFile(secret, "utf-8")).toBe("untracked and ignored")
+					// .gitignore was never checkpointed, so the overwritten version is kept rather than deleted.
+					expect(await fs.readFile(gitignore, "utf-8")).toBe("dist/\n")
+					expect(await fileExistsAtPath(createdAfter)).toBe(false)
+				})
+
+				it("keeps files that were ignored at checkpoint time when a checkpointed .gitignore changed", async () => {
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					const secret = path.join(service.workspaceDir, "secrets", "key.txt")
+					await fs.writeFile(gitignore, "secrets/\n")
+					await fs.mkdir(path.dirname(secret), { recursive: true })
+					await fs.writeFile(secret, "untracked and ignored")
+					const checkpoint = await service.saveCheckpoint("with .gitignore")
+					expect(checkpoint?.commit).toBeTruthy()
+
+					await fs.writeFile(gitignore, "dist/\n")
+					const createdAfter = path.join(service.workspaceDir, "nested", "created-after.txt")
+					await fs.mkdir(path.dirname(createdAfter), { recursive: true })
+					await fs.writeFile(createdAfter, "new")
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					expect(await fs.readFile(secret, "utf-8")).toBe("untracked and ignored")
+					// Normalize line endings: core.autocrlf may rewrite the restored file on Windows.
+					expect((await fs.readFile(gitignore, "utf-8")).replace(/\r\n/g, "\n")).toBe("secrets/\n")
+					// Files created after the checkpoint are still rolled back, including their new directory.
+					expect(await fileExistsAtPath(path.dirname(createdAfter))).toBe(false)
+				})
+
+				it("restores checkpoints saved before ignore records existed with the previous clean", async () => {
+					await fs.writeFile(testFile, "checkpointed")
+					const checkpoint = await service.saveCheckpoint("legacy checkpoint")
+					// Simulate a checkpoint saved by an older version, which wrote no ignore record.
+					await fs.rm(path.join(service.checkpointsDir, ".git", "zoo-checkpoint-ignored"), {
+						recursive: true,
+						force: true,
+					})
+					const createdAfter = path.join(service.workspaceDir, "created-after.txt")
+					await fs.writeFile(createdAfter, "new")
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					expect(await fs.readFile(testFile, "utf-8")).toBe("checkpointed")
+					expect(await fileExistsAtPath(createdAfter)).toBe(false)
+				})
+			})
+
 			it("does not create a checkpoint for ignored files", async () => {
 				// Create a file that matches an ignored pattern (e.g., .log file).
 				const ignoredFile = path.join(service.workspaceDir, "ignored.log")

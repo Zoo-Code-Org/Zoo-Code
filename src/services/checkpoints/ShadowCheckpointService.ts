@@ -218,6 +218,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			await this.stageAll(git)
 			const { commit } = await git.commit("initial commit", { "--allow-empty": null })
 			this.baseHash = commit
+			await this.recordIgnoredPaths(git, commit)
 			created = true
 		}
 
@@ -260,6 +261,83 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			this.log(
 				`[${this.constructor.name}#stageAll] failed to add files to git: ${error instanceof Error ? error.message : String(error)}`,
 			)
+		}
+	}
+
+	// Ignore rules are read from the live workspace, so a .gitignore changed after a checkpoint
+	// would make `git clean` delete files that were ignored (and so never checkpointed) at the
+	// time (#1832). Each checkpoint therefore records the paths ignored when it was saved.
+	private ignoredRecordPath(commitHash: string) {
+		return path.join(this.dotGitDir, "zoo-checkpoint-ignored", commitHash)
+	}
+
+	private async listIgnoredPaths(git: SimpleGit): Promise<string[]> {
+		// --directory collapses fully ignored directories (e.g. node_modules/) to one entry.
+		const output = await git.raw(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"])
+		return output.split("\0").filter(Boolean)
+	}
+
+	private async readIgnoredRecord(commitHash: string): Promise<string[] | undefined> {
+		try {
+			const content = await fs.readFile(this.ignoredRecordPath(commitHash), "utf8")
+			return content.split("\0").filter(Boolean)
+		} catch {
+			return undefined
+		}
+	}
+
+	/** Adds the currently ignored paths to the record for a checkpoint; never fails the save. */
+	private async recordIgnoredPaths(git: SimpleGit, commitHash: string) {
+		try {
+			const ignored = new Set([
+				...((await this.readIgnoredRecord(commitHash)) ?? []),
+				...(await this.listIgnoredPaths(git)),
+			])
+			await fs.mkdir(path.dirname(this.ignoredRecordPath(commitHash)), { recursive: true })
+			await fs.writeFile(this.ignoredRecordPath(commitHash), [...ignored].join("\0"))
+		} catch (error) {
+			this.log(
+				`[${this.constructor.name}#recordIgnoredPaths] failed to record ignored paths: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	/**
+	 * Removes untracked files like `git clean -f -d -f`, but only those ignored by neither the
+	 * current rules nor the rules recorded when the checkpoint was saved.
+	 */
+	private async removeUntrackedFiles(git: SimpleGit, ignoredAtCheckpoint: string[]) {
+		const ignoredEntries = new Set(ignoredAtCheckpoint)
+		const ignoredDirs = ignoredAtCheckpoint.filter((entry) => entry.endsWith("/"))
+		const wasIgnored = (relPath: string) =>
+			ignoredEntries.has(relPath) || ignoredDirs.some((dir) => relPath.startsWith(dir))
+
+		// --exclude-standard applies the current rules; nested repositories are listed as "dir/".
+		const output = await git.raw(["ls-files", "--others", "--exclude-standard", "-z"])
+		const removedDirs = new Set<string>()
+		for (const relPath of output.split("\0").filter(Boolean)) {
+			if (wasIgnored(relPath)) {
+				continue
+			}
+			const absPath = path.join(this.workspaceDir, relPath)
+			await fs.rm(absPath, { force: true, recursive: relPath.endsWith("/") })
+			removedDirs.add(path.dirname(absPath))
+		}
+
+		// Like `git clean -d`, remove directories left empty by the removal.
+		for (const dir of [...removedDirs].sort((a, b) => b.length - a.length)) {
+			let current = dir
+			while (current.startsWith(this.workspaceDir + path.sep)) {
+				try {
+					await fs.rmdir(current)
+				} catch (error) {
+					const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+					if (code !== "ENOENT") {
+						break // Not empty: stop walking up.
+					}
+				}
+				current = path.dirname(current)
+			}
 		}
 	}
 
@@ -348,6 +426,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			const fromHash = this._checkpoints[this._checkpoints.length - 1] ?? this.baseHash!
 			const toHash = result.commit || fromHash
 			this._checkpoints.push(toHash)
+			await this.recordIgnoredPaths(this.git, toHash)
 			const duration = Date.now() - startTime
 
 			if (result.commit) {
@@ -386,7 +465,13 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			}
 
 			const start = Date.now()
-			await this.git.clean("f", ["-d", "-f"])
+			const ignoredAtCheckpoint = await this.readIgnoredRecord(commitHash)
+			if (ignoredAtCheckpoint) {
+				await this.removeUntrackedFiles(this.git, ignoredAtCheckpoint)
+			} else {
+				// Checkpoints saved before ignore records existed keep the previous behavior.
+				await this.git.clean("f", ["-d", "-f"])
+			}
 			await this.git.reset(["--hard", commitHash])
 
 			// Remove all checkpoints after the specified commitHash.
