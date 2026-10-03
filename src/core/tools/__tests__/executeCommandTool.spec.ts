@@ -857,6 +857,76 @@ describe("executeCommandTool", () => {
 			)
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
+
+		it("settles the publication signal and reports when the execa fallback retry throws", async () => {
+			mockToolUse.params.command = "npm test"
+			mockToolUse.nativeArgs = { command: "npm test" }
+			// First attempt fails shell integration startup (retryable); the
+			// execa retry then fails with an ordinary terminal error before any
+			// result is published.
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const retryError = new Error("terminal crashed during retry")
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const retryProcess = Object.assign(Promise.reject(retryError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			vitest
+				.mocked(TerminalRegistry.getOrCreateTerminal)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockReturnValue(failedProcess),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockReturnValue(retryProcess),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			// The retry error is reported through the tool error path and no
+			// result is published; the catch arm also settles the shared
+			// toolResultPublished signal (false) so the background-completion
+			// drain chain awaiting it cannot hang forever and hold task refs.
+			expect(mockHandleError).toHaveBeenCalledWith("executing command", retryError)
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+		})
+
+		it("settles the publication signal and reports when the shell-integration warning say throws", async () => {
+			mockToolUse.params.command = "npm test"
+			mockToolUse.nativeArgs = { command: "npm test" }
+			// Command was submitted but shell integration lost track of it
+			// (non-retryable); the warning say then fails before publication.
+			const shellError = new executeCommandModule.ShellIntegrationError("lost track", true)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			vitest.mocked(TerminalRegistry.getOrCreateTerminal).mockResolvedValueOnce({
+				runCommand: vitest.fn().mockReturnValue(failedProcess),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			} as never)
+			const sayError = new Error("webview gone")
+			mockCline.say.mockRejectedValueOnce(sayError)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledWith("executing command", sayError)
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("Command execution timeout configuration", () => {

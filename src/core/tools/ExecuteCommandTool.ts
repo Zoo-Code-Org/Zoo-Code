@@ -239,23 +239,39 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					const status: CommandExecutionStatus = { executionId, status: "fallback" }
 					postCommandExecutionStatus(provider, status)
 
-					const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, {
-						...options,
-						terminalShellIntegrationDisabled: true,
-					})
+					try {
+						const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, {
+							...options,
+							terminalShellIntegrationDisabled: true,
+						})
 
-					if (rejected) {
-						task.didRejectTool = true
+						if (rejected) {
+							task.didRejectTool = true
+						}
+
+						publishToolResult(result)
+						shouldDrainQueuedMessages = commandSubmitted
+					} catch (fallbackError) {
+						// The retry never published: settle the signal (and
+						// rethrow) so the background-completion drain chain
+						// awaiting toolResultPublished cannot hang forever and
+						// hold task references. Settling is idempotent.
+						settleToolResultPublished?.(false)
+						throw fallbackError
 					}
-
-					publishToolResult(result)
-					shouldDrainQueuedMessages = commandSubmitted
 				} else if (error instanceof ShellIntegrationError) {
 					// Command was submitted but shell integration lost track of it — show warning.
-					await task.say("shell_integration_warning")
-					publishToolResult(
-						"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
-					)
+					try {
+						await task.say("shell_integration_warning")
+						publishToolResult(
+							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
+						)
+					} catch (warningError) {
+						// Same hang hazard as the fallback arm: a throw before
+						// publishToolResult leaves the signal unsettled.
+						settleToolResultPublished?.(false)
+						throw warningError
+					}
 				} else {
 					// Ordinary execution error (e.g. the terminal failed to start) —
 					// not a shell-integration failure, so it must not emit the
