@@ -1,7 +1,13 @@
 import type { ClineMessage } from "@roo-code/types"
 
+import { checkAutoApproval } from "../../auto-approval"
 import { MessageQueueService } from "../../message-queue/MessageQueueService"
 import { Task } from "../Task"
+
+vi.mock("../../auto-approval", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../auto-approval")>()
+	return { ...actual, checkAutoApproval: vi.fn(actual.checkAutoApproval) }
+})
 
 function buildTask(getState: () => Promise<Record<string, unknown>>) {
 	const task = Object.create(Task.prototype) as Task
@@ -38,6 +44,24 @@ describe("Task.ask abort during the auto-approval await", () => {
 		})
 
 		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), partial)
+		task["abort"] = true
+		gate.release()
+
+		await expect(askPromise).rejects.toThrow(/aborted/)
+		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
+		expect(task["lastMessageTs"]).toBeUndefined()
+	})
+
+	it("does not add an ask row when aborted while checkAutoApproval is pending", async () => {
+		const gate = deferred()
+		vi.mocked(checkAutoApproval).mockImplementationOnce(async () => {
+			await gate.promise
+			return { decision: "ask" }
+		})
+		const task = buildTask(async () => ({}))
+
+		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		await vi.waitFor(() => expect(checkAutoApproval).toHaveBeenCalled())
 		task["abort"] = true
 		gate.release()
 
