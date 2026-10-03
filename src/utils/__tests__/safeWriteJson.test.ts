@@ -562,9 +562,8 @@ describe("safeWriteJson", () => {
 		const callerPath = path.join(linkDir, "test-file.json")
 		const referentPath = path.join(referentDir, "test-file.json")
 		// Seed the RESOLVED referent with real content (via the actual fs) so the
-		// write exercises replacement of an EXISTING referent: the lock is
-		// acquired on the caller path (realpath:false, which may be absent) while
-		// the backup + commit happen on the referent.
+		// write exercises replacement of an EXISTING referent: the lock, the
+		// backup, and the commit all target the resolved referent.
 		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: true }))
 
 		vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)

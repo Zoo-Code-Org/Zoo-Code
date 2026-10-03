@@ -235,6 +235,10 @@ export async function guardedWrite(
 
 	return enqueue(absolutePath, async () => {
 		const obs = task.observationRegistry.get(absolutePath)
+		// A targeted edit authorizes only the view the model saw, so a partial
+		// observation must stay partial after the publish; a full-file publish
+		// carries the whole content the model supplied and is complete.
+		let staysPartial = false
 
 		if (kind === "edit") {
 			// Edit-style writes require a prior read: no observation, no write.
@@ -245,6 +249,7 @@ export async function guardedWrite(
 				await unobservedEditGuard(absolutePath)
 			} else {
 				await replaceIfVersion(absolutePath, obs.version, content)
+				staysPartial = obs.complete === false
 			}
 		} else {
 			// "create" or "update" publish a full file built on the model's
@@ -286,7 +291,11 @@ export async function guardedWrite(
 		// runs after a publish actually happened.
 		const publishedToken = await computeVersionToken(absolutePath).catch(() => undefined)
 		if (publishedToken !== undefined) {
-			task.observationRegistry.observe(absolutePath, publishedToken, true)
+			// Refresh with the new token, keeping the completeness the guard
+			// established: a partial observation that authorized a targeted edit
+			// must stay partial, otherwise a later full-file replacement would
+			// publish content built from the slice alone.
+			task.observationRegistry.observe(absolutePath, publishedToken, !staysPartial)
 		}
 	})
 }

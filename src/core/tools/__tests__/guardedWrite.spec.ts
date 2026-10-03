@@ -95,6 +95,20 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bytes.txt"), Buffer.from([0x00, 0x68]))
 		})
 
+		it("records an unobserved create as complete so a later full-file update is allowed", async () => {
+			// Nothing was read, so the model supplied the whole file: the post-publish
+			// refresh must record completeness, otherwise the next update would be
+			// rejected as a partial read.
+			const reg = new ObservationRegistry()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "new-file.txt", "hello", "create")
+
+			expect(reg.get(abs("new-file.txt"))?.complete).toBe(true)
+		})
+
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
 			mockedFsAccess.mockResolvedValue(undefined)
 			const task = createMockTask()
@@ -281,6 +295,25 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "doc.txt", "patched", "edit")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+		})
+
+		it("keeps a partial observation partial after an edit so a later full replacement is rejected", async () => {
+			// The edit replaced only the region the model saw. Refreshing the
+			// observation to complete would let a following full-file write publish
+			// content built from the slice alone.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			expect(reg.get(abs("doc.txt"))?.complete).toBe(false)
+
+			await expect(guardedWrite(task, "doc.txt", "full replacement", "update")).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+			)
 		})
 
 		it("rejects a create-kind full-file overwrite of an existing file when only a partial read observed it", async () => {

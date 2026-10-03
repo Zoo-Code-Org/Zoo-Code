@@ -454,7 +454,10 @@ export function readWithSlice(
 	// Slice lines
 	const endIdx = Math.min(offset + limit, totalLines)
 	const selectedLines = lines.slice(offset, endIdx)
-	const wasTruncated = endIdx < totalLines
+	// Every line can still be a partial view: formatWithLineNumbers clips a
+	// line longer than MAX_LINE_LENGTH, so a slice that returns the whole file
+	// may still hide content and must not count as a complete read.
+	const wasTruncated = endIdx < totalLines || selectedLines.some((line) => line.content.length > MAX_LINE_LENGTH)
 
 	// Format output
 	const formattedContent = formatWithLineNumbers(selectedLines)

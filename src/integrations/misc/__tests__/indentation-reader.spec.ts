@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { MAX_LINE_LENGTH } from "../../../core/prompts/tools/native-tools/read_file"
 import {
 	parseLines,
 	formatWithLineNumbers,
@@ -276,6 +277,37 @@ describe("readWithSlice", () => {
 		const result = readWithSlice(TYPESCRIPT_CODE, 0, 5)
 
 		expect(result.returnedLines).toBe(5)
+		expect(result.wasTruncated).toBe(true)
+	})
+
+	it("marks a full-file slice truncated when a line is clipped by the length cap", () => {
+		// Every line is returned, but formatWithLineNumbers clips a line longer
+		// than MAX_LINE_LENGTH, so the model did not see the whole file and the read
+		// must not count as complete.
+		const longLine = "x".repeat(MAX_LINE_LENGTH + 10)
+		const result = readWithSlice(longLine, 0, 10)
+
+		expect(result.returnedLines).toBe(1)
+		expect(result.wasTruncated).toBe(true)
+	})
+
+	it("keeps a slice complete when a line is exactly at the length cap", () => {
+		// formatWithLineNumbers clips only lines strictly longer than the cap, so a
+		// line at exactly MAX_LINE_LENGTH is shown in full and the read is complete.
+		const lines = ["x".repeat(MAX_LINE_LENGTH), "short"].join("\n")
+		const result = readWithSlice(lines, 0, 10)
+
+		expect(result.returnedLines).toBe(2)
+		expect(result.wasTruncated).toBe(false)
+	})
+
+	it("marks a slice truncated when any line is clipped, not only when every line is", () => {
+		// The first line is clipped and the second is shown in full: some lines are
+		// a partial view even though every line was returned.
+		const lines = ["y".repeat(MAX_LINE_LENGTH + 1), "short"].join("\n")
+		const result = readWithSlice(lines, 0, 10)
+
+		expect(result.returnedLines).toBe(2)
 		expect(result.wasTruncated).toBe(true)
 	})
 
