@@ -188,5 +188,8 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
+		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 })

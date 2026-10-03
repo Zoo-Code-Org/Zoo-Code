@@ -266,7 +266,15 @@ describe("safeWriteText", () => {
 
 			// the temp file was fully closed before the commit rename
 			expect(vi.mocked(fsSync.closeSync).mock.calls[0][0]).toBe(1)
-			expect(fs.rename).toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			// The title promises the order, so compare the invocations rather than
+			// only count them: a rename before closeSync, or a close before fsync,
+			// would not be a durable commit.
+			const fsyncOrder = vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]
+			const closeOrder = vi.mocked(fsSync.closeSync).mock.invocationCallOrder[0]
+			const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[0]
+			expect(fsyncOrder).toBeLessThan(closeOrder)
+			expect(closeOrder).toBeLessThan(renameOrder)
 		})
 	})
 
