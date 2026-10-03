@@ -99,18 +99,12 @@ export async function getMimoModels(
 	})
 
 	if (!response.ok) {
-		let errorBody = ""
-		try {
-			errorBody = await response.text()
-		} catch {
-			errorBody = "(unable to read response body)"
-		}
-
+		// Metadata only: response bodies can echo credentials or conversation
+		// fragments back at whatever sinks the logs, so the body is never logged.
 		console.error(`[getMimoModels] HTTP error:`, {
 			status: response.status,
 			statusText: response.statusText,
 			url: url.toString(),
-			body: errorBody,
 		})
 
 		throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -119,7 +113,11 @@ export async function getMimoModels(
 	const data = await response.json()
 
 	if (!data?.data || !Array.isArray(data.data)) {
-		console.error("[getMimoModels] Unexpected response format:", data)
+		// Same reason: log the shape mismatch, never the payload.
+		console.error("[getMimoModels] Unexpected response format:", {
+			receivedType: Array.isArray(data) ? "array" : typeof data,
+			dataFieldType: data?.data === null ? "null" : typeof data?.data,
+		})
 		throw new Error("Failed to fetch MiMo models: Unexpected response format.")
 	}
 
