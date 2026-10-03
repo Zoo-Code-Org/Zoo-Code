@@ -89,6 +89,7 @@ vi.mock("vscode", () => ({
 	},
 	window: {
 		createTextEditorDecorationType: vi.fn(),
+		activeTextEditor: undefined as unknown,
 		showTextDocument: vi.fn(),
 		onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
@@ -1492,8 +1493,10 @@ describe("DiffViewProvider", () => {
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 			// the revert activates the exact document with the exact options:
 			// preserveFocus keeps the user's focus, preview: false pins the tab
+			// the target is activated so the revert command is scoped to this document
+			// (no active editor to restore in this case)
 			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(dirtyEditor.document, {
-				preserveFocus: true,
+				preserveFocus: false,
 				preview: false,
 			})
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
@@ -1532,7 +1535,7 @@ describe("DiffViewProvider", () => {
 			// buffer (never re-saved from originalContent), and the placeholder
 			// is unlinked while it is still exactly the file open() wrote
 			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(dirtyEditor.document, {
-				preserveFocus: true,
+				preserveFocus: false,
 				preview: false,
 			})
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
@@ -1754,6 +1757,84 @@ describe("DiffViewProvider", () => {
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 			expect(vi.mocked(vscode.commands.executeCommand)).not.toHaveBeenCalledWith("workbench.action.files.revert")
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
+		})
+
+		it("activates the document before the revert so the command is scoped to it, then restores the focus", async () => {
+			// workbench.action.files.revert takes no resource argument: with the Open
+			// Editors view focused it force-reverts every selected editor, otherwise the
+			// active editor. Activating the target keeps the revert scoped to this
+			// document, and the user's previous focus is given back afterwards.
+			const previousEditor = mockTextEditor(`${mockCwd}/other.ts`, "other")
+			vi.mocked(vscode.window).activeTextEditor = previousEditor
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+
+			await diffViewProvider.saveChanges(false)
+
+			const calls = vi.mocked(vscode.window.showTextDocument).mock.calls
+			expect(calls[0]).toEqual([dirtyEditor.document, { preserveFocus: false, preview: false }])
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(calls[1]).toEqual([previousEditor.document, { preserveFocus: false, preview: false }])
+		})
+
+		it("does not restore focus when the user had no active editor", async () => {
+			vi.mocked(vscode.window).activeTextEditor = undefined
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+
+			await diffViewProvider.saveChanges(false)
+
+			// Only the activation happened; there was no focus to give back.
+			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not restore focus when the active editor is already the target document", async () => {
+			// The user was already looking at this document, so there is nothing to give
+			// back: re-showing it would be a redundant activation.
+			const editor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			vi.mocked(vscode.window).activeTextEditor = editor
+			diffViewProvider["activeDiffEditor"] = editor
+
+			await diffViewProvider.saveChanges(false)
+
+			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
 		})
 
 		it("does not reload a clean buffer when the guard rejects - only dirty buffers are discarded", async () => {

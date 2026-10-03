@@ -397,6 +397,31 @@ export class DiffViewProvider {
 		}
 	}
 
+	/**
+	 * Revert one document through the workbench command. The command takes no
+	 * resource argument: when the Open Editors view has focus with a selection it
+	 * force-reverts every selected editor, otherwise the active editor. Activate
+	 * the target first so only this document is reverted, then give the user
+	 * their focus back.
+	 */
+	private async revertDocument(document: vscode.TextDocument): Promise<void> {
+		const previous = vscode.window.activeTextEditor
+		try {
+			await vscode.window.showTextDocument(document, { preserveFocus: false, preview: false })
+			await vscode.commands.executeCommand("workbench.action.files.revert")
+		} catch {
+			// best-effort: a document that cannot be reverted stays dirty
+		}
+		if (previous && previous.document !== document) {
+			// Give the user their focus back.
+			try {
+				await vscode.window.showTextDocument(previous.document, { preserveFocus: false, preview: false })
+			} catch {
+				// best-effort: the focus cannot always be restored
+			}
+		}
+	}
+
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
@@ -462,8 +487,7 @@ export class DiffViewProvider {
 				this.cancelDeferredScroll()
 
 				if (updatedDocument.isDirty) {
-					await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
-					await vscode.commands.executeCommand("workbench.action.files.revert")
+					await this.revertDocument(updatedDocument)
 				}
 				if (this.editType === "create" && this.placeholderVersion) {
 					const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
@@ -519,13 +543,7 @@ export class DiffViewProvider {
 		// buffer that moved on stays dirty: the close helpers skip dirty tabs and
 		// the user's text survives in the editor.
 		if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
-			try {
-				await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
-				await vscode.commands.executeCommand("workbench.action.files.revert")
-			} catch {
-				// best-effort: a dirty tab that cannot be cleared stays open
-				// rather than risking a save-prompt loop
-			}
+			await this.revertDocument(updatedDocument)
 		}
 
 		await this.closeAllDiffViews()
