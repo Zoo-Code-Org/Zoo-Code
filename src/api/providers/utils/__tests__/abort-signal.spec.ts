@@ -3,8 +3,105 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	mergeAbortSignals,
+	rejectOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
+import { settlesWithin } from "../../../../test-utils/promise"
+
+const SETTLE_MS = 200
+
+describe("rejectOnAbort", () => {
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+
+		await expect(
+			settlesWithin(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider"), SETTLE_MS),
+		).resolves.toBe("done")
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	it("rejects with the provider abort error when the signal aborts first", async () => {
+		const controller = new AbortController()
+		// Never settles: the race must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const race = rejectOnAbort(pending, controller.signal, "TestProvider")
+		controller.abort()
+
+		await expect(settlesWithin(race, SETTLE_MS)).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const pending = new Promise<never>(() => {})
+
+		await expect(
+			settlesWithin(rejectOnAbort(pending, controller.signal, "TestProvider"), SETTLE_MS),
+		).rejects.toMatchObject({
+			name: "AbortError",
+		})
+	})
+
+	it("propagates the pending rejection when the signal stays active", async () => {
+		const controller = new AbortController()
+		const boom = new Error("lookup failed")
+
+		await expect(
+			settlesWithin(rejectOnAbort(Promise.reject(boom), controller.signal, "TestProvider"), SETTLE_MS),
+		).rejects.toBe(boom)
+	})
+
+	it("detaches the exact abort listener it registered once the pending settles", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+		await expect(
+			settlesWithin(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider"), SETTLE_MS),
+		).resolves.toBe("done")
+
+		const registeredListener = addSpy.mock.calls[0]?.[1]
+		expect(registeredListener).toBeTypeOf("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("detaches the exact abort listener it registered when the pending rejects", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const lookupError = new Error("lookup failed")
+
+		await expect(
+			settlesWithin(rejectOnAbort(Promise.reject(lookupError), controller.signal, "TestProvider"), SETTLE_MS),
+		).rejects.toBe(lookupError)
+
+		const registeredListener = addSpy.mock.calls[0]?.[1]
+		expect(registeredListener).toBeTypeOf("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("registers the abort listener with { once: true }", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		// Never settles: the race must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const race = rejectOnAbort(pending, controller.signal, "TestProvider")
+		controller.abort()
+
+		await expect(settlesWithin(race, SETTLE_MS)).rejects.toMatchObject({ name: "AbortError" })
+		const registeredListener = addSpy.mock.calls[0]?.[1]
+		expect(registeredListener).toBeTypeOf("function")
+		expect(addSpy).toHaveBeenCalledWith("abort", registeredListener, { once: true })
+		addSpy.mockRestore()
+	})
+})
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {
