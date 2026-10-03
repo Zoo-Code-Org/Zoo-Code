@@ -133,6 +133,11 @@ describe("Single-open-task invariant", () => {
 		const provider = {
 			taskRegistry: registry2,
 			taskScheduler: new TaskScheduler(),
+			taskHistoryStore: {
+				get: vi.fn(() => undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
+			},
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
 				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, consecutiveMistakeLimit: 0 },
