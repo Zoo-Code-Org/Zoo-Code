@@ -2,7 +2,13 @@ import { screen } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
 
-import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	mimoDefaultModelId,
+	type ModelInfo,
+	type ProviderSettings,
+	type OrganizationAllowList,
+} from "@roo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
@@ -11,13 +17,26 @@ import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import ApiOptions from "../ApiOptions"
 import { MODELS_BY_PROVIDER, PROVIDERS } from "../constants"
 
-// Mock the extension state context
+// Mock the extension state context. The hoisted state holder lets the MiMo suite
+// reset the allow list to the unfiltered default without re-typing the full
+// ExtensionStateContextType (previous suites pin mockReturnValue via `as any`,
+// and vi.clearAllMocks() does not undo that).
+const { useExtensionStateMock, setOrganizationAllowList } = vi.hoisted(() => {
+	const mock = vi.fn(() => ({
+		organizationAllowList: undefined as OrganizationAllowList | undefined,
+		cloudIsAuthenticated: false,
+	}))
+	return {
+		useExtensionStateMock: mock,
+		setOrganizationAllowList: (list: OrganizationAllowList | undefined) => {
+			mock.mockReturnValue({ organizationAllowList: list, cloudIsAuthenticated: false })
+		},
+	}
+})
+
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	ExtensionStateContextProvider: ({ children }: any) => children,
-	useExtensionState: vi.fn(() => ({
-		organizationAllowList: undefined,
-		cloudIsAuthenticated: false,
-	})),
+	useExtensionState: useExtensionStateMock,
 }))
 
 // Mock the translation hook
@@ -34,12 +53,20 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-// Mock the router models hook
+// Mock the router models hook. The hoisted state holder lets tests drive `data`
+// without re-typing the full react-query UseQueryResult at each call site.
+const { useRouterModelsMock, setRouterModelsData } = vi.hoisted(() => {
+	const state = { data: undefined as Record<string, Record<string, unknown>> | undefined }
+	return {
+		useRouterModelsMock: vi.fn(() => ({ data: state.data, refetch: vi.fn() })),
+		setRouterModelsData: (data: typeof state.data) => {
+			state.data = data
+		},
+	}
+})
+
 vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
-	useRouterModels: vi.fn(() => ({
-		data: null,
-		refetch: vi.fn(),
-	})),
+	useRouterModels: useRouterModelsMock,
 }))
 
 // Mock the selected model hook
@@ -342,5 +369,75 @@ describe("ApiOptions Provider Filtering", () => {
 		// Cleanup
 		delete (MODELS_BY_PROVIDER as any).testEmptyProvider
 		PROVIDERS.pop()
+	})
+
+	describe("MiMo dynamic model catalog (ApiOptions -> ModelPicker wiring)", () => {
+		// Regression guard: the generic ModelPicker must receive the host-fetched router
+		// catalog for MiMo merged on top of the static MODELS_BY_PROVIDER fallback in
+		// ApiOptions. ModelPicker itself performs no router merging, so if the merge in
+		// ApiOptions regressed to static-only, router-only models newer than the shipped
+		// catalog would silently become unselectable and no other suite would catch it.
+		const routerOnlyMimoModelId = "mimo-v2.7-ultra"
+
+		const routerOnlyMimoModelInfo: ModelInfo = {
+			maxTokens: 131_072,
+			contextWindow: 262_144,
+			supportsPromptCache: false,
+		}
+
+		const renderWithMimoSelected = (routerData: Record<string, Record<string, ModelInfo>> | undefined) => {
+			// Earlier allow-list suites leave a restrictive organizationAllowList on this
+			// mock (clearAllMocks keeps mockReturnValue); reset to the unfiltered default
+			// so the MiMo catalog reaches the picker in full.
+			setOrganizationAllowList(undefined)
+			setRouterModelsData(routerData)
+			vi.mocked(useSelectedModel).mockReturnValue({
+				provider: providerIdentifiers.mimo,
+				id: mimoDefaultModelId,
+				info: undefined,
+				isLoading: false,
+				isError: false,
+			})
+
+			return renderWithProviders({
+				...defaultProps,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.mimo,
+					apiModelId: mimoDefaultModelId,
+				} as ProviderSettings,
+			})
+		}
+
+		afterEach(() => {
+			// Restore the default (no fetched models) for any suites that run later.
+			setRouterModelsData(undefined)
+		})
+
+		it("passes both static and router-fetched MiMo models to the generic ModelPicker", () => {
+			// The router payload contains ONLY a model id that does not exist in the
+			// shipped static mimo catalog; it can reach the picker solely via the merge.
+			renderWithMimoSelected({ [providerIdentifiers.mimo]: { [routerOnlyMimoModelId]: routerOnlyMimoModelInfo } })
+
+			// Static default from getStaticModelsForProvider(mimo) / MODELS_BY_PROVIDER.
+			expect(screen.getByTestId(`model-option-${mimoDefaultModelId}`)).toBeInTheDocument()
+			// Router-only model: present in the picker only if ApiOptions merged routerModels[mimo].
+			expect(screen.getByTestId(`model-option-${routerOnlyMimoModelId}`)).toBeInTheDocument()
+		})
+
+		it("keeps the static MiMo catalog selectable when no router models are available", () => {
+			// useRouterModels data is undefined while the fetch is pending/failed; the
+			// spread of routerModels?.[mimo] must not crash or drop the static defaults.
+			renderWithMimoSelected(undefined)
+
+			expect(screen.getByTestId(`model-option-${mimoDefaultModelId}`)).toBeInTheDocument()
+			expect(screen.queryByTestId(`model-option-${routerOnlyMimoModelId}`)).not.toBeInTheDocument()
+		})
+
+		it("keeps the static MiMo catalog selectable when the router catalog is empty", () => {
+			renderWithMimoSelected({})
+
+			expect(screen.getByTestId(`model-option-${mimoDefaultModelId}`)).toBeInTheDocument()
+			expect(screen.queryByTestId(`model-option-${routerOnlyMimoModelId}`)).not.toBeInTheDocument()
+		})
 	})
 })

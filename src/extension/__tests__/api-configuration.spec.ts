@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
+import { providerIdentifiers } from "@roo-code/types"
+
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 
@@ -61,5 +63,29 @@ describe("API - configuration", () => {
 
 		expect(setModeConfig).not.toHaveBeenCalled()
 		expect(postStateToWebview).toHaveBeenCalledOnce()
+	})
+
+	it("excludes mimoApiKey from getConfiguration while keeping non-secret MiMo settings", () => {
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues: () => ({
+				apiProvider: providerIdentifiers.mimo,
+				mimoApiKey: "mimo-secret-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+				apiModelId: "mimo-v2.6-pro",
+			}),
+			// Double assertion: this filter-focused spec only needs the two members
+			// the API surface touches; a full ClineProvider test double is out of
+			// scope (the upstream siblings above use the same pattern).
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider)
+
+		const configuration = api.getConfiguration()
+
+		expect(configuration).not.toHaveProperty("mimoApiKey")
+		expect(configuration.mimoBaseUrl).toBe("https://token-plan-sgp.xiaomimimo.com/v1")
+		expect(configuration.apiModelId).toBe("mimo-v2.6-pro")
 	})
 })

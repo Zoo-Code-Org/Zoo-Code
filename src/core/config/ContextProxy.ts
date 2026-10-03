@@ -104,7 +104,46 @@ export class ContextProxy {
 		// Migration: Clear old default condensing prompt so users get the improved v2 default
 		await this.migrateOldDefaultCondensingPrompt()
 
+		// Migration: Move a MiMo API key persisted in plaintext globalState (from
+		// builds before the key joined SECRET_STATE_KEYS) into SecretStorage.
+		await this.migratePlaintextMimoApiKey()
+
 		this._isInitialized = true
+	}
+
+	/**
+	 * MiMo shipped with its API key in plaintext globalState. Once the key became a
+	 * secret-state key, globalState stopped being read for it, so an existing
+	 * plaintext value would sit orphaned (and exposed) while SecretStorage stayed
+	 * empty. Move it into SecretStorage once and clear the plaintext copy.
+	 *
+	 * The existence check reads SecretStorage fresh rather than trusting the
+	 * initialize() snapshot: a secret written after the snapshot (or a transient
+	 * secrets.get failure during the load) would otherwise be clobbered by older
+	 * plaintext. Crash-safe: the plaintext is only cleared after the checks and
+	 * store resolve, so a failure leaves both copies intact and the migration
+	 * retries on next launch.
+	 */
+	private async migratePlaintextMimoApiKey() {
+		try {
+			const plaintextKey = this.originalContext.globalState.get<string>("mimoApiKey")
+			if (!plaintextKey) {
+				return
+			}
+			const existingSecret = await this.originalContext.secrets.get("mimoApiKey")
+			if (!existingSecret) {
+				await this.originalContext.secrets.store("mimoApiKey", plaintextKey)
+				this.secretCache.mimoApiKey = plaintextKey
+				logger.info("Migrated mimoApiKey to secrets")
+			} else {
+				// Repair the snapshot cache if the fresh read found a secret the
+				// initial load missed.
+				this.secretCache.mimoApiKey = existingSecret
+			}
+			await this.originalContext.globalState.update("mimoApiKey", undefined)
+		} catch (error) {
+			logger.error(`Error during mimoApiKey migration: ${error instanceof Error ? error.message : String(error)}`)
+		}
 	}
 
 	/**
