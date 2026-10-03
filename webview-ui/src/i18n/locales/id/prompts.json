@@ -104,6 +104,10 @@
 				"label": "Tingkatkan Prompt",
 				"description": "Gunakan peningkatan prompt untuk mendapatkan saran atau perbaikan yang disesuaikan untuk input Anda. Ini memastikan Zoo memahami maksud Anda dan memberikan respons terbaik. Tersedia melalui ikon ✨ di chat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Pesan Commit",
+				"description": "Merangkum perubahan Anda menjadi pesan commit. Tersedia melalui ikon Zoo Code di panel Source Control, yang menulis hasilnya langsung ke kotak input commit."
+			},
 			"CONDENSE": {
 				"label": "Peringkasan Konteks",
 				"description": "Konfigurasikan bagaimana konteks percakapan diringkas untuk mengelola batas token. Prompt ini digunakan untuk operasi peringkasan konteks manual dan otomatis."

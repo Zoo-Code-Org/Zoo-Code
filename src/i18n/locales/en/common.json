@@ -40,6 +40,7 @@
 		"update_support_prompt": "Failed to update support prompt",
 		"reset_support_prompt": "Failed to reset support prompt",
 		"enhance_prompt": "Failed to enhance prompt",
+		"commit_message_empty_response": "The model returned an empty commit message.",
 		"get_system_prompt": "Failed to get system prompt",
 		"search_commits": "Failed to search commits",
 		"save_api_config": "Failed to save api configuration",

@@ -40,6 +40,7 @@
 		"update_support_prompt": "Không thể cập nhật lời nhắc hỗ trợ",
 		"reset_support_prompt": "Không thể đặt lại lời nhắc hỗ trợ",
 		"enhance_prompt": "Không thể nâng cao lời nhắc",
+		"commit_message_empty_response": "Mô hình đã trả về thông điệp commit trống.",
 		"get_system_prompt": "Không thể lấy lời nhắc hệ thống",
 		"search_commits": "Không thể tìm kiếm các commit",
 		"save_api_config": "Không thể lưu cấu hình API",
