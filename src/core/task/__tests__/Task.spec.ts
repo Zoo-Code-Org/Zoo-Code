@@ -1449,6 +1449,74 @@ describe("Cline", () => {
 			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo)
 		})
 
+		describe("emergency condense reporting (#1769)", () => {
+			const ctxModelInfo: ModelInfo = { contextWindow: 50_000, maxTokens: 1024, supportsPromptCache: false }
+
+			// Overflow the 50k window so the real handler reaches manageContext's condense branch.
+			const createOverflowingTask = async (state: ProviderState) => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.getTaskMode()
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 100_000,
+				})
+				vi.spyOn(task.api, "getModel").mockReturnValue({ id: "ctx-model", info: ctxModelInfo })
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+				task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
+				const say = vi.spyOn(task, "say").mockResolvedValue(undefined)
+				return { task, say }
+			}
+
+			it("emits the summary's condenseId and summarizes with the task's condense settings", async () => {
+				const { task, say } = await createOverflowingTask(
+					providerStateWith({ customSupportPrompts: { CONDENSE: "custom condense prompt" } }),
+				)
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: [{ role: "user", content: [{ type: "text", text: "condensed" }], ts: Date.now() }],
+					summary: "summary",
+					cost: 0,
+					newContextTokens: 1,
+					condenseId: "emergency-condense-id",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				// Rewind cleanup can only remove the summary if the event carries its condenseId.
+				const condenseCall = say.mock.calls.find(([type]) => type === "condense_context")
+				expect(condenseCall?.[7]).toMatchObject({ condenseId: "emergency-condense-id" })
+				const [options] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+				expect(options).toMatchObject({ customCondensingPrompt: "custom condense prompt", cwd: task.cwd })
+			})
+
+			it("surfaces a failed emergency condense as condense_context_error", async () => {
+				const { task, say } = await createOverflowingTask(providerStateWith())
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: task.apiConversationHistory,
+					summary: "",
+					cost: 0,
+					error: "Condensing failed: rate limited",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				expect(say).toHaveBeenCalledWith("condense_context_error", "Condensing failed: rate limited")
+				// The sliding-window fallback still reports its truncation after the error row.
+				expect(say.mock.calls.map(([type]) => type)).toEqual([
+					"condense_context_error",
+					"sliding_window_truncation",
+				])
+			})
+		})
+
 		it("uses the task mode when manually condensing after focused state changes", async () => {
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "architect" }))
 			const task = new Task({
