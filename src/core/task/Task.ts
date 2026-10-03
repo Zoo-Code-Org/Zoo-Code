@@ -1006,11 +1006,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 				// Mirrors say()'s interactive user_feedback append: bump
 				// lastMessageTs and let the retry loop below own persistence.
-				// The association is recorded only after the append succeeds so
-				// a redelivery can never reconcile a row that was never added.
+				// The association is registered before the append: the append's
+				// only uncaught throw is a synchronously throwing Message
+				// listener, which runs after the row is already pushed, so a
+				// redelivery can reconcile the same row instead of appending a
+				// duplicate feedback row.
 				this.lastMessageTs = row.ts
-				await this.addToClineMessages(row)
 				this.queuedFeedbackRows.set(messageId, row)
+				await this.addToClineMessages(row)
 			}
 		} catch (error) {
 			// A failed write must not leave the message claimed: release it so a

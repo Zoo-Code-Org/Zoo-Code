@@ -13,6 +13,7 @@ type QueueTaskTestAccess = {
 	abort: boolean
 	abandoned: boolean
 	queuedMessageDrainChain: Promise<unknown>
+	emit: (...args: never[]) => void
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
@@ -421,6 +422,47 @@ describe("Task.ask queued message drain", () => {
 		const rows = taskAccess.clineMessages.filter((message) => message.say === "user_feedback")
 		expect(rows).toHaveLength(1)
 		expect(rows[0].text).toBe("dedupe me")
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("associates the feedback row before the append so a throwing listener cannot strand it", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		task.messageQueueService.addMessage("dedupe me")
+		const result = await task.ask("completion_result", "Done", false)
+		const messageId = result.queuedMessageId!
+
+		const access = getQueueTaskTestAccess(task)
+		// Mirror the real append: the row is pushed before the Message emit,
+		// and a consumer-attached listener can throw synchronously.
+		access.addToClineMessages = vi.fn(async (message?: ClineMessage) => {
+			access.clineMessages.push(message!)
+			access.emit("message")
+			return true
+		})
+		access.emit = vi.fn(() => {
+			throw new Error("listener boom")
+		})
+
+		await expect(task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)).rejects.toThrow(
+			"listener boom",
+		)
+
+		// The pushed row must stay associated with the queue entry, and the
+		// failed write must release the entry for redelivery.
+		expect(access.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
+		expect(access.queuedFeedbackRows.has(messageId)).toBe(true)
+		expect(task.messageQueueService.messages).toHaveLength(1)
+
+		// Redelivery reconciles the same row instead of appending a duplicate.
+		access.emit = vi.fn()
+		const updateClineMessage = vi.fn(async () => {})
+		access.updateClineMessage = updateClineMessage
+		access.saveClineMessages = vi.fn(async () => true)
+		await expect(task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)).resolves.toBe(
+			true,
+		)
+		expect(updateClineMessage).toHaveBeenCalledTimes(1)
+		expect(access.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
