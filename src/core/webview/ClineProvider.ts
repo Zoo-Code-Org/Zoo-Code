@@ -3474,8 +3474,16 @@ export class ClineProvider
 		})
 
 		await this.addClineToStack(task)
+		// Claim local session ownership before scheduling so the periodic
+		// delegation pass cannot treat this not-yet-started task (e.g. a child
+		// awaited by a delegated parent) as an orphan while the scheduler queues
+		// the run. Released on scheduler rejection; a later non-active status
+		// write or dispose also drops the claim.
+		this.taskHistoryStore.markLocallyActive(task.taskId)
 		if (options.startTask !== false) {
-			scheduleTask(this.taskScheduler, task, "createTask")
+			scheduleTask(this.taskScheduler, task, "createTask", undefined, () =>
+				this.taskHistoryStore.markLocallyInactive(task.taskId),
+			)
 		}
 
 		this.log(
@@ -4005,6 +4013,10 @@ export class ClineProvider
 				}
 			}
 		} catch (err) {
+			// The child will never start: release the ownership claim createTask
+			// installed for it (the rollback delete also drops it, but that path
+			// is best-effort).
+			this.taskHistoryStore.markLocallyInactive(child.taskId)
 			this.log(
 				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${
 					(err as Error)?.message ?? String(err)
@@ -4077,7 +4089,11 @@ export class ClineProvider
 		}
 
 		// 6) Start the child task now that parent metadata is safely persisted.
-		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
+		//    The child's ownership claim was installed by createTask in step 4;
+		//    release it only if the scheduler rejects the run.
+		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild", undefined, () =>
+			this.taskHistoryStore.markLocallyInactive(child.taskId),
+		)
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {

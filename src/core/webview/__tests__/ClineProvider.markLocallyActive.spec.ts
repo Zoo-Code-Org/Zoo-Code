@@ -18,6 +18,7 @@ import { RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../ClineProvider"
 import { TaskRegistry } from "../../task/TaskRegistry"
 import { type Task } from "../../task/Task"
+import { LifecycleTransitionError } from "../../task-persistence/taskLifecycle"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 type HistoryItemLike = Parameters<ClineProvider["createTaskWithHistoryItem"]>[0]
@@ -36,6 +37,16 @@ type PrivateClineProviderMethods = {
 		options?: { startTask?: boolean },
 	) => Promise<Task>
 	runDelegationTransition: <T>(this: unknown, parentTaskId: string, fn: () => Promise<T>) => Promise<T>
+	delegateParentAndOpenChild: (
+		this: unknown,
+		params: {
+			parentTaskId: string
+			message: string
+			initialTodos: unknown[]
+			mode: string
+			pendingActionId?: string
+		},
+	) => Promise<Task>
 	reopenParentFromDelegation: (
 		this: unknown,
 		params: {
@@ -127,6 +138,8 @@ type OwnershipStore = {
 	markLocallyInactive: MockFn
 	invalidate: MockFn
 	atomicUpdatePair: MockFn
+	atomicReadAndUpdate: MockFn
+	clearPendingActionIfMatching: MockFn
 }
 
 type ProviderStubObject = {
@@ -139,6 +152,7 @@ type ProviderStubObject = {
 	// Wired after the literal in makeProvider because the wrapper must be bound to
 	// the stub object itself; optional so the literal typechecks before wiring.
 	createTaskWithHistoryItem?: (historyItem: HistoryItemLike, options?: { startTask?: boolean }) => Promise<Task>
+	createTask?: (text?: string, images?: string[], parentTask?: Task, options?: { startTask?: boolean }) => Promise<Task>
 	/** Satisfies the ClineProvider structural interface for `createTask` without being invoked by it. */
 	setValues?: MockFn
 	taskRegistry: TaskRegistry
@@ -146,6 +160,7 @@ type ProviderStubObject = {
 	evictCurrentTask: MockFn
 	removeClineFromStack: MockFn
 	addClineToStack: MockFn
+	deleteTaskWithId: MockFn
 	performPreparationTasks: MockFn
 	taskScheduler: { schedule: MockFn }
 	taskEventListeners: Map<unknown, Array<() => void>>
@@ -168,6 +183,8 @@ function makeStore(): OwnershipStore {
 		markLocallyInactive: vi.fn(),
 		invalidate: vi.fn().mockResolvedValue(undefined),
 		atomicUpdatePair: vi.fn(),
+		atomicReadAndUpdate: vi.fn().mockResolvedValue(undefined),
+		clearPendingActionIfMatching: vi.fn(),
 	}
 }
 
@@ -198,6 +215,7 @@ function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObje
 		evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 		removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 		addClineToStack: vi.fn().mockResolvedValue(undefined),
+		deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
 		performPreparationTasks: vi.fn().mockResolvedValue(undefined),
 		setValues: vi.fn().mockResolvedValue(undefined),
 		taskScheduler: { schedule: vi.fn().mockResolvedValue(undefined) },
@@ -240,6 +258,10 @@ function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObje
 	// Unlocked prototype method with `this`, so it must be bound to the stub object.
 	provider.createTaskWithHistoryItem = (historyItem, options) =>
 		privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem, options)
+	// delegateParentAndOpenChildUnlocked calls this.createTask internally; bind
+	// the real prototype method so the child-construction claim is exercised too.
+	provider.createTask = (text?: string, images?: string[], parentTask?: Task, options?: { startTask?: boolean }) =>
+		privateClineProvider.createTask.call(provider, text, images, parentTask, options)
 	return provider
 }
 
@@ -671,12 +693,12 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		)
 	})
 
-	it("hookless createTask call site survives a scheduler rejection by logging the createTask-tagged error, without a failure hook", async () => {
-		// scheduleTask's optional onScheduleFailure hook is undefined at this call site
-		// (createTask performs no claim that needs rolling back). The catch must invoke an
-		// absent hook exactly zero times — an unconditional `onScheduleFailure(error)`
-		// throws a TypeError as an unhandled rejection — and must log the rejection with
-		// THIS call site's source tag ("createTask").
+	it("hookless createTask claims ownership before scheduling and releases it when the scheduler rejects", async () => {
+		// The claim closes the orphan-repair window between stacking the task and
+		// its first active status write (the periodic delegation pass must never
+		// treat a not-yet-started child as an orphan); the scheduler-rejection
+		// hook rolls the claim back so the id is not excluded from in-window
+		// orphan repair for the window's lifetime.
 		const store = makeStore()
 		const provider = makeProvider(store, {
 			taskScheduler: { schedule: vi.fn().mockRejectedValue(new Error("permit failed")) },
@@ -693,14 +715,169 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		expect(task).toBeInstanceOf(TaskStub)
 		expect(task.taskId).toBe(`task-stub-${TaskStub.instanceCount}`)
 		expect(provider.taskScheduler.schedule).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(task.taskId)
 
 		await flushMicrotasks()
+		// The rejection hook ran after the catch logged: claim released exactly once.
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyInactive).toHaveBeenCalledWith(task.taskId)
+
 		// Logged exactly once, with the exact tagged message and the original error.
 		expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			"[createTask] taskScheduler.schedule failed:",
 			expect.objectContaining({ message: "permit failed" }),
 		)
+	})
+
+	it("hookless createTask keeps the ownership claim when the scheduler admits the run", async () => {
+		// A started task legitimately owns its id until a non-active status
+		// write or dispose drops the claim — the scheduler path must not
+		// release it on success.
+		const store = makeStore()
+		const provider = makeProvider(store, {
+			taskScheduler: {
+				schedule: vi.fn().mockImplementation(async (_task: unknown, run: () => Promise<void>) => run()),
+			},
+		})
+
+		const task = await privateClineProvider.createTask.call(provider, "hello")
+
+		expect(task).toBeInstanceOf(TaskStub)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(task.taskId)
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+	})
+
+	it("hookless createTask with startTask:false claims ownership for the caller-scheduled start", async () => {
+		// The delegation handoff creates its child with startTask:false and
+		// starts it in a later step; the claim installed here is what protects
+		// the brand-new delegation from the periodic pass in the meantime.
+		const store = makeStore()
+		const provider = makeProvider(store)
+
+		const task = await privateClineProvider.createTask.call(provider, "hello", undefined, undefined, {
+			startTask: false,
+		})
+
+		expect(task).toBeInstanceOf(TaskStub)
+		expect(provider.taskScheduler.schedule).not.toHaveBeenCalled()
+		expect(store.markLocallyActive).toHaveBeenCalledWith(task.taskId)
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+	})
+})
+
+describe("ClineProvider delegateParentAndOpenChild child ownership claim", () => {
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+
+	beforeEach(() => {
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+	})
+
+	afterEach(() => {
+		consoleErrorSpy.mockRestore()
+	})
+
+	/**
+	 * Parent surface read by delegateParentAndOpenChildUnlocked: identity,
+	 * execution-context selectors, and the pre-disposal history flush. Mode
+	 * resolves to the requested mode so the handoff selector takes the
+	 * no-profile-swap path.
+	 */
+	function makeParentStub(taskId: string) {
+		return {
+			taskId,
+			instanceId: "parent-inst",
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+			getTaskApiConfigName: vi.fn().mockResolvedValue("profile-1"),
+			getTaskMode: vi.fn().mockResolvedValue("code"),
+			flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+		}
+	}
+
+	async function delegate(store: OwnershipStore, provider: ReturnType<typeof makeProvider>) {
+		return privateClineProvider.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "do the child work",
+			initialTodos: [],
+			mode: "code",
+		})
+	}
+
+	it("claims the child before the parent delegation write and keeps the claim when the scheduler admits the run", async () => {
+		const store = makeStore()
+		const parent = makeParentStub("parent-1")
+		const provider = makeProvider(store, {
+			getCurrentTask: vi.fn(() => parent),
+		})
+
+		const child = await delegate(store, provider)
+
+		expect(child).toBeInstanceOf(TaskStub)
+		// Claim installed by createTask (step 4) before the parent was persisted
+		// as delegated (step 5) — a tick in that gap must see the claim.
+		expect(store.markLocallyActive).toHaveBeenCalledWith(child.taskId)
+		expect(provider.taskScheduler.schedule).toHaveBeenCalledTimes(1)
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+	})
+
+	it("releases the child claim when the scheduler rejects the delegated run", async () => {
+		const store = makeStore()
+		const parent = makeParentStub("parent-1")
+		const provider = makeProvider(store, {
+			getCurrentTask: vi.fn(() => parent),
+			taskScheduler: { schedule: vi.fn().mockRejectedValue(new Error("permit failed")) },
+		})
+
+		const child = await delegate(store, provider)
+
+		expect(child).toBeInstanceOf(TaskStub)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(child.taskId)
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyInactive).toHaveBeenCalledWith(child.taskId)
+	})
+
+	it("releases the child claim when the parent delegation write rejects the transition", async () => {
+		// Rollback path: the child never starts, so the claim from createTask
+		// must not leak (it would exclude the deleted child id from in-window
+		// orphan repair for the window's lifetime). The rejected delegation
+		// settles its pending action and reports settlement failure, so the
+		// parent-restore block is skipped and the assertion stays focused on
+		// the child claim release.
+		const store = makeStore()
+		store.get = vi.fn((id: string) =>
+			id === "parent-1"
+				? { status: "interrupted", pendingAction: { kind: "create_subtask", actionId: "action-1" } }
+				: undefined,
+		)
+		store.atomicReadAndUpdate = vi.fn().mockRejectedValue(new LifecycleTransitionError("rejected delegation"))
+		store.clearPendingActionIfMatching = vi.fn().mockResolvedValue({
+			status: "interrupted",
+			pendingAction: { kind: "create_subtask", actionId: "action-1" },
+		})
+		const parent = makeParentStub("parent-1")
+		const provider = makeProvider(store, {
+			getCurrentTask: vi.fn(() => parent),
+		})
+
+		await expect(
+			privateClineProvider.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "do the child work",
+				initialTodos: [],
+				mode: "code",
+				pendingActionId: "action-1",
+			}),
+		).rejects.toThrow("rejected delegation")
+
+		expect(store.markLocallyActive).toHaveBeenCalled()
+		// The settlement ran disk-authoritatively before the error propagated.
+		expect(store.clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", "action-1")
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).toHaveBeenCalled()
 	})
 })
 
@@ -745,6 +922,18 @@ describe("ClineProvider reopenParentFromDelegation continuation scheduling owner
 					return []
 				},
 			),
+			atomicReadAndUpdate: vi.fn(
+				async (taskId: string, updater: (current: HistoryItemLike) => HistoryItemLike) => {
+					const current = items.get(taskId)
+					if (!current) {
+						throw new Error(`atomicReadAndUpdate: ${taskId} not found`)
+					}
+					const next = updater(structuredClone(current))
+					items.set(taskId, next)
+					return []
+				},
+			),
+			clearPendingActionIfMatching: vi.fn(),
 		}
 	}
 
