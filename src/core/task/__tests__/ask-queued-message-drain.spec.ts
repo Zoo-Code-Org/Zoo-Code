@@ -403,6 +403,23 @@ describe("Task.ask queued message drain", () => {
 		expect(result.queuedMessageId).toBe(queuedEntry.id)
 	})
 
+	it("leaves a queued message redeliverable when the ask prefix throws", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("stranded no more")
+		const access = getQueueTaskTestAccess(task)
+		// A synchronously throwing Message listener during the ask prefix.
+		access.addToClineMessages = vi.fn(async () => {
+			throw new Error("listener boom")
+		})
+
+		await expect(task.ask("followup", "Q?", false)).rejects.toThrow("listener boom")
+
+		// The claim is taken at the handoff, not in the prefix, so the throw
+		// cannot strand it in claimedMessageIds: the message is immediately
+		// claimable again for a later ask or drain.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("stranded no more")
+	})
+
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")

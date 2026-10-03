@@ -2035,16 +2035,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// resolution would leak the claim. The resolution is only actionable
 		// when a message was actually claimed: otherwise it must not force a
 		// manual ask (that would bypass auto-approval for empty-queue lifecycle
-		// asks).
-		const claimableResolution =
+		// asks). The claim itself is deferred to the handoff branch below: it
+		// runs at the point of use with no prefix await in between, so a throw
+		// from the prefix (e.g. a synchronously throwing Message listener in
+		// addToClineMessages) can never strand the claim in claimedMessageIds.
+		const queuedAskResolution =
 			partial === true ||
 			type === "command_output" ||
 			!queueMayAnswerThisAsk ||
 			!this.mayDrainQueuedMessageForAsk()
 				? undefined
 				: queuedResponseForAsk(type, text)
-		const queuedMessage = claimableResolution ? this.messageQueueService.claimNextMessage() : undefined
-		const queuedAskResolution = queuedMessage ? claimableResolution : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
@@ -2303,65 +2304,72 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		if (isStatusMutable) {
 			armAskStatusTimers()
-		} else if (queuedMessage && queuedAskResolution) {
-			if (type === "command") {
-				// The snapshot gate is frozen; blanket deny may have engaged since the
-				// ask began. Re-read policy before the message stands in for approval.
-				// Drain-site parity for cancellation and cleanup: the fresh policy
-				// read ends in an uncancellable provider read, so an abort poller
-				// aborts a signal the re-check itself awaits — settling it on the
-				// abort instead of leaving a pending promise that retains this task
-				// and runs policy post-abort — and one `finally` releases the claim
-				// on the abort, throw, supersession, and "release" outcomes alike.
-				const recheckAbort = new AbortController()
-				const checkAbort = () => {
-					if (this.abort) {
-						recheckAbort.abort()
+		} else if (queuedAskResolution && this.mayDrainQueuedMessageForAsk()) {
+			// Claim at the point of handoff: for non-command asks the response is
+			// posted synchronously below (no await between claim and use), and the
+			// command re-check owns its own release in its finally — so a prefix
+			// throw can never strand this claim.
+			const queuedMessage = this.messageQueueService.claimNextMessage()
+			if (queuedMessage) {
+				if (type === "command") {
+					// The snapshot gate is frozen; blanket deny may have engaged since the
+					// ask began. Re-read policy before the message stands in for approval.
+					// Drain-site parity for cancellation and cleanup: the fresh policy
+					// read ends in an uncancellable provider read, so an abort poller
+					// aborts a signal the re-check itself awaits — settling it on the
+					// abort instead of leaving a pending promise that retains this task
+					// and runs policy post-abort — and one `finally` releases the claim
+					// on the abort, throw, supersession, and "release" outcomes alike.
+					const recheckAbort = new AbortController()
+					const checkAbort = () => {
+						if (this.abort) {
+							recheckAbort.abort()
+						}
 					}
-				}
-				checkAbort()
-				const abortWatcher = setInterval(checkAbort, 100)
-				try {
-					const action = await this.recheckQueuedCommandPolicy(
-						{
-							text,
-							isProtected,
-							dcgDecision: autoApprovalContext?.dcgDecision,
-						},
-						recheckAbort.signal,
-					)
-					if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
-						// Any outcome on a still-live ask — the user answered or the
-						// ask was superseded — leaves the message for the next
-						// consumer; the `finally` below releases the claim and the ask
-						// resolves with the user's own response via the pWaitFor.
-						queuedMessageId = this.applyQueuedCommandPolicyAction(
-							action,
-							queuedMessage,
-							queuedAskResolution,
+					checkAbort()
+					const abortWatcher = setInterval(checkAbort, 100)
+					try {
+						const action = await this.recheckQueuedCommandPolicy(
+							{
+								text,
+								isProtected,
+								dcgDecision: autoApprovalContext?.dcgDecision,
+							},
+							recheckAbort.signal,
 						)
-						// A "release" outcome leaves the ask pending; consume/deny/approve
-						// resolved it, and the arm's pending check declines to arm then.
+						if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
+							// Any outcome on a still-live ask — the user answered or the
+							// ask was superseded — leaves the message for the next
+							// consumer; the `finally` below releases the claim and the ask
+							// resolves with the user's own response via the pWaitFor.
+							queuedMessageId = this.applyQueuedCommandPolicyAction(
+								action,
+								queuedMessage,
+								queuedAskResolution,
+							)
+							// A "release" outcome leaves the ask pending; consume/deny/approve
+							// resolved it, and the arm's pending check declines to arm then.
+							armAskStatusTimers()
+						}
+					} catch (error) {
+						// Drain-site parity: a failed re-check must not reject ask() nor
+						// strand the claim; the prompt stays pending for the user.
+						console.error("[Task#ask] queued command policy re-check failed:", error)
 						armAskStatusTimers()
+					} finally {
+						clearInterval(abortWatcher)
+						// One release path for abort, throw, supersession, and "release".
+						// `releaseMessage` is idempotent, so it stays safe beside the
+						// helper-internal release. The durable consume is the one outcome
+						// that must keep its claim until persistence removes the message —
+						// it is the only path that assigned `queuedMessageId` here.
+						if (queuedMessageId !== queuedMessage.id) {
+							this.messageQueueService.releaseMessage(queuedMessage.id)
+						}
 					}
-				} catch (error) {
-					// Drain-site parity: a failed re-check must not reject ask() nor
-					// strand the claim; the prompt stays pending for the user.
-					console.error("[Task#ask] queued command policy re-check failed:", error)
-					armAskStatusTimers()
-				} finally {
-					clearInterval(abortWatcher)
-					// One release path for abort, throw, supersession, and "release".
-					// `releaseMessage` is idempotent, so it stays safe beside the
-					// helper-internal release. The durable consume is the one outcome
-					// that must keep its claim until persistence removes the message —
-					// it is the only path that assigned `queuedMessageId` here.
-					if (queuedMessageId !== queuedMessage.id) {
-						this.messageQueueService.releaseMessage(queuedMessage.id)
-					}
+				} else {
+					queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 				}
-			} else {
-				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 			}
 		} else if (shouldDrainQueuedMessageForAsk && isMessageQueued) {
 			// The claim gate (per-turn latch, or blanket deny engaged for a command
