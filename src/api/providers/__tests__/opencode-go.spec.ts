@@ -9,8 +9,12 @@ vitest.mock("vscode", () => ({
 	},
 }))
 
-import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import {
+	Anthropic,
+	APIConnectionTimeoutError as AnthropicTimeoutError,
+	APIUserAbortError as AnthropicAbortError,
+} from "@anthropic-ai/sdk"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	opencodeGoDefaultModelId,
@@ -25,6 +29,7 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -65,15 +70,22 @@ const mockResponsesCreate = vitest.fn()
 	}
 })
 
-vitest.mock("@anthropic-ai/sdk", () => ({
-	Anthropic: vitest.fn(function () {
-		return {
-			messages: {
-				create: mockAnthropicCreate,
-			},
-		}
-	}),
-}))
+// The real SDK error classes are re-exported alongside the mocked client so
+// tests can emulate the SDK's abort/timeout rejections and the provider's
+// instanceof checks resolve against the same class identity.
+vitest.mock("@anthropic-ai/sdk", async () => {
+	const actual = await vi.importActual<typeof import("@anthropic-ai/sdk")>("@anthropic-ai/sdk")
+	return {
+		...actual,
+		Anthropic: vitest.fn(function () {
+			return {
+				messages: {
+					create: mockAnthropicCreate,
+				},
+			}
+		}),
+	}
+})
 
 describe("OpencodeGoHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
@@ -208,6 +220,7 @@ describe("OpencodeGoHandler", () => {
 					max_completion_tokens: 40_960,
 					temperature: expect.any(Number),
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -233,6 +246,7 @@ describe("OpencodeGoHandler", () => {
 					model: "glm-5.1",
 					reasoning_effort: "medium",
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -260,6 +274,87 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
 			// convertToR1Format keeps a single user turn as one user message.
 			expect(callArgs.messages.filter((m) => m.role === "user")).toHaveLength(1)
+		})
+
+		it("merges post-tool-result text into the tool message for preserveReasoning models", async () => {
+			// convertToR1Format with mergeToolResultText folds text that follows
+			// tool_results into the last tool message (interleaved-thinking
+			// support) instead of opening a new user message; assert the merged
+			// wire shape so the preserveReasoning conversion branch and its
+			// mergeToolResultText flag stay kill-tested.
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hi" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "let me check" },
+						{ type: "tool_use", id: "tu_1", name: "read_file", input: { path: "/tmp/x" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "tu_1", content: "file-contents" },
+						{ type: "text", text: "and here is more context" },
+					],
+				},
+			]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockCreate.mock.calls[0][0] as {
+				messages: Array<{ role: string; content?: unknown }>
+			}
+			const bodyMessages = callArgs.messages
+			const toolIndex = bodyMessages.findIndex((m) => m.role === "tool")
+			expect(bodyMessages[toolIndex]?.content).toBe("file-contents\n\nand here is more context")
+			// No user message may follow the tool message: the trailing text
+			// merged into the tool message instead of opening a new user turn.
+			expect(bodyMessages.slice(toolIndex + 1).some((m) => m.role === "user")).toBe(false)
+		})
+
+		it("keeps post-tool-result text unmerged for non-preserveReasoning models", async () => {
+			// The plain OpenAI converter (non-preserveReasoning models) does not
+			// merge post-tool-result text into the tool message: the text stays
+			// a separate user message. Pin the plain shape so the always-R1
+			// direction of the conversion branch stays kill-tested.
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"kimi-k2.6": { ...opencodeGoModels["kimi-k2.6"] },
+			}))
+
+			const handler = new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "kimi-k2.6" })
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hi" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "let me check" },
+						{ type: "tool_use", id: "tu_1", name: "read_file", input: { path: "/tmp/x" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "tu_1", content: "file-contents" },
+						{ type: "text", text: "and here is more context" },
+					],
+				},
+			]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockCreate.mock.calls[0][0] as {
+				messages: Array<{ role: string; content?: unknown }>
+			}
+			const bodyMessages = callArgs.messages
+			const toolIndex = bodyMessages.findIndex((m) => m.role === "tool")
+			// Unmerged: the tool message keeps only the tool result content.
+			expect(bodyMessages[toolIndex]?.content).toBe("file-contents")
+			// ...and the trailing text stays its own user message (array
+			// content, the plain converter's shape).
+			const trailingUser = bodyMessages.slice(toolIndex + 1).find((m) => m.role === "user")
+			expect(trailingUser?.content).toEqual([{ type: "text", text: "and here is more context" }])
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
@@ -383,10 +478,447 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_completion_tokens: 999 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("sends the unclamped modelMaxTokens override when it exceeds the model ceiling", async () => {
+			// getModelMaxOutputTokens clamps the slider override to the model
+			// ceiling for supportsMaxTokens models (glm-5.1 reports
+			// supportsMaxTokens), but the OpenAI branch sends the raw override
+			// (modelMaxTokens || maxTokens): with a ceiling-bounded override the
+			// wire value is the unclamped override. Pin that so the
+			// includeMaxTokens branch stays kill-tested.
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"glm-5.1": { ...opencodeGoModels["glm-5.1"], maxTokens: 500 },
+			}))
+
+			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 999 })
+			await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_completion_tokens: 999 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("sends the clamped maxTokens when includeMaxTokens is off", async () => {
+			// With the flag off the body uses the resolved maxTokens, which the
+			// shared getModelMaxOutputTokens already clamps to the model ceiling
+			// for supportsMaxTokens models.
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"glm-5.1": { ...opencodeGoModels["glm-5.1"], maxTokens: 500 },
+			}))
+
+			const handler = new OpencodeGoHandler({ ...mockOptions, modelMaxTokens: 999 })
+			await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_completion_tokens: 500 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("defaults parallel_tool_calls to true and honors an explicit false", async () => {
+			// The OpenAI branch defaults parallel_tool_calls to true when the
+			// metadata omits it and forwards an explicit false unchanged; pin
+			// both so the nullish default stays kill-tested (the Responses
+			// branch has its own assertions).
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
+			expect(mockCreate.mock.calls[0][0]).toEqual(expect.objectContaining({ parallel_tool_calls: true }))
+
+			await collectStream(
+				handler.createMessage(
+					"sys",
+					[{ role: "user", content: "Hi" }],
+					makeCreateMessageMetadata({ parallelToolCalls: false }),
+				),
+			)
+			expect(mockCreate.mock.calls[1][0]).toEqual(expect.objectContaining({ parallel_tool_calls: false }))
+		})
+
+		it("rethrows non-abort errors from the OpenAI stream unchanged", async () => {
+			// A mid-stream failure that is not an abort (e.g. a connection
+			// reset) must propagate unchanged — the catch only normalizes
+			// aborts to a DOM-standard AbortError.
+			const streamError = new Error("connection reset")
+			mockCreate.mockImplementation(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
+					throw streamError
+				})(),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const error = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }])).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+
+			expect(error).toBe(streamError)
+		})
+
+		it("skips empty choices, empty deltas and tool calls without a function field", async () => {
+			// Full-list assertions: a frame without choices[0], a delta without
+			// content/tool_calls, and a tool call missing `function` must each
+			// contribute nothing except the partial tool call with undefined
+			// name/arguments (toEqual ignores undefined-valued keys).
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [], index: 0 },
+					{ choices: [{ delta: {}, index: 0 }], index: 0 },
+					{
+						choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1" }] }, index: 0 }],
+						index: 0,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						index: 0,
+						usage: { prompt_tokens: 1, completion_tokens: 2 },
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			expect(chunks).toEqual([
+				{ type: "tool_call_partial", index: 0, id: "call_1" },
+				{ type: "usage", inputTokens: 1, outputTokens: 2 },
+			])
+		})
+
+		it("emits the text delta and the usage chunk with cached tokens from the final frame", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "hi" }, index: 0 }], index: 0 },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						index: 0,
+						usage: {
+							prompt_tokens: 4,
+							completion_tokens: 9,
+							prompt_tokens_details: { cached_tokens: 6 },
+						},
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			expect(chunks).toEqual([
+				{ type: "text", text: "hi" },
+				{ type: "usage", inputTokens: 4, outputTokens: 9, cacheReadTokens: 6 },
+			])
 		})
 	})
 
+	describe("createMessage abort signal bridging", () => {
+		it("rejects with an AbortError when the external signal is already aborted", async () => {
+			// A pre-aborted request must fail fast before any model-catalog or
+			// SDK work starts: the standardized AbortError wins over any
+			// resolution failure, and the request itself never begins.
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				throw new DOMException("The operation was aborted.", "AbortError")
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"sys",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The fast-fail guard throws before the request starts.
+			expect(mockCreate).not.toHaveBeenCalled()
+			// Pre-flight cancellation must skip the model catalog entirely:
+			// the getModels mock must remain uncalled, not just the SDK create.
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
+			expect(capturedSignal).toBeUndefined()
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("rejects with the standardized AbortError when the external signal aborts while model resolution is pending", async () => {
+			// The model catalog stays pending while the external signal aborts:
+			// the resolution race must settle with the standardized AbortError
+			// before the lookup is released, and the request itself must never
+			// start. A bridge-only fix would let the lookup finish and abort the
+			// internal controller after the fact; this gate proves the prompt
+			// settles on the abort itself.
+			let releaseResolution!: () => void
+			const resolutionGate = new Promise<void>((resolve) => {
+				releaseResolution = resolve
+			})
+			vitest.mocked(getModels).mockImplementationOnce(async () => {
+				await resolutionGate
+				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"sys",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			// Let the lookup park on the gate, then abort while it is still pending.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The catalog lookup was attempted but the prompt must have settled
+			// on the abort itself, before the lookup was released: no SDK call.
+			expect(vitest.mocked(getModels)).toHaveBeenCalledTimes(1)
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+
+			// Releasing the lookup afterwards must not start a late request.
+			releaseResolution()
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("propagates a raw model-lookup failure unchanged when no abort signal is present", async () => {
+			// Without an abort signal the resolution must not be wrapped or
+			// normalized: a catalog failure keeps its own identity so callers
+			// can distinguish a lookup failure from a cancellation.
+			const lookupError = new Error("catalog offline")
+			vitest.mocked(getModels).mockRejectedValueOnce(lookupError)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const error = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }])).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toBe(lookupError)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("normalizes an abort-flavored model-lookup failure to the provider AbortError", async () => {
+			// A lookup that fails with an AbortError-shaped error (e.g. the
+			// catalog fetch itself was aborted) must settle with the provider's
+			// standardized AbortError, not the raw error shape.
+			const abortFlavored = new Error("The operation was aborted.")
+			abortFlavored.name = "AbortError"
+			vitest.mocked(getModels).mockRejectedValueOnce(abortFlavored)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const error = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }])).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).not.toBe(abortFlavored)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
+			// The mock polls the INTERNAL controller signal instead of waiting
+			// for an "abort" event: bounded polling means the test can never
+			// hang if the bridge stops forwarding aborts, and it rejects as
+			// soon as the bridge aborts the controller.
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return (async function* () {
+					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
+					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 5))
+					}
+					if (capturedSignal?.aborted) {
+						throw new DOMException("The operation was aborted.", "AbortError")
+					}
+				})()
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"sys",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			// Let the request start and the first chunk be yielded before aborting.
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			controller.abort()
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("detaches the bridged abort listener when the request completes normally", async () => {
+			// The listener is added with { once: true }, so it only detaches on
+			// abort. A task-scoped signal spanning many requests must not
+			// accumulate a listener per request: assert explicit removal after a
+			// normal (non-aborted) completion.
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						index: 0,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						index: 0,
+						usage: { prompt_tokens: 2, completion_tokens: 3 },
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+
+			const stream = handler.createMessage(
+				"sys",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			// Assert the exact listener reference so a bridge that removes a
+			// different callback than the one it registered cannot pass.
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			// The listener is registered with { once: true } — assert the exact
+			// options so a bridge that drops them (and relies on the finally
+			// block alone for single-shot semantics) is caught.
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			expect(controller.signal.aborted).toBe(false)
+		})
+
+		it("detaches the bridged abort listener from the Anthropic-format path", async () => {
+			// The Anthropic branch (streamAnthropicMessage) has its own finally
+			// block that removes the bridged listener; assert explicit removal
+			// after a normal (non-aborted) completion on that path too.
+			mockAnthropicCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 0 } } },
+					{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+					{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } },
+					{ type: "message_delta", usage: { output_tokens: 1 } },
+					{ type: "message_stop" },
+				]),
+			)
+
+			const handler = new OpencodeGoHandler({
+				opencodeGoApiKey: "test-key",
+				opencodeGoModelId: "qwen3.7-max",
+			})
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+
+			const stream = handler.createMessage(
+				"sys",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			expect(controller.signal.aborted).toBe(false)
+		})
+
+		it("detaches the bridged abort listener when the OpenAI message conversion fails", async () => {
+			// The OpenAI branch converts messages and tools before the
+			// request; the conversion must run inside the same cleanup scope
+			// as the Anthropic and Responses branches so an unstringifiable
+			// tool input does not leave the bridged listener attached.
+			const circularInput: Record<string, unknown> = {}
+			circularInput.self = circularInput
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+
+			const stream = handler.createMessage(
+				"sys",
+				[
+					{ role: "user", content: "hi" },
+					{
+						role: "assistant",
+						content: [{ type: "tool_use", id: "tu_1", name: "calc", input: circularInput }],
+					},
+				],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The conversion failure propagates unchanged (the signal never
+			// aborted) and the bridge listener is detached by reference.
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toMatch(/circular/i)
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			expect(controller.signal.aborted).toBe(false)
+		})
+	})
 	describe("completePrompt", () => {
 		it("returns the message content for a non-streaming completion", async () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "the answer" } }] })
@@ -400,6 +932,7 @@ describe("OpencodeGoHandler", () => {
 					max_completion_tokens: 40_960,
 					reasoning_effort: "medium",
 				}),
+				{},
 			)
 		})
 
@@ -425,7 +958,7 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 4321 })
 			await handler.completePrompt("ping")
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }))
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }), {})
 		})
 	})
 
@@ -487,6 +1020,7 @@ describe("OpencodeGoHandler", () => {
 					stream: true,
 					system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 			// The OpenAI chat completions endpoint must NOT be used for this model.
 			expect(mockCreate).not.toHaveBeenCalled()
@@ -543,6 +1077,23 @@ describe("OpencodeGoHandler", () => {
 			)
 		})
 
+		it("preserves abort identity when the Anthropic request rejects with a name-based AbortError", async () => {
+			// No SDK abort class and no aborted signal: only the DOM-standard
+			// name === "AbortError" check marks a cancelled pre-stream request.
+			const rawAbort = Object.assign(new Error("raw"), { name: "AbortError" })
+			mockAnthropicCreate.mockRejectedValueOnce(rawAbort)
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "hi" }]
+
+			const error = await collectStream(handler.createMessage("sys", messages)).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
 		it("applies cache-control breakpoints when the model supports prompt caching", async () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [
@@ -579,6 +1130,7 @@ describe("OpencodeGoHandler", () => {
 					// so the model default is used.
 					max_tokens: 65_536,
 				}),
+				undefined,
 			)
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
@@ -594,7 +1146,7 @@ describe("OpencodeGoHandler", () => {
 				modelMaxTokens: 2048,
 			})
 			await handler.completePrompt("ping")
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }))
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }), undefined)
 		})
 
 		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
@@ -609,6 +1161,320 @@ describe("OpencodeGoHandler", () => {
 			expect(await handler.completePrompt("ping")).toBe("")
 		})
 
+		it("completePrompt passes abort signal through to Anthropic client", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { abortSignal: controller.signal })
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("completePrompt passes both signal and timeoutMs through to Anthropic client", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				signal: controller.signal,
+				timeout: 10000,
+			})
+		})
+
+		it("completePrompt passes only timeoutMs when no signal is provided", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { timeoutMs: 5000 })
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				timeout: 5000,
+			})
+		})
+
+		it("completePrompt omits the timeout option when timeoutMs is 0 (Anthropic path)", async () => {
+			// The SDK treats timeout: 0 as an immediate abort, so the "disabled"
+			// value must never be forwarded — assert the absence of the option.
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { timeoutMs: 0 })
+			const call = mockAnthropicCreate.mock.calls[mockAnthropicCreate.mock.calls.length - 1]
+			const requestOptions = call[1] as { timeout?: number } | undefined
+			// When no option is forwarded the provider omits the SDK options
+			// argument entirely, so absence means: undefined arg OR an arg
+			// without a timeout key.
+			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
+		})
+
+		it("completePrompt preserves abort identity when the caller aborts (Anthropic path)", async () => {
+			// Emulate the Anthropic SDK: an aborted request signal rejects with
+			// APIUserAbortError ("Request was aborted." — the trailing period would
+			// fail task-level abort detection, so the provider must normalize it).
+			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					throw new AnthropicAbortError()
+				}
+				throw new Error("boom")
+			})
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("completePrompt surfaces request timeouts as an AbortError (Anthropic path)", async () => {
+			// Emulate the Anthropic SDK: when the request timeout fires, the SDK
+			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+			// are exhausted — verified against @anthropic-ai/sdk against a hung server.
+			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+				throw new AnthropicTimeoutError()
+			})
+			const handler = new OpencodeGoHandler(anthropicOptions)
+
+			const error = await handler.completePrompt("ping", { timeoutMs: 50 }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("completePrompt works without options (backward compatible, Anthropic path)", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const result = await handler.completePrompt("ping")
+			expect(result).toBe("response")
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				undefined,
+			)
+		})
+
+		it("completePrompt keeps the model max_tokens when includeMaxTokens is off (Anthropic path)", async () => {
+			// includeMaxTokens unset: modelMaxTokens must NOT replace the model
+			// default — only the explicit includeMaxTokens flag opts into the
+			// user override.
+			mockAnthropicCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "ok" }] })
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, modelMaxTokens: 2048 })
+			await handler.completePrompt("ping")
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "qwen3.7-max", max_tokens: 65_536 }),
+				undefined,
+			)
+		})
+
+		it("completePrompt forwards an explicit model temperature (Anthropic path)", async () => {
+			mockAnthropicCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "ok" }] })
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, modelTemperature: 0.7 })
+			await handler.completePrompt("ping")
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "qwen3.7-max", temperature: 0.7 }),
+				undefined,
+			)
+		})
+
+		it("completePrompt preserves abort identity when the signal is pre-aborted with a plain error", async () => {
+			// The aborted-signal disjunct alone must normalize a plain
+			// rejection (not just SDK abort classes) to the DOM-standard
+			// AbortError.
+			mockAnthropicCreate.mockRejectedValueOnce(new Error("boom"))
+			const controller = new AbortController()
+			controller.abort()
+			const handler = new OpencodeGoHandler(anthropicOptions)
+
+			const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("completePrompt preserves abort identity for a name-based AbortError rejection (Anthropic path)", async () => {
+			// No aborted signal and no SDK abort class: only the DOM-standard
+			// name === "AbortError" check marks a cancelled request.
+			const rawAbort = Object.assign(new Error("raw"), { name: "AbortError" })
+			mockAnthropicCreate.mockRejectedValueOnce(rawAbort)
+			const handler = new OpencodeGoHandler(anthropicOptions)
+
+			const error = await handler.completePrompt("ping").then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		describe("completePrompt (OpenAI path)", () => {
+			const openaiOptions: ApiHandlerOptions = {
+				opencodeGoApiKey: "test-key",
+				apiModelId: "glm-5.1", // OpenAI-format model
+			}
+
+			beforeEach(() => {
+				vitest.clearAllMocks()
+			})
+
+			it("completePrompt returns text for OpenAI path", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+
+				const handler = new OpencodeGoHandler(openaiOptions)
+				expect(await handler.completePrompt("ping")).toBe("response")
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{}, // empty object when no options
+				)
+			})
+
+			it("completePrompt passes abort signal through to OpenAI client", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const controller = new AbortController()
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				await handler.completePrompt("ping", { abortSignal: controller.signal })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{ signal: controller.signal },
+				)
+			})
+
+			it("completePrompt passes both signal and timeoutMs through to OpenAI client", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const controller = new AbortController()
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				await handler.completePrompt("ping", { abortSignal: controller.signal, timeoutMs: 10000 })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{ signal: controller.signal, timeout: 10000 },
+				)
+			})
+
+			it("completePrompt passes only timeoutMs when no signal is provided", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				await handler.completePrompt("ping", { timeoutMs: 5000 })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{ timeout: 5000 },
+				)
+			})
+
+			it("completePrompt omits the timeout option when timeoutMs is 0 (OpenAI path)", async () => {
+				// The OpenAI SDK treats timeout: 0 as an immediate abort, so the
+				// "disabled" value must never be forwarded — assert the absence of
+				// the option.
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+				await handler.completePrompt("ping", { timeoutMs: 0 })
+				const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+				const requestOptions = call[1] as { timeout?: number } | undefined
+				expect(requestOptions).not.toHaveProperty("timeout")
+			})
+
+			it("completePrompt preserves abort identity when the caller aborts (OpenAI path)", async () => {
+				// Emulate the OpenAI SDK: an aborted request signal rejects with
+				// APIUserAbortError ("Request was aborted." — the trailing period would
+				// fail task-level abort detection, so the provider must normalize it).
+				mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+					if (options?.signal?.aborted) {
+						throw new APIUserAbortError()
+					}
+					throw new Error("boom")
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+				const controller = new AbortController()
+				controller.abort()
+
+				const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			})
+
+			it("completePrompt surfaces request timeouts as an AbortError (OpenAI path)", async () => {
+				// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+				// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+				// are exhausted — verified against openai v5.23.2 against a hung server.
+				mockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+					await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+					throw new APIConnectionTimeoutError()
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				const error = await handler.completePrompt("ping", { timeoutMs: 50 }).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			})
+
+			it("completePrompt works without options (backward compatible, OpenAI path)", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				const result = await handler.completePrompt("ping")
+				expect(result).toBe("response")
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{}, // empty object when no options
+				)
+			})
+
+			it("completePrompt preserves abort identity when the signal is pre-aborted with a plain error", async () => {
+				// The aborted-signal disjunct alone must normalize a plain
+				// rejection (not just SDK abort classes) to the DOM-standard
+				// AbortError.
+				mockCreate.mockRejectedValueOnce(new Error("boom"))
+				const controller = new AbortController()
+				controller.abort()
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			})
+
+			it("completePrompt preserves abort identity for a name-based AbortError rejection (OpenAI path)", async () => {
+				// No aborted signal and no SDK abort class: only the DOM-standard
+				// name === "AbortError" check marks a cancelled request.
+				const rawAbort = Object.assign(new Error("raw"), { name: "AbortError" })
+				mockCreate.mockRejectedValueOnce(rawAbort)
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				const error = await handler.completePrompt("ping").then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			})
+		})
 		it("omits tools and tool_choice from the Anthropic request when no tools are provided", async () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -754,7 +1620,10 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192 }))
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_tokens: 8192 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
@@ -764,7 +1633,10 @@ describe("OpencodeGoHandler", () => {
 			await collectStream(handler.createMessage("sys", messages))
 
 			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 65_536 }))
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_tokens: 65_536 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("accumulates output tokens across message_delta events into the final cost", async () => {
@@ -831,6 +1703,63 @@ describe("OpencodeGoHandler", () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: rate limited")
 		})
+
+		it("preserves abort identity for aborted Anthropic requests from createMessage", async () => {
+			// A cancelled /v1/messages request (the SDK rejects with
+			// APIUserAbortError) must surface as a DOM-standard AbortError, not
+			// the wrapped "completion error" reserved for other failures.
+			mockAnthropicCreate.mockRejectedValue(new AnthropicAbortError())
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			await expect(async () => {
+				await collectStream(handler.createMessage("sys", messages))
+			}).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Opencode Go request was aborted",
+			})
+		})
+
+		it("normalizes a mid-stream abort on the Anthropic path to the standardized AbortError", async () => {
+			// A cancellation that surfaces after the /v1/messages stream has
+			// started must normalize to the standardized AbortError like the
+			// other wire formats, not leak the raw SDK rejection.
+			let capturedSignal: AbortSignal | undefined
+			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return (async function* () {
+					yield {
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "text_delta", text: "partial" },
+					}
+					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 5))
+					}
+					if (capturedSignal?.aborted) {
+						throw new AnthropicAbortError()
+					}
+				})()
+			})
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const consumed = collectStream(
+				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
+			)
+
+			// Let the request start and the first chunk be yielded before aborting.
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			controller.abort()
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
 	})
 
 	describe("Responses-format models (gpt-5.6-luna)", () => {
@@ -861,7 +1790,11 @@ describe("OpencodeGoHandler", () => {
 			)
 		})
 
-		it("forwards the abort signal to the streaming Responses request", async () => {
+		it("forwards the per-request abort signal to the streaming Responses request", async () => {
+			// The /v1/responses request is wired to the per-request internal
+			// controller (the bridge target), not the caller's signal: the
+			// caller's signal is bridged into the internal controller, and the
+			// SDK watches only the internal one.
 			const handler = new OpencodeGoHandler(lunaOptions)
 			const controller = new AbortController()
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -870,10 +1803,118 @@ describe("OpencodeGoHandler", () => {
 				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
 			)
 
-			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
-				signal: controller.signal,
-				headers: { "x-opencode-session": "test-task" },
+			const callOptions = mockResponsesCreate.mock.calls[0][1] as { signal?: AbortSignal; headers?: unknown }
+			expect(callOptions.headers).toEqual({ "x-opencode-session": "test-task" })
+			expect(callOptions.signal).toBeInstanceOf(AbortSignal)
+			expect(callOptions.signal).not.toBe(controller.signal)
+			expect(callOptions.signal?.aborted).toBe(false)
+		})
+
+		it("normalizes an aborted Responses request to the standardized AbortError", async () => {
+			// Emulate the OpenAI SDK against the per-request internal signal:
+			// the caller's signal aborts just as the request starts, the bridge
+			// flips the internal controller, and the SDK rejects with
+			// APIUserAbortError. The Responses-path guard must normalize it to
+			// the DOM-standard AbortError instead of wrapping it.
+			const controller = new AbortController()
+			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
+				controller.abort()
+				if (options?.signal?.aborted) {
+					throw new APIUserAbortError()
+				}
+				throw new Error("unreachable: the bridge must have aborted the internal signal")
 			})
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const error = await collectStream(
+				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
+			).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// A cancelled /v1/responses request surfaces as a DOM-standard
+			// AbortError, not the wrapped "completion error" reserved for other
+			// failures.
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("normalizes a mid-stream abort on the Responses path to the standardized AbortError", async () => {
+			// A cancellation that surfaces after the /v1/responses stream has
+			// started must normalize to the standardized AbortError like the
+			// other wire formats, not leak the raw SDK rejection.
+			let capturedSignal: AbortSignal | undefined
+			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return (async function* () {
+					yield { type: "response.output_text.delta", delta: "partial" }
+					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 5))
+					}
+					if (capturedSignal?.aborted) {
+						throw new APIUserAbortError()
+					}
+				})()
+			})
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const consumed = collectStream(
+				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
+			)
+
+			// Let the request start and the first chunk be yielded before aborting.
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			controller.abort()
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("wraps non-abort Responses pre-stream failures with the Opencode Go prefix", async () => {
+			// A non-abort rejection from responses.create (e.g. an upstream 500)
+			// must be wrapped like the other wire formats, not normalized.
+			mockResponsesCreate.mockRejectedValue(new Error("boom"))
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toThrow(
+				"Opencode Go completion error: boom",
+			)
+		})
+
+		it("detaches the bridged abort listener from the Responses-format path", async () => {
+			// The Responses branch must detach the bridged listener on the way
+			// out like the other formats: a task-scoped signal must not
+			// accumulate one listener per request.
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(
+				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
+			)
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			expect(controller.signal.aborted).toBe(false)
 		})
 
 		it("closes the Responses iterator when the consumer stops early", async () => {
@@ -959,7 +2000,13 @@ describe("OpencodeGoHandler", () => {
 			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
 			controller.abort()
 
-			await expect(nextPromise).rejects.toThrow("request aborted")
+			// The read rejection lands on an aborted request signal, so the
+			// Responses branch normalizes it to the standardized AbortError
+			// (series standard) while still closing the in-flight iterator.
+			await expect(nextPromise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Opencode Go request was aborted",
+			})
 			expect(iterator.return).toHaveBeenCalled()
 		})
 
@@ -1283,7 +2330,10 @@ describe("OpencodeGoHandler", () => {
 			await expect(handler.completePrompt("ping")).rejects.toBe("completion failure")
 		})
 
-		it("rejects non-streaming Responses completion when the abort signal fires", async () => {
+		it("normalizes an aborted non-streaming Responses completion to the standardized AbortError", async () => {
+			// A caller-initiated cancellation of a /v1/responses completion must
+			// surface as a DOM-standard AbortError (series standard), not the raw
+			// rejection or a wrapped completion error.
 			const controller = new AbortController()
 			const request = new Promise<never>((_resolve, reject) => {
 				controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true })
@@ -1295,7 +2345,10 @@ describe("OpencodeGoHandler", () => {
 			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
 			controller.abort()
 
-			await expect(completion).rejects.toThrow("request aborted")
+			await expect(completion).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Opencode Go request was aborted",
+			})
 		})
 
 		it("completePrompt calls responses.create and returns output_text", async () => {
@@ -1345,6 +2398,69 @@ describe("OpencodeGoHandler", () => {
 
 			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
 			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("forwards a positive timeoutMs to the non-streaming Responses request", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await handler.completePrompt("ping", { timeoutMs: 5_000 })
+
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ timeout: 5_000 })
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("omits the timeout option from the Responses request when timeoutMs is 0", async () => {
+			// The OpenAI SDK treats timeout: 0 as an immediate abort, so the
+			// "disabled" value must never be forwarded — assert the absence of
+			// the option (a forwarded timeout: 0 would fail this assertion).
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await handler.completePrompt("ping", { timeoutMs: 0 })
+
+			const callOptions = mockResponsesCreate.mock.calls[0][1] as Record<string, unknown>
+			expect(callOptions).not.toHaveProperty("timeout")
+			expect(callOptions).not.toHaveProperty("signal")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("preserves abort identity on the Responses completion path", async () => {
+			// Emulate the OpenAI SDK: an aborted request signal rejects with
+			// APIUserAbortError; the Responses completion path must normalize it
+			// to the DOM-standard AbortError, not a wrapped completion error.
+			const controller = new AbortController()
+			controller.abort()
+			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					throw new APIUserAbortError()
+				}
+				throw new Error("unreachable")
+			})
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("surfaces Responses request timeouts as an AbortError in completePrompt", async () => {
+			// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+			// surfaces APIConnectionTimeoutError ("Request timed out.") — the
+			// series standard maps it to the same AbortError identity as caller
+			// cancellations.
+			mockResponsesCreate.mockRejectedValue(new APIConnectionTimeoutError())
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			const error = await handler.completePrompt("ping").then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
 		})
 
 		it("completePrompt wraps errors with an Opencode Go-specific message", async () => {
