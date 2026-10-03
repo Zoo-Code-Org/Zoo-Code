@@ -56,6 +56,7 @@ export function handleProviderError(
 			name: error.name,
 			stack: error.stack,
 			status: anyErr.status,
+			statusCode: anyErr.statusCode,
 		})
 
 		let wrapped: Error
@@ -74,9 +75,12 @@ export function handleProviderError(
 
 		// Preserve HTTP status and structured details for retry/backoff + UI
 		// These fields are used by Task.backoffAndAnnounce() and ChatRow/ErrorRow
-		// to provide status-aware error messages and handling
-		if (anyErr.status !== undefined) {
-			;(wrapped as any).status = anyErr.status
+		// to provide status-aware error messages and handling. AI SDK errors (e.g.,
+		// APICallError) expose the HTTP status as `statusCode` instead of `status`,
+		// so fall back to it: a real 429 must reach Task.backoffAndAnnounce's .status check.
+		const preservedStatus = anyErr.status !== undefined ? anyErr.status : anyErr.statusCode
+		if (preservedStatus !== undefined) {
+			;(wrapped as any).status = preservedStatus
 		}
 		if (anyErr.errorDetails !== undefined) {
 			;(wrapped as any).errorDetails = anyErr.errorDetails
@@ -96,10 +100,17 @@ export function handleProviderError(
 	console.error(`[${providerName}] Non-Error exception:`, error)
 	const wrapped = new Error(`${providerName} ${messagePrefix} error: ${String(error)}`)
 
-	// Also try to preserve status for non-Error exceptions (e.g., plain objects with status)
+	// Also try to preserve status for non-Error exceptions (e.g., plain objects with
+	// status or statusCode, matching the AI SDK APICallError shape)
 	const anyErr = error as any
-	if (typeof anyErr?.status === "number") {
-		;(wrapped as any).status = anyErr.status
+	const plainStatus =
+		typeof anyErr?.status === "number"
+			? anyErr.status
+			: typeof anyErr?.statusCode === "number"
+				? anyErr.statusCode
+				: undefined
+	if (plainStatus !== undefined) {
+		;(wrapped as any).status = plainStatus
 	}
 
 	return wrapped
