@@ -196,6 +196,12 @@ describe("safeWriteText", () => {
 			const staging = created.filter((p) => p.includes(".file-safety-staging_"))
 			expect(staging).toHaveLength(2)
 			expect(staging[0]).not.toBe(staging[1])
+			// Uniqueness comes from the documented name shape
+			// <dir>/.file-safety-staging_<timestamp>_<random>: pinning the shape
+			// keeps the separator and the random suffix meaningful, not just the prefix.
+			for (const dir of staging) {
+				expect(dir).toMatch(/\.file-safety-staging_\d+_[a-z0-9]+$/)
+			}
 			const removed = vi.mocked(fs.rmdir).mock.calls.map((c) => String(c[0]))
 			expect(removed).toEqual([staging[0], staging[1]])
 		})
