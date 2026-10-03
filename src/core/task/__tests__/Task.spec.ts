@@ -25,6 +25,7 @@ import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
@@ -32,6 +33,7 @@ import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { writeToFileTool } from "../../tools/WriteToFileTool"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -45,6 +47,7 @@ type TaskTestAccess = {
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
@@ -83,6 +86,7 @@ vi.mock("delay", () => ({
 }))
 
 import delay from "delay"
+import pWaitFor from "p-wait-for"
 
 vi.mock("uuid", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("uuid")>()
@@ -517,6 +521,60 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("output token limit mid-stream", () => {
+		async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new OutputTokenLimitError()
+		}
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("asks once instead of auto-retrying, even with auto-approval", async () => {
+			const task = await createAutoApprovedTask()
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => truncatedStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(backoffSpy).not.toHaveBeenCalled()
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
+		})
+
+		it("retries from a fresh attempt count when the user confirms", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => truncatedStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+		})
+	})
+
 	describe("native tool-call request isolation", () => {
 		it("keeps overlapping Task parser state scoped to each request", async () => {
 			const firstTask = new Task({
@@ -656,6 +714,98 @@ describe("Cline", () => {
 			])
 		})
 
+		it("clears didFinishAbortingStream on retry so cancelTask waits for the new stream (#1801)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort flag reset test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+
+			const failingStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial" }
+				throw new Error("simulated mid-stream failure")
+			}
+
+			let releaseRetryStream: (() => void) | undefined
+			let markRetryStreamPaused: (() => void) | undefined
+			const retryStreamRelease = new Promise<void>((resolve) => {
+				releaseRetryStream = resolve
+			})
+			const retryStreamPaused = new Promise<void>((resolve) => {
+				markRetryStreamPaused = resolve
+			})
+			const pausedRetryStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "retry" }
+				markRetryStreamPaused?.()
+				await retryStreamRelease
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => failingStream())
+				.mockImplementationOnce(() => pausedRetryStream())
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation(realPWaitFor)
+			let request: Promise<boolean> | undefined
+			let cancel: Promise<void> | undefined
+			try {
+				await mockProvider.addClineToStack(task)
+				request = task.recursivelyMakeClineRequests([{ type: "text", text: "abort flag reset test" }])
+				await Promise.race([
+					retryStreamPaused,
+					request.then(() => {
+						throw new Error("request settled before the retry stream paused")
+					}),
+				])
+
+				const firstApiReq = task.clineMessages.find((message) => message.say === "api_req_started")
+				expect(JSON.parse(firstApiReq?.text ?? "{}")).toMatchObject({ cancelReason: "streaming_failed" })
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+
+				let markCancelWaiting: (() => void) | undefined
+				const cancelWaiting = new Promise<void>((resolve) => {
+					markCancelWaiting = resolve
+				})
+				vi.mocked(pWaitFor).mockImplementation((condition, options) =>
+					realPWaitFor(async () => {
+						const done = await condition()
+						if (!done) markCancelWaiting?.()
+						return done
+					}, options),
+				)
+
+				vi.spyOn(mockProvider, "createTaskWithHistoryItem").mockImplementation((historyItem) =>
+					ClineProvider.prototype.createTaskWithHistoryItem.call(mockProvider, historyItem, {
+						startTask: false,
+					}),
+				)
+
+				let cancelSettled = false
+				cancel = mockProvider.cancelTask().then(() => {
+					cancelSettled = true
+				})
+				await Promise.race([cancelWaiting, cancel])
+				expect(cancelSettled, "cancelTask must wait while the retry stream is live").toBe(false)
+
+				releaseRetryStream?.()
+				await cancel
+				await expect(request).resolves.toBe(true)
+			} finally {
+				releaseRetryStream?.()
+				await Promise.allSettled([request, cancel])
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		})
+
 		it("finalizes MCP tool call using the request-scoped parser state", async () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -693,6 +843,102 @@ describe("Cline", () => {
 					input: { param: "value" },
 				},
 			])
+		})
+
+		it("blocks a truncated write_to_file call instead of executing it (issue #1221)", async () => {
+			// Regression test for #1221: if the model's stream is cut off mid-way
+			// through a write_to_file tool call's `content` argument (e.g. it hits
+			// max_tokens), finalizeStreamingToolCall() can't parse the incomplete
+			// JSON and returns null. Task.ts must not let the truncated content
+			// reach writeToFileTool's execution path - it must clear nativeArgs so
+			// presentAssistantMessage's fail-closed guard emits a structured
+			// tool_result error instead.
+			//
+			// Unlike the simulation-based tests in truncated-native-tool-args.spec.ts,
+			// this drives the real streaming + presentAssistantMessage flow through
+			// Task, and spies on the actual tool handler to prove it is never invoked.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "truncated tool call test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			// presentAssistantMessageSafe is intentionally left un-mocked here (unlike
+			// the other tests in this block) - the whole point is to exercise the real
+			// dispatch/guard logic, not just tool_use finalization.
+
+			const writeToFileHandleSpy = vi.spyOn(writeToFileTool, "handle")
+			// Spy directly on the guard's own push, rather than inspecting
+			// userMessageContent/apiConversationHistory afterwards - the task
+			// recurses into a follow-up request once the tool_result is ready
+			// (see the second mocked stream below), which resets those arrays
+			// for the new turn before this function returns.
+			const pushToolResultSpy = vi.spyOn(task, "pushToolResultToUserContent")
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call_partial",
+							index: 0,
+							id: "call_truncated",
+							name: "write_to_file",
+						},
+						{
+							type: "tool_call_partial",
+							index: 0,
+							// Cut off mid-string: no closing quote/brace, and the stream
+							// ends here with no explicit tool_call_end - exactly what
+							// happens when the model hits max_tokens mid-argument.
+							// .md path deliberately used so the only thing that can block
+							// execution is the nativeArgs guard under test - an arbitrary
+							// extension could also get caught by unrelated mode-based file
+							// restrictions (e.g. Architect mode's markdown-only rule),
+							// which would produce a false pass/fail unrelated to this bug.
+							arguments: '{"path":"docs/config.md","content":"sk-live-abc123',
+						},
+					]),
+				)
+				// The task recurses once the error tool_result makes the turn
+				// "ready" - this bounds that follow-up to a single harmless text
+				// reply instead of an unmocked second call.
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "" }]))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "truncated tool call test" }])
+
+			// handle() legitimately gets called with partial: true while the call is
+			// still streaming (BaseTool.handle short-circuits to a no-op preview hook
+			// in that case) - that's expected and safe. What must never happen is a
+			// call with partial: false, which is what actually reaches execute() and
+			// writes to disk.
+			const nonPartialCalls = writeToFileHandleSpy.mock.calls.filter(
+				([, block]) => (block as { partial?: boolean }).partial === false,
+			)
+			expect(nonPartialCalls).toHaveLength(0)
+
+			// Neither nativeArgs nor params should leak the truncated content into
+			// the recorded assistant turn - Task.ts builds that entry's `input` via
+			// `toolUse.nativeArgs || toolUse.params`, so clearing nativeArgs alone
+			// would just have shifted the leak to params instead of closing it.
+			const assistantEntry = task.apiConversationHistory.find(
+				(m) => m.role === "assistant" && Array.isArray(m.content) && m.content[0]?.type === "tool_use",
+			)
+			expect(JSON.stringify(assistantEntry)).not.toContain("sk-live-abc123")
+
+			// A structured, matching tool_result error must have been pushed for
+			// the truncated call's ID instead of letting it execute.
+			const truncatedCallResult = pushToolResultSpy.mock.calls.find(
+				([result]) => result.tool_use_id === "call_truncated",
+			)?.[0]
+			expect(truncatedCallResult).toMatchObject({
+				type: "tool_result",
+				tool_use_id: "call_truncated",
+				is_error: true,
+			})
+			expect(JSON.stringify(truncatedCallResult)).toContain("missing nativeArgs")
 		})
 	})
 
@@ -1909,6 +2155,52 @@ describe("Cline", () => {
 			})
 		})
 
+		describe("slash command mode switch", () => {
+			it("passes null as targetTask so handleModeSwitch does not overwrite the orchestrator task", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+				Object.assign(task.api, { ensureModelFetched })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "run /commit" }],
+					mode: "code",
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+				vi.spyOn(task, "say").mockImplementation(async (type) => {
+					if (type === "api_req_started") {
+						task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+					}
+					return undefined as never
+				})
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw new Error("stop after mode switch")
+				})
+
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
+
+				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
+			})
+		})
+
 		describe("Subtask Rate Limiting", () => {
 			let mockProvider: MockedClineProvider
 			let mockApiConfig: RateLimitedProviderSettings
@@ -2756,7 +3048,7 @@ describe("Cline", () => {
 			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 		})
 
-		it("waits for a new partial message flush before a following message update", async () => {
+		it("keeps a new partial message on the throttled path without flushing", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2765,11 +3057,6 @@ describe("Cline", () => {
 			})
 			const taskAccess = getTaskTestAccess(task)
 			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
-			let releaseFlush!: () => void
-			const pendingFlush = new Promise<void>((resolve) => {
-				releaseFlush = resolve
-			})
-			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockReturnValueOnce(pendingFlush)
 			const updatePostSpy = vi.mocked(mockProvider.postMessageToWebview)
 			const partialMessage = {
 				ts: 1,
@@ -2778,22 +3065,15 @@ describe("Cline", () => {
 				text: "partial message",
 				partial: true,
 			}
-			let partialAddSettled = false
-			const addThenUpdate = taskAccess.addToClineMessages(partialMessage).then(async () => {
-				partialAddSettled = true
-				await taskAccess.updateClineMessage({ ...partialMessage, text: "updated partial" })
-			})
 
-			await Promise.resolve()
+			await taskAccess.addToClineMessages(partialMessage)
+			await taskAccess.updateClineMessage({ ...partialMessage, text: "updated partial" })
+
+			// Flushing here would cancel the debounce's trailing timer and send the *next*
+			// message straight through the leading edge, collapsing the throttle back to one
+			// full-state post per message.
 			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(flushSpy).toHaveBeenCalledWith()
-			expect(partialAddSettled).toBe(false)
-			expect(updatePostSpy).not.toHaveBeenCalled()
-
-			releaseFlush()
-			await addThenUpdate
-
-			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(updatePostSpy.mock.invocationCallOrder[0])
+			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(updatePostSpy).toHaveBeenCalledWith({
 				type: "messageUpdated",
 				clineMessage: {
