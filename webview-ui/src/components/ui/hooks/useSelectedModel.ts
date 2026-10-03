@@ -100,15 +100,15 @@ function getStaticCatalogSelection(
 	const configuredId = apiConfiguration.apiModelId
 	switch (provider) {
 		case providerIdentifiers.deepseek: {
-			const id = configuredId ?? deepSeekDefaultModelId
+			const id = configuredId || deepSeekDefaultModelId
 			return { id, info: deepSeekModels[id as keyof typeof deepSeekModels] }
 		}
 		case providerIdentifiers.moonshot: {
-			const id = configuredId ?? moonshotDefaultModelId
+			const id = configuredId || moonshotDefaultModelId
 			return { id, info: moonshotModels[id as keyof typeof moonshotModels] }
 		}
 		case providerIdentifiers.mimo: {
-			const id = configuredId ?? mimoDefaultModelId
+			const id = configuredId || mimoDefaultModelId
 			return { id, info: mimoModels[id as keyof typeof mimoModels] }
 		}
 	}

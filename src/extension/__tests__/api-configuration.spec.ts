@@ -75,6 +75,9 @@ describe("API - configuration", () => {
 				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 				apiModelId: "mimo-v2.6-pro",
 			}),
+			// Double assertion: this filter-focused spec only needs the two members
+			// the API surface touches; a full ClineProvider test double is out of
+			// scope (the upstream siblings above use the same pattern).
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider)

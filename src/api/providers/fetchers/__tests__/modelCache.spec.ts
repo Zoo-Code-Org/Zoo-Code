@@ -40,6 +40,13 @@ vi.mock("fs", () => ({
 	readFileSync: vi.fn().mockReturnValue("{}"),
 }))
 
+// Wrap (not replace) pbkdf2Sync so tests can count KDF invocations while real digests
+// are still produced.
+vi.mock("crypto", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("crypto")>()
+	return { ...actual, pbkdf2Sync: vi.fn(actual.pbkdf2Sync) }
+})
+
 // Mock all the model fetchers
 vi.mock("../litellm")
 vi.mock("../openrouter")
@@ -67,6 +74,7 @@ import type { Mock, Mocked } from "vitest"
 import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
+import { pbkdf2Sync } from "crypto"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
 import { getModels, getModelsFromCache } from "../modelCache"
@@ -87,6 +95,7 @@ const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
 const mockGetMimoModels = getMimoModels as Mock<typeof getMimoModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
+const mockPbkdf2Sync = vi.mocked(pbkdf2Sync)
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 
@@ -1134,6 +1143,62 @@ describe("key-scoped cache key derivation", () => {
 		// The discriminator is the trailing key-component: an 8-char (32-bit) hex string.
 		const discriminator = cacheKey.split(":").pop() as string
 		expect(discriminator).toMatch(/^[0-9a-f]{8}$/)
+	})
+})
+
+describe("cache digest derivation memoization", () => {
+	// The bounded FIFO memo exists because getCacheKey/deriveApiKeyDiscriminator run on the
+	// per-message hot path (PoeHandler.getModel -> getModelsFromCache -> getCacheKey): the KDF
+	// must not run per request, but the memo must not grow unbounded either. Keys are unique
+	// per test because the memo is module-level state shared across the file.
+	const memoProvider = providerIdentifiers.requesty
+	const memoModels = {
+		"memo/model": { maxTokens: 4096, contextWindow: 200_000, supportsPromptCache: false },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetRequestyModels.mockResolvedValue(memoModels)
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+	})
+
+	it("reuses the derived digest across repeated calls with the same key", async () => {
+		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" })
+		const afterFirst = mockPbkdf2Sync.mock.calls.length
+		expect(afterFirst).toBeGreaterThan(0)
+
+		// Per-request cache lookups with the same key must not re-run the KDF.
+		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" })
+		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" })
+
+		expect(mockPbkdf2Sync.mock.calls.length).toBe(afterFirst)
+	})
+
+	it("derives a fresh digest for each distinct key", async () => {
+		await getModels({ provider: memoProvider, apiKey: "memo-distinct-a" })
+		const afterA = mockPbkdf2Sync.mock.calls.length
+		expect(afterA).toBeGreaterThan(0)
+
+		await getModels({ provider: memoProvider, apiKey: "memo-distinct-b" })
+		expect(mockPbkdf2Sync.mock.calls.length).toBeGreaterThan(afterA)
+	})
+
+	it("bounds the memo and recomputes inputs that fell out of the FIFO window", async () => {
+		// Each call introduces two memo inputs (the raw key and its compound cache key),
+		// so 12 distinct keys overflow the 16-entry cap: the earliest pairs are evicted
+		// while the most recent ones are retained.
+		for (let i = 0; i < 12; i++) {
+			await getModels({ provider: memoProvider, apiKey: `memo-flood-${i}` })
+		}
+
+		const beforeEvicted = mockPbkdf2Sync.mock.calls.length
+		await getModels({ provider: memoProvider, apiKey: "memo-flood-0" })
+		expect(mockPbkdf2Sync.mock.calls.length).toBeGreaterThan(beforeEvicted)
+
+		const beforeRecent = mockPbkdf2Sync.mock.calls.length
+		await getModels({ provider: memoProvider, apiKey: "memo-flood-11" })
+		expect(mockPbkdf2Sync.mock.calls.length).toBe(beforeRecent)
 	})
 })
 

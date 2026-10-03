@@ -765,6 +765,24 @@ describe("useSelectedModel", () => {
 		)
 
 		it.each([
+			[providerIdentifiers.deepseek, deepSeekDefaultModelId],
+			[providerIdentifiers.moonshot, moonshotDefaultModelId],
+			[providerIdentifiers.mimo, mimoDefaultModelId],
+		])("%s: treats an empty configured ID as unset while the router query is unsettled", (provider, defaultId) => {
+			// Repo convention (cf. router-provider fallbacks) is `||`, so an
+			// empty-string apiModelId resolves to the default instead of being
+			// preserved as a phantom selection.
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: provider, apiModelId: "" }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(defaultId)
+		})
+
+		it.each([
 			[providerIdentifiers.deepseek, deepSeekDefaultModelId, deepSeekModels[deepSeekDefaultModelId]],
 			[providerIdentifiers.moonshot, moonshotDefaultModelId, moonshotModels[moonshotDefaultModelId]],
 			[providerIdentifiers.mimo, mimoDefaultModelId, mimoModels[mimoDefaultModelId]],

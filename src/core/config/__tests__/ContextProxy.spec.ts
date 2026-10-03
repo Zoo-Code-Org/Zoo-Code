@@ -593,6 +593,31 @@ describe("ContextProxy", () => {
 			expect(migratedProxy.getSecret("mimoApiKey")).toBe("already-secret-value")
 		})
 
+		it("trusts a fresh SecretStorage read over the stale snapshot before deciding to store", async () => {
+			// Simulates a secret written after the initialize() snapshot (or a transient
+			// secrets.get failure during the load): the snapshot sees no secret, the
+			// migration's fresh read sees one. The newer secret must win and the cache
+			// must be repaired with it.
+			clearAllMocks()
+			let mimoGetCount = 0
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? plaintextKey : undefined))
+			mockSecrets.get.mockImplementation((key: string) => {
+				if (key !== "mimoApiKey") {
+					return Promise.resolve("test-secret")
+				}
+				mimoGetCount += 1
+				return Promise.resolve(mimoGetCount === 1 ? undefined : "freshly-written-secret")
+			})
+
+			const migratedProxy = new ContextProxy(mockContext)
+			await migratedProxy.initialize()
+
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+			expect(migratedProxy.getSecret("mimoApiKey")).toBe("freshly-written-secret")
+			expect(migratedProxy.getValues()["mimoApiKey"]).toBe("freshly-written-secret")
+		})
+
 		it("does nothing when no plaintext key exists", async () => {
 			clearAllMocks()
 			mockGlobalState.get.mockImplementation(() => undefined)
