@@ -1816,6 +1816,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
+		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
+		if (this.abort) {
+			if (queuedMessage) {
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			}
+			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
+
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
 
