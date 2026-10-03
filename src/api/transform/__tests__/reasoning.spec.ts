@@ -20,6 +20,8 @@ import {
 	GeminiThinkingLevel,
 } from "../reasoning"
 
+import { parseOpenRouterModel } from "../../providers/fetchers/openrouter"
+
 describe("reasoning.ts", () => {
 	const baseModel: ModelInfo = {
 		contextWindow: 16000,
@@ -291,6 +293,91 @@ describe("reasoning.ts", () => {
 			const result = getOpenRouterReasoning(options)
 
 			expect(result).toBeUndefined()
+		})
+
+		describe("OpenRouter fetcher contract", () => {
+			// Model shapes produced by the real fetcher (parseOpenRouterModel) for
+			// models advertising the "reasoning" parameter.
+			const parseFetchedModel = (id: string, supportedParameters: string[]) =>
+				parseOpenRouterModel({
+					id,
+					model: {
+						name: "Reasoning Model",
+						description: "Model advertising reasoning",
+						context_length: 128000,
+						max_completion_tokens: 8192,
+						pricing: { prompt: "0.000003", completion: "0.000015" },
+					},
+					inputModality: ["text"],
+					outputModality: ["text"],
+					maxTokens: 8192,
+					supportedParameters,
+				})
+
+			it("sends no reasoning param on the wire for a default (unset) user", () => {
+				const model = parseFetchedModel("test/reasoning-model", ["reasoning", "max_tokens", "temperature"])
+
+				expect(model.supportsReasoningEffort).toContain("disable")
+
+				const result = getOpenRouterReasoning({
+					model,
+					reasoningBudget: undefined,
+					reasoningEffort: undefined,
+					settings: {},
+				})
+
+				expect(result).toBeUndefined()
+			})
+
+			it("keeps the gemini-2.5-pro exclusion guard intact for a default (unset) user", () => {
+				// gemini-2.5-pro-preview is budget-capable (not required), so an
+				// unconfigured user must resolve to no reasoning params, letting the
+				// provider apply its reasoning = { exclude: true } guard.
+				const model = parseFetchedModel("google/gemini-2.5-pro-preview", [
+					"reasoning",
+					"max_tokens",
+					"temperature",
+				])
+
+				expect(model.supportsReasoningBudget).toBe(true)
+				expect(model.requiredReasoningBudget).toBeFalsy()
+
+				const result = getOpenRouterReasoning({
+					model,
+					reasoningBudget: undefined,
+					reasoningEffort: undefined,
+					settings: {},
+				})
+
+				// Undefined here lets the provider apply its reasoning = { exclude: true } guard.
+				expect(result).toBeUndefined()
+			})
+
+			it("omits reasoning for a stored 'disable' selection", () => {
+				const model = parseFetchedModel("test/reasoning-model", ["reasoning"])
+
+				const result = getOpenRouterReasoning({
+					model,
+					reasoningBudget: undefined,
+					reasoningEffort: "disable",
+					settings: { reasoningEffort: "disable", enableReasoningEffort: false },
+				})
+
+				expect(result).toBeUndefined()
+			})
+
+			it("forwards an explicitly selected xhigh effort", () => {
+				const model = parseFetchedModel("test/reasoning-model", ["reasoning"])
+
+				const result = getOpenRouterReasoning({
+					model,
+					reasoningBudget: undefined,
+					reasoningEffort: "xhigh",
+					settings: { reasoningEffort: "xhigh", enableReasoningEffort: true },
+				})
+
+				expect(result).toEqual({ effort: "xhigh" })
+			})
 		})
 	})
 
