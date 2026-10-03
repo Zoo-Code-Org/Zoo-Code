@@ -2337,8 +2337,8 @@ describe("webviewMessageHandler - chat message queue", () => {
 		expect(updateSpy).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
 	})
 
-	it("logs and shows a visible error when condenseTaskContext rejects", async () => {
-		const condenseError = new Error("queued submission failed")
+	it("logs, shows an error, and still posts the response when condenseTaskContext rejects", async () => {
+		const condenseError = new Error("Task with id task-1 not found in stack")
 		const providerWithCondense = mockClineProvider as unknown as {
 			condenseTaskContext: ReturnType<typeof vi.fn>
 		}
@@ -2349,8 +2349,14 @@ describe("webviewMessageHandler - chat message queue", () => {
 		).resolves.toBeUndefined()
 
 		expect(mockClineProvider.log).toHaveBeenCalledWith(
-			"[condenseTaskContextRequest] Failed: queued submission failed",
+			"[condenseTaskContextRequest] Failed: Task with id task-1 not found in stack",
 		)
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.condense_failed")
+		// The response must still reach the webview so ChatView clears
+		// isCondensing/sendingDisabled when the task vanished mid-request.
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "condenseTaskContextResponse",
+			text: "task-1",
+		})
 	})
 })

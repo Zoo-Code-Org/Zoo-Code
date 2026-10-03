@@ -927,6 +927,11 @@ export const webviewMessageHandler = async (
 					`[condenseTaskContextRequest] Failed: ${error instanceof Error ? error.message : String(error)}`,
 				)
 				await vscode.window.showErrorMessage(t("common:errors.condense_failed"))
+				// Post the response even on failure: a request racing task removal
+				// (or a failed condense) must still clear ChatView's
+				// isCondensing/sendingDisabled, which only the response message
+				// releases. The shape matches the success path.
+				await provider.postMessageToWebview({ type: "condenseTaskContextResponse", text: message.text! })
 			}
 			break
 		case "deleteTaskWithId":
