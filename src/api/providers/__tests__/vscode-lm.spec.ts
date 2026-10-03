@@ -603,7 +603,10 @@ describe("VsCodeLmHandler", () => {
 				).toEqual([])
 			})
 
-			it("keeps an incomplete invoke buffered when the cap passes a newline inside it", async () => {
+			it.each([
+				{ where: "its parameter body", separator: " " },
+				{ where: "its opening tag", separator: "\n" },
+			])("keeps an incomplete invoke buffered when the cap passes a newline in $where", async ({ separator }) => {
 				// The drain boundary was the first newline after the last closed block, even inside a
 				// later open block. The filler trips the cap before that block's closing tag arrives.
 				const padding = "p".repeat(20 * 1024)
@@ -611,7 +614,7 @@ describe("VsCodeLmHandler", () => {
 				const openBody = `sub\n${filler}`
 				const chunks = await collect([
 					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">${padding}</parameter></in${"voke"}> ` +
-						`<in${"voke"} name="calculator"><parameter name="operation">sub\n`,
+						`<in${"voke"}${separator}name="calculator"><parameter name="operation">sub\n`,
 					filler,
 					`</parameter></in${"voke"}></function${"_calls"}>`,
 				])

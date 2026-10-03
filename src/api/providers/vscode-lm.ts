@@ -143,7 +143,8 @@ function decidedSalvageEnd(text: string): number {
 		return 0
 	}
 	// A newline inside a later, still-open block must not drain that block's opener as text.
-	const nextOpen = text.slice(blockEnd, lineEnd).search(/<(?:antml:)?invoke\s+name="/i)
+	// Search past the newline: the opener itself may span it, as in `<invoke\nname="`.
+	const nextOpen = text.slice(blockEnd).search(/<(?:antml:)?invoke\s+name="/i)
 	return nextOpen === -1 ? lineEnd + 1 : blockEnd + nextOpen
 }
 
