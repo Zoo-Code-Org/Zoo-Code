@@ -481,6 +481,26 @@ describe("Task.ask queued message drain", () => {
 		expect(String(resultA)).toContain("superseded")
 	})
 
+	it("treats a consumed submission as direct feedback when the entry was deleted mid-flight", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		// Interception: blocked ask, drain submits, then the user deletes the
+		// queued message before the ask observes the pending slot.
+		const askPromise = task.ask("completion_result", "Done", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		task.messageQueueService.addMessage("deleted before consume")
+		await task.processQueuedMessages()
+		const entry = task.messageQueueService.messages.at(0)
+		if (!entry) throw new Error("queued message missing")
+		task.messageQueueService.removeMessage(entry.id)
+
+		const result = await askPromise
+
+		// No entry remains to ack: the ID must not be handed back, and the
+		// response text is delivered as direct feedback instead.
+		expect(result).toMatchObject({ response: "messageResponse", text: "deleted before consume" })
+		expect(result.queuedMessageId).toBeUndefined()
+	})
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")

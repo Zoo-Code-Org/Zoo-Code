@@ -2535,15 +2535,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Hand the ID to the caller instead of removing inline: the queue
 					// entry is deleted only after the feedback is durably saved
 					// (persistQueuedFeedbackAndAcknowledge), so a failed history write
-					// cannot lose a message that was already dequeued.
-					queuedMessageId = this.pendingSubmittedQueuedMessageId
+					// cannot lose a message that was already dequeued. The ID is
+					// handed only when the entry can also be reserved: the user may
+					// have deleted the queued message between submission and
+					// consumption, and acking an entry that no longer exists would
+					// fail at removeMessage — without a reservation the response is
+					// treated as direct feedback instead.
+					const submittedId = this.pendingSubmittedQueuedMessageId
 					this.pendingSubmittedQueuedMessageId = undefined
 					// Reserve the entry through the durable ack: while persistence
 					// retries (which can take seconds), neither a second ask nor a
 					// background drain may claim it again and persist the same
 					// message twice. Persistence settles the reservation itself —
 					// removeMessage on success, releaseMessage on failure/abort.
-					this.messageQueueService.claimMessage(queuedMessageId)
+					if (this.messageQueueService.claimMessage(submittedId)) {
+						queuedMessageId = submittedId
+					}
 				} else if (
 					!this.messageQueueService.messages.some(
 						(message) => message.id === this.pendingSubmittedQueuedMessageId,
