@@ -3363,14 +3363,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 
 				if (response === "messageResponse") {
+					// Durable ack first: the feedback must reach history before
+					// the API turn. When the ack fails the entry is re-queued for
+					// redelivery, and the model must not already have seen the text
+					// (mirrors AttemptCompletionTool's ordering).
+					await this.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
+
 					currentUserContent.push(
 						...[
 							{ type: "text" as const, text: formatResponse.tooManyMistakes(text) },
 							...formatResponse.imageBlocks(images),
 						],
 					)
-
-					await this.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				}
 
 				this.consecutiveMistakeCount = 0

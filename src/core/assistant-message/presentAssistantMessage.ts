@@ -741,6 +741,12 @@ export async function presentAssistantMessage(cline: Task) {
 					)
 
 					if (response === "messageResponse") {
+						// Durable ack first: the feedback must reach history before
+						// the API turn. When the ack fails the entry is re-queued
+						// for redelivery, and the model must not already have seen
+						// the text (mirrors AttemptCompletionTool's ordering).
+						await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
+
 						// Add user feedback to userContent.
 						cline.userMessageContent.push(
 							{
@@ -749,9 +755,6 @@ export async function presentAssistantMessage(cline: Task) {
 							},
 							...formatResponse.imageBlocks(images),
 						)
-
-						// Add user feedback to chat.
-						await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 					}
 
 					// Track tool repetition in telemetry via PostHog exception tracking and event.

@@ -738,6 +738,35 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				}),
 			)
 		})
+
+		it("acks tool-repetition feedback before it reaches the API turn", async () => {
+			mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+				allowExecution: false,
+				askUser: {
+					messageKey: "mistake_limit_reached",
+					messageDetail: "The tool {toolName} was called consecutively without progress.",
+				},
+			})
+			mockTask.apiConfiguration = { apiProvider: providerIdentifiers.anthropic }
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_repetition_feedback",
+					name: "read_file",
+					params: { path: "a.txt" },
+					nativeArgs: { path: "a.txt" },
+					partial: false,
+				},
+			]
+			mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: "Try another approach" })
+			mockTask.sayUserFeedbackAndAckQueued = vi.fn().mockRejectedValue(new Error("persist failed"))
+
+			await expect(presentAssistantMessage(mockTask as unknown as Task)).rejects.toThrow("persist failed")
+
+			// The durable ack failed and the entry is re-queued for redelivery:
+			// the feedback must not already be part of the API turn.
+			expect(mockTask.userMessageContent).toHaveLength(0)
+		})
 	})
 
 	describe("undefined provider state", () => {
