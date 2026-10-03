@@ -322,7 +322,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
 	
 	${result.content}`
-		} else if (result.returnedLines === 0) {
+		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			output = "Note: File is empty"
 		}
 

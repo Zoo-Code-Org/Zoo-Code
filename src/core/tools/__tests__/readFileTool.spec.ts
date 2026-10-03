@@ -17,6 +17,7 @@ import path from "path"
 import { isBinaryFile } from "isbinaryfile"
 
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
+import type { Task } from "../../task/Task"
 import { formatResponse } from "../../prompts/responses"
 import {
 	validateImageForProcessing,
@@ -581,7 +582,31 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ path: "empty.ts" }, mockTask as any, callbacks)
 
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("empty"))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Note: File is empty"))
+		})
+
+		it("should propagate beyond-EOF error instead of reporting file as empty", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3\nline4\nline5"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "Error: offset 99 is beyond file end (5 lines)",
+				returnedLines: 0,
+				totalLines: 5,
+				wasTruncated: false,
+				includedRanges: [],
+			})
+
+			await readFileTool.execute(
+				{ path: "test.ts", mode: "slice", offset: 100 },
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			expect(mockedReadWithSlice).toHaveBeenCalledWith(expect.any(String), 99, expect.any(Number))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("beyond file end"))
+			expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Note: File is empty"))
 		})
 	})
 
