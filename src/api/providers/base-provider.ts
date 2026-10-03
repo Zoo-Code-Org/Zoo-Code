@@ -84,12 +84,13 @@ export abstract class BaseProvider implements ApiHandler {
 			// Recursively process nested objects and convert nullable types
 			const newProps = { ...result.properties }
 			for (const key of allKeys) {
-				const prop = newProps[key]
+				let prop = newProps[key]
 
 				// Handle nullable types by removing null
 				if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
 					const nonNullTypes = prop.type.filter((t: string) => t !== "null")
-					prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+					prop = { ...prop, type: nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes }
+					newProps[key] = prop
 				}
 
 				// Recursively process nested objects

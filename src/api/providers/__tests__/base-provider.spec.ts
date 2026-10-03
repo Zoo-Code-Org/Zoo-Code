@@ -4,6 +4,7 @@ import type { ModelInfo } from "@roo-code/types"
 
 import { BaseProvider } from "../base-provider"
 import type { ApiStream } from "../../transform/stream"
+import executeCommand, { createExecuteCommandTool } from "../../../core/prompts/tools/native-tools/execute_command"
 
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
@@ -41,6 +42,52 @@ describe("BaseProvider", () => {
 	})
 
 	describe("convertToolSchemaForOpenAI", () => {
+		it("preserves nullable source properties while converting nested schemas", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					name: { type: ["string", "null"] },
+					value: { type: ["string", "number", "null"] },
+					settings: {
+						type: ["object", "null"],
+						properties: { timeout: { type: ["number", "null"] } },
+					},
+					items: {
+						type: ["array", "null"],
+						items: { type: "object", properties: { cwd: { type: ["string", "null"] } } },
+					},
+				},
+			}
+			const original = structuredClone(schema)
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(schema).toEqual(original)
+			expect(result.properties).toMatchObject({
+				name: { type: "string" },
+				value: { type: ["string", "number"] },
+				settings: { type: "object", properties: { timeout: { type: "number" } } },
+				items: { type: "array", items: { properties: { cwd: { type: "string" } } } },
+			})
+		})
+
+		it("preserves command schemas for a later NanoGPT request after strict conversion", () => {
+			const original = structuredClone(executeCommand)
+			const earlierNonStrict = createExecuteCommandTool({ strict: false })
+			provider.testConvertToolsForOpenAI([executeCommand])
+			const laterNonStrict = createExecuteCommandTool({ strict: false })
+
+			expect(executeCommand).toEqual(original)
+			for (const tool of [earlierNonStrict, laterNonStrict]) {
+				expect(tool.function.strict).toBe(false)
+				expect(tool.function.parameters?.required).toEqual(["command"])
+				expect(tool.function.parameters?.properties).toMatchObject({
+					cwd: { type: ["string", "null"] },
+					timeout: { type: ["number", "null"] },
+				})
+			}
+		})
+
 		it("should add additionalProperties: false to object schemas", () => {
 			const schema = {
 				type: "object",
