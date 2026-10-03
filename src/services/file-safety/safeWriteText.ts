@@ -131,12 +131,23 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  * across filesystems fails with EXDEV.
  */
 export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
-	return fs.realpath(absoluteFilePath).catch((error: unknown) => {
+	return fs.realpath(absoluteFilePath).catch(async (error: unknown) => {
 		const code =
 			typeof error === "object" && error !== null && "code" in error
 				? (error as { code?: string }).code
 				: undefined
 		if (code !== "ENOENT") throw error
+		// ENOENT also covers a dangling symlink: realpath resolves the referent,
+		// so it fails when the link exists but its target is missing. Writing
+		// through the link path would replace the symlink with a regular file,
+		// so only a genuinely absent target may fall back to the given path.
+		let linkStat: Awaited<ReturnType<typeof fs.lstat>> | undefined
+		try {
+			linkStat = await fs.lstat(absoluteFilePath)
+		} catch {
+			// the path itself is absent: a target that has not been created yet
+		}
+		if (linkStat?.isSymbolicLink()) throw error
 		return absoluteFilePath
 	})
 }

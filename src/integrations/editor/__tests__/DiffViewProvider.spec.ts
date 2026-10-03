@@ -1273,6 +1273,12 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
 				"Cannot guard the write: the owning task is no longer available",
 			)
+
+			// Nothing may be published for a collected task, and the discard-only
+			// cleanup still runs before the error is rethrown.
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).not.toHaveBeenCalled()
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalledTimes(1)
 		})
 
 		it("open() keeps the model's existing observation instead of replacing it with the preview token", async () => {
@@ -1819,7 +1825,10 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider.saveChanges(false)
 
 			// Only the activation happened; there was no focus to give back.
-			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(vscode.window.showTextDocument).mock.calls).toEqual([
+				[dirtyEditor.document, { preserveFocus: false, preview: false }],
+			])
+			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
 		})
 
 		it("does not restore focus when the active editor is already the target document", async () => {

@@ -14,6 +14,7 @@ vi.mock("fs/promises", () => ({
 	unlink: vi.fn(),
 	rmdir: vi.fn(),
 	realpath: vi.fn(),
+	lstat: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -674,6 +675,9 @@ describe("safeWriteText", () => {
 		it("when realpath reports ENOENT (target absent), uses the given path as-is", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			// lstat reports the path itself as absent, so this is a new target and
+			// the fallback is allowed.
+			vi.mocked(fs.lstat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
 			await safeWriteText(targetPath, "data", { platform: "linux" })
@@ -681,6 +685,22 @@ describe("safeWriteText", () => {
 			// rename still happened with the fallback path (path.resolve on /tmp → C:\tmp)
 			const resolvedFallback = _resolvedTarget(targetPath)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), resolvedFallback)
+		})
+
+		it("propagates a dangling symlink instead of writing through the link path", async () => {
+			// realpath resolves the referent, so a link whose target is missing reports
+			// ENOENT. Falling back to the link path would replace the symlink with a
+			// regular file, so the error must propagate and nothing may be committed.
+			const linkPath = "/tmp/test-dir/dangling-link.txt"
+			vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const linkStats = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+			linkStats.isSymbolicLink = () => true
+			vi.mocked(fs.lstat).mockResolvedValue(linkStats)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux" })).rejects.toThrow("ENOENT")
+
+			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
 
