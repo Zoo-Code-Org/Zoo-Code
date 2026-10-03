@@ -66,6 +66,9 @@ vi.mock("path", () => ({
 vi.mock("vscode", () => ({
 	workspace: {
 		applyEdit: vi.fn(),
+		// VS Code's own codec: the mock echoes the content back as bytes so the
+		// assertions can see exactly what the publish received.
+		encode: vi.fn((content: string) => Promise.resolve(Buffer.from(content))),
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		openTextDocument: vi.fn().mockResolvedValue({
 			isDirty: false,
@@ -846,7 +849,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -869,7 +872,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -884,7 +887,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -930,7 +933,7 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {
@@ -959,7 +962,7 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 			})
 
 			it("fails closed when the owning task has been collected", async () => {
@@ -1145,14 +1148,14 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { encoding: "utf8" })
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 			expect(result.newProblemsMessage).toBe("")
 		})
 
 		it("publishes the accepted content in the document's own encoding", async () => {
 			// A utf8bom document: getText() returns the text without the BOM, so the
-			// guarded publish must re-encode it with the BOM the document was read
-			// in rather than as plain UTF-8.
+			// publish must go through VS Code's codec for the document's own
+			// encoding rather than re-encoding the text as plain UTF-8.
 			const bomEditor = {
 				document: {
 					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
@@ -1168,9 +1171,10 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+			expect(vi.mocked(vscode.workspace.encode)).toHaveBeenCalledWith("new content", {
 				encoding: "utf8bom",
 			})
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 		})
 
 		it("rejects the accepted save when the file changed after the preview (stale version)", async () => {
@@ -1205,6 +1209,17 @@ describe("DiffViewProvider", () => {
 					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
 			)
 			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+		it("publishes a targeted edit that a partial observation authorizes", async () => {
+			// The same partial observation rejects a full-file replacement but
+			// authorizes the targeted edit the tool performed, so the write kind
+			// the tool passed must reach the guard.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "v1", false)
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await diffViewProvider.saveChanges(false, 0, "edit")
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 		})
 
 		it("fails closed when the owning task has been collected", async () => {
@@ -1417,7 +1432,7 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { encoding: "utf8" })
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 			expect(result.newProblemsMessage).toBe("")
 		})
 
@@ -1443,7 +1458,7 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { encoding: "utf8" })
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 			// the revert activates the exact document with the exact options:
 			// preserveFocus keeps the user's focus, preview: false pins the tab
 			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(dirtyEditor.document, {

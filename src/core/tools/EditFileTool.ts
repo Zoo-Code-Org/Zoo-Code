@@ -449,7 +449,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, isNewFile ? "create" : "edit")
 			}
 
 			// Track file edit operation

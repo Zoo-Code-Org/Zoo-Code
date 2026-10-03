@@ -219,7 +219,7 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
 			}
 
 			// Track file edit operation

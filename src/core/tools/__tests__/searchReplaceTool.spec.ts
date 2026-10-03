@@ -320,7 +320,7 @@ describe("searchReplaceTool", () => {
 
 			await executeSearchReplaceTool()
 
-			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit")
 			expect(mockCline.didEditFile).toBe(true)
 			// Usage is recorded once at the central presentAssistantMessage
 			// attribution point, not locally by the handler.

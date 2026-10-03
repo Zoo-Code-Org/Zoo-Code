@@ -51,6 +51,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "fileContextTracker"
 	>
 	let mockSaveDirectly: MockedFunction<(...args: unknown[]) => Promise<unknown>>
+	let mockSaveChanges: MockedFunction<(...args: unknown[]) => Promise<unknown>>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
 	let mockHandleError: MockedFunction<(...args: unknown[]) => Promise<void>>
 	let mockPushToolResult: MockedFunction<(...args: unknown[]) => void>
@@ -65,6 +66,11 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			userEdits: undefined,
 			finalContent: "new content",
 		})
+		mockSaveChanges = vi.fn().mockResolvedValue({
+			newProblemsMessage: "",
+			userEdits: undefined,
+			finalContent: "new content",
+		})
 
 		// Structural stubs for the guarded-write path: the real DiffViewProvider is
 		// out of scope here, so vi.fn() doubles stand in for the members the tool
@@ -73,6 +79,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			editType: undefined as "create" | "modify" | undefined,
 			originalContent: undefined as string | undefined,
 			saveDirectly: mockSaveDirectly,
+			saveChanges: mockSaveChanges,
+			open: vi.fn().mockResolvedValue(undefined),
+			update: vi.fn().mockResolvedValue(undefined),
+			scrollToFirstDiff: vi.fn(),
 			pushToolWriteResult: vi.fn().mockResolvedValue("Saved file"),
 			reset: vi.fn().mockResolvedValue(undefined),
 		}
@@ -153,5 +163,30 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(vi.mocked(mockTask.diffViewProvider.reset)).toHaveBeenCalled()
 		expect(mockTask.didEditFile).toBe(false)
 		expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
+	})
+
+	it("passes the edit kind to the diff-view save path", async () => {
+		// Without focus disruption the tool saves through the diff view, and the
+		// kind it passes must carry its intent: a targeted edit, not the default
+		// full-file replacement.
+		// The settings double is rebuilt for this test so the focus-disruption
+		// experiment is off and the tool takes the diff-view save path.
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+				}),
+			}),
+		} as unknown as Task["providerRef"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
 	})
 })

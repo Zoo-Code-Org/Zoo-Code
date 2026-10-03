@@ -762,7 +762,7 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
-	describe("content encoding", () => {
+	describe("content bytes", () => {
 		const targetPath = "/tmp/enc-dir/target.txt"
 
 		beforeEach(() => {
@@ -770,46 +770,19 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 		})
 
-		it("stages UTF-8 bytes when no encoding is given", async () => {
+		it("stages UTF-8 bytes for string content", async () => {
 			await safeWriteText(targetPath, "héllo", { platform: "linux" })
 			expect(fsSync.writeSync).toHaveBeenCalledWith(1, Buffer.from("héllo", "utf8"), 0, 6)
 		})
 
-		it("prepends the UTF-8 BOM for a utf8bom document", async () => {
-			await safeWriteText(targetPath, "hi", { platform: "linux", encoding: "utf8bom" })
-			expect(fsSync.writeSync).toHaveBeenCalledWith(
-				1,
-				Buffer.concat([Buffer.from("\uFEFF", "utf8"), Buffer.from("hi", "utf8")]),
-				0,
-				5,
-			)
-		})
-
-		it("stages UTF-16LE bytes for a utf16le document", async () => {
-			await safeWriteText(targetPath, "hi", { platform: "linux", encoding: "utf16le" })
-			expect(fsSync.writeSync).toHaveBeenCalledWith(1, Buffer.from("hi", "utf16le"), 0, 4)
-		})
-
-		it("stages byte-swapped UTF-16BE bytes for a utf16be document", async () => {
-			// Node has no UTF-16BE encoder, so the LE bytes are swapped pairwise.
-			await safeWriteText(targetPath, "hi", { platform: "linux", encoding: "utf16be" })
-			expect(fsSync.writeSync).toHaveBeenCalledWith(1, Buffer.from([0x00, 0x68, 0x00, 0x69]), 0, 4)
-		})
-
-		it("publishes an ASCII-only document unchanged for a code page Node cannot encode", async () => {
-			await safeWriteText(targetPath, "plain", { platform: "linux", encoding: "windows1252" })
-			expect(fsSync.writeSync).toHaveBeenCalledWith(1, Buffer.from("plain", "utf8"), 0, 5)
-		})
-
-		it("rejects a non-ASCII document for a code page Node cannot encode, before staging anything", async () => {
-			await expect(
-				safeWriteText(targetPath, "héllo", { platform: "linux", encoding: "windows1252" }),
-			).rejects.toThrow("Cannot publish content as windows1252")
-			// the encoding is checked before the staging file is opened, so no
-			// half-written temp file is left behind
-			expect(fsSync.openSync).not.toHaveBeenCalled()
-			expect(fsSync.writeSync).not.toHaveBeenCalled()
-			expect(fs.rename).not.toHaveBeenCalled()
+		it("publishes caller-supplied bytes unchanged instead of re-encoding them", async () => {
+			// The extension host encodes a document with VS Code's own codec, which
+			// covers the legacy code pages and BOMs Node cannot represent, and hands
+			// the result over: those bytes must reach the commit rename exactly as
+			// they were given.
+			const bytes = Buffer.from([0x00, 0x68, 0x00, 0x69])
+			await safeWriteText(targetPath, bytes, { platform: "linux" })
+			expect(fsSync.writeSync).toHaveBeenCalledWith(1, bytes, 0, 4)
 		})
 	})
 })

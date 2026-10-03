@@ -566,8 +566,19 @@ describe("editFileTool", () => {
 
 			await executeEditFileTool()
 
-			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit")
 			expect(mockTask.didEditFile).toBe(true)
+		})
+
+		it("keeps create-guard semantics for a new file on the diff-view save path", async () => {
+			// A new file is still a create, even when it is saved through the diff
+			// view rather than directly; only an existing targeted edit becomes an
+			// edit kind.
+			mockAskApproval.mockResolvedValue(true)
+
+			await executeEditFileTool({ old_string: "", new_string: "New file content" }, { fileExists: false })
+
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "create")
 			// Usage is recorded once at the central presentAssistantMessage
 			// attribution point, not locally by the handler.
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()

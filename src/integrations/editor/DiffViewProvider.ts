@@ -399,6 +399,10 @@ export class DiffViewProvider {
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		// Stryker disable next-line StringLiteral: an empty kind dispatches exactly
+		// like "update" in guardedWrite (only "edit" and "create" branch distinctly),
+		// so the StringLiteral mutant here is equivalent.
+		writeKind: GuardedWriteKind = "update",
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -427,14 +431,16 @@ export class DiffViewProvider {
 				// dead task cannot leave the empty placeholder behind either.
 				throw new Error("Cannot guard the write: the owning task is no longer available")
 			}
-			// Stryker disable next-line StringLiteral: "" is semantically identical to "update" in guardedWrite (only "edit" and "create" take distinct branches), so the StringLiteral mutant is equivalent at this sole production call site.
-			// Publish with the document's own encoding (BOM included when the
-			// document is utf8bom): encoding as UTF-8 unconditionally would drop
-			// the BOM and reload a legacy-code-page document as mojibake after the
-			// revert.
-			await guardedWrite(saveTask, this.relPath, editedContent, "update", {
+			// Publish with the document's own encoding. VS Code's codec covers the
+			// legacy code pages Node cannot represent (a hand-rolled encoder would
+			// have to reject them), so encode here and let the guarded write publish
+			// the bytes unchanged. The write kind comes from the caller: a targeted
+			// edit after a partial read is authorized by the edit guard, while a
+			// full-file replacement still needs a complete observation.
+			const encodedContent = await vscode.workspace.encode(editedContent, {
 				encoding: updatedDocument.encoding,
 			})
+			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
 		} catch (error) {
 			// Discard-only failure cleanup. The publish was rejected (stale
 			// version, unobserved target, a partial-read observation, or an

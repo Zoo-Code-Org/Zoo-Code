@@ -223,7 +223,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				}
 
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
 			}
 
 			// Track file edit operation
