@@ -13,7 +13,7 @@ type QueueTaskTestAccess = {
 	abort: boolean
 	abandoned: boolean
 	queuedMessageDrainChain: Promise<unknown>
-	emit: (...args: never[]) => void
+	emit: (event: string, ...args: unknown[]) => void
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
