@@ -115,6 +115,16 @@ export interface ApiOptionsProps {
 	setErrorMessage: React.Dispatch<React.SetStateAction<string | undefined>>
 }
 
+// Providers whose picker catalog merges the host-fetched dynamic model
+// catalog into the static fallback (fetched entries win), so models newer
+// than the shipped catalog are selectable without an extension update.
+const DYNAMIC_CATALOG_PROVIDERS = [providerIdentifiers.gemini, providerIdentifiers.vertex] as const
+
+type DynamicCatalogProvider = (typeof DYNAMIC_CATALOG_PROVIDERS)[number]
+
+const isDynamicCatalogProvider = (provider: ProviderName): provider is DynamicCatalogProvider =>
+	(DYNAMIC_CATALOG_PROVIDERS as ReadonlyArray<ProviderName>).includes(provider)
+
 const ApiOptions = ({
 	uriScheme,
 	apiConfiguration,
@@ -745,11 +755,22 @@ const ApiOptions = ({
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
 								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
-								models={getStaticModelsForProvider(
-									activeSelectedProvider,
-									t("settings:labels.useCustomArn"),
-									apiConfiguration,
-								)}
+								models={
+									isDynamicCatalogProvider(activeSelectedProvider)
+										? {
+												...getStaticModelsForProvider(
+													activeSelectedProvider,
+													t("settings:labels.useCustomArn"),
+													apiConfiguration,
+												),
+												...routerModels?.[activeSelectedProvider],
+											}
+										: getStaticModelsForProvider(
+												activeSelectedProvider,
+												t("settings:labels.useCustomArn"),
+												apiConfiguration,
+											)
+								}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
 								serviceUrl={getProviderServiceConfig(activeSelectedProvider).serviceUrl}

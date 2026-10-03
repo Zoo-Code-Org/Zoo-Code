@@ -260,16 +260,24 @@ function getSelectedModel({
 			return { id, info: baseInfo }
 		}
 		case providerIdentifiers.vertex: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const baseInfo = vertexModels[id as keyof typeof vertexModels]
+			const availableModels = routerModels[providerIdentifiers.vertex]
+				? { ...vertexModels, ...routerModels[providerIdentifiers.vertex] }
+				: vertexModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels[providerIdentifiers.vertex]?.[id]
+			const staticInfo = vertexModels[id as keyof typeof vertexModels]
+			const baseInfo = routerInfo ?? staticInfo
 
 			// Apply 1M context for supported Claude 4 models when enabled
-			if (VERTEX_1M_CONTEXT_MODEL_IDS.includes(id as any) && apiConfiguration.vertex1MContext && baseInfo) {
-				const modelInfo: ModelInfo = baseInfo
-				const tier = modelInfo.tiers?.[0]
+			if (
+				(VERTEX_1M_CONTEXT_MODEL_IDS as readonly string[]).includes(id) &&
+				apiConfiguration.vertex1MContext &&
+				baseInfo
+			) {
+				const tier = baseInfo.tiers?.[0]
 				if (tier) {
 					const info: ModelInfo = {
-						...modelInfo,
+						...baseInfo,
 						contextWindow: tier.contextWindow,
 						inputPrice: tier.inputPrice,
 						outputPrice: tier.outputPrice,
@@ -283,9 +291,13 @@ function getSelectedModel({
 			return { id, info: baseInfo }
 		}
 		case providerIdentifiers.gemini: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = geminiModels[id as keyof typeof geminiModels]
-			return { id, info }
+			const availableModels = routerModels[providerIdentifiers.gemini]
+				? { ...geminiModels, ...routerModels[providerIdentifiers.gemini] }
+				: geminiModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels[providerIdentifiers.gemini]?.[id]
+			const staticInfo = geminiModels[id as keyof typeof geminiModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case providerIdentifiers.deepseek: {
 			const availableModels = routerModels[providerIdentifiers.deepseek]

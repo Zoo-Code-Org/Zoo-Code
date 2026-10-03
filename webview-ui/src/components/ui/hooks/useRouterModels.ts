@@ -14,12 +14,39 @@ type UseRouterModelsOptions = {
 	enabled?: boolean // gate fetching entirely
 }
 
-export const fetchRouterModels = async (provider?: string) =>
+export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
+		// Request identity lets the extension host abort this specific fetch when the webview
+		// cancels (see cancelRouterModelsRequest in webviewMessageHandler).
+		const requestId = crypto.randomUUID()
+		// Set once the request message has been posted; a cancellation is only forwarded for
+		// requests the extension host actually received.
+		let requestPosted = false
+
 		const cleanup = () => {
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
 			}
+			signal?.removeEventListener("abort", onAbort)
+		}
+
+		const onAbort = () => {
+			clearTimeout(timeout)
+			cleanup()
+			// Fire-and-forget: ask the extension host to abort the matching in-flight fetch.
+			// Only when the request was actually posted -- a pre-aborted signal never reaches
+			// the host, so there is nothing to cancel there.
+			if (requestPosted) {
+				void vscode.postMessage({
+					type: RouterModelsMessageType.cancelRouterModelsRequest,
+					values: { requestId },
+				})
+			}
+			// Match the repo abort contract (abort-signal.ts): name "AbortError"
+			// so cancellation is recognizable by callers and React Query.
+			const abortError = new Error("Aborted")
+			abortError.name = "AbortError"
+			reject(abortError)
 		}
 
 		const timeout = setTimeout(() => {
@@ -32,10 +59,16 @@ export const fetchRouterModels = async (provider?: string) =>
 
 			if (message.type === RouterModelsMessageType.routerModels) {
 				const msgProvider = message?.values?.provider as string | undefined
+				const msgRequestId = message?.values?.requestId as string | undefined
 
-				// Verify response matches request
+				// Verify response matches request. Responses stamped with a requestId must match
+				// this in-flight request's id (the extension host echoes it); responses without
+				// one come from other producers and keep the legacy provider-only matching.
 				if (provider !== msgProvider) {
 					// Not our response; ignore and wait for the matching one
+					return
+				}
+				if (msgRequestId !== undefined && msgRequestId !== requestId) {
 					return
 				}
 
@@ -51,18 +84,32 @@ export const fetchRouterModels = async (provider?: string) =>
 		}
 
 		window.addEventListener("message", handler)
-		if (provider) {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels, values: { provider } })
-		} else {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
+
+		if (signal?.aborted) {
+			onAbort()
+			return
 		}
+		signal?.addEventListener("abort", onAbort)
+
+		if (provider) {
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider, requestId },
+			})
+		} else {
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { requestId },
+			})
+		}
+		requestPosted = true
 	})
 
 export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 	const provider = opts.provider || undefined
 	return useQuery({
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
-		queryFn: () => fetchRouterModels(provider),
+		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
 	})
 }

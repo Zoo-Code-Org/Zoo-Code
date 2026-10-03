@@ -192,6 +192,7 @@ export type RouterModels = Record<DynamicProvider | LocalProvider, ModelRecord>
 export const routerModelsMessageTypes = [
 	"flushRouterModels",
 	"requestRouterModels",
+	"cancelRouterModelsRequest",
 	"routerModels",
 	"singleRouterModelFetchResponse",
 ] as const

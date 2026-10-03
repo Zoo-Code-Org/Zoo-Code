@@ -1,0 +1,277 @@
+// npx vitest src/components/ui/hooks/__tests__/useRouterModels.spec.ts
+
+vi.mock("@src/utils/vscode", () => ({
+	vscode: {
+		postMessage: vi.fn(),
+	},
+}))
+
+import React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderHook, waitFor } from "@testing-library/react"
+
+import { RouterModelsMessageType, providerIdentifiers, type RouterModels } from "@roo-code/types"
+
+import { vscode } from "@src/utils/vscode"
+
+import { fetchRouterModels, useRouterModels } from "../useRouterModels"
+
+const modelInfo = {
+	maxTokens: 8192,
+	contextWindow: 200_000,
+	supportsImages: false,
+	supportsPromptCache: false,
+}
+
+// Test fixtures intentionally carry a single provider key; RouterModels requires
+// every provider key, so cast through unknown for these partial literals.
+const asRouterModels = (value: Record<string, Record<string, typeof modelInfo>>) => value as unknown as RouterModels
+
+const respondWithRouterModels = (routerModels: RouterModels, provider?: string, requestId?: string) => {
+	const values: Record<string, string> = {}
+	if (provider) {
+		values.provider = provider
+	}
+	if (requestId) {
+		values.requestId = requestId
+	}
+	window.dispatchEvent(
+		new MessageEvent("message", {
+			data: {
+				type: RouterModelsMessageType.routerModels,
+				routerModels,
+				values: Object.keys(values).length > 0 ? values : undefined,
+			},
+		}),
+	)
+}
+
+const makeQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+const makeWrapper = (queryClient: QueryClient) => {
+	return ({ children }: { children: React.ReactNode }) =>
+		React.createElement(QueryClientProvider, { client: queryClient }, children)
+}
+
+// Spies on addEventListener so a test can capture the exact "message" callback a fetch
+// registers and later assert removeEventListener received THAT reference — not just any
+// function. Spies call through, so real dispatch behavior is unaffected.
+const captureMessageListener = () => {
+	const addSpy = vi.spyOn(window, "addEventListener")
+	const removeSpy = vi.spyOn(window, "removeEventListener")
+	return {
+		removeSpy,
+		lastAdded: () => {
+			const call = addSpy.mock.calls.filter((args) => args[0] === "message").at(-1)
+			return call?.[1] as EventListener
+		},
+		restore: () => {
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		},
+	}
+}
+
+describe("fetchRouterModels", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("posts a provider request and resolves with the matching response", async () => {
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
+		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+		const listener = lastAdded()
+		expect(listener).toBeInstanceOf(Function)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter, requestId: expect.any(String) },
+		})
+
+		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
+
+		await expect(promise).resolves.toEqual(routerModels)
+		// Success must remove the exact listener the fetch registered.
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
+		restore()
+	})
+
+	it("requests the full catalog when no provider is given", async () => {
+		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+		const promise = fetchRouterModels()
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId: expect.any(String) },
+		})
+
+		respondWithRouterModels(routerModels)
+
+		await expect(promise).resolves.toEqual(routerModels)
+	})
+
+	it("ignores responses addressed to a different provider", async () => {
+		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
+		respondWithRouterModels(asRouterModels({ requesty: { "model-b": modelInfo } }), "requesty")
+		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
+
+		await expect(promise).resolves.toEqual(routerModels)
+	})
+
+	it("ignores a response whose requestId does not match the in-flight request", async () => {
+		const wrongModels = asRouterModels({ openrouter: { "model-wrong": modelInfo } })
+		const rightModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
+		const requestId = (vi.mocked(vscode.postMessage).mock.calls[0][0].values as { requestId: string }).requestId
+
+		// A stale or foreign requestId must not resolve the fetch even with a matching provider.
+		respondWithRouterModels(wrongModels, providerIdentifiers.openrouter, "someone-elses-request")
+		respondWithRouterModels(rightModels, providerIdentifiers.openrouter, requestId)
+
+		await expect(promise).resolves.toEqual(rightModels)
+	})
+
+	it("still resolves a response without a requestId (legacy producers)", async () => {
+		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
+		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
+
+		await expect(promise).resolves.toEqual(routerModels)
+	})
+
+	it("rejects after the 10s timeout and removes the listener", async () => {
+		vi.useFakeTimers()
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+		const listener = lastAdded()
+		vi.advanceTimersByTime(10_000)
+
+		await expect(promise).rejects.toThrow("Router models request timed out")
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
+		restore()
+	})
+
+	it("rejects with an AbortError, removes the listener, and clears the timeout when aborted", async () => {
+		vi.useFakeTimers()
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
+		const controller = new AbortController()
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+		const listener = lastAdded()
+		expect(vi.getTimerCount()).toBe(1)
+
+		controller.abort()
+
+		await expect(promise).rejects.toMatchObject({ name: "AbortError", message: "Aborted" })
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
+		// The 10s timeout must not fire after an abort.
+		expect(vi.getTimerCount()).toBe(0)
+		restore()
+	})
+
+	it("posts a cancellation message with the same request id when aborted, then rejects", async () => {
+		const controller = new AbortController()
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+
+		// The cancellation must carry the exact requestId from the original request so the
+		// extension host can abort the matching in-flight fetch.
+		const requestMessage = vi.mocked(vscode.postMessage).mock.calls[0][0]
+		const requestId = (requestMessage.values as { requestId: string }).requestId
+		expect(requestId).toEqual(expect.any(String))
+
+		controller.abort()
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.cancelRouterModelsRequest,
+			values: { requestId },
+		})
+		await expect(promise).rejects.toMatchObject({ name: "AbortError", message: "Aborted" })
+	})
+
+	it("rejects immediately without posting the request when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(fetchRouterModels(providerIdentifiers.openrouter, controller.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+})
+
+describe("useRouterModels", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("fetches router models through the query", async () => {
+		const queryClient = makeQueryClient()
+		const routerModels = asRouterModels({ openrouter: { "model-a": modelInfo } })
+
+		const { result } = renderHook(() => useRouterModels({ provider: providerIdentifiers.openrouter }), {
+			wrapper: makeWrapper(queryClient),
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.openrouter, requestId: expect.any(String) },
+		})
+
+		respondWithRouterModels(routerModels, providerIdentifiers.openrouter)
+
+		await waitFor(() => expect(result.current.data).toEqual(routerModels))
+		expect(result.current.isError).toBe(false)
+	})
+
+	it("does not fetch when disabled", async () => {
+		const queryClient = makeQueryClient()
+
+		renderHook(() => useRouterModels({ enabled: false }), { wrapper: makeWrapper(queryClient) })
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+
+	it("forwards the query cancellation to the in-flight fetch", async () => {
+		vi.useFakeTimers()
+		const queryClient = makeQueryClient()
+		const { removeSpy, lastAdded, restore } = captureMessageListener()
+
+		const { result } = renderHook(() => useRouterModels({ provider: providerIdentifiers.openrouter }), {
+			wrapper: makeWrapper(queryClient),
+		})
+		expect(vscode.postMessage).toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(1)
+		const listener = lastAdded()
+
+		// A cancelled query (e.g. a refetch handoff or explicit cancelQueries)
+		// must remove the window listener instead of leaking it until the
+		// extension answers. (The companion timeout-clearing assertion lives in
+		// the fetchRouterModels abort tests; after a cancel React Query also
+		// schedules its own stale/GC timers, so getTimerCount is not exact here.)
+		await queryClient.cancelQueries({
+			queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.openrouter],
+		})
+
+		expect(removeSpy).toHaveBeenCalledWith("message", listener)
+		// The abort rejection is swallowed by React Query's cancellation path.
+		expect(result.current.isError).toBe(false)
+
+		restore()
+	})
+})
