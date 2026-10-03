@@ -24,6 +24,12 @@ import {
 	minimaxModels,
 	friendliDefaultModelId,
 	friendliModels,
+	fireworksDefaultModelId,
+	fireworksModels,
+	basetenDefaultModelId,
+	basetenModels,
+	sambaNovaDefaultModelId,
+	sambaNovaModels,
 	deepSeekDefaultModelId,
 	deepSeekModels,
 	openRouterDefaultModelId,
@@ -1370,6 +1376,109 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
+	})
+
+	describe("OpenAI-compatible static catalog providers (fireworks, baseten, sambanova)", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("returns the default Fireworks model when no model is configured", () => {
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(fireworksDefaultModelId)
+			expect(result.current.info).toEqual(fireworksModels[fireworksDefaultModelId])
+		})
+
+		it("returns known Fireworks model metadata", () => {
+			const id = "accounts/fireworks/models/kimi-k2-instruct"
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: id }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(id)
+			expect(result.current.info).toEqual(fireworksModels[id])
+		})
+
+		const staticCatalogCases = [
+			{
+				apiProvider: providerIdentifiers.fireworks,
+				defaultId: fireworksDefaultModelId,
+				models: fireworksModels as Record<string, ModelInfo>,
+				knownId: "accounts/fireworks/models/kimi-k2-instruct",
+			},
+			{
+				apiProvider: providerIdentifiers.baseten,
+				defaultId: basetenDefaultModelId,
+				models: basetenModels as Record<string, ModelInfo>,
+				knownId: Object.keys(basetenModels).find((id) => id !== basetenDefaultModelId)!,
+			},
+			{
+				apiProvider: providerIdentifiers.sambanova,
+				defaultId: sambaNovaDefaultModelId,
+				models: sambaNovaModels as Record<string, ModelInfo>,
+				knownId: Object.keys(sambaNovaModels).find((id) => id !== sambaNovaDefaultModelId)!,
+			},
+		]
+
+		it.each(staticCatalogCases)(
+			"returns the default $apiProvider model when no model is configured",
+			({ apiProvider, defaultId, models }) => {
+				const { result } = renderHook(() => useSelectedModel({ apiProvider }), { wrapper: createWrapper() })
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe(defaultId)
+				expect(result.current.info).toEqual(models[defaultId])
+				expect(result.current.info).toBeDefined()
+			},
+		)
+
+		it.each(staticCatalogCases)(
+			"falls back to the default $apiProvider model when apiModelId is an empty string",
+			({ apiProvider, defaultId, models }) => {
+				const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId: "" }), {
+					wrapper: createWrapper(),
+				})
+
+				expect(result.current.id).toBe(defaultId)
+				expect(result.current.info).toEqual(models[defaultId])
+				expect(result.current.info).toBeDefined()
+			},
+		)
+
+		it.each(staticCatalogCases)(
+			"returns known $apiProvider catalog metadata",
+			({ apiProvider, models, knownId }) => {
+				expect(knownId).toBeDefined()
+				const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId: knownId }), {
+					wrapper: createWrapper(),
+				})
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe(knownId)
+				expect(result.current.info).toEqual(models[knownId])
+			},
+		)
+
+		it.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+			"honors a custom %s model ID with sane default metadata (not undefined info)",
+			(apiProvider) => {
+				// Regression: custom models had undefined info, so the task header fell back to a
+				// context window of 1. The backend uses openAiModelInfoSaneDefaults, so the UI must too.
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider, apiModelId: "some/custom-model-not-in-list" }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe("some/custom-model-not-in-list")
+				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+				expect(result.current.info?.contextWindow).toBeGreaterThan(1)
+			},
+		)
 	})
 
 	describe("Z AI provider", () => {

@@ -58,6 +58,27 @@ function getValidatedModelId(
 }
 
 /**
+ * Resolves a static-catalog model for providers backed by `BaseOpenAiCompatibleProvider`
+ * (Fireworks, Baseten, SambaNova). Mirrors the backend `getModel()`: a user-supplied custom
+ * model ID that isn't in the static list is honored with `openAiModelInfoSaneDefaults`, so the
+ * UI shows sensible limits (e.g. context window) instead of treating the selection as unknown.
+ */
+function getStaticCatalogModel(
+	configuredId: string | undefined,
+	models: Record<string, ModelInfo>,
+	defaultModelId: string,
+): { id: string; info: ModelInfo | undefined } {
+	// An empty configured ID means "unset": fall back to the provider default.
+	if (!configuredId) {
+		return { id: defaultModelId, info: models[defaultModelId] }
+	}
+	if (!(configuredId in models)) {
+		return { id: configuredId, info: { ...openAiModelInfoSaneDefaults } }
+	}
+	return { id: configuredId, info: models[configuredId] }
+}
+
+/**
  * Resolves the model currently selected for the active API provider.
  *
  * Dynamic providers validate the configured model ID against the fetched
@@ -230,11 +251,8 @@ function getSelectedModel({
 			const info = xaiModels[id as keyof typeof xaiModels]
 			return info ? { id, info } : { id, info: undefined }
 		}
-		case providerIdentifiers.baseten: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = basetenModels[id as keyof typeof basetenModels]
-			return { id, info }
-		}
+		case providerIdentifiers.baseten:
+			return getStaticCatalogModel(apiConfiguration.apiModelId, basetenModels, defaultModelId)
 		case providerIdentifiers.bedrock: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const baseInfo = bedrockModels[id as keyof typeof bedrockModels]
@@ -390,16 +408,10 @@ function getSelectedModel({
 			}
 			return { id, info }
 		}
-		case providerIdentifiers.sambanova: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = sambaNovaModels[id as keyof typeof sambaNovaModels]
-			return { id, info }
-		}
-		case providerIdentifiers.fireworks: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = fireworksModels[id as keyof typeof fireworksModels]
-			return { id, info }
-		}
+		case providerIdentifiers.sambanova:
+			return getStaticCatalogModel(apiConfiguration.apiModelId, sambaNovaModels, defaultModelId)
+		case providerIdentifiers.fireworks:
+			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = friendliModels[id as keyof typeof friendliModels]
