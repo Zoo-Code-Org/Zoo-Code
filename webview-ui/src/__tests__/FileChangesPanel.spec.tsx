@@ -1,4 +1,5 @@
 import React from "react"
+import { act } from "@testing-library/react"
 import { fireEvent, render, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
 import { TranslationProvider } from "@/i18n/__mocks__/TranslationContext"
@@ -28,15 +29,18 @@ vi.mock("react-i18next", () => ({
 vi.mock("@src/components/common/CodeAccordion", () => ({
 	default: ({
 		path,
+		code,
 		isExpanded,
 		onToggleExpand,
 	}: {
 		path?: string
+		code?: string
 		isExpanded: boolean
 		onToggleExpand: () => void
 	}) => (
 		<div data-testid="code-accordian">
 			<span data-testid="accordian-path">{path}</span>
+			<pre data-testid="accordian-code">{code}</pre>
 			<button type="button" onClick={onToggleExpand} data-testid="accordian-toggle">
 				{isExpanded ? "expanded" : "collapsed"}
 			</button>
@@ -64,10 +68,10 @@ function createFileEditMessage(
 	}
 }
 
-function renderPanel(messages: ClineMessage[] | undefined) {
+function renderPanel(messages: ClineMessage[] | undefined, taskId?: string) {
 	return render(
 		<TranslationProvider>
-			<FileChangesPanel clineMessages={messages} />
+			<FileChangesPanel clineMessages={messages} taskId={taskId} />
 		</TranslationProvider>,
 	)
 }
@@ -195,5 +199,246 @@ describe("FileChangesPanel", () => {
 
 		expect(screen.getByTestId("total-added")).toHaveTextContent("+5")
 		expect(screen.getByTestId("total-removed")).toHaveTextContent("-6")
+	})
+	describe("original content omitted by the extension", () => {
+		const TS = 1234
+
+		function createEditWithOriginal(payload: Record<string, unknown>): ClineMessage {
+			return {
+				type: "ask",
+				ask: "tool",
+				ts: TS,
+				partial: false,
+				isAnswered: true,
+				text: JSON.stringify({
+					tool: "appliedDiff",
+					path: "src/foo.ts",
+					diff: "the recorded diff",
+					...payload,
+				}),
+			}
+		}
+
+		function expandRow() {
+			fireEvent.click(screen.getByText("1 file(s) changed in this conversation").closest("button")!)
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+		}
+
+		function respond(message: Record<string, unknown>) {
+			act(() => {
+				window.dispatchEvent(new MessageEvent("message", { data: message }))
+			})
+		}
+
+		const requestsOfType = (type: string) =>
+			mockPostMessage.mock.calls.map(([m]) => m).filter((m: { type: string }) => m.type === type)
+
+		it("requests nothing until a row is expanded, then asks for the final and the original content", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			fireEvent.click(screen.getByText("1 file(s) changed in this conversation").closest("button")!)
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			expect(requestsOfType("readFileContent")).toEqual([{ type: "readFileContent", text: "src/foo.ts" }])
+			expect(requestsOfType("readOriginalContent")).toEqual([
+				{ type: "readOriginalContent", messageTs: TS, messageId: undefined, taskId: undefined },
+			])
+		})
+
+		it("shows the merged diff once both the original and the final content arrive", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			expandRow()
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+
+			respond({ type: "originalContent", originalContentInfo: { ts: TS, content: "old line\n" } })
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("+new line")
+		})
+
+		it("keeps the recorded diff when the original cannot be loaded", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({ type: "originalContent", originalContentInfo: { ts: TS, content: null } })
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+		})
+
+		it("does not request the original when it is already inline", () => {
+			renderPanel([createEditWithOriginal({ originalContent: "old line\n" })])
+			expandRow()
+
+			expect(requestsOfType("readOriginalContent")).toHaveLength(0)
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("+new line")
+		})
+
+		it("requests nothing for an edit that has no original", () => {
+			renderPanel([createEditWithOriginal({})])
+			expandRow()
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("requests and matches originals by messageId when messages share a ts", () => {
+			const edit = (path: string, messageId: string): ClineMessage => ({
+				...createEditWithOriginal({ path, originalContentLength: 5000 }),
+				messageId,
+			})
+			renderPanel([edit("src/a.ts", "id-a"), edit("src/b.ts", "id-b")], "task-1")
+			fireEvent.click(screen.getByText("2 file(s) changed in this conversation").closest("button")!)
+			screen.getAllByTestId("accordian-toggle").forEach((toggle) => fireEvent.click(toggle))
+
+			expect(requestsOfType("readOriginalContent")).toEqual([
+				{ type: "readOriginalContent", messageTs: TS, messageId: "id-a", taskId: "task-1" },
+				{ type: "readOriginalContent", messageTs: TS, messageId: "id-b", taskId: "task-1" },
+			])
+
+			respond({ type: "fileContent", fileContent: { path: "src/a.ts", content: "new a\n" } })
+			respond({ type: "fileContent", fileContent: { path: "src/b.ts", content: "new b\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, messageId: "id-b", taskId: "task-1", content: "old b\n" },
+			})
+
+			const [a, b] = screen.getAllByTestId("accordian-code")
+			expect(a).toHaveTextContent("the recorded diff")
+			expect(b).toHaveTextContent("-old b")
+		})
+
+		it("requests the original again when the task id arrives after a request is already pending", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const { rerender } = renderPanel(messages)
+			expandRow()
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+
+			rerender(
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId="task-1" />
+				</TranslationProvider>,
+			)
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			const requests = requestsOfType("readOriginalContent")
+			expect(requests).toHaveLength(2)
+			expect(requests[1]).toMatchObject({ taskId: "task-1" })
+		})
+
+		it("does not send a duplicate request when switching A -> B -> A before the first response arrives", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const panel = (taskId: string) => (
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId={taskId} />
+				</TranslationProvider>
+			)
+			const { rerender } = renderPanel(messages, "task-A")
+			expandRow()
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+
+			rerender(panel("task-B"))
+			rerender(panel("task-A"))
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			expect(requestsOfType("readOriginalContent").filter((m) => m.taskId === "task-A")).toHaveLength(1)
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-A", content: "old line\n" },
+			})
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+		})
+
+		it("requests again after a response that arrived for a task that is no longer current", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const panel = (taskId: string) => (
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId={taskId} />
+				</TranslationProvider>
+			)
+			const { rerender } = renderPanel(messages, "task-A")
+			expandRow()
+
+			rerender(panel("task-B"))
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-A", content: "old line\n" },
+			})
+			rerender(panel("task-A"))
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+
+			expect(requestsOfType("readOriginalContent").filter((m) => m.taskId === "task-A")).toHaveLength(2)
+		})
+
+		it("does not request for rows expanded under the previous task when the task id changes", () => {
+			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const { rerender } = renderPanel(messages, "task-A")
+			expandRow()
+			mockPostMessage.mockClear()
+
+			rerender(
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={messages} taskId="task-B" />
+				</TranslationProvider>,
+			)
+
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("keeps a loaded original when the messages are replaced by an update of the same task", () => {
+			const first = [createEditWithOriginal({ originalContentLength: 5000 })]
+			const { rerender } = renderPanel(first, "task-A")
+			expandRow()
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-A", content: "old line\n" },
+			})
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+
+			rerender(
+				<TranslationProvider>
+					<FileChangesPanel clineMessages={[...first]} taskId="task-A" />
+				</TranslationProvider>,
+			)
+			fireEvent.click(screen.getByTestId("accordian-toggle"))
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+
+			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("-old line")
+		})
+
+		it("ignores an original answered for a different task", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })], "task-1")
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({
+				type: "originalContent",
+				originalContentInfo: { ts: TS, taskId: "task-2", content: "old line\n" },
+			})
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+		})
+
+		it("ignores an original for a different message", () => {
+			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+			respond({ type: "originalContent", originalContentInfo: { ts: TS + 1, content: "old line\n" } })
+
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("the recorded diff")
+		})
 	})
 })
