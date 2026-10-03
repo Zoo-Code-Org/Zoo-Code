@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.82.0'daki Yenilikler
+## v3.86.0'daki Yenilikler
 
-- 🔑 **Zoo Gateway API anahtarını her yerde kullan** — anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: https://zoocode.dev/models
-- 🎁 **Sınırlı süreli ücretsiz model erişimi** — Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.
-- ✨ **Yepyeni modeller** — GPT-6 Astra ve Claude Fable 5.1 artık kullanılabilir.
+- ✨ **Yeni model desteği:** GPT-6.1 Sol kullan, Claude Opus 5.5'in düzeltilmiş çıktı sınırından yararlan ve OpenCode Go'da DeepSeek V4.1 Flash'ı seç.
+- 🧭 **Güvenilir görev iptalleri ve kesintiler:** İlk iptal nedenini koru, her istek için akış iptal durumunu sıfırla ve kesintiye uğrayan görevlerin reddedilen alt görevleri yeniden çalıştırmasını önle.
+- 🛠️ **Güvenilir araçlar, Prompt'lar ve arayüz akışı:** Akışla gelen araç argümanlarını eksiksiz koru, MCP araç politikasını uygula, uydurma satır numaralarını önle ve sohbet güncellemelerini akıcı hâle getir.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 
